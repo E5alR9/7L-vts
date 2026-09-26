@@ -12,8 +12,8 @@ import re
 import sys
 import time
 
-IS_AGENT_LOOP_ENABLED = os.getenv("AGENT_LOOP", "0") == "1"
-IS_AGENT_LOOP_DAD = os.getenv("AGENT_LOOP_DAD", "0") == "1"  # 爸爸主腦也進迴路（整台 agent 化）
+IS_AGENT_LOOP_ENABLED = os.getenv("AGENT_LOOP", "1") == "1"
+IS_AGENT_LOOP_DAD = os.getenv("AGENT_LOOP_DAD", "1") == "1"  # 爸爸主腦也進迴路（整台 agent 化）
 
 LIVE_MODEL = "gemini-3.1-flash-live-preview"  # 觀眾迴路（已驗證可連）
 # 爸爸迴路優先 3.8 Live（RPD Unlimited，解 HTTP 20/天上限；2026-09-26 實測命中）
