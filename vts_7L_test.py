@@ -4943,6 +4943,40 @@ async def mic_volume_worker():
             CURRENT_MIC_VOL_PERCENT = 0
             await asyncio.sleep(0.5)
 
+def _wav_b64_to_pcm16k(audio_b64: str):
+    """mic WAV base64 → 16k 單聲道 int16 PCM（直灌 Live 用，失败回 None 走舊鏈）。"""
+    try:
+        import wave as _wv
+        raw = base64.b64decode(audio_b64) if isinstance(audio_b64, str) else bytes(audio_b64)
+        bio = io.BytesIO(raw)
+        try:
+            with _wv.open(bio, "rb") as w:
+                nch, sw, fr, nfr = w.getnchannels(), w.getsampwidth(), w.getframerate(), w.getnframes()
+                frames = w.readframes(nfr)
+        except Exception:
+            # 無 wav 頭：假定 16k 單聲道 16-bit raw
+            return raw if len(raw) > 3200 else None
+        import numpy as _np
+        if sw == 1:
+            pcm = (_np.frombuffer(frames, dtype=_np.uint8).astype(_np.float32) - 128.0) * 256.0
+        elif sw == 2:
+            pcm = _np.frombuffer(frames, dtype=_np.int16).astype(_np.float32)
+        elif sw == 4:
+            pcm = (_np.frombuffer(frames, dtype=_np.int32).astype(_np.float32)) / 65536.0
+        else:
+            return None
+        if nch > 1:
+            pcm = pcm.reshape(-1, nch).mean(axis=1)
+        if fr != 16000 and len(pcm) > 1:
+            old_idx = np.linspace(0.0, 1.0, num=len(pcm))
+            new_idx = np.linspace(0.0, 1.0, num=max(1, int(len(pcm) * 16000 / fr)))
+            pcm = np.interp(new_idx, old_idx, pcm)
+        out = np.clip(pcm, -32768, 32767).astype(np.int16).tobytes()
+        return out if len(out) > 3200 else None
+    except Exception:
+        return None
+
+
 def listen_once_fast(recognizer):
     global is_user_listening, listen_start_time, current_mic_action_str
     text = ""
@@ -5137,6 +5171,19 @@ async def mic_worker(recognizer, input_queue):
                 # 🔇 4. 電腦內部聲音 (WASAPI Loopback 遊戲/影片) 輔助過濾
                 if is_computer_audio_echo(cleaned_text):
                     continue
+
+                # 🔁 Agent 直聽：聲紋已驗是老爸，PCM 直送爸爸 session（原生轉錄＋理解，
+                # 對話只跑一遍；STT 文只留作關機安全網）。失敗回退舊文字鏈。
+                try:
+                    import services.agent_loop as _al_direct
+                    if _al_direct.is_dad_enabled() and audio_b64:
+                        _pcm = _wav_b64_to_pcm16k(audio_b64)
+                        if _pcm and await _al_direct.handle_dad_audio(vts, input_queue, _pcm, source="mic"):
+                            LATEST_REALWORLD_SPEECH_TEXT = cleaned_text
+                            LATEST_REALWORLD_SPEECH_TIME = time.time()
+                            continue
+                except Exception as _e_ald:
+                    log_print(f"⚠️ [Agent直聽] 回退舊鏈: {_e_ald}")
                 
                 saved_audio_path = save_local_audio_clip(audio_b64)
                 LATEST_REALWORLD_SPEECH_TEXT = cleaned_text

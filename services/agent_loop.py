@@ -308,28 +308,16 @@ class AgentSession:
                 pass
         return responses
 
-    async def chat(self, text: str, timeout: float = 0) -> str:
-        """送一句、收一輪（含工具多回合），回最終口語。空字串=失敗/靜默。"""
-        if not text or not text.strip():
-            return ""
-        core = get_core()
-        if self.turns >= MAX_TURNS_PER_SESSION:
-            await self.rotate()
-        if not await self._ensure():
-            return ""
+    async def _exchange(self, core, send_fn, timeout):
+        """一輪收發共用迴路：送輸入（文字或音訊）→ 工具多回合 → 回 (聽到的, 口語)。"""
         try:
             from google.genai import types as _types
         except Exception:
-            return ""
-        wait = timeout or self._timeout or RECEIVE_TIMEOUT
-        payload = text.strip()
-        if self.context_summary:
-            payload = f"【前情提要】{self.context_summary}\n{text.strip()}"
-            self.context_summary = ""
+            return "", ""
+        out, heard = "", ""
         try:
-            async with asyncio.timeout(wait):
-                await self._session.send_realtime_input(text=payload)
-                out = ""
+            async with asyncio.timeout(timeout):
+                await send_fn(self._session)
                 while True:
                     turn_done = False
                     async for resp in self._session.receive():
@@ -345,6 +333,9 @@ class AgentSession:
                             break  # 回外層繼續收工具執行後的回覆
                         c = getattr(resp, "server_content", None)
                         if c:
+                            it = getattr(c, "input_transcription", None)
+                            if it and getattr(it, "text", ""):
+                                heard += it.text
                             ot = getattr(c, "output_transcription", None)
                             if ot and getattr(ot, "text", ""):
                                 out += ot.text
@@ -353,20 +344,74 @@ class AgentSession:
                                 break
                     if turn_done:
                         break
-            out = out.strip()
-            self.turns += 1
-            self.transcript.append(("user", text.strip()[:200]))
-            if out:
-                self.transcript.append(("model", out[:200]))
-            if len(self.transcript) > 40:
-                self.transcript = self.transcript[-40:]
-            total_chars = sum(len(t) for _, t in self.transcript)
-            if total_chars > MAX_TRANSCRIPT_CHARS:
-                await self.rotate()
-            return out
+            return heard.strip(), out.strip()
         except Exception:
             await self.rotate()
+            return "", ""
+
+    async def chat(self, text: str, timeout: float = 0) -> str:
+        """送一句、收一輪（含工具多回合），回最終口語。空字串=失敗/靜默。"""
+        if not text or not text.strip():
             return ""
+        core = get_core()
+        if self.turns >= MAX_TURNS_PER_SESSION:
+            await self.rotate()
+        if not await self._ensure():
+            return ""
+        wait = timeout or self._timeout or RECEIVE_TIMEOUT
+        payload = text.strip()
+        if self.context_summary:
+            payload = f"【前情提要】{self.context_summary}\n{text.strip()}"
+            self.context_summary = ""
+
+        async def _send_text(sess):
+            await sess.send_realtime_input(text=payload)
+
+        _, out = await self._exchange(core, _send_text, wait)
+        if not out:
+            return ""
+        self.turns += 1
+        self.transcript.append(("user", text.strip()[:200]))
+        self.transcript.append(("model", out[:200]))
+        if len(self.transcript) > 40:
+            self.transcript = self.transcript[-40:]
+        total_chars = sum(len(t) for _, t in self.transcript)
+        if total_chars > MAX_TRANSCRIPT_CHARS:
+            await self.rotate()
+        return out
+
+    async def chat_audio(self, pcm16k: bytes, timeout: float = 0):
+        """麥克風直灌：送 16k PCM，session 原生轉錄＋理解。回 (聽到的, 口語)。"""
+        core = get_core()
+        if not pcm16k or len(pcm16k) < 3200:
+            return "", ""
+        if self.turns >= MAX_TURNS_PER_SESSION:
+            await self.rotate()
+        if not await self._ensure():
+            return "", ""
+        wait = timeout or self._timeout or RECEIVE_TIMEOUT
+        try:
+            from google.genai import types as _types
+            blob = _types.AudioBlob(data=pcm16k, mime_type="audio/pcm;rate=16000")
+        except Exception:
+            return "", ""
+
+        async def _send_audio(sess):
+            await sess.send_realtime_input(audio=blob)
+
+        heard, out = await self._exchange(core, _send_audio, wait)
+        if not out and not heard:
+            return "", ""
+        self.turns += 1
+        self.transcript.append(("user", (heard or "[語音]")[:200]))
+        if out:
+            self.transcript.append(("model", out[:200]))
+        if len(self.transcript) > 40:
+            self.transcript = self.transcript[-40:]
+        total_chars = sum(len(t) for _, t in self.transcript)
+        if total_chars > MAX_TRANSCRIPT_CHARS:
+            await self.rotate()
+        return heard, out
 
 
 _SESSION: AgentSession | None = None
@@ -616,3 +661,128 @@ async def handle_dad_message(vts, input_queue, user_input: str, source: str = "m
                 core.current_ai_state = "IDLE"
             except Exception:
                 pass
+
+
+async def handle_dad_audio(vts, input_queue, pcm16k: bytes, source: str = "mic") -> bool:
+    """🎙️ 麥克風直灌：PCM 直送爸爸 session（原生轉錄＋理解，對話只跑一遍）。
+    STT 只保留作關機安全網。回 True=已處理，False=走舊文字鏈。"""
+    core = get_core()
+    log = getattr(core, "log_print", print)
+    if not pcm16k or len(pcm16k) < 3200:
+        return False
+    try:
+        try:
+            core.current_ai_state = "THINKING"
+        except Exception:
+            pass
+        try:
+            core.touch_interaction()
+        except Exception:
+            pass
+        try:
+            prof = await core.get_user_profile()
+            custom_name = (prof or {}).get("custom_name", "老爸")
+        except Exception:
+            custom_name = "老爸"
+
+        heard, reply = await get_dad_session().chat_audio(
+            pcm16k, timeout=DEEP_THINK_TIMEOUT)
+        if not reply:
+            return False
+        heard = (heard or "").strip()
+        log(f"👂 [AgentLoop 直聽] session 聽到：{heard[:60] if heard else '(無轉錄)'}")
+        if "[SILENCE]" in reply.upper() or "[SKIP]" in reply.upper():
+            try:
+                core.append_to_unified_memory(
+                    speaker="老爸", target="7L",
+                    content=heard or "[語音]", role="user", source="mic")
+            except Exception:
+                pass
+            try:
+                core.last_interaction_time = time.time()
+            except Exception:
+                pass
+            return True
+
+        try:
+            from core.prompts import TextCleanEngine
+            bot_reply = TextCleanEngine.remove_system_hints(reply)
+        except Exception:
+            bot_reply = reply
+
+        exec_actions = getattr(core, "execute_actions", None)
+        spoken = await exec_actions(vts, bot_reply, input_queue,
+                                    user_input_ctx=heard or "[語音輸入]",
+                                    caller_target="dad",
+                                    caller_user=custom_name) if callable(exec_actions) else bot_reply
+        clean_spoken = (spoken or "").strip(" *'\"-.,!?。，！？\n\r")
+        if clean_spoken:
+            try:
+                await asyncio.to_thread(core.update_subtitle, clean_spoken)
+            except Exception:
+                pass
+            try:
+                core.record_bot_message(clean_spoken)
+            except Exception:
+                pass
+            log(f"💬 7L (AgentLoop 爸爸回覆): {clean_spoken} (🔁 {get_dad_session().live_model_used or 'live'} #{get_dad_session().turns})")
+            try:
+                await core.speech_queue.put({
+                    "text": clean_spoken, "target": "dad",
+                    "raw_text": bot_reply, "model": "agent-loop-dad"})
+            except Exception:
+                pass
+            try:
+                if heard:
+                    core.append_to_unified_memory(
+                        speaker="老爸", target="7L", content=heard,
+                        role="user", source="mic")
+                core.append_to_unified_memory(
+                    speaker="7L", target=custom_name, content=clean_spoken,
+                    role="assistant", source="tts", model="agent-loop-dad")
+            except Exception:
+                pass
+            try:
+                ch = getattr(core, "DEFAULT_CHANNEL_ID", "dad")
+                fresh = await core.fetch_from_long_term_memory(ch)
+                fresh.append({"role": "user", "content": heard or "[語音輸入]"})
+                fresh.append({"role": "assistant", "content": clean_spoken})
+                asyncio.create_task(core.save_to_long_term_memory(ch, fresh))
+            except Exception:
+                pass
+        try:
+            core.last_interaction_time = time.time()
+        except Exception:
+            pass
+        return True
+    except Exception as e:
+        try:
+            log(f"⚠️ [AgentLoop 直聽異常，回退舊鏈]: {e}")
+        except Exception:
+            pass
+        return False
+    finally:
+        try:
+            rtm = getattr(core, "realtime_task_mgr", None)
+            if rtm:
+                try:
+                    rtm.finish_dad_task()
+                except Exception:
+                    pass
+                try:
+                    rtm.mark_dad_input_read()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        try:
+            mark_board = getattr(core, "mark_streamer_mind_board_as_read", None)
+            if mark_board:
+                mark_board(unique_id="dad", content="")
+        except Exception:
+            pass
+        try:
+            if getattr(core, "current_ai_state", "") == "THINKING":
+                core.current_ai_state = "IDLE"
+        except Exception:
+            pass
