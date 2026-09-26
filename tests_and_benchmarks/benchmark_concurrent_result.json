@@ -1,0 +1,502 @@
+[
+  {
+    "provider": "Groq",
+    "model": "llama-3.3-70b-versatile",
+    "method": "純文字 (Text)",
+    "status": "ERROR",
+    "latency": 0.427,
+    "output": "",
+    "key_used": "GroqKey#22",
+    "error": "Error code: 404 - {'error': {'message': 'The model `llama-3.3-70b-versatile` does not exist or you d"
+  },
+  {
+    "provider": "Groq",
+    "model": "llama-3.1-8b-instant",
+    "method": "純文字 (Text)",
+    "status": "ERROR",
+    "latency": 0.302,
+    "output": "",
+    "key_used": "GroqKey#23",
+    "error": "Error code: 404 - {'error': {'message': 'The model `llama-3.1-8b-instant` does not exist or you do n"
+  },
+  {
+    "provider": "Google",
+    "model": "gemini-3.5-flash-lite",
+    "method": "思考預算 0 (Fast 0s)",
+    "status": "ERROR",
+    "latency": 9.327,
+    "output": "",
+    "key_used": "Key#24",
+    "error": "403 PERMISSION_DENIED. {'error': {'code': 403, 'message': 'Your project has been denied access. Plea"
+  },
+  {
+    "provider": "Groq",
+    "model": "openai/gpt-oss-20b",
+    "method": "純文字 (Text)",
+    "status": "SUCCESS",
+    "latency": 0.74,
+    "output": "我是 ChatGPT，一個具備自然語言理解與生成、跨語言對話、快速資訊檢索與創意寫作能力的人工智慧助手。",
+    "key_used": "GroqKey#21",
+    "error": null
+  },
+  {
+    "provider": "Groq",
+    "model": "qwen/qwen3.6-27b",
+    "method": "純文字 (Text)",
+    "status": "SUCCESS",
+    "latency": 1.492,
+    "output": "<think> Here's a thinking process:  1.  **Analyze User Input:**  ",
+    "key_used": "GroqKey#18",
+    "error": null
+  },
+  {
+    "provider": "Groq",
+    "model": "openai/gpt-oss-120b",
+    "method": "純文字 (Text)",
+    "status": "SUCCESS",
+    "latency": 1.742,
+    "output": "我是ChatGPT，由OpenAI開發的語言模型，擅長理解與生成自然語言，提供資訊、創意寫作與問題解答。",
+    "key_used": "GroqKey#17",
+    "error": null
+  },
+  {
+    "provider": "Google",
+    "model": "gemini-3.5-flash-lite",
+    "method": "工具調用 (Tool Call)",
+    "status": "SUCCESS",
+    "latency": 10.261,
+    "output": "[Tool: trigger_vts_expression]",
+    "key_used": "Key#23",
+    "error": null
+  },
+  {
+    "provider": "Google",
+    "model": "gemini-flash-lite-latest",
+    "method": "純文字 (Text)",
+    "status": "SUCCESS",
+    "latency": 6.381,
+    "output": "我是你的 AI 助手，核心特長是快速整合資訊、提供精準解答與協助各類文字創作。",
+    "key_used": "Key#4",
+    "error": null
+  },
+  {
+    "provider": "Google",
+    "model": "gemini-3.5-flash-lite",
+    "method": "純文字 (Text)",
+    "status": "SUCCESS",
+    "latency": 11.558,
+    "output": "我是您的全能 AI 助手，核心特長是快速整合資訊、提供創意思考與協助您解決各類文字與邏輯難題。",
+    "key_used": "Key#20",
+    "error": null
+  },
+  {
+    "provider": "Google",
+    "model": "gemini-flash-lite-latest",
+    "method": "工具調用 (Tool Call)",
+    "status": "SUCCESS",
+    "latency": 5.277,
+    "output": "[Tool: trigger_vts_expression]",
+    "key_used": "Key#7",
+    "error": null
+  },
+  {
+    "provider": "Groq",
+    "model": "groq/compound-mini",
+    "method": "純文字 (Text)",
+    "status": "SUCCESS",
+    "latency": 1.43,
+    "output": "我是ChatGPT，由OpenAI訓練的大型語言模型，核心特長是快速且精確的自然語言理解與生成。",
+    "key_used": "GroqKey#20",
+    "error": null
+  },
+  {
+    "provider": "Google",
+    "model": "gemini-3.1-flash-lite",
+    "method": "工具調用 (Tool Call)",
+    "status": "SUCCESS",
+    "latency": 8.466,
+    "output": "[Tool: trigger_vts_expression]",
+    "key_used": "Key#28",
+    "error": null
+  },
+  {
+    "provider": "Google",
+    "model": "gemini-3-flash-preview",
+    "method": "工具調用 (Tool Call)",
+    "status": "SUCCESS",
+    "latency": 12.247,
+    "output": "[Tool: trigger_vts_expression]",
+    "key_used": "Key#19",
+    "error": null
+  },
+  {
+    "provider": "Google",
+    "model": "gemini-3.5-flash",
+    "method": "思考預算 0 (Fast 0s)",
+    "status": "SUCCESS",
+    "latency": 13.841,
+    "output": "1+1 等於 **2**。",
+    "key_used": "Key#15",
+    "error": null
+  },
+  {
+    "provider": "Google",
+    "model": "gemini-3.1-flash-lite",
+    "method": "純文字 (Text)",
+    "status": "SUCCESS",
+    "latency": 9.956,
+    "output": "我是由 Google 訓練的大型語言模型，專長在於精準理解語言、快速整合資訊，並為您提供高效的創意與邏輯分析支援。",
+    "key_used": "Key#25",
+    "error": null
+  },
+  {
+    "provider": "Google",
+    "model": "gemini-3.5-flash",
+    "method": "工具調用 (Tool Call)",
+    "status": "SUCCESS",
+    "latency": 14.529,
+    "output": "[Tool: trigger_vts_expression]",
+    "key_used": "Key#14",
+    "error": null
+  },
+  {
+    "provider": "Groq",
+    "model": "groq/compound",
+    "method": "純文字 (Text)",
+    "status": "SUCCESS",
+    "latency": 2.365,
+    "output": "我是一個由 Groq 開發的 AI 系統，名為 Compound，專長於利用自訂 LPU 硬體提供高速高效的 AI 推理服務。",
+    "key_used": "GroqKey#19",
+    "error": null
+  },
+  {
+    "provider": "Google",
+    "model": "gemini-3.6-flash",
+    "method": "工具調用 (Tool Call)",
+    "status": "SUCCESS",
+    "latency": 16.422,
+    "output": "[Tool: trigger_vts_expression]",
+    "key_used": "Key#10",
+    "error": null
+  },
+  {
+    "provider": "Google",
+    "model": "gemini-3.7-flash",
+    "method": "思考預算 0 (Fast 0s)",
+    "status": "503_HIGH_DEMAND",
+    "latency": 18.129,
+    "output": "",
+    "key_used": "Key#6",
+    "error": "503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is currently experiencing high deman"
+  },
+  {
+    "provider": "Google",
+    "model": "gemini-flash-latest",
+    "method": "純文字 (Text)",
+    "status": "SUCCESS",
+    "latency": 9.83,
+    "output": "我是由 Google 打造的 AI 大型語言模型 Gemini，核心特長在於能快速、精準地進行邏輯推理、多語言溝通與跨領域的智慧內",
+    "key_used": "Key#29",
+    "error": null
+  },
+  {
+    "provider": "Google",
+    "model": "gemini-flash-lite-latest",
+    "method": "單圖視覺 (1 Image)",
+    "status": "SUCCESS",
+    "latency": 8.445,
+    "output": "畫面中包含以下幾何元素與色彩：  1. **藍色矩形**：位於左上方，邊框為白色，內部填滿藍色。 2. **粉紅色圓形**：位於右",
+    "key_used": "Key#5",
+    "error": null
+  },
+  {
+    "provider": "Google",
+    "model": "gemini-3.5-flash-lite",
+    "method": "單圖視覺 (1 Image)",
+    "status": "SUCCESS",
+    "latency": 13.724,
+    "output": "畫面中包含兩個主要的幾何圖形：  1. **左側**：一個帶有白色邊框的**藍色長方形**。 2. **右側**：一個帶有白色邊框",
+    "key_used": "Key#21",
+    "error": null
+  },
+  {
+    "provider": "Google",
+    "model": "gemma-4-26b-a4b-it",
+    "method": "工具調用 (Tool Call)",
+    "status": "SUCCESS",
+    "latency": 4.668,
+    "output": "[Tool: trigger_vts_expression]",
+    "key_used": "Key#15",
+    "error": null
+  },
+  {
+    "provider": "Google",
+    "model": "gemini-3-flash-preview",
+    "method": "純文字 (Text)",
+    "status": "SUCCESS",
+    "latency": 16.08,
+    "output": "我是由 Google 訓練的大型語言模型，核心特長是透過強大的邏輯分析與語言處理能力，為您提供精準的資訊整合、創意產出與問題解決方",
+    "key_used": "Key#16",
+    "error": null
+  },
+  {
+    "provider": "Google",
+    "model": "gemini-3.1-flash-lite",
+    "method": "單圖視覺 (1 Image)",
+    "status": "SUCCESS",
+    "latency": 12.573,
+    "output": "此畫面包含兩個幾何圖形：  1.  **左側：** 一個藍色的**矩形**。 2.  **右側：** 一個粉紅色的**圓形**。 ",
+    "key_used": "Key#26",
+    "error": null
+  },
+  {
+    "provider": "Google",
+    "model": "gemini-3.6-flash",
+    "method": "純文字 (Text)",
+    "status": "SUCCESS",
+    "latency": 20.858,
+    "output": "我是由 Google 開發的人工智慧助手，核心特長是高效分析資訊、解答各式問題，並協助進行多語言的文字創作與邏輯推理。",
+    "key_used": "Key#7",
+    "error": null
+  },
+  {
+    "provider": "Google",
+    "model": "gemini-3.5-flash",
+    "method": "單圖視覺 (1 Image)",
+    "status": "SUCCESS",
+    "latency": 19.632,
+    "output": "此畫面包含以下幾何元素與色彩：  * **背景與外框**：背景為**深藍灰色**，外圍有一個**淡藍色**的矩形細外框。 * **",
+    "key_used": "Key#12",
+    "error": null
+  },
+  {
+    "provider": "Google",
+    "model": "gemini-flash-latest",
+    "method": "單圖視覺 (1 Image)",
+    "status": "503_HIGH_DEMAND",
+    "latency": 12.514,
+    "output": "",
+    "key_used": "Key#1",
+    "error": "503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is currently experiencing high deman"
+  },
+  {
+    "provider": "Google",
+    "model": "gemini-flash-lite-latest",
+    "method": "5圖多視角 (5 Images)",
+    "status": "SUCCESS",
+    "latency": 10.814,
+    "output": "這 5 個連續視角展示了同一個測試畫面在不同旋轉角度下的截圖，具體特徵如下：  1. **畫面內容**：    - 畫面背景為深藍",
+    "key_used": "Key#6",
+    "error": null
+  },
+  {
+    "provider": "Google",
+    "model": "gemini-3.5-flash",
+    "method": "純文字 (Text)",
+    "status": "SUCCESS",
+    "latency": 21.307,
+    "output": "我是由 Google 開發的人工智慧助手，核心特長是運用強大的語言理解與邏輯分析能力，高效協助您進行資訊檢索、創意寫作與問題解決。",
+    "key_used": "Key#11",
+    "error": null
+  },
+  {
+    "provider": "Google",
+    "model": "gemini-3-flash-preview",
+    "method": "單圖視覺 (1 Image)",
+    "status": "SUCCESS",
+    "latency": 19.003,
+    "output": "此畫面包含以下幾何元素與色彩：  *   **背景與框架：** 深灰色背景，外圍嵌有一圈淡藍色矩形邊框。 *   **幾何形狀：*",
+    "key_used": "Key#17",
+    "error": null
+  },
+  {
+    "provider": "Google",
+    "model": "gemini-flash-latest",
+    "method": "工具調用 (Tool Call)",
+    "status": "SUCCESS",
+    "latency": 13.253,
+    "output": "[Tool: trigger_vts_expression]",
+    "key_used": "Key#3",
+    "error": null
+  },
+  {
+    "provider": "Google",
+    "model": "gemini-3.5-flash-lite",
+    "method": "5圖多視角 (5 Images)",
+    "status": "SUCCESS",
+    "latency": 17.501,
+    "output": "這五個視角展現了以下特徵與變化：  1. **視覺內容一致性**：    * 畫面中始終包含兩個主要幾何圖形：左側為一個藍色長方形",
+    "key_used": "Key#22",
+    "error": null
+  },
+  {
+    "provider": "Google",
+    "model": "gemini-flash-latest",
+    "method": "5圖多視角 (5 Images)",
+    "status": "503_HIGH_DEMAND",
+    "latency": 14.848,
+    "output": "",
+    "key_used": "Key#2",
+    "error": "503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is currently experiencing high deman"
+  },
+  {
+    "provider": "Google",
+    "model": "gemini-3.7-flash",
+    "method": "5圖多視角 (5 Images)",
+    "status": "503_HIGH_DEMAND",
+    "latency": 26.15,
+    "output": "",
+    "key_used": "Key#4",
+    "error": "503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is currently experiencing high deman"
+  },
+  {
+    "provider": "Google",
+    "model": "gemma-4-31b-it",
+    "method": "工具調用 (Tool Call)",
+    "status": "SUCCESS",
+    "latency": 12.449,
+    "output": "[Tool: trigger_vts_expression]",
+    "key_used": "Key#11",
+    "error": null
+  },
+  {
+    "provider": "Google",
+    "model": "gemma-4-26b-a4b-it",
+    "method": "純文字 (Text)",
+    "status": "SUCCESS",
+    "latency": 14.093,
+    "output": "我是 Google 開發的 AI 助手，擅長透過強大的語言理解與生成能力，為你提供精準的資訊處理、創意寫作與問題解決方案。",
+    "key_used": "Key#12",
+    "error": null
+  },
+  {
+    "provider": "Google",
+    "model": "gemini-3.5-flash",
+    "method": "5圖多視角 (5 Images)",
+    "status": "SUCCESS",
+    "latency": 28.092,
+    "output": "這五個連續視角展示了一個多模態測試（7L Multi-Modal Test）的畫面序列。以下是針對這 5 個視角的變化與特徵進行的",
+    "key_used": "Key#13",
+    "error": null
+  },
+  {
+    "provider": "Google",
+    "model": "gemini-3.7-flash",
+    "method": "純文字 (Text)",
+    "status": "SUCCESS",
+    "latency": 32.719,
+    "output": "我是由 Google 開發的 AI 模型 Gemini，核心特長在於具備強大的邏輯推理、多模態資訊理解、程式設計以及高效的文字創作",
+    "key_used": "Key#2",
+    "error": null
+  },
+  {
+    "provider": "Google",
+    "model": "gemma-4-31b-it",
+    "method": "純文字 (Text)",
+    "status": "SUCCESS",
+    "latency": 18.831,
+    "output": "我是由 Google 訓練的大型語言模型，擅長高效處理資訊、邏輯分析及多元內容生成，旨在為您提供全方位的智能協助。",
+    "key_used": "Key#8",
+    "error": null
+  },
+  {
+    "provider": "Google",
+    "model": "gemini-3.6-flash",
+    "method": "5圖多視角 (5 Images)",
+    "status": "503_HIGH_DEMAND",
+    "latency": 30.843,
+    "output": "",
+    "key_used": "Key#9",
+    "error": "503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is currently experiencing high deman"
+  },
+  {
+    "provider": "Google",
+    "model": "gemini-3-flash-preview",
+    "method": "5圖多視角 (5 Images)",
+    "status": "SUCCESS",
+    "latency": 27.976,
+    "output": "這五張圖片呈現了一個具有規律變化的序列，我們可以從數據特徵、視覺組成和變化規律三個方面進行綜合評估：  ### 1. 數據與元數據",
+    "key_used": "Key#18",
+    "error": null
+  },
+  {
+    "provider": "Google",
+    "model": "gemini-3.7-flash",
+    "method": "工具調用 (Tool Call)",
+    "status": "503_HIGH_DEMAND",
+    "latency": 33.18,
+    "output": "",
+    "key_used": "Key#5",
+    "error": "503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is currently experiencing high deman"
+  },
+  {
+    "provider": "Google",
+    "model": "gemma-4-26b-a4b-it",
+    "method": "單圖視覺 (1 Image)",
+    "status": "SUCCESS",
+    "latency": 21.254,
+    "output": "畫面背景為深灰色，四周有淺藍色邊框。幾何元素包含左側一個帶有白色輪廓的藍色矩形，以及右側一個帶有白色輪廓的粉紅色圓形。左下方則有白",
+    "key_used": "Key#13",
+    "error": null
+  },
+  {
+    "provider": "Google",
+    "model": "gemma-4-31b-it",
+    "method": "單圖視覺 (1 Image)",
+    "status": "SUCCESS",
+    "latency": 28.463,
+    "output": "畫面為深藍色背景，四周有淺藍色細邊框。其中包含兩個主要幾何元素：左側是一個帶白色邊框的**藍色矩形**，右側是一個帶白色邊框的**",
+    "key_used": "Key#9",
+    "error": null
+  },
+  {
+    "provider": "Google",
+    "model": "gemma-4-26b-a4b-it",
+    "method": "5圖多視角 (5 Images)",
+    "status": "SUCCESS",
+    "latency": 41.198,
+    "output": "這五張連續的圖像（從視角 1/5 到 5/5）呈現了一個高度受控的實驗或測試環境。以下是針對這些視角的綜合評估與特徵分析：  ##",
+    "key_used": "Key#14",
+    "error": null
+  },
+  {
+    "provider": "Google",
+    "model": "gemma-4-31b-it",
+    "method": "5圖多視角 (5 Images)",
+    "status": "SUCCESS",
+    "latency": 54.329,
+    "output": "這五張連續視角的圖片呈現了一個受控的視覺測試序列。透過對比分析，可以將其特徵總結為以下三個維度：  ### 1. 恆定不變的元素（",
+    "key_used": "Key#10",
+    "error": null
+  },
+  {
+    "provider": "Google",
+    "model": "gemini-3.1-flash-lite",
+    "method": "5圖多視角 (5 Images)",
+    "status": "SUCCESS",
+    "latency": 61.432,
+    "output": "綜合評估這 5 個連續視角的變化，可以歸納出以下特徵：  ### 1. 核心內容的穩定性 這 5 個視角在構圖上具有高度的一致性：",
+    "key_used": "Key#27",
+    "error": null
+  },
+  {
+    "provider": "Google",
+    "model": "gemini-3.7-flash",
+    "method": "單圖視覺 (1 Image)",
+    "status": "SUCCESS",
+    "latency": 72.81,
+    "output": "這幅畫面的主要幾何元素與色彩如下：  * **背景與外框**：整體為**深藍色（暗藍灰色）**背景，四周包覆著一圈**淺藍色**的",
+    "key_used": "Key#3",
+    "error": null
+  },
+  {
+    "provider": "Google",
+    "model": "gemini-3.6-flash",
+    "method": "單圖視覺 (1 Image)",
+    "status": "503_HIGH_DEMAND",
+    "latency": 84.519,
+    "output": "",
+    "key_used": "Key#8",
+    "error": "503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is currently experiencing high deman"
+  }
+]

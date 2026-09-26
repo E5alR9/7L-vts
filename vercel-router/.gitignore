@@ -1,0 +1,5 @@
+.vercel
+.env*
+!.env.example
+node_modules/
+admin-test.log

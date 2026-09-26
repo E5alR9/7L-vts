@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Groq Router · 登入</title>
+<style>
+:root{--bg:#0d1117;--panel:#161b22;--line:#2b3444;--txt:#e6edf3;--dim:#8b98a9;--acc:#4dd0e1;--bad:#f85149}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--txt);font:14px/1.55 "Segoe UI","Microsoft JhengHei",system-ui,sans-serif;
+display:flex;min-height:100vh;align-items:center;justify-content:center;padding:20px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:28px;width:100%;max-width:400px}
+h1{font-size:19px;margin:0 0 4px} h1 b{color:var(--acc)}
+.sub{color:var(--dim);font-size:12.5px;margin-bottom:16px}
+.tabs{display:flex;gap:8px;margin-bottom:14px}
+.tabs button{flex:1;background:transparent;color:var(--dim);border:1px solid var(--line);border-radius:8px;padding:8px;cursor:pointer;font-size:13px}
+.tabs button.active{color:var(--acc);border-color:var(--acc);background:#12333a}
+label{display:block;font-size:12px;color:var(--dim);margin:10px 0 4px}
+input{width:100%;background:#0b0f14;color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:9px 11px;font:inherit}
+button.go{width:100%;margin-top:16px;background:#12333a;border:1px solid #1f6f7a;color:var(--acc);
+border-radius:8px;padding:10px;cursor:pointer;font-size:14px}
+button.go:hover{filter:brightness(1.2)}
+button.go:disabled{opacity:.5;cursor:not-allowed}
+.err{color:var(--bad);font-size:12.5px;min-height:20px;margin-top:10px}
+.ok{color:var(--acc);font-size:12.5px;margin-top:10px;word-break:break-all}
+.hint{color:var(--dim);font-size:11.5px;margin-top:14px;text-align:center}
+.hint a{color:var(--acc)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1><b>Groq Router</b> 中轉站</h1>
+  <div class="sub">註冊帳號 → 管理員充值 → 用 API key 聊天（OpenAI 相容）</div>
+  <div class="tabs">
+    <button id="tabLogin" class="active" onclick="switchTab('login')">登入</button>
+    <button id="tabReg" onclick="switchTab('reg')">註冊</button>
+  </div>
+  <div id="paneLogin">
+    <label>名稱</label><input type="text" id="loginName" autocomplete="username">
+    <label>密碼</label><input type="password" id="loginPass" autocomplete="current-password">
+    <button class="go" id="btnLogin" onclick="doLogin()">登入</button>
+  </div>
+  <div id="paneReg" style="display:none">
+    <label>名稱（2~24 字）</label><input type="text" id="regName" autocomplete="username">
+    <label>密碼（最少 6 字）</label><input type="password" id="regPass" autocomplete="new-password">
+    <button class="go" id="btnReg" onclick="doReg()">註冊（初始 0 點）</button>
+  </div>
+  <div class="err" id="msg"></div>
+  <div class="ok" id="okmsg"></div>
+  <div class="hint">已有 session 會自動跳轉 · <a href="/admin">管理後台</a></div>
+</div>
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+function switchTab(t){
+  $("tabLogin").classList.toggle("active", t==="login");
+  $("tabReg").classList.toggle("active", t==="reg");
+  $("paneLogin").style.display = t==="login" ? "" : "none";
+  $("paneReg").style.display = t==="reg" ? "" : "none";
+  $("msg").textContent = ""; $("okmsg").textContent = "";
+}
+async function api(body){
+  const r = await fetch("/api/auth", { method:"POST",
+    headers:{"Content-Type":"application/json"}, body: JSON.stringify(body) });
+  let j = {}; try{ j = await r.json(); }catch(e){}
+  if(!r.ok) throw new Error((j.error&&j.error.message)||("HTTP "+r.status));
+  return j;
+}
+async function doLogin(){
+  const name=$("loginName").value.trim(), password=$("loginPass").value;
+  if(!name||!password) return $("msg").textContent="請填名稱與密碼";
+  $("btnLogin").disabled = true;
+  try{
+    const j = await api({action:"login", name, password});
+    localStorage.setItem("gr_session", j.session);
+    $("okmsg").textContent = "登入成功，跳轉中…";
+    setTimeout(()=>location.href = j.user.role==="admin" ? "/admin" : "/me", 600);
+  }catch(e){ $("msg").textContent = e.message; $("btnLogin").disabled = false; }
+}
+async function doReg(){
+  const name=$("regName").value.trim(), password=$("regPass").value;
+  if(!name||!password) return $("msg").textContent="請填名稱與密碼";
+  $("btnReg").disabled = true;
+  try{
+    const j = await api({action:"register", name, password});
+    localStorage.setItem("gr_session", j.session);
+    $("okmsg").innerHTML = "註冊成功！API token（只顯示這一次，請複製）：<br><code style=\"user-select:all\">"
+      + String(j.token||"").replace(/</g,"&lt;") + "</code><br>初始 0 點，請聯繫管理員充值。3 秒後進個人頁…";
+    setTimeout(()=>location.href="/me", 3000);
+  }catch(e){ $("msg").textContent = e.message; }
+  $("btnReg").disabled = false;
+}
+// 已登入直接跳轉
+(function(){
+  if(!localStorage.getItem("gr_session")) return;
+  fetch("/api/auth?action=me", { headers:{Authorization:"Bearer "+localStorage.getItem("gr_session")} })
+    .then(r=>r.json()).then(j=>{
+      if(j.ok) location.href = (j.kind==="admin"||(j.user&&j.user.role==="admin")) ? "/admin" : "/me";
+    }).catch(()=>{});
+})();
+for (const [id, fn] of [["loginPass",doLogin],["regPass",doReg],["loginName",doLogin],["regName",doReg]]) {
+  $(id).addEventListener("keydown", e=>{ if(e.key==="Enter") fn(); });
+}
+</script>
+</body>
+</html>

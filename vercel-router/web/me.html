@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Groq Router · 我的用量</title>
+<style>
+:root{--bg:#0d1117;--panel:#161b22;--line:#2b3444;--txt:#e6edf3;--dim:#8b98a9;--acc:#4dd0e1;--ok:#3fb950;--bad:#f85149}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--txt);font:14px/1.55 "Segoe UI","Microsoft JhengHei",system-ui,sans-serif}
+header{position:sticky;top:0;display:flex;gap:10px;align-items:center;padding:10px 18px;
+background:rgba(13,17,23,.94);border-bottom:1px solid var(--line)}
+header h1{font-size:16px;margin:0} header h1 b{color:var(--acc)}
+header button{margin-left:auto;background:#1c2330;color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:6px 12px;cursor:pointer}
+main{padding:18px;display:grid;gap:16px;grid-template-columns:repeat(12,minmax(0,1fr));max-width:1100px;margin:0 auto}
+section{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px 16px;grid-column:span 12}
+@media(min-width:900px){#secMe{grid-column:span 5}#secUse{grid-column:span 7}}
+h2{margin:0 0 10px;font-size:13.5px;color:var(--acc);padding-bottom:8px;border-bottom:1px solid var(--line)}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font-size:13px}
+.kv div:nth-child(odd){color:var(--dim);white-space:nowrap}
+.bar{height:8px;background:#0b0f14;border-radius:4px;overflow:hidden;border:1px solid var(--line);margin-top:6px}
+.bar i{display:block;height:100%;background:linear-gradient(90deg,var(--acc),var(--ok))}
+code{background:#0b0f14;border:1px solid var(--line);border-radius:6px;padding:2px 6px;font-size:12px;word-break:break-all}
+table{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:8px}
+th,td{text-align:left;padding:6px 8px;border-bottom:1px solid #1e2632}
+th{color:var(--dim);font-size:11.5px}
+.muted{color:var(--dim);font-size:12px}
+button.cp{background:#12333a;border:1px solid #1f6f7a;color:var(--acc);border-radius:6px;padding:3px 10px;cursor:pointer;font-size:12px}
+pre{background:#0b0f14;border:1px solid var(--line);border-radius:8px;padding:10px;font-size:11.5px;overflow:auto}
+</style>
+</head>
+<body>
+<header><h1><b>Groq Router</b> 我的用量</h1><button onclick="logout()">登出</button></header>
+<main>
+  <section id="secMe">
+    <h2>👤 帳號</h2>
+    <div class="kv" id="kvMe"><div>狀態</div><div>載入中…</div></div>
+    <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+      <button class="cp" onclick="checkin()">📅 每日簽到領點數</button>
+    </div>
+    <h2 style="margin-top:14px">🎟️ 兌換邀請碼</h2>
+    <div style="display:flex;gap:8px">
+      <input type="text" id="invCode" placeholder="例如：X7K2-9PQ4" style="flex:1;background:#0b0f14;color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:7px 9px">
+      <button class="cp" onclick="redeem()">兌換</button>
+    </div>
+    <h2 style="margin-top:14px">🔑 API 用法</h2>
+    <div class="muted">OpenAI 相容端點（把 token 當 api_key）：</div>
+    <pre>from openai import OpenAI
+client = OpenAI(
+    base_url="https://vercel-router-khaki.vercel.app/v1",
+    api_key="你的 token",
+)</pre>
+  </section>
+  <section id="secUse">
+    <h2>📊 近 7 天用量 <small id="useTotal"></small></h2>
+    <table><thead><tr><th>日期</th><th>tokens</th><th>請求</th><th>模型</th></tr></thead>
+    <tbody id="useRows"><tr><td colspan="4" class="muted">載入中…</td></tr></tbody></table>
+  </section>
+</main>
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const ses = localStorage.getItem("gr_session");
+if(!ses) location.href = "/login";
+function esc(s){ return String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+function logout(){ localStorage.removeItem("gr_session");
+  fetch("/api/auth",{method:"POST",headers:{"Content-Type":"application/json",Authorization:"Bearer "+ses},
+    body:JSON.stringify({action:"logout"})}).finally(()=>location.href="/login"); }
+async function checkin(){
+  try{
+    const j = await (await fetch("/api/auth",{method:"POST",
+      headers:{"Content-Type":"application/json",Authorization:"Bearer "+ses},
+      body:JSON.stringify({action:"checkin"})})).json();
+    alert(j.message || (j.ok ? "簽到成功" : "失敗"));
+    if(j.ok) location.reload();
+  }catch(e){ alert("失敗："+e.message); }
+}
+async function redeem(){
+  const code = $("invCode").value.trim();
+  if(!code) return alert("請輸入邀請碼");
+  try{
+    const j = await (await fetch("/api/auth",{method:"POST",
+      headers:{"Content-Type":"application/json",Authorization:"Bearer "+ses},
+      body:JSON.stringify({action:"invites.redeem", code})})).json();
+    alert(j.message || (j.ok ? "兌換成功" : "失敗"));
+    if(j.ok) location.reload();
+  }catch(e){ alert("失敗："+e.message); }
+}
+(async function boot(){
+  try{
+    const me = await (await fetch("/api/auth?action=me",{headers:{Authorization:"Bearer "+ses}})).json();
+    if(!me.ok){ localStorage.removeItem("gr_session"); return location.href="/login"; }
+    if(me.kind==="admin"||(me.user&&me.user.role==="admin")) return location.href="/admin";
+    const u = me.user;
+    $("kvMe").innerHTML = [
+      ["名稱", u.name], ["角色", u.role],
+      ["點數", u.credits===-1 ? "無限" : u.credits],
+      ["累計用量", (u.usedTokens||0)+" tokens"],
+    ].map(([k,v])=>`<div>${esc(k)}</div><div>${esc(v)}</div>`).join("");
+    const uj = await (await fetch("/api/auth?action=usage&days=7",{headers:{Authorization:"Bearer "+ses}})).json();
+    const rows = uj.usage||[];
+    let tot=0, req=0;
+    $("useRows").innerHTML = rows.map(d=>{
+      tot += d.tokens||0; req += d.reqs||0;
+      const models = Object.entries(d.models||{}).map(([m,n])=>`${esc(m.split("/").pop())}×${n}`).join("、") || "--";
+      return `<tr><td>${esc(d.day)}</td><td>${esc(d.tokens||0)}</td><td>${esc(d.reqs||0)}</td><td>${models}</td></tr>`;
+    }).join("");
+    $("useTotal").textContent = `共 ${tot} tokens / ${req} 次`;
+  }catch(e){
+    $("kvMe").innerHTML = `<div>錯誤</div><div>${esc(e.message)}</div>`;
+  }
+})();
+</script>
+</body>
+</html>

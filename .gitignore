@@ -1,0 +1,124 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+*.whl
+.Python
+
+# Virtual environments
+venv/
+env/
+.venv/
+.env/
+
+# Environment files
+.env
+6.env
+*.env
+
+# IDE / Tools
+.vscode/
+.idea/
+.antigravity-ide/
+ai-ide/
+*.suo
+*.user
+
+# OS / Windows system files
+.DS_Store
+Thumbs.db
+desktop.ini
+NTUSER.DAT*
+ntuser.dat*
+ntuser.ini
+
+# Windows user profile system folders
+AppData/
+Application Data/
+Local Settings/
+My Documents/
+Cookies/
+Recent/
+SendTo/
+Templates/
+NetHood/
+PrintHood/
+Favorites/
+Searches/
+Links/
+OneDrive/
+Desktop/
+Downloads/
+Documents/
+
+# Logs & temp
+*.log
+*.tmp
+*.bak
+*.swp
+
+# Audio/Video (large binary files)
+*.mp3
+*.mp4
+*.wav
+*.flac
+*.m4a
+*.ogg
+*.mid
+*.midi
+
+# Models & weights (large files)
+*.pt
+*.pth
+*.onnx
+*.pkl
+*.bin
+*.safetensors
+
+# HuggingFace cache
+.cache/
+
+# Scratch / temp work
+scratch/
+
+# GPT-SoVITS (large model files)
+GPT-SoVITS/
+GPT_SoVITS/
+
+# Minecraft / CurseForge
+curseforge/
+xiaoyi_dataset/
+
+# Gemini config
+.gemini/
+
+# 🔐 Secrets – 絕對不上傳 (2026-09-26 hygiene)
+litellm-config.yaml
+vts_token.txt
+*.npy
+.env.backup_pre_merge
+.gitconfig
+
+# 🧹 Runtime state – 本機運行產物不上傳
+data/
+!data/tts_heteronym_dictionary.json
+services/data/
+chat_input.txt
+subtitle.txt
+cma_status.json
+cma_status.txt
+songs_library/cover_cache/
+7L_Playground/drawings/
+*.orig_backup
+vts_7L_test(local).py
+backup_friend_optimized_20260923/
+
+# Local tool configs (may contain keys)
+.config/
+.local/

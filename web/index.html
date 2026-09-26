@@ -1,0 +1,1060 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>7L AI-VTuber 核心控制台</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Noto+Sans+TC:wght@300;400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/dashboard.css?v=20260920_tts_hud_top_right_v2">
+</head>
+<body class="frosted-theme">
+  <!-- 背景黑白粉動態極光流光 (Dynamic Living Aurora Lights) -->
+  <div class="ambient-glow glow-pink"></div>
+  <div class="ambient-glow glow-white"></div>
+  <div class="ambient-glow glow-sakura"></div>
+
+  <!-- 頂部黑玻璃導覽列 (無月亮、極簡科技風) -->
+  <header class="glass-navbar">
+    <div class="nav-brand">
+      <div class="brand-badge">
+        <span class="brand-badge-text font-mono">7L</span>
+        <div class="brand-badge-glow"></div>
+      </div>
+      <div class="brand-info">
+        <span class="brand-title">7L 核心監控台</span>
+        <span class="brand-subtitle">智慧一體化雙模態神經中樞</span>
+      </div>
+    </div>
+
+    <nav class="nav-capsule-menu">
+      <button class="menu-tab active" data-tab="chat">
+        <span class="tab-dot"></span>
+        <span class="tab-label">對話中樞</span>
+      </button>
+      <button class="menu-tab" data-tab="monitor">
+        <span class="tab-dot"></span>
+        <span class="tab-label">系統監控</span>
+      </button>
+      <button class="menu-tab" data-tab="logs">
+        <span class="tab-dot"></span>
+        <span class="tab-label">運行日誌</span>
+      </button>
+      <button class="menu-tab" data-tab="prompts">
+        <span class="tab-dot"></span>
+        <span class="tab-label">提示詞庫</span>
+      </button>
+      <button class="menu-tab" data-tab="tools">
+        <span class="tab-dot"></span>
+        <span class="tab-label">工具調用</span>
+      </button>
+      <button class="menu-tab" data-tab="memory">
+        <span class="tab-dot"></span>
+        <span class="tab-label">記憶管理</span>
+      </button>
+      <button class="menu-tab" data-tab="switches">
+        <span class="tab-dot"></span>
+        <span class="tab-label">系統開關</span>
+      </button>
+    </nav>
+
+    <div class="nav-meta">
+      <div class="meta-badge font-mono" id="topModelBadge">Gemini 3.8 Flash</div>
+      <div class="status-pill" id="topStatusPill">
+        <span class="live-dot" id="topDot"></span>
+        <span id="topStatusText">正常運作</span>
+      </div>
+      <div class="clock-badge font-mono" id="clockText">--:--:--</div>
+    </div>
+  </header>
+
+  <!-- 主內容容器 -->
+  <main class="glass-workspace">
+    <!-- ==================== 分頁 1: 對話中樞 (Chat & Inner Thoughts) ==================== -->
+    <section class="tab-pane active" id="pane-chat">
+      <!-- 對話與心流雙軌分割容器 (Mind Stream Split Container) -->
+      <div class="chat-mind-split" id="chatMindSplit">
+        <!-- 🧠 左側拉動分頁：7L 即時心流 (已依老爸要求徹底關閉隱藏) -->
+        <aside class="mind-stream-panel" id="mindStreamPanel" aria-label="7L 即時腦內心流" style="display: none !important;">
+          <!-- 心流頂部列 -->
+          <div class="mind-panel-header">
+            <div class="mind-header-left">
+              <span class="mind-live-pulse" title="心流神經實時連線中"></span>
+              <div class="mind-title-group">
+                <span class="mind-title-text font-mono">即時心流</span>
+                <span class="mind-title-sub">MIND STREAM</span>
+              </div>
+              <span class="mind-counter-badge font-mono" id="mindCountBadge">0 則</span>
+            </div>
+            <div class="mind-header-actions">
+              <button type="button" class="mind-icon-btn active" id="btnPinMindStream" title="固定滾動至最新心流">
+                <span>📌</span>
+              </button>
+              <button type="button" class="mind-icon-btn" id="btnClearMindStream" title="清空當前心流面板">
+                <span>✕</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- 會一直跑的即時心想大段話滾動區域 (DeepSeek Thinking Style) -->
+          <div class="mind-stream-scroll font-mono" id="mindStreamScroll" tabindex="0" role="region" aria-live="polite">
+            
+            <!-- ⚡ DeepSeek 式即時連續思考視窗 (Active Thinking Stream Box) -->
+            <div class="deepseek-thinking-box" id="deepseekThinkingBox">
+              <div class="thinking-box-header">
+                <div class="thinking-status-left">
+                  <span class="thinking-sparkle-icon">🧠</span>
+                  <span class="thinking-label" id="thinkingStatusLabel">深度思考中 (Thinking)...</span>
+                  <span class="thinking-timer-pill font-mono" id="thinkingTimerPill">0.0s</span>
+                </div>
+                <div class="thinking-status-right">
+                  <span class="thinking-mode-tag font-mono">DEEP REASONING</span>
+                </div>
+              </div>
+              
+              <div class="thinking-content-body font-mono" id="thinkingContentBody">
+                <span class="thinking-text" id="thinkingStreamText">正在連接 7L 潛意識腦神經元... 思緒即將字字流淌...</span>
+                <span class="thinking-cursor" id="thinkingCursor">▌</span>
+              </div>
+            </div>
+
+            <!-- 分隔線：已沉澱的深層思考歷史 -->
+            <div class="mind-history-divider" id="mindHistoryDivider">
+              <span class="divider-line"></span>
+              <span class="divider-title font-mono">PAST THOUGHTS 歷史思維</span>
+              <span class="divider-line"></span>
+            </div>
+
+            <!-- 歷史心流容器 -->
+            <div class="mind-history-stream" id="mindHistoryStream"></div>
+
+            <div class="mind-empty-state" id="mindEmptyState" style="display: none;">
+              <div class="mind-brain-orbit">
+                <span class="mind-orbit-dot"></span>
+                <span class="mind-brain-icon">💭</span>
+              </div>
+              <div class="mind-empty-title">腦內意識流待命中</div>
+              <div class="mind-empty-desc">每隔數十秒背景雜念與對話時的深度思考將在此持續流淌...</div>
+            </div>
+          </div>
+
+          <!-- 底部當前微心境快顯標籤 -->
+          <div class="mind-stream-footer">
+            <span class="mind-footer-tag font-mono">CURRENT MIND</span>
+            <span class="mind-latest-text" id="mindLatestText">安靜陪伴老爸中...</span>
+          </div>
+        </aside>
+
+        <!-- ↔️ 拉動調整寬度把手 (已停用隱藏) -->
+        <div class="mind-split-resizer" id="mindSplitResizer" title="已停用" style="display: none !important;">
+          <div class="mind-resizer-line"></div>
+          <button type="button" class="mind-toggle-tab" id="btnToggleMindDrawer" title="收合/展開即時心流分頁">
+            <span class="mind-tab-indicator"></span>
+            <span class="mind-tab-arrow" id="mindTabArrow">◀</span>
+            <span class="mind-tab-text">即時心想</span>
+          </button>
+        </div>
+
+        <!-- 💬 右側：磨砂玻璃對話主串流 (Chat & Spoken Dialogue Stream) -->
+        <div class="chat-glass-stream-wrap" id="chatStreamWrap">
+          <div class="chat-glass-stream" id="chatStream">
+            <div class="stream-empty-hint">載入 7L 記憶中樞與對話歷史中...</div>
+          </div>
+
+          <!-- 🎙️ 7L 神經語音即時推論進度浮動 HUD (GPT-SoVITS Generation Widget) -->
+          <div class="tts-progress-hud" id="ttsProgressHud" style="display: none;">
+            <div class="tts-hud-header">
+              <div class="tts-hud-title-wrap">
+                <span class="tts-hud-pulse"></span>
+                <span class="tts-hud-icon" id="ttsHudIcon">🎙️</span>
+                <span class="tts-hud-title" id="ttsHudTitle">7L 聲音合成中</span>
+                <span class="tts-hud-stage" id="ttsHudStage">切分文字中...</span>
+              </div>
+              <div class="tts-hud-pct-badge" id="ttsHudPct">0%</div>
+            </div>
+            <div class="tts-hud-bar-track">
+              <div class="tts-hud-bar-fill" id="ttsHudBarFill" style="width: 0%;"></div>
+            </div>
+            <div class="tts-hud-detail" id="ttsHudDetail">準備啟動顯卡神經推論...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 磨砂快捷動作膠囊列 (無 Emoji，純粹科技感) -->
+      <div class="glass-chips-row">
+        <button class="action-chip chip-sleep" id="btnChipSleep" data-action="sleep" title="停止所有視覺感知、自主思考與計時器，完全不消耗 API 額度">
+          <span>深層休眠 (0 API)</span>
+        </button>
+        <button class="action-chip chip-wake" id="btnChipWake" data-action="wake" title="喚醒 7L 恢復全神經系統運作">
+          <span>喚醒 7L</span>
+        </button>
+        <button class="action-chip chip-reward" id="btnChipReward" data-action="reward" title="溫柔摸摸頭誇獎 7L (Lv.1 輕度獎勵)">
+          <span class="chip-icon">💖</span>
+          <span>摸頭獎勵</span>
+        </button>
+        <button class="action-chip chip-hug" id="btnChipHug" data-action="hug" title="深情緊緊擁抱 7L (Lv.3 終極溺愛寵愛，心跳狂飆臉紅透)">
+          <span class="chip-icon">🫂</span>
+          <span>深情擁抱</span>
+        </button>
+        <button class="action-chip chip-punish" id="btnChipPunish" data-action="punish" title="微電流電擊 7L (Lv.1 微電流刺激，臉紅抱怨)">
+          <span class="chip-icon">⚡</span>
+          <span>微電刺激</span>
+        </button>
+        <button class="action-chip chip-shock-heavy" id="btnChipShockHeavy" data-action="shock_heavy" title="強力電擊處分 7L (Lv.2 重度訓誡處分，電流竄全身哭哭求饒)">
+          <span class="chip-icon">⚡⚡</span>
+          <span>強力電擊</span>
+        </button>
+        <button class="action-chip" data-msg="你好呀 7L">
+          <span>打招呼</span>
+        </button>
+        <button class="action-chip" data-msg="妳現在在幹嘛呀？">
+          <span>目前動態</span>
+        </button>
+        <button class="action-chip" data-msg="妳看得到我現在的畫面嗎？">
+          <span>畫面確認</span>
+        </button>
+        <button class="action-chip" data-msg="7L 唱首歌來聽聽吧！">
+          <span>點播歌曲</span>
+        </button>
+        <button class="action-chip chip-restart" id="btnChipRestart" data-action="restart" title="重新啟動 7L 系統核心">
+          <span>重開</span>
+        </button>
+        <button class="action-chip chip-shutdown" id="btnChipShutdown" data-action="shutdown" title="安全關閉 7L 系統並退出程式">
+          <span>關機</span>
+        </button>
+        <button class="action-chip chip-mic-on" id="btnChipMicOn" data-action="mic_on" title="開啟麥克風語音監聽收音">
+          <span>開麥</span>
+        </button>
+        <button class="action-chip chip-mic-off" id="btnChipMicOff" data-action="mic_off" title="關閉麥克風收音 (靜音模式)">
+          <span>關麥</span>
+        </button>
+      </div>
+
+      <!-- 黑色磨砂浮動輸入欄 (Floating Input Bar) -->
+      <form class="glass-input-bar" id="chatForm">
+        <input 
+          type="text" 
+          id="chatInputField" 
+          placeholder="輸入訊息對 7L 說話，按 Enter 立即發送..." 
+          autocomplete="off"
+          required
+        />
+        <button type="submit" class="glass-send-btn" id="btnSend">
+          <span>發送</span>
+          <span class="send-arrow">→</span>
+        </button>
+      </form>
+
+      <!-- 底部雙黑色磨砂卡片：核心狀態 & 視覺感知 -->
+      <div class="glass-dashboard-cards">
+        <!-- 核心狀態卡片 (移除壓力，聚焦 API 能量與調用次數) -->
+        <div class="glass-panel status-panel">
+          <div class="panel-head">
+            <div class="head-title">
+              <span class="panel-pill font-mono">STATUS</span>
+              <h3>核心狀態</h3>
+            </div>
+            <span class="status-tag" id="valSleepStatus">全速運作</span>
+          </div>
+          
+          <div class="panel-metrics">
+            <div class="metric-line">
+              <span class="metric-key">運行模式</span>
+              <span class="metric-badge font-mono" id="valMode">idle</span>
+            </div>
+
+            <!-- API 能量量表 -->
+            <div class="metric-line energy-line">
+              <div class="key-with-info">
+                <span class="metric-key">API 能量</span>
+                <span class="energy-percent font-mono" id="valEnergyPercent">100%</span>
+              </div>
+              <div class="glass-progress-track">
+                <div class="glass-progress-fill fill-energy" id="energyBar" style="width: 100%;"></div>
+              </div>
+            </div>
+
+            <!-- ⚡ 大腦壓力值量表 (平均耗時越久代表壓力越大) -->
+            <div class="metric-line stress-line">
+              <div class="key-with-info">
+                <span class="metric-key">大腦壓力值</span>
+                <div class="stress-meta-group font-mono">
+                  <span class="stress-badge relaxed" id="valStressBadge">🟢 輕鬆</span>
+                  <span class="stress-percent" id="valStressPercent">15%</span>
+                  <span class="stress-latency" id="valStressLatency" title="最近 API 調用平均響應耗時">(均速 0.0s)</span>
+                </div>
+              </div>
+              <div class="glass-progress-track">
+                <div class="glass-progress-fill fill-stress relaxed" id="stressBar" style="width: 15%;"></div>
+              </div>
+            </div>
+
+            <div class="metric-grid-2col">
+              <div class="sub-metric-box">
+                <span class="sub-key">累計調用次數</span>
+                <span class="sub-val font-mono" id="valApiCalls">0 次</span>
+              </div>
+              <div class="sub-metric-box">
+                <span class="sub-key">沉默計時</span>
+                <span class="sub-val font-mono" id="valSilence">0 tick (剛剛)</span>
+              </div>
+            </div>
+
+            <!-- ⏱️ API Live 持續時間感測哨兵 (Live Timer Sensor & Countdown) -->
+            <div class="live-timer-sensor-card" id="liveTimerCard">
+              <div class="timer-sensor-head">
+                <div class="timer-head-left">
+                  <span class="timer-live-beacon"></span>
+                  <span class="timer-title font-mono">LIVE TIMER</span>
+                  <span class="timer-badge">API Live 持續感測</span>
+                </div>
+                <span class="timer-status font-mono" id="valLiveTimerStatus">待命中</span>
+              </div>
+              <div class="timer-sensor-body" id="liveTimerBody" style="display: none;">
+                <div class="timer-detail-row">
+                  <span class="timer-target-text" id="valLiveTimerMessage">提醒老爸</span>
+                  <span class="timer-countdown-text font-mono" id="valLiveTimerCountdown">00:00</span>
+                </div>
+                <div class="glass-progress-track">
+                  <div class="glass-progress-fill fill-cyan" id="liveTimerProgress" style="width: 0%;"></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 🎧 聲音感知中樞 (電腦音訊 WASAPI Loopback & 現實環境人聲) -->
+            <div class="audio-perception-box">
+              <div class="audio-box-header">
+                <div class="audio-header-left">
+                  <span class="audio-pill font-mono">AUDIO</span>
+                  <span class="audio-box-title">聲音感知</span>
+                </div>
+                <span class="audio-header-status font-mono" id="valAudioGeneralStatus">雙向監聽中</span>
+              </div>
+
+              <!-- 電腦全系統聲音 (WASAPI Loopback) -->
+              <div class="audio-subcard card-sys-audio">
+                <div class="subcard-header">
+                  <div class="subcard-title-group">
+                    <span class="channel-icon">💻</span>
+                    <span class="channel-name" title="WASAPI Loopback：全系統喇叭/耳機輸出（包含影片、音樂、遊戲音效、通話與鋼琴）">電腦全系統聲音</span>
+                  </div>
+                  <span class="subcard-badge" id="valSysAudioTag">安靜無聲</span>
+                </div>
+                <div class="subcard-body">
+                  <div class="audio-detail-text" id="valSysAudioDetail">電腦目前無音訊輸出（全系統聲音安靜）。</div>
+                  <div class="meter-bar-row">
+                    <span class="meter-bar-label font-mono" title="電腦全系統即時音量">LEVEL</span>
+                    <div class="meter-track">
+                      <div class="meter-fill fill-cyan" id="meterSysAudio" style="width: 0%;"></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 現實環境聲音 (Microphone) -->
+              <div class="audio-subcard card-real-audio">
+                <div class="subcard-header">
+                  <div class="subcard-title-group">
+                    <span class="channel-icon">🎙️</span>
+                    <span class="channel-name">現實聲音</span>
+                  </div>
+                  <span class="subcard-badge badge-real" id="valRealAudioTag">靈敏傾聽中</span>
+                </div>
+                <div class="subcard-body">
+                  <div class="audio-detail-text" id="valRealAudioDetail">現實環境安靜，等待老爸說話中...</div>
+                  <div class="meter-bar-row">
+                    <span class="meter-bar-label font-mono">MIC</span>
+                    <div class="meter-track">
+                      <div class="meter-fill fill-pink" id="meterRealAudio" style="width: 0%;"></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 視覺感知卡片 (最後一眼畫面即時更新預覽相框) -->
+        <div class="glass-panel vision-panel">
+          <div class="panel-head">
+            <div class="head-title">
+              <span class="panel-pill font-mono">VISION</span>
+              <h3>視覺感知</h3>
+            </div>
+            <span class="badge-scene font-mono" id="visionScene">螢幕動態</span>
+          </div>
+
+          <div class="vision-body">
+            <!-- 最後一眼畫面即時預覽相框 (Pure Black Frosted Frame) -->
+            <div class="vision-preview-box" id="visionPreviewBox" title="點擊立即手動刷新截圖">
+              <img 
+                id="visionImgPreview" 
+                class="vision-preview-img" 
+                src="/api/last_vision_image" 
+                alt=""
+              />
+              <div class="vision-fallback" id="visionImgFallback">
+                <span class="fallback-tag font-mono">VISION FEED</span>
+                <span class="fallback-text">等待視覺感知畫面同步中...</span>
+              </div>
+              <div class="vision-preview-overlay">
+                <span class="overlay-badge font-mono">🔍 點擊放大檢視</span>
+                <span class="overlay-time font-mono" id="visionImgTimestamp">即時</span>
+              </div>
+            </div>
+
+            <div class="vision-meta-row">
+              <div class="meta-item">
+                <span class="meta-k">畫面變化：</span>
+                <span class="meta-v font-mono" id="visionChange">high</span>
+              </div>
+              <div class="meta-item">
+                <span class="meta-k">最後刷新：</span>
+                <span class="meta-v font-mono" id="visionUpdateTimer">剛剛</span>
+              </div>
+            </div>
+
+            <div class="vision-stream-header font-mono">
+              <span class="stream-title">📜 視覺時序歷史串流 (可上下自由滾動)</span>
+              <span class="stream-counter" id="visionHistoryCount">0 筆紀錄</span>
+            </div>
+            <div class="frosted-desc-box vision-history-container" id="visionDescription" role="region" aria-label="視覺感知歷史串流">
+              <div class="vision-history-item current-focus">
+                <div class="item-meta">
+                  <span class="item-time font-mono">即時</span>
+                  <span class="item-badge font-mono">待命注視</span>
+                </div>
+                <div class="item-content">7L 正透過眼角餘光持續注視老爸的操作畫面...</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================== 分頁 2: 系統監控 (Monitor) ==================== -->
+    <section class="tab-pane" id="pane-monitor">
+      <div class="monitor-glass-grid">
+        <!-- TikTok 直播雙帳號卡片 -->
+        <div class="glass-panel">
+          <div class="panel-head">
+            <div class="head-title">
+              <span class="panel-pill font-mono">TIKTOK</span>
+              <h3>TikTok 直播雙帳號秒連巡檢</h3>
+            </div>
+            <span class="status-tag tag-offline" id="monTkBadge">離線巡檢中</span>
+          </div>
+          <div class="panel-metrics">
+            <div class="accounts-row">
+              <span class="glass-tag">@e5alr9qub2</span>
+              <span class="glass-tag">@e_7l_9</span>
+              <span class="tip-text">雙帳號平行巡檢，哪個開播就秒連哪個</span>
+            </div>
+            <div class="metric-grid-2col">
+              <div class="sub-metric-box">
+                <span class="sub-key">即時在線觀眾</span>
+                <span class="sub-val font-mono font-lg" id="monViewerCount">0</span>
+              </div>
+              <div class="sub-metric-box">
+                <span class="sub-key">累計愛心按讚</span>
+                <span class="sub-val font-mono font-lg text-pink" id="monLikeCount">0</span>
+              </div>
+            </div>
+            <div class="frosted-desc-box font-sm" id="monTkTelemetry">
+              [TikTok 情報]：目前離線未開播
+            </div>
+          </div>
+        </div>
+
+        <!-- 麥克風音量電平跳動 -->
+        <div class="glass-panel">
+          <div class="panel-head">
+            <div class="head-title">
+              <span class="panel-pill font-mono">AUDIO</span>
+              <h3>音訊輸入動態 (VU Meter)</h3>
+            </div>
+            <button class="glass-btn-toggle" id="btnToggleMic">收音中</button>
+          </div>
+          <div class="panel-metrics">
+            <div class="vu-track">
+              <div class="vu-fill" id="vuMeterInner" style="width: 20%;"></div>
+            </div>
+            <div class="metric-grid-2col">
+              <div class="sub-metric-box">
+                <span class="sub-key">麥克風狀態</span>
+                <span class="sub-val font-mono" id="monMicStatus">開啟收音中</span>
+              </div>
+              <div class="sub-metric-box">
+                <span class="sub-key">掌管調度模型</span>
+                <span class="sub-val text-cyan font-mono" id="monModelName">Gemini 3.8 Flash</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Live2D 表情控制盤 -->
+        <div class="glass-panel">
+          <div class="panel-head">
+            <div class="head-title">
+              <span class="panel-pill font-mono">LIVE2D</span>
+              <h3>Live2D 表情切換</h3>
+            </div>
+            <span class="tip-text font-mono" id="monVtsExpression">目前：自然</span>
+          </div>
+          <div class="expression-grid">
+            <button class="expr-chip" data-expr="happy">微笑</button>
+            <button class="expr-chip" data-expr="shy">害羞</button>
+            <button class="expr-chip" data-expr="shock">震驚</button>
+            <button class="expr-chip" data-expr="heart">喜愛</button>
+            <button class="expr-chip" data-expr="wink">眨眼</button>
+            <button class="expr-chip" data-expr="frown">委屈</button>
+            <button class="expr-chip" data-expr="star">專注</button>
+            <button class="expr-chip expr-reset-all" data-expr="_RESET_">重置預設</button>
+          </div>
+        </div>
+
+        <!-- 7L 大腦思維黑板 -->
+        <div class="glass-panel">
+          <div class="panel-head">
+            <div class="head-title">
+              <span class="panel-pill font-mono">MIND</span>
+              <h3>心流思維看板</h3>
+            </div>
+          </div>
+          <div class="frosted-desc-box mind-box" id="monMindBoard">
+            7L 正在靜候老爸發言或直播間互動...
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================== 分頁 3: 運行日誌 (Logs) ==================== -->
+    <section class="tab-pane" id="pane-logs">
+      <div class="glass-panel terminal-panel">
+        <div class="panel-head">
+          <div class="head-title">
+            <span class="panel-pill font-mono">LOGS</span>
+            <h3>系統終端即時日誌</h3>
+          </div>
+          <button class="glass-mini-btn" id="btnClearLogs">清空畫面</button>
+        </div>
+        <div class="frosted-terminal" id="terminalLogs">
+          <div class="term-line line-info">[系統] 7L 智慧一體化核心已成功啟動</div>
+          <div class="term-line line-success">[TikTok] 雙帳號巡檢已就緒 (@e5alr9qub2 / @e_7l_9)</div>
+          <div class="term-line line-info">[視覺] 眼角餘光即時感知守護中</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================== 分頁 4: 提示詞庫 (Prompt Hub & Cloud Knowledge) ==================== -->
+    <section class="tab-pane" id="pane-prompts">
+      <div class="prompts-container">
+        <!-- 頂部同步狀態與操作工具列 -->
+        <div class="glass-panel prompts-header-card">
+          <div class="prompts-header-left">
+            <div class="prompts-title-group">
+              <span class="panel-pill font-mono">PROMPTS</span>
+              <h2>7L 雲端提示詞與大腦認知庫</h2>
+            </div>
+            <p class="prompts-subtitle">與 Firestore 雲端大腦即時雙向同步・支援老爸自訂 7L 核心世界觀、說話風格、行為心智原則、網路流行梗與神回覆示範</p>
+          </div>
+          <div class="prompts-header-actions">
+            <div class="sync-status-box">
+              <span class="sync-indicator-dot" id="promptSyncDot"></span>
+              <span class="sync-status-text font-mono" id="promptSyncStatus">雲端已連線</span>
+              <span class="sync-time font-mono" id="promptSyncTime">--:--:--</span>
+            </div>
+            <button class="glass-btn btn-secondary" id="btnReloadPrompts" title="從雲端 Firestore 重新讀取最新提示詞">
+              <span>🔄 重新載入</span>
+            </button>
+            <button class="glass-btn btn-danger" id="btnResetPrompts" title="恢復為系統預設的出廠設定">
+              <span>↺ 恢復預設</span>
+            </button>
+            <button class="glass-btn btn-primary-pink" id="btnSavePrompts" title="立即同步儲存至 Firestore 雲端大腦與本地">
+              <span class="save-icon">💾</span>
+              <span>儲存並同步至雲端</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- 提示詞編輯雙欄格網 -->
+        <div class="prompts-grid">
+          <!-- 區塊 1: 核心人格與對話風格 -->
+          <div class="glass-panel prompt-section-card">
+            <div class="panel-head">
+              <div class="head-title">
+                <span class="panel-pill font-mono">PERSONA</span>
+                <h3>核心世界觀與人設</h3>
+              </div>
+              <span class="tip-text">老爸視角專屬</span>
+            </div>
+            
+            <div class="prompt-field-group">
+              <label class="prompt-label" for="promptPersonaCore">
+                <span class="label-title">核心身份認知 (persona_core)</span>
+                <span class="label-desc">定義 7L 對自我定位、老爸的身份認同與羈絆關係</span>
+              </label>
+              <textarea class="glass-textarea" id="promptPersonaCore" rows="3" placeholder="例如：妳是 7L，老爸最重要的AI助手兼幽默搭檔..."></textarea>
+            </div>
+
+            <div class="prompt-field-group">
+              <label class="prompt-label" for="promptConversationStyle">
+                <span class="label-title">說話風格與語調 (conversation_style)</span>
+                <span class="label-desc">決定日常回話個性（如毒舌吐槽、神級接梗、絕不說教、1~2句短句俐落）</span>
+              </label>
+              <textarea class="glass-textarea" id="promptConversationStyle" rows="3" placeholder="例如：極致機智、毒舌吐槽、神級接梗、絕不說教！"></textarea>
+            </div>
+
+            <div class="prompt-field-group">
+              <label class="prompt-label" for="promptStreamerBio">
+                <span class="label-title">TikTok 直播間世界觀 (streamer_bio)</span>
+                <span class="label-desc">在直播開台時切換的角色設定、對待觀眾的稱謂與直播節奏</span>
+              </label>
+              <textarea class="glass-textarea" id="promptStreamerBio" rows="3" placeholder="例如：妳是 7L，正在 TikTok 開台直播..."></textarea>
+            </div>
+
+            <div class="prompt-field-group">
+              <label class="prompt-label" for="promptProactiveGuide">
+                <span class="label-title">餘光觀察與主動發話指引 (proactive_guide)</span>
+                <span class="label-desc">當看著電腦畫面時，何時隨性吐槽、何時保持 [SILENCE] 安靜陪伴</span>
+              </label>
+              <textarea class="glass-textarea" id="promptProactiveGuide" rows="3" placeholder="例如：看著螢幕畫面，想吐槽、想聊或有什麼感想就直接隨性說..."></textarea>
+            </div>
+          </div>
+
+          <!-- 區塊 2: 7L 自主心智原則與禁忌客服腔 -->
+          <div class="glass-panel prompt-section-card">
+            <div class="panel-head">
+              <div class="head-title">
+                <span class="panel-pill font-mono">RULES</span>
+                <h3>心智原則與禁言黑名單</h3>
+              </div>
+              <span class="tip-text">行為規範</span>
+            </div>
+
+            <div class="prompt-field-group">
+              <label class="prompt-label" for="promptCustomRules">
+                <span class="label-title">7L 自主心智原則 (custom_rules)</span>
+                <span class="label-desc">每行一條原則，約束思考深度、短句發言與鋼琴演奏邊界</span>
+              </label>
+              <textarea class="glass-textarea font-mono" id="promptCustomRules" rows="6" placeholder="每行一條行為原則..."></textarea>
+            </div>
+
+            <div class="prompt-field-group">
+              <label class="prompt-label">
+                <span class="label-title">絕對禁止的死板客服腔 (banned_phrases)</span>
+                <span class="label-desc">7L 開口發言時 100% 嚴禁出現的機械式用語與廢話</span>
+              </label>
+              <div class="tags-editor-box" id="bannedPhrasesContainer">
+                <div class="tags-list" id="bannedPhrasesList"></div>
+                <div class="tag-input-row">
+                  <input type="text" class="glass-input-sm" id="inputNewBanned" placeholder="輸入要禁用的詞彙，按 Enter 新增..." />
+                  <button type="button" class="glass-mini-btn btn-add" id="btnAddBanned">+ 新增</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 區塊 3: 網路流行梗庫與事實記憶 -->
+          <div class="glass-panel prompt-section-card">
+            <div class="panel-head">
+              <div class="head-title">
+                <span class="panel-pill font-mono">KNOWLEDGE</span>
+                <h3>流行梗庫與事實記憶</h3>
+              </div>
+              <span class="tip-text">大腦演進庫</span>
+            </div>
+
+            <div class="prompt-field-group">
+              <label class="prompt-label">
+                <span class="label-title">當前掌握的流行語與網路梗 (memes_and_slang)</span>
+                <span class="label-desc">秒懂老爸與觀眾的暗梗與潛台詞</span>
+              </label>
+              <div class="tags-editor-box" id="memesContainer">
+                <div class="tags-list" id="memesList"></div>
+                <div class="tag-input-row">
+                  <input type="text" class="glass-input-sm" id="inputNewMeme" placeholder="輸入新梗（如：遙遙領先、尊嘟假嘟），按 Enter 新增..." />
+                  <button type="button" class="glass-mini-btn btn-add" id="btnAddMeme">+ 新增</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="prompt-field-group">
+              <label class="prompt-label" for="promptLearnedFacts">
+                <span class="label-title">已學會的事實與深層認知 (learned_facts)</span>
+                <span class="label-desc">每行一條紀錄，保存老爸喜好、遊戲日常、工作習慣與重大事件</span>
+              </label>
+              <textarea class="glass-textarea" id="promptLearnedFacts" rows="8" placeholder="每行一條記憶事實..."></textarea>
+            </div>
+          </div>
+
+          <!-- 區塊 4: 神回覆思維示範庫 (Few-Shot Examples) -->
+          <div class="glass-panel prompt-section-card">
+            <div class="panel-head">
+              <div class="head-title">
+                <span class="panel-pill font-mono">FEW-SHOT</span>
+                <h3>神回覆思維示範庫</h3>
+              </div>
+              <button type="button" class="glass-mini-btn btn-add" id="btnAddFewShot">+ 新增示範</button>
+            </div>
+            <div class="few-shot-list" id="fewShotList">
+              <!-- 動態渲染示範卡片 -->
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== 分頁 5: 工具調用工作台 (Tool Calling Hub) ===================== -->
+    <section class="tab-pane" id="pane-tools">
+      <div class="tools-container">
+        <!-- 頂部資訊與控制欄 -->
+        <div class="tools-topbar">
+          <div class="topbar-info">
+            <h2 class="pane-title">工具調用中樞 <span class="badge-tag font-mono" id="toolsActiveCount">23 個工具就緒</span></h2>
+            <p class="pane-desc">監控 7L 大腦自主函數調用 (Function Calling) 歷史紀錄，老爸亦可在此手動調用任何底層神經工具與鋼琴指令。</p>
+          </div>
+          <div class="tools-stats-pills">
+            <div class="stat-capsule">
+              <span class="capsule-label">總調用次數</span>
+              <strong class="capsule-val font-mono" id="toolsTotalCalls">0</strong>
+            </div>
+            <div class="stat-capsule">
+              <span class="capsule-label">老爸手動</span>
+              <strong class="capsule-val text-cyan font-mono" id="toolsManualCalls">0</strong>
+            </div>
+            <div class="stat-capsule">
+              <span class="capsule-label">7L 自主</span>
+              <strong class="capsule-val text-pink font-mono" id="toolsAutonomousCalls">0</strong>
+            </div>
+          </div>
+        </div>
+
+        <!-- 雙欄分流網格佈局 -->
+        <div class="tools-grid-layout">
+          <!-- 左欄：老爸手動調用工作台 (Manual Tool Playground) -->
+          <div class="glass-panel tool-playground-panel">
+            <div class="panel-head">
+              <div class="head-title">
+                <span class="panel-pill font-mono">PLAYGROUND</span>
+                <h3>老爸手動調用工作台</h3>
+              </div>
+              <span class="panel-sub font-mono">MANUAL DISPATCH</span>
+            </div>
+
+            <!-- 分類切換膠囊列 -->
+            <div class="tool-category-chips" id="toolCategoryChips">
+              <button type="button" class="category-chip active" data-category="all">全部工具</button>
+              <button type="button" class="category-chip" data-category="piano">🎹 鋼琴演奏</button>
+              <button type="button" class="category-chip" data-category="live2d">🎭 Live2D 空間</button>
+              <button type="button" class="category-chip" data-category="system">⚙️ 系統與語音</button>
+              <button type="button" class="category-chip" data-category="mind">🧠 記憶大腦</button>
+              <button type="button" class="category-chip" data-category="creative">🎨 多模態創作</button>
+            </div>
+
+            <!-- 工具選擇下拉/清單 -->
+            <div class="tool-selector-group">
+              <label class="form-label" for="toolSelect">選擇欲調用的工具</label>
+              <select class="glass-select font-mono" id="toolSelect">
+                <!-- 動態注入可調用工具 -->
+              </select>
+            </div>
+
+            <!-- 當前選中工具簡介卡 -->
+            <div class="tool-meta-card" id="toolMetaCard">
+              <div class="tool-meta-header">
+                <span class="tool-name-tag font-mono" id="toolSelectedName">pe.play_virtual_piano</span>
+                <span class="tool-cat-tag" id="toolSelectedCat">鋼琴演奏</span>
+              </div>
+              <p class="tool-desc-text" id="toolSelectedDesc">讓 7L 坐到 88 鍵平台鋼琴前演奏指定曲目，支援本地 MIDI 與 YouTube 即時扒譜開彈。</p>
+            </div>
+
+            <!-- 動態參數配置表單 -->
+            <form id="toolParamForm" class="tool-param-form">
+              <div class="form-subhead">
+                <span>參數配置 (Arguments)</span>
+                <span class="form-subhead-hint">填寫後點擊下方執行</span>
+              </div>
+              <div class="dynamic-params-container" id="toolParamsContainer">
+                <!-- 根據選中工具動態渲染輸入欄位 -->
+              </div>
+
+              <!-- 執行動作按鈕與防連點保護 -->
+              <div class="tool-action-row">
+                <button type="button" class="glass-btn btn-secondary" id="btnResetToolParams">重置參數</button>
+                <button type="submit" class="glass-btn btn-execute-tool" id="btnExecuteTool">
+                  <span class="btn-sparkle">⚡</span>
+                  <span>立即執行調用</span>
+                </button>
+              </div>
+            </form>
+
+            <!-- 執行反饋結果卡片 -->
+            <div class="tool-result-box" id="toolResultBox" style="display: none;">
+              <div class="result-header">
+                <span class="result-title font-mono">執行結果 (EXECUTION RESULT)</span>
+                <div class="result-meta">
+                  <span class="badge-status status-success" id="toolResultStatus">SUCCESS</span>
+                  <span class="result-duration font-mono" id="toolResultDuration">0ms</span>
+                </div>
+              </div>
+              <pre class="result-content font-mono" id="toolResultContent"></pre>
+            </div>
+          </div>
+
+          <!-- 右欄：工具調用歷史紀錄串流 (Tool Execution Logs) -->
+          <div class="glass-panel tool-history-panel">
+            <div class="panel-head">
+              <div class="head-title">
+                <span class="panel-pill font-mono">STREAM</span>
+                <h3>調用工具即時紀錄</h3>
+              </div>
+              <div class="panel-actions">
+                <button type="button" class="glass-mini-btn" id="btnClearToolHistory" title="清空所有工具調用紀錄">清空紀錄</button>
+              </div>
+            </div>
+
+            <!-- 紀錄清單篩選列 -->
+            <div class="history-filter-bar">
+              <input type="text" class="glass-input search-input" id="toolHistorySearch" placeholder="搜尋工具名稱、參數或結果..." />
+              <div class="caller-filter-chips">
+                <button type="button" class="filter-chip active" data-caller="all">全部來源</button>
+                <button type="button" class="filter-chip" data-caller="dad">老爸手動</button>
+                <button type="button" class="filter-chip" data-caller="7l">7L 自主</button>
+              </div>
+            </div>
+
+            <!-- 紀錄時序串流列表 -->
+            <div class="tool-history-list" id="toolHistoryList">
+              <div class="tool-empty-hint">尚無工具調用紀錄，可從左側工作台手動執行或等待 7L 大腦自主調用...</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== 分頁 6: 記憶管理中樞 (Memory Hub) ===================== -->
+    <section class="tab-pane" id="pane-memory">
+      <div class="memory-manager-container">
+        <!-- 頂部資訊與控制工具列 -->
+        <div class="memory-header-card glass-card">
+          <div class="memory-title-wrap">
+            <h2 class="pane-title">7L 全景記憶時序庫 <span class="badge-tag font-mono" id="memTotalBadge">載入中...</span></h2>
+            <p class="pane-desc">檢視、搜尋、修改或刪除 7L 腦中的即時記憶與思緒，可即時校準大腦認知與防跳針系統。</p>
+          </div>
+          <div class="memory-toolbar-actions">
+            <button type="button" class="glass-btn btn-primary" id="btnOpenAddMemory">
+              <span>+ 新增記憶</span>
+            </button>
+            <button type="button" class="glass-btn btn-secondary" id="btnCleanDuplicates" title="智慧清理重複思緒與跳針記憶">
+              <span>🧹 一鍵去重</span>
+            </button>
+            <button type="button" class="glass-btn btn-secondary" id="btnReloadMemoryList" title="重新載入最新記憶庫">
+              <span>🔄 重新整理</span>
+            </button>
+            <button type="button" class="glass-btn btn-danger" id="btnClearAllMemories" title="徹底清空 7L 的所有雲端與本地記憶 (不可逆)">
+              <span>🗑️ 清除記憶</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- 🧠 底層對話記憶池容量配置卡片 (可編輯 500 句或設為無上限) -->
+        <div class="memory-capacity-card glass-card">
+          <div class="capacity-info-col">
+            <div class="capacity-headline">
+              <span class="capacity-icon">💾</span>
+              <span class="capacity-title">底層真實對話記憶池上限（歷史深度容量）：</span>
+              <span class="capacity-status-badge font-mono" id="memCapacityCurrent">讀取中...</span>
+            </div>
+            <p class="capacity-desc">
+              自由設定 7L 腦海中保留的底層真實對話句數。支援自訂數量（如 500、1000、3000）或輸入 <code>0</code> 設為「<strong>⚡ 無上限</strong>」！修訂後即時生效並永久保存。
+            </p>
+          </div>
+          <div class="capacity-ctrl-col">
+            <div class="capacity-input-wrap">
+              <input type="number" class="glass-input capacity-input font-mono" id="inputMemCapacity" min="0" max="100000" step="50" placeholder="0 = 無上限" />
+              <span class="capacity-unit-tag">句</span>
+            </div>
+            <div class="capacity-presets">
+              <button type="button" class="preset-chip" data-val="500">500 句</button>
+              <button type="button" class="preset-chip" data-val="1000">1000 句</button>
+              <button type="button" class="preset-chip" data-val="3000">3000 句</button>
+              <button type="button" class="preset-chip preset-unlimited" data-val="0">⚡ 無上限</button>
+            </div>
+            <button type="button" class="glass-btn btn-primary" id="btnSaveMemCapacity">
+              <span>💾 儲存上限</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- 搜尋與身分過濾列 -->
+        <div class="memory-filter-bar glass-card">
+          <div class="memory-search-box">
+            <input type="text" class="glass-input search-input" id="memorySearchInput" placeholder="搜尋記憶內容、關鍵字、歌名或對象..." />
+            <button type="button" class="glass-mini-btn" id="btnClearMemorySearch" style="display:none;">✕</button>
+          </div>
+          <div class="memory-role-chips">
+            <button type="button" class="filter-chip active" data-role="all">全部記憶 (<span id="memCountAll">0</span>)</button>
+            <button type="button" class="filter-chip" data-role="thought">💭 內心流動 (<span id="memCountThought">0</span>)</button>
+            <button type="button" class="filter-chip" data-role="ai">🤖 7L 發言 (<span id="memCountAi">0</span>)</button>
+            <button type="button" class="filter-chip" data-role="user">👨‍💻 老爸對話 (<span id="memCountUser">0</span>)</button>
+            <button type="button" class="filter-chip" data-role="tiktok">🔴 直播彈幕 (<span id="memCountTiktok">0</span>)</button>
+          </div>
+        </div>
+
+        <!-- 記憶卡片時序清單 -->
+        <div class="memory-stream-card glass-card">
+          <div class="memory-list-header">
+            <span class="memory-list-meta font-mono" id="memoryListMeta">顯示 0 / 0 筆記憶</span>
+            <span class="memory-hint">點擊「編輯」可直接修訂大腦記憶內容，點擊「刪除」可永久移除</span>
+          </div>
+          <div class="memory-card-list" id="memoryCardList">
+            <div class="memory-empty-hint">載入記憶中樞中...</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================== 分頁 7: 系統開關 (System Switches & Autonomy Hub) ==================== -->
+    <section class="tab-pane" id="pane-switches">
+      <div class="switches-hub-container">
+        <!-- 頂部概覽卡片 -->
+        <div class="switches-hub-header glass-card">
+          <div class="switches-header-main">
+            <div class="switches-title-box">
+              <span class="switches-icon">🎛️</span>
+              <div>
+                <h2 class="switches-title">7L 系統開關與自主行為中樞</h2>
+                <p class="switches-subtitle">即時控制 7L 的背景協程、視覺感知、音樂連播與自主搭話行為，點擊 Toggle 滑動開關立即生效</p>
+              </div>
+            </div>
+            <div class="switches-stats-box">
+              <div class="switches-stat-pill">
+                <span class="stat-num text-cyan font-mono" id="switchesActiveCount">0</span>
+                <span class="stat-lbl">/ 9 項開關已啟用</span>
+              </div>
+              <button class="glass-btn btn-sm" id="btnRefreshSwitches" title="從後端重新讀取所有開關最新狀態">
+                <span>🔄 重新整理</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 開關清單網格容器 (依照類別分組動態渲染) -->
+        <div class="switches-category-grid" id="switchesGrid">
+          <div class="stream-empty-hint">載入 7L 系統開關配置中...</div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- 底部微型磨砂玻璃狀態列 (無 Emoji) -->
+  <footer class="glass-footer">
+    <div class="footer-left">
+      <span class="indicator-beacon"></span>
+      <span class="footer-token font-mono" id="footMode">idle</span>
+      <span class="footer-sep">/</span>
+      <span class="footer-token">生命刻度: <strong class="text-pink font-mono" id="footUptime">0 tick</strong></span>
+      <span class="footer-sep">/</span>
+      <span class="footer-token">API 能量: <strong class="text-cyan font-mono" id="footEnergy">100%</strong></span>
+      <span class="footer-sep">/</span>
+      <span class="footer-token">調用: <strong class="font-mono" id="footCalls">0 次</strong></span>
+      <span class="footer-sep">|</span>
+      <span class="footer-token">TikTok: <span id="footTiktok">雙帳號巡檢中</span></span>
+      <span class="footer-sep">|</span>
+      <span class="footer-token">視覺: <span id="footVision">已連線</span></span>
+    </div>
+    <div class="footer-right">
+      <span class="font-mono">7L SYSTEM・BLACK WHITE PINK GLASS</span>
+    </div>
+  </footer>
+
+  <!-- 視覺畫面放大檢視燈箱 (Vision Modal Lightbox) -->
+  <div class="vision-modal-overlay" id="visionModal">
+    <div class="vision-modal-content">
+      <div class="vision-modal-head">
+        <span class="font-mono">7L 視覺感知全螢幕大圖檢視 (100% 超高清原圖 · 點擊任意處或按 ESC 關閉)</span>
+        <div class="vision-modal-actions">
+          <a href="/api/last_vision_image?hd=1" target="_blank" class="vision-modal-link" id="btnVisionOpenRaw" title="在新分頁開啟 100% 原始解析度高清大圖">另開超高清原圖 ↗</a>
+          <button class="vision-modal-close" id="btnVisionModalClose">✕ 關閉</button>
+        </div>
+      </div>
+      <img id="visionModalImg" class="vision-modal-img" src="/api/last_vision_image?hd=1" alt="視覺超高清原圖" />
+    </div>
+  </div>
+
+  <!-- 記憶編輯燈箱 (Edit Memory Modal) -->
+  <div class="glass-modal-overlay" id="editMemoryModal" style="display:none;">
+    <div class="glass-modal-card">
+      <div class="glass-modal-header">
+        <div class="modal-title-box">
+          <span class="modal-icon">✏️</span>
+          <span class="modal-title">修訂 7L 記憶內容</span>
+        </div>
+        <button type="button" class="glass-mini-btn btn-close-modal" id="btnCloseEditModal">✕</button>
+      </div>
+      <div class="glass-modal-body">
+        <div class="memory-meta-badges">
+          <span class="meta-tag font-mono" id="editMemIndexBadge">#0</span>
+          <span class="meta-tag" id="editMemRoleBadge">內心流動</span>
+          <span class="meta-tag font-mono" id="editMemTimeBadge">12:00:00</span>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="editMemSpeaker">說話者 / 身分標籤</label>
+          <input type="text" class="glass-input" id="editMemSpeaker" />
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="editMemContent">記憶內容 (即時注入 7L 記憶庫)</label>
+          <textarea class="glass-textarea" id="editMemContent" rows="5" placeholder="輸入修訂後的記憶內容..."></textarea>
+        </div>
+      </div>
+      <div class="glass-modal-footer">
+        <button type="button" class="glass-btn btn-secondary" id="btnCancelEditModal">取消</button>
+        <button type="button" class="glass-btn btn-primary" id="btnSaveEditMemory">保存修改 (立即生效)</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 新增記憶燈箱 (Add Memory Modal) -->
+  <div class="glass-modal-overlay" id="addMemoryModal" style="display:none;">
+    <div class="glass-modal-card">
+      <div class="glass-modal-header">
+        <div class="modal-title-box">
+          <span class="modal-icon">➕</span>
+          <span class="modal-title">手動注入新記憶至 7L 大腦</span>
+        </div>
+        <button type="button" class="glass-mini-btn btn-close-modal" id="btnCloseAddModal">✕</button>
+      </div>
+      <div class="glass-modal-body">
+        <div class="form-group">
+          <label class="form-label">記憶類型</label>
+          <select class="glass-select" id="addMemRole">
+            <option value="thought">💭 7L 內心流動 (自言自語 / 思緒)</option>
+            <option value="user">👨‍💻 老爸對話 (使用者輸入)</option>
+            <option value="assistant">🤖 7L 發言回應</option>
+            <option value="tiktok">🔴 直播觀眾彈幕</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="addMemSpeaker">說話者 / 來源名稱</label>
+          <input type="text" class="glass-input" id="addMemSpeaker" value="老爸" />
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="addMemContent">記憶文字內容</label>
+          <textarea class="glass-textarea" id="addMemContent" rows="4" placeholder="請輸入想要讓 7L 記住的事實、對話或動態..."></textarea>
+        </div>
+      </div>
+      <div class="glass-modal-footer">
+        <button type="button" class="glass-btn btn-secondary" id="btnCancelAddModal">取消</button>
+        <button type="button" class="glass-btn btn-primary" id="btnSubmitAddMemory">確認寫入記憶中樞</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 全域透明玻璃輕量通知 Toast -->
+  <div class="glass-toast font-mono" id="glassToast"></div>
+
+  <script src="/static/dashboard.js?v=20260920_tts_hud_top_right_v2"></script>
+</body>
+</html>

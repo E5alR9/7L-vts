@@ -1,0 +1,18 @@
+{
+  "AUDIO_MODES": {
+    "HYPERV_ENHANCED_SESSION": true,
+    "DISCORD_VOICE_CHANNEL": true,
+    "COMMENT": "可個別開關：true 為啟用，false 為停用"
+  },
+  "LIVE2D_DISPLAY_MODES": {
+    "VM_CORNER_COMPANION": true,
+    "NDI_HOST_STREAM": true,
+    "COMMENT": "可個別開關：VM_CORNER_COMPANION 為虛擬機角落陪伴，NDI_HOST_STREAM 為局域網投影回老爸主機"
+  },
+  "PREFERRED_MODELS": [
+    "gemini-3.7-flash",
+    "gemini-3.6-flash",
+    "gemini-3.1-pro-preview",
+    "gemini-3.5-flash"
+  ]
+}

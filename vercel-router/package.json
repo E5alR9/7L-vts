@@ -1,0 +1,12 @@
+{
+  "name": "groq-router-admin",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Groq multi-key router on Vercel Serverless: key rotation, cooldown, model ladder, user credits, admin panel",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@upstash/redis": "^1.39.0"
+  }
+}

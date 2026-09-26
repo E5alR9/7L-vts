@@ -1,0 +1,55 @@
+# 7L AI VTuber — 執行期依賴（本機版，不再從 GitHub 遠端安裝）
+# 安裝：python -m pip install -r requirements.txt
+# 顯卡版 PyTorch（CUDA 12.4）請另行安裝：
+#   python -m pip install torch --index-url https://download.pytorch.org/whl/cu124
+
+# ── 核心通訊 / 平台 ─────────────────────────────────────────────
+discord.py
+aiohttp
+httpx                      # ElevenLabs TTS / 各雲端 API 的 HTTP 用戶端
+websockets
+pyvts                      # VTube Studio API
+python-dotenv
+TikTokLive                 # TikTok 直播間彈幕/禮物監聽（其依賴會帶入 EulerApiSdk）
+
+# ── LLM / AI ───────────────────────────────────────────────────
+groq                       # 文字主力（第一梯隊）
+google-genai               # 視覺 + Live API 音訊
+duckduckgo_search
+tavily-python
+
+# ── 語音：TTS / STT / 音訊 ─────────────────────────────────────
+kokoro-onnx                # 本地小模型 TTS（備援引擎）
+misaki[zh]                 # kokoro-v1.1-zh 官方 G2P（注音+數字調 tokenization）
+num2words                  # misaki 英文段（中英混說）需要
+edge-tts                   # 雲端備援 TTS（台灣腔女聲 / 日文）
+espeakng-loader            # phonemizer 的 espeak-ng 資料（Windows 內建）
+phonemizer
+soundfile
+librosa
+pygame
+soundcard                  # WASAPI loopback（擷取系統音）
+SpeechRecognition
+PyAudio
+faster-whisper             # 本地 STT
+numpy
+
+# ── RAG / 向量檢索 ─────────────────────────────────────────────
+chromadb                   # 向量資料庫（本機持久化）
+fastembed                  # 本地嵌入模型（ONNX，離線）
+faiss-cpu                  # 向量相似度（RVC / 檢索共用）
+
+# ── 其他 ───────────────────────────────────────────────────────
+firebase-admin
+opencv-python
+Pillow
+pyautogui
+psutil
+transformers
+tzdata
+EulerApiSdk
+mido                       # 鋼琴模組（piano_engine 模組層無條件 import，缺了直接無法啟動）
+dxcam                      # 畫面截取（Gemini 視覺上下文）
+
+# ── 測試 ───────────────────────────────────────────────────────
+pytest                         # python -m pytest tests -q

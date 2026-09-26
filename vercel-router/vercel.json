@@ -1,0 +1,16 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "rewrites": [
+    { "source": "/", "destination": "/web/login.html" },
+    { "source": "/v1/chat/completions", "destination": "/api/chat" },
+    { "source": "/v1/models", "destination": "/api/models" },
+    { "source": "/admin", "destination": "/web/admin.html" },
+    { "source": "/admin/", "destination": "/web/admin.html" },
+    { "source": "/login", "destination": "/web/login.html" },
+    { "source": "/me", "destination": "/web/me.html" }
+  ],
+  "functions": {
+    "api/chat.js": { "maxDuration": 120 },
+    "api/admin.js": { "maxDuration": 30 }
+  }
+}

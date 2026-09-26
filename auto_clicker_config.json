@@ -1,0 +1,7 @@
+{
+    "hotkey": "mouse4",
+    "macro_script": "{lock}\n{CLICK_POS: 1244, 722, 50}\n{WAIT: 10}\n{TAB}\n{WAIT: 15}\n{TAB}\n{unlock}",
+    "interval_ms": 500,
+    "click_mode": "single",
+    "always_on_top": true
+}
