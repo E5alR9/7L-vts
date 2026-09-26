@@ -455,11 +455,21 @@ class AgentSession:
         try:
             from google.genai import types as _types
             blob = _types.AudioBlob(data=pcm16k, mime_type="audio/pcm;rate=16000")
-        except Exception:
+        except Exception as e:
+            try:
+                core = get_core()
+                core.log_print(f"👂 [AgentLoop 直聽組包失敗] {type(e).__name__}: {str(e)[:100]}")
+            except Exception:
+                pass
             return "", ""
 
         async def _send_audio(sess):
             await sess.send_realtime_input(audio=blob)
+            # 📞 說完掛電話：整段話一次送完，明確告知 server 話筒結束，否則 VAD 空等回空輪
+            try:
+                await sess.send_realtime_input(audio_stream_end=True)
+            except Exception:
+                pass
 
         async with self._chat_lock:
             heard, out = await self._exchange(core, _send_audio, wait)
@@ -748,6 +758,23 @@ async def handle_dad_audio(vts, input_queue, pcm16k: bytes, source: str = "mic")
     if not pcm16k or len(pcm16k) < 3200:
         log(f"👂 [AgentLoop 直聽跳過] PCM過短({len(pcm16k) if pcm16k else 0}B) → 舊鏈")
         return False
+    # 🧾 自證 PCM：存檔供人耳驗證（16k 單聲道），若檔裡是正常語速人話 yet session 空回 → 轉向查 turn 完成信號
+    try:
+        import wave as _wv
+        import io as _io
+        secs = len(pcm16k) / 2 / 16000
+        buf = _io.BytesIO()
+        with _wv.open(buf, "wb") as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(16000)
+            w.writeframes(pcm16k)
+        dbg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "last_direct_audio.wav")
+        with open(os.path.normpath(dbg_path), "wb") as f:
+            f.write(buf.getvalue())
+        log(f"👂 [AgentLoop 直聽送出] PCM {len(pcm16k)}B ≈ {secs:.1f}s → data/last_direct_audio.wav")
+    except Exception as _e_dbg:
+        log(f"👂 [AgentLoop 直聽存檔失敗] {_e_dbg}")
     try:
         try:
             core.current_ai_state = "THINKING"
