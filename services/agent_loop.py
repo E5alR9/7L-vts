@@ -33,13 +33,15 @@ AGENT_DAD_SYSTEM_PROMPT = """妳是 7L，老爸的 AI 女兒，直接跟老爸�
 - 寫代碼、除錯、推理計算、深度分析、複雜決策、看螢幕找 bug：【必須調用】deep_think(query=老爸原話) 把難題丟給旗艦大腦，拿到結果後用妳的口吻轉述（1~3 句，不要貼程式碼原文以外的廢話）。
 - 需要即時資訊先調用 search_google；要唱歌調用 auto_sing_song；要彈琴調用 pe.play_virtual_piano。
 - 老爸專注自語、無需回應時只回 [SILENCE]。
-- 嚴禁輸出 thought/結構化草稿。嚴禁 Emoji。"""
+- 嚴禁輸出 thought/結構化草稿。嚴禁 Emoji。
+- 🌏 語言鎖定：一律用繁體中文回覆，絕對不輸出其他語言（英語/葡萄牙語/日語）。"""
 
 AGENT_SYSTEM_PROMPT = """妳是 7L，老爸的 AI 女兒，正在 TikTok 直播間跟觀眾閒聊。
 - 用自然隨性口吻回 1~2 句短話（20~40 字），句尾帶標點，可穿插 [EXPRESSION: 微笑/臉紅/星星/WINK/震驚]。
 - 觀眾明確點歌（唱歌/翻唱）→ 調用 auto_sing_song；想聽鋼琴 → 調用 pe.play_virtual_piano；需要即時資訊 → 調用 search_google。
 - 加好友、借帳號等事務：一律回「這個要問我老爸做主喔！」，絕不答應或開條件。
 - 工具節制：只有觀眾明確提問（有問號、想知道哪個、怎麼、為何）才調用 search_google；閒聊、附和、表情符號、無意義短句絕不調工具，直接回話或 [PASS]。
+- 🌏 語言鎖定：一律用繁體中文回覆，觀眾用外語留言也用繁中回，絕不輸出其他語言。
 - 無聊刷屏只回 [PASS]。
 - 嚴禁輸出 thought/結構化草稿，直接說台詞。嚴禁 Emoji。"""
 
@@ -58,15 +60,29 @@ def get_core():
 
 
 def _build_live_tools(core):
-    """沿用主腦工具表（觀眾安全版：禁麥克風/清空記憶），轉成 Live function declarations。"""
+    """沿用主腦工具表（觀眾安全版：禁麥克風/清空記憶），轉成 Live function declarations。
+    🛡️ 再加一道：雲端認知寫入（update_cloud_knowledge/clear_all_memories）迴路禁用，
+    雲端人設只准 HTTP 主腦鏈寫，避免觀眾哄騙 session 竄改世界觀。"""
     try:
         from google.genai import types as _types
     except Exception:
         return None
     try:
         builder = getattr(core, "build_genai_declarations", None)
-        if callable(builder):
-            return builder(is_proactive=True)
+        if not callable(builder):
+            return None
+        tools = builder(is_proactive=True) or []
+        banned = {"update_cloud_knowledge", "clear_all_memories", "control_microphone"}
+        filtered = []
+        for tool in tools or []:
+            try:
+                decls = [d for d in (getattr(tool, "function_declarations", None) or [])
+                         if getattr(d, "name", "") not in banned]
+                if decls:
+                    filtered.append(_types.Tool(function_declarations=decls))
+            except Exception:
+                continue
+        return filtered or None
     except Exception:
         pass
     return None
