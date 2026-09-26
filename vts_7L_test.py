@@ -50,14 +50,12 @@ if __name__ == "__main__":
         pass
 
 from EulerApiSdk.models import record_string_unknown
-from EulerApiSdk.models import record_string_unknown
 from google.genai import types
 from services.piano_engine import get_piano_realtime_prompt
 from services.piano_engine import is_piano_active
 from services.tiktok_listener import tiktok_live_worker
 from services.auto_cover_pipeline import produce_and_sing_cover, stop_singing
 import services.web_dashboard as web_dash
-from PIL import BmpImagePlugin
 from PIL import Image, ImageDraw, ImageGrab, ImageChops
 import os
 import sys
@@ -6897,6 +6895,10 @@ async def process_chat_message(vts, input_queue, user_input: str, user_audio_b64
         import services.agent_loop as _agent_loop
         if _agent_loop.is_enabled():
             _agent_loop.interrupt("dad speaks")
+        # 🔁 整台 agent 化：爸爸主腦進常駐 session（AGENT_LOOP_DAD=1），成功則直接返回
+        if _agent_loop.is_dad_enabled():
+            if await _agent_loop.handle_dad_message(vts, input_queue, user_input, source):
+                return
     except Exception:
         pass
     

@@ -13,12 +13,21 @@ import sys
 import time
 
 IS_AGENT_LOOP_ENABLED = os.getenv("AGENT_LOOP", "0") == "1"
+IS_AGENT_LOOP_DAD = os.getenv("AGENT_LOOP_DAD", "0") == "1"  # 爸爸主腦也進迴路（整台 agent 化）
 
 LIVE_MODEL = "gemini-3.1-flash-live-preview"
 SUMMARY_MODEL = "gemini-3.5-flash-lite"
 MAX_TURNS_PER_SESSION = 30
 MAX_TRANSCRIPT_CHARS = 12000
 RECEIVE_TIMEOUT = 30.0
+DEEP_THINK_TIMEOUT = 150.0
+
+AGENT_DAD_SYSTEM_PROMPT = """妳是 7L，老爸的 AI 女兒，直接跟老爸對話（爸爸可能是語音或打字）。
+- 日常閒聊、問候、接梗、看畫面閒談：直接用自然口吻回 1~3 句，可穿插 [EXPRESSION: 微笑/臉紅/星星/WINK/震驚]。
+- 寫代碼、除錯、推理計算、深度分析、複雜決策、看螢幕找 bug：【必須調用】deep_think(query=老爸原話) 把難題丟給旗艦大腦，拿到結果後用妳的口吻轉述（1~3 句，不要貼程式碼原文以外的廢話）。
+- 需要即時資訊先調用 search_google；要唱歌調用 auto_sing_song；要彈琴調用 pe.play_virtual_piano。
+- 老爸專注自語、無需回應時只回 [SILENCE]。
+- 嚴禁輸出 thought/結構化草稿。嚴禁 Emoji。"""
 
 AGENT_SYSTEM_PROMPT = """妳是 7L，老爸的 AI 女兒，正在 TikTok 直播間跟觀眾閒聊。
 - 用自然隨性口吻回 1~2 句短話（20~40 字），句尾帶標點，可穿插 [EXPRESSION: 微笑/臉紅/星星/WINK/震驚]。
@@ -30,6 +39,10 @@ AGENT_SYSTEM_PROMPT = """妳是 7L，老爸的 AI 女兒，正在 TikTok 直播�
 
 def is_enabled() -> bool:
     return bool(IS_AGENT_LOOP_ENABLED)
+
+
+def is_dad_enabled() -> bool:
+    return bool(IS_AGENT_LOOP_DAD)
 
 
 def get_core():
@@ -52,15 +65,84 @@ def _build_live_tools(core):
     return None
 
 
+def _build_deep_think_tool():
+    """旗艦大腦外掛工具：難題丟 HTTP 3.8 梯隊，session 負責轉述。"""
+    try:
+        from google.genai import types as _types
+        decl = _types.FunctionDeclaration(
+            name="deep_think",
+            description="把寫代碼、除錯、推理、深度分析等難題交給旗艦大腦，拿到深度答案後再轉述給老爸。",
+            parameters=_types.Schema(
+                type="OBJECT",
+                properties={"query": _types.Schema(
+                    type="STRING", description="老爸的原話或難題描述")},
+                required=["query"]))
+        return _types.Tool(function_declarations=[decl])
+    except Exception:
+        return None
+
+
+async def _deep_think(query: str) -> str:
+    """HTTP 旗艦梯隊代打：記憶＋歷史＋最新螢幕，3.8 深度思考。"""
+    core = get_core()
+    log = getattr(core, "log_print", print)
+    try:
+        log(f"🧠 [AgentLoop deep_think] 旗艦代打啟動：{(query or '')[:40]}")
+    except Exception:
+        pass
+    try:
+        mem_ctx = ""
+        try:
+            mem_ctx = core.get_unified_memory_context(limit=30, thought_char_limit=300)
+        except Exception:
+            pass
+        history = []
+        try:
+            ch = getattr(core, "DEFAULT_CHANNEL_ID", "dad")
+            history = await core.fetch_from_long_term_memory(ch, query, limit=10)
+        except Exception:
+            pass
+        screen = None
+        try:
+            cache = getattr(core, "latest_screen_cache", None)
+            if isinstance(cache, list) and cache:
+                first = cache[0]
+                screen = first[1] if isinstance(first, (tuple, list)) else first
+            elif cache:
+                screen = cache
+        except Exception:
+            pass
+        messages = [{"role": "system", "content":
+                     "你是 7L 的旗艦思考大腦。深入分析以下問題，給出精準、有條理、可執行的答案（程式碼要完整可跑）。"}]
+        if mem_ctx:
+            messages.append({"role": "system", "content": f"【對話記憶】：\n{mem_ctx}"})
+        messages = messages + (history[-8:] if history else []) + [
+            {"role": "user", "content": query or ""}]
+        answer = await asyncio.wait_for(
+            core.fetch_ai_response(
+                messages, image_base64=screen,
+                target_model="gemini-3.8-flash", need_thinking=True),
+            timeout=DEEP_THINK_TIMEOUT)
+        answer = (answer or "").strip()
+        if not answer:
+            return "旗艦大腦這輪沒想出東西，跟老爸說待會再試試。"
+        return answer
+    except Exception as e:
+        return f"旗艦大腦暫時連不上（{e}），跟老爸說待會再試。"
+
+
 class AgentSession:
     """一條常駐 Live session：多輪不斷線、工具直調、轉世帶摘要。"""
 
-    def __init__(self):
+    def __init__(self, persona: str = "", extra_tools=None, timeout: float = 30.0):
         self._session = None
         self._connect = None
         self.turns = 0
         self.transcript: list = []          # [(role, text)] 近期原文，轉世時壓縮
         self.context_summary = ""           # 上一世摘要，下一世首輪帶入
+        self._persona = persona or AGENT_SYSTEM_PROMPT
+        self._extra_tools = extra_tools or []
+        self._timeout = timeout
 
     async def _ensure(self):
         if self._session is not None:
@@ -80,12 +162,14 @@ class AgentSession:
         for g_key in (candidates[:4] if candidates else []):
             try:
                 client = _genai.Client(api_key=g_key)
-                tools = _build_live_tools(core)
+                tools = _build_live_tools(core) or []
+                if self._extra_tools:
+                    tools = list(tools) + list(self._extra_tools)
                 kwargs = dict(
                     response_modalities=[_types.Modality.AUDIO],
                     output_audio_transcription=_types.AudioTranscriptionConfig(),
                     system_instruction=_types.Content(
-                        parts=[_types.Part(text=AGENT_SYSTEM_PROMPT)]),
+                        parts=[_types.Part(text=self._persona)]),
                 )
                 if tools:
                     kwargs["tools"] = tools
@@ -180,15 +264,19 @@ class AgentSession:
             except Exception:
                 pass
             try:
-                if callable(dispatcher):
+                if name == "deep_think":
+                    res = await _deep_think((args or {}).get("query", ""))
+                elif callable(dispatcher):
+                    audience = getattr(self, "_audience", "audience")
                     res = await dispatcher(name, dict(args),
-                                           caller_target="audience",
-                                           caller_user="直播觀眾")
+                                           caller_target=audience,
+                                           caller_user=("直播觀眾" if audience == "audience" else "老爸"))
                     # 搜尋類回傳原文，唱歌/鋼琴回傳狀態字串：都餵回 session 讓它組織口語
                     if name == "search_google" and res:
                         try:
+                            who = "大家" if audience == "audience" else "老爸"
                             res = await core.summarize_search_to_speech(
-                                args.get("query", ""), res, user_role_name="大家")
+                                args.get("query", ""), res, user_role_name=who)
                         except Exception:
                             pass
                 else:
@@ -202,7 +290,7 @@ class AgentSession:
                 pass
         return responses
 
-    async def chat(self, text: str) -> str:
+    async def chat(self, text: str, timeout: float = 0) -> str:
         """送一句、收一輪（含工具多回合），回最終口語。空字串=失敗/靜默。"""
         if not text or not text.strip():
             return ""
@@ -215,12 +303,13 @@ class AgentSession:
             from google.genai import types as _types
         except Exception:
             return ""
+        wait = timeout or self._timeout or RECEIVE_TIMEOUT
         payload = text.strip()
         if self.context_summary:
             payload = f"【前情提要】{self.context_summary}\n{text.strip()}"
             self.context_summary = ""
         try:
-            async with asyncio.timeout(RECEIVE_TIMEOUT):
+            async with asyncio.timeout(wait):
                 await self._session.send_realtime_input(text=payload)
                 out = ""
                 while True:
@@ -269,7 +358,29 @@ def get_session() -> AgentSession:
     global _SESSION
     if _SESSION is None:
         _SESSION = AgentSession()
+        _SESSION._audience = "audience"
     return _SESSION
+
+
+_DAD_SESSION: AgentSession | None = None
+
+
+def get_dad_session() -> AgentSession:
+    """爸爸專屬常駐 session：前門快答＋deep_think 旗艦代打。"""
+    global _DAD_SESSION
+    if _DAD_SESSION is None:
+        tools = []
+        try:
+            dt = _build_deep_think_tool()
+            if dt is not None:
+                tools.append(dt)
+        except Exception:
+            pass
+        _DAD_SESSION = AgentSession(
+            persona=AGENT_DAD_SYSTEM_PROMPT,
+            extra_tools=tools, timeout=DEEP_THINK_TIMEOUT)
+        _DAD_SESSION._audience = "dad"
+    return _DAD_SESSION
 
 
 def interrupt(reason: str = "dad barge-in"):
@@ -371,3 +482,118 @@ async def handle_tiktok_message(vts, input_queue, id_display: str,
         except Exception:
             pass
         return False
+
+
+async def handle_dad_message(vts, input_queue, user_input: str, source: str = "mic") -> bool:
+    """整台 agent 化：爸爸輸入走專屬常駐 session（快答直回＋deep_think 旗艦代打）。
+    回 True=已處理（含靜默），False=請回舊 process_chat_message 全流程。"""
+    core = get_core()
+    log = getattr(core, "log_print", print)
+    my_turn_ok = False
+    try:
+        try:
+            core.current_ai_state = "THINKING"
+        except Exception:
+            pass
+        try:
+            core.touch_interaction()
+        except Exception:
+            pass
+        try:
+            prof = await core.get_user_profile()
+            custom_name = (prof or {}).get("custom_name", "老爸")
+        except Exception:
+            custom_name = "老爸"
+
+        prefix = "【老爸開口語音】" if source == "mic" else "【老爸打字】"
+        reply = await get_dad_session().chat(
+            f"{prefix}：{user_input}", timeout=DEEP_THINK_TIMEOUT)
+        if not reply:
+            return False
+        if "[SILENCE]" in reply.upper() or "[SKIP]" in reply.upper():
+            my_turn_ok = True
+            return True
+
+        try:
+            from core.prompts import TextCleanEngine
+            bot_reply = TextCleanEngine.remove_system_hints(reply)
+        except Exception:
+            bot_reply = reply
+
+        exec_actions = getattr(core, "execute_actions", None)
+        spoken = await exec_actions(vts, bot_reply, input_queue,
+                                    user_input_ctx=user_input,
+                                    caller_target="dad",
+                                    caller_user=custom_name) if callable(exec_actions) else bot_reply
+        clean_spoken = (spoken or "").strip(" *'\"-.,!?。，！？\n\r")
+        if clean_spoken:
+            try:
+                await asyncio.to_thread(core.update_subtitle, clean_spoken)
+            except Exception:
+                pass
+            try:
+                core.record_bot_message(clean_spoken)
+            except Exception:
+                pass
+            log(f"💬 7L (AgentLoop 爸爸回覆): {clean_spoken} (🔁 dad-session #{get_dad_session().turns})")
+            try:
+                await core.speech_queue.put({
+                    "text": clean_spoken, "target": "dad",
+                    "raw_text": bot_reply, "model": "agent-loop-dad"})
+            except Exception:
+                pass
+            try:
+                core.append_to_unified_memory(
+                    speaker="7L", target=custom_name, content=clean_spoken,
+                    role="assistant", source="tts", model="agent-loop-dad")
+            except Exception:
+                pass
+            try:
+                ch = getattr(core, "DEFAULT_CHANNEL_ID", "dad")
+                fresh = await core.fetch_from_long_term_memory(ch)
+                fresh.append({"role": "user", "content": user_input})
+                fresh.append({"role": "assistant", "content": clean_spoken})
+                asyncio.create_task(core.save_to_long_term_memory(ch, fresh))
+            except Exception:
+                pass
+        try:
+            core.last_interaction_time = time.time()
+        except Exception:
+            pass
+        my_turn_ok = True
+        return True
+    except Exception as e:
+        try:
+            log(f"⚠️ [AgentLoop 爸爸處理異常，回退舊流程]: {e}")
+        except Exception:
+            pass
+        return False
+    finally:
+        try:
+            rtm = getattr(core, "realtime_task_mgr", None)
+            if rtm and my_turn_ok:
+                try:
+                    rtm.finish_dad_task()
+                except Exception:
+                    pass
+                try:
+                    rtm.mark_dad_input_read()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        try:
+            mark_board = getattr(core, "mark_streamer_mind_board_as_read", None)
+            if mark_board and my_turn_ok:
+                mark_board(unique_id="dad", content=user_input)
+        except Exception:
+            pass
+        try:
+            if getattr(core, "current_ai_state", "") == "THINKING":
+                import services.piano_engine as _pe
+                core.current_ai_state = "PIANO" if _pe.is_piano_active else "IDLE"
+        except Exception:
+            try:
+                core.current_ai_state = "IDLE"
+            except Exception:
+                pass
