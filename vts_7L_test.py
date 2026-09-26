@@ -6891,6 +6891,14 @@ async def process_chat_message(vts, input_queue, user_input: str, user_audio_b64
     
     CURRENT_CHAT_SESSION_ID += 1
     my_session_id = CURRENT_CHAT_SESSION_ID
+
+    # 🔁 Agent Loop 階段 4：老爸一開口，秒停 Agent 迴路正在播的語音（barge-in），爸爸回覆照常排入
+    try:
+        import services.agent_loop as _agent_loop
+        if _agent_loop.is_enabled():
+            _agent_loop.interrupt("dad speaks")
+    except Exception:
+        pass
     
     try:
         req_start = request_start_time if request_start_time else time.time()
@@ -7503,8 +7511,20 @@ async def chat_processor_worker(vts, input_queue):
                         process_chat_message(vts, input_queue, aud_c, None, request_start_time=req_time, source="tiktok_dad")
                     )
                 else:
-                    # 寫入 7L 滾動記憶腦袋，由 streamer_mind_loop_worker 自主排程讀取與發話
-                    add_to_streamer_mind_board(id_display, v_unique_id, aud_c, source)
+                    # 🔁 Agent Loop 第一階段：開關在 services/agent_loop.py（AGENT_LOOP=1 啟用），
+                    # 只接 TikTok 閒聊；失敗/關閉時回退舊看板，訊息絕不丟失
+                    _agent_routed = False
+                    try:
+                        import services.agent_loop as agent_loop
+                        if agent_loop.is_enabled():
+                            asyncio.create_task(agent_loop.handle_tiktok_message(
+                                vts, input_queue, id_display, v_unique_id, aud_c, source))
+                            _agent_routed = True
+                    except Exception as _ae:
+                        log_print(f"⚠️ [AgentLoop] 啟動異常，回退看板: {_ae}")
+                    if not _agent_routed:
+                        # 寫入 7L 滾動記憶腦袋，由 streamer_mind_loop_worker 自主排程讀取與發話
+                        add_to_streamer_mind_board(id_display, v_unique_id, aud_c, source)
 
             # -------------------------------------------------------------
             # 🔇 軌道 3：TikTok 背景瑣碎動態 (tiktok_ambient: 點讚/進房/分享)
