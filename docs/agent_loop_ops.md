@@ -6,10 +6,9 @@
 - 日誌關鍵字：`🔁 [AgentLoop]`。沒看到 = 沒啟用，走舊鏈。
 
 ## 架構（爸爸迴路 = 前門快答＋旗艦代打）
-- 爸爸 session（live 模型）：閒聊、問候、接梗直接回。
-- 難題（代碼/除錯/推理）：調 `deep_think` → HTTP `gemini-3.8-flash` 旗艦梯隊（記憶30句＋歷史＋最新螢幕）→ session 轉述。
-- Live 沒有 3.8，只有 live-preview 模型；旗艦品質靠 HTTP 後端保住，兩邊都要。
-- 觀眾 session：閒聊＋點歌/鋼琴/搜尋工具直調。
+- 爸爸 session 優先 `gemini-3.8-flash-live-preview`（Live RPD Unlimited，解 HTTP 20/天上限），ID 猜錯自動往 `3.8-live-preview → 3.8-live → 3-flash-live-preview → 3.1-flash-live-preview` 掉級，日誌會印最終命中；全滅回退舊鏈。
+- 真難題才調 `deep_think` → HTTP `gemini-3.8-flash`（注意 HTTP 側 RPD 已超標，能省則省，日常一律 session 直回）。
+- 觀眾 session 維持 `3.1-flash-live-preview`（已驗證可連）。
 - 轉世、打斷、回退機制同前。
 
 ## 測試矩陣（開台時照表打勾）
@@ -39,4 +38,4 @@ git checkout agent-loop
 - Live 端工具超時 30 秒；鋼琴/搜尋正常在 10 秒內。
 - `send_tool_response` 綁定 google-genai SDK 現行簽名，升級 SDK 後需重驗（跑離線測試）。
 - 轉世摘要失敗就裸重開（前情丟失，閒聊可接受）。
-- 離線測試：`python AppData\Local\Temp\opencode\test_agent_loop.py`（T1~T7 全綠才推）。
+- 離線測試：`python AppData\Local\Temp\opencode\test_agent_loop.py`（T1~T9 全綠才推）。

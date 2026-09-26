@@ -15,7 +15,15 @@ import time
 IS_AGENT_LOOP_ENABLED = os.getenv("AGENT_LOOP", "0") == "1"
 IS_AGENT_LOOP_DAD = os.getenv("AGENT_LOOP_DAD", "0") == "1"  # 爸爸主腦也進迴路（整台 agent 化）
 
-LIVE_MODEL = "gemini-3.1-flash-live-preview"
+LIVE_MODEL = "gemini-3.1-flash-live-preview"  # 觀眾迴路（已驗證可連）
+# 爸爸迴路優先 3.8 Live（RPD Unlimited，解 HTTP 20/天上限）；ID 若猜錯自動往下掉，絕不炸線
+DAD_LIVE_MODEL_CANDIDATES = [
+    "gemini-3.8-flash-live-preview",
+    "gemini-3.8-live-preview",
+    "gemini-3.8-live",
+    "gemini-3-flash-live-preview",
+    "gemini-3.1-flash-live-preview",
+]
 SUMMARY_MODEL = "gemini-3.5-flash-lite"
 MAX_TURNS_PER_SESSION = 30
 MAX_TRANSCRIPT_CHARS = 12000
@@ -134,7 +142,8 @@ async def _deep_think(query: str) -> str:
 class AgentSession:
     """一條常駐 Live session：多輪不斷線、工具直調、轉世帶摘要。"""
 
-    def __init__(self, persona: str = "", extra_tools=None, timeout: float = 30.0):
+    def __init__(self, persona: str = "", extra_tools=None, timeout: float = 30.0,
+                 model_candidates=None):
         self._session = None
         self._connect = None
         self.turns = 0
@@ -143,6 +152,8 @@ class AgentSession:
         self._persona = persona or AGENT_SYSTEM_PROMPT
         self._extra_tools = extra_tools or []
         self._timeout = timeout
+        self._models = model_candidates or [LIVE_MODEL]
+        self.live_model_used = ""
 
     async def _ensure(self):
         if self._session is not None:
@@ -160,31 +171,40 @@ class AgentSession:
         except Exception:
             return False
         for g_key in (candidates[:4] if candidates else []):
-            try:
-                client = _genai.Client(api_key=g_key)
-                tools = _build_live_tools(core) or []
-                if self._extra_tools:
-                    tools = list(tools) + list(self._extra_tools)
-                kwargs = dict(
-                    response_modalities=[_types.Modality.AUDIO],
-                    output_audio_transcription=_types.AudioTranscriptionConfig(),
-                    system_instruction=_types.Content(
-                        parts=[_types.Part(text=self._persona)]),
-                )
-                if tools:
-                    kwargs["tools"] = tools
-                cfg = _types.LiveConnectConfig(**kwargs)
-                mgr = client.aio.live.connect(model=LIVE_MODEL, config=cfg)
-                self._session = await mgr.__aenter__()
-                self._connect = mgr
-                self.turns = 0
+            for live_model in (self._models or [LIVE_MODEL]):
                 try:
-                    core.log_print("🔁 [AgentLoop] Live session 已連線（常駐迴路啟動）")
+                    client = _genai.Client(api_key=g_key)
+                    tools = _build_live_tools(core) or []
+                    if self._extra_tools:
+                        tools = list(tools) + list(self._extra_tools)
+                    kwargs = dict(
+                        response_modalities=[_types.Modality.AUDIO],
+                        output_audio_transcription=_types.AudioTranscriptionConfig(),
+                        system_instruction=_types.Content(
+                            parts=[_types.Part(text=self._persona)]),
+                    )
+                    if tools:
+                        kwargs["tools"] = tools
+                    cfg = _types.LiveConnectConfig(**kwargs)
+                    mgr = client.aio.live.connect(model=live_model, config=cfg)
+                    self._session = await mgr.__aenter__()
+                    self._connect = mgr
+                    self.turns = 0
+                    self.live_model_used = live_model
+                    try:
+                        core.log_print(f"🔁 [AgentLoop] Live session 已連線：{live_model}（常駐迴路啟動）")
+                    except Exception:
+                        pass
+                    return True
                 except Exception:
-                    pass
-                return True
-            except Exception:
-                continue
+                    try:
+                        if self._session is None and self._connect is not None:
+                            await self._connect.__aexit__(None, None, None)
+                    except Exception:
+                        pass
+                    self._session = None
+                    self._connect = None
+                    continue
         return False
 
     async def _summarize_and_reset(self):
@@ -378,7 +398,8 @@ def get_dad_session() -> AgentSession:
             pass
         _DAD_SESSION = AgentSession(
             persona=AGENT_DAD_SYSTEM_PROMPT,
-            extra_tools=tools, timeout=DEEP_THINK_TIMEOUT)
+            extra_tools=tools, timeout=DEEP_THINK_TIMEOUT,
+            model_candidates=DAD_LIVE_MODEL_CANDIDATES)
         _DAD_SESSION._audience = "dad"
     return _DAD_SESSION
 
@@ -535,7 +556,7 @@ async def handle_dad_message(vts, input_queue, user_input: str, source: str = "m
                 core.record_bot_message(clean_spoken)
             except Exception:
                 pass
-            log(f"💬 7L (AgentLoop 爸爸回覆): {clean_spoken} (🔁 dad-session #{get_dad_session().turns})")
+            log(f"💬 7L (AgentLoop 爸爸回覆): {clean_spoken} (🔁 {get_dad_session().live_model_used or 'live'} #{get_dad_session().turns})")
             try:
                 await core.speech_queue.put({
                     "text": clean_spoken, "target": "dad",
