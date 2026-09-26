@@ -135,6 +135,46 @@ def capture_tts_output():
 
 _tts_pipeline = None
 _thread_lock = threading.Lock()
+# 🛡️ 初始化單例門：同一時間只允許一個線程做 TTS(config) 重型初始化，
+# 其他線程等待結果（多線程並發 init 會把 transformers 權重撕成 meta tensor 全滅）
+_INIT_LOCK = threading.Lock()
+_INIT_DONE = threading.Event()
+_INIT_FAIL_TIME = 0.0
+_INIT_FAIL_COOLDOWN = 60.0
+
+
+def ensure_tts_ready(timeout: float = 150.0) -> bool:
+    """線程安全取得 pipeline：已就緒秒回；初始化中則等待；剛失敗過就快速失敗不硬碰。
+    所有调用入口（預熱/合成/預合成）一律走這扇門，嚴禁直調 init_gpt_sovits。"""
+    global _INIT_FAIL_TIME
+    if _tts_pipeline is not None:
+        return True
+    try:
+        if time.time() - _INIT_FAIL_TIME < _INIT_FAIL_COOLDOWN:
+            return False
+    except Exception:
+        pass
+    # 別的線程正在初始化 → 等它做完（而不是自己再開一輪互踩）
+    if _INIT_DONE.is_set():
+        pass
+    else:
+        got_lock = _INIT_LOCK.acquire(blocking=False)
+        if not got_lock:
+            ok = _INIT_DONE.wait(timeout=min(timeout, 150.0))
+            return bool(ok and _tts_pipeline is not None)
+        try:
+            if _tts_pipeline is None:
+                init_gpt_sovits()
+                if _tts_pipeline is None:
+                    try:
+                        _INIT_FAIL_TIME = time.time()
+                    except Exception:
+                        pass
+                else:
+                    _INIT_DONE.set()
+        finally:
+            _INIT_LOCK.release()
+    return _tts_pipeline is not None
 
 def init_gpt_sovits():
     global _tts_pipeline
@@ -260,11 +300,129 @@ def detect_emotion(text: str) -> str:
     return "default"
 
 
+def _split_by_script(text: str):
+    """按假名/非假名切段，無語音字符的純標點併入前一段。回 [(段文字, 是否日語段)]
+    - 假名數 >= 漢字數：整句視為正統日語（單段，避免「お兄ちゃん」被漢字切碎）。
+    - 漢字主場（如中文夾 SRY•スリー）：只把假名段拆出走日語，其餘走中文。
+    """
+    import re as _re
+    text = text or ""
+    kana_n = len(_re.findall(r'[\u3040-\u309F\u30A0-\u30FF]', text))
+    hanzi_n = len(_re.findall(r'[\u4E00-\u9FFF]', text))
+    if kana_n > 0 and kana_n >= hanzi_n:
+        return [(text.strip(), True)] if text.strip() else []
+    raw_segs = _re.findall(r'[\u3040-\u309F\u30A0-\u30FF]+|[^\u3040-\u309F\u30A0-\u30FF]+', text)
+    merged = []
+    for seg in raw_segs:
+        if not seg:
+            continue
+        has_voice = bool(_re.search(r'[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFFa-zA-Z0-9]', seg))
+        if not has_voice and merged:
+            merged[-1] = (merged[-1][0] + seg, merged[-1][1])
+            continue
+        is_ja = bool(_re.search(r'[\u3040-\u309F\u30A0-\u30FF]', seg))
+        merged.append((seg, is_ja))
+    # 短漢字夾在兩段假名之間（如教えて的教）：併入日語側，讀音才連貫
+    fixed = []
+    for i, (seg, is_ja) in enumerate(merged):
+        s = seg.strip()
+        if (not is_ja and 0 < len(s) <= 2 and _re.search(r'[\u4E00-\u9FFF]', s)
+                and i > 0 and i < len(merged) - 1
+                and merged[i - 1][1] and merged[i + 1][1]):
+            fixed[-1] = (fixed[-1][0] + seg, True)
+            continue
+        fixed.append((seg, is_ja))
+    # 全是標點的極端情況：當中文單段處理
+    if not fixed and text.strip():
+        fixed.append((text.strip(), False))
+    # 相鄰同語段合併，少跑一次合成
+    out = []
+    for seg, is_ja in fixed:
+        if out and out[-1][1] == is_ja:
+            out[-1] = (out[-1][0] + seg, is_ja)
+        else:
+            out.append((seg, is_ja))
+    return out
+
+
+def _lang_params_for(seg_text: str, emo) -> dict:
+    """單段語言參數：含假名→日語，其餘→中文（含情緒預設與情緒參考音）。"""
+    import re as _re
+    if _re.search(r'[\u3040-\u309F\u30A0-\u30FF]', seg_text):
+        return {
+            "text_lang": "all_ja",
+            "ref_audio": r"C:\Users\qiwai\xiaoyi_japanese_ref.wav",
+            "ref_text": "お兄ちゃん、今日も一日頑張ろうね！大好きだよ！",
+            "ref_lang": "all_ja",
+            "top_k": 15, "top_p": 0.75, "temp": 0.65, "speed": 1.0,
+        }
+    _preset = EMOTION_PRESETS.get(emo or "default", EMOTION_PRESETS["default"])
+    ref_audio = r"C:\Users\qiwai\xiaoyi_girl_ref.wav"
+    ref_text = "哇！真的假的？太棒了吧！今天也要一起加油喔！嘿嘿～"
+    ref_audio, ref_text = _resolve_emotion_ref(emo, ref_audio, ref_text)
+    return {
+        "text_lang": "zh" if _re.search(r'[a-zA-Z]', seg_text) else "all_zh",
+        "ref_audio": ref_audio,
+        "ref_text": ref_text,
+        "ref_lang": "all_zh",
+        "top_k": 15,
+        "top_p": _preset["top_p"], "temp": _preset["temp"], "speed": _preset["speed"],
+    }
+
+
+def _run_tts_inputs(inputs: dict, preview_text: str = ""):
+    """跑一次管線，回 (sr, audio float)；失敗回 (0, None)。"""
+    try:
+        import services.web_dashboard as web_dash
+        web_dash.broadcast_event("tts_progress", {
+            "active": True,
+            "stage": "啟動神經語音合成...",
+            "percent": 5,
+            "text": (preview_text or inputs.get("text", ""))[:35]
+        })
+    except Exception:
+        pass
+    try:
+        import time as _t
+        _t0 = _t.time()
+        with capture_tts_output():
+            gen = _tts_pipeline.run(inputs)
+            chunks = list(gen)
+        _t_run = _t.time() - _t0
+        try:
+            print(f"⏱️ [TTS 分段計時] 管線推理 {len(inputs.get('text',''))} 字耗時 {_t_run:.2f}s")
+        except Exception:
+            pass
+        if not chunks:
+            return 0, None
+        sr = chunks[0][0]
+        audio = chunks[0][1] if len(chunks) == 1 else np.concatenate([c for _, c in chunks])
+        return sr, audio
+    except Exception as e:
+        print(f"❌ [分段合成異常]: {e}")
+        return 0, None
+
+
+def _resample_audio(audio, from_sr: int, to_sr: int):
+    """段間取樣率不一致時的線性重取樣（正常不該觸發，保險用）。"""
+    try:
+        if from_sr == to_sr or len(audio) < 2:
+            return audio
+        import numpy as _np
+        old_idx = _np.linspace(0.0, 1.0, num=len(audio))
+        new_len = max(1, int(len(audio) * to_sr / from_sr))
+        new_idx = _np.linspace(0.0, 1.0, num=new_len)
+        return _np.interp(new_idx, old_idx, audio).astype(audio.dtype)
+    except Exception:
+        return audio
+
+
 def synthesize_xiaoyi_bytes_with_emotion(text: str, emotion=None) -> bytes:
     global _tts_pipeline
+    if not ensure_tts_ready():
+        print("❌ [_tts_pipeline 未就緒（初始化中或冷卻中），本次跳過合成]")
+        return b""
     with _thread_lock:
-        if _tts_pipeline is None:
-            init_gpt_sovits()
         if _tts_pipeline is None:
             print("❌ [_tts_pipeline 為 None，無法合成]")
             return b""
@@ -281,40 +439,6 @@ def synthesize_xiaoyi_bytes_with_emotion(text: str, emotion=None) -> bytes:
             text = re.sub(r'\[EMOTION[：:]\s*[^\]]+\]', '', text, flags=re.IGNORECASE)
             if not emo:
                 emo = detect_emotion(text)
-            # 🧠 智能全自動語言邊界判定 (精準區分「正統日語」vs「純中文語境」)
-            num_kana = len(re.findall(r'[\u3040-\u309F\u30A0-\u30FF]', text))
-            num_hanzi = len(re.findall(r'[\u4E00-\u9FFF]', text))
-            
-            # 判斷是否為日語：
-            # 只要包含假名，該片段 100% 以正統日語模式 (all_ja) 甜美女聲合成
-            # 徹底廢除 LOANWORDS 中文諧音（杜絕八嘎、卡哇伊、阿里嘎多等空耳）
-            is_real_japanese = (num_kana > 0)
-            
-            if is_real_japanese:
-                # 🇯🇵 正統日語模式：採用高音甜美版曉伊日語提示音（360Hz 少女高音）
-                ref_audio = r"C:\Users\qiwai\xiaoyi_japanese_ref.wav"
-                ref_text = "お兄ちゃん、今日も一日頑張ろうね！大好きだよ！"
-                ref_lang = "all_ja"
-                text_lang = "all_ja"
-                top_k = 15
-                top_p = 0.75
-                temp = 0.65
-                speed = 1.0
-            else:
-                # 🇨🇳 中文主體模式：
-                ref_audio = r"C:\Users\qiwai\xiaoyi_girl_ref.wav"
-                ref_text = "哇！真的假的？太棒了吧！今天也要一起加油喔！嘿嘿～"
-                ref_lang = "all_zh"
-                text_lang = "zh" if re.search(r'[a-zA-Z]', text) else "all_zh"
-                top_k = 15
-                # 🎭 語氣預設覆寫語速/採樣（只動中文分支，日文維持原參數）
-                _preset = EMOTION_PRESETS.get(emo or "default", EMOTION_PRESETS["default"])
-                top_p = _preset["top_p"]
-                temp = _preset["temp"]
-                speed = _preset["speed"]
-                # 🎭 有錄情緒專用參考音則換音色底色，沒錄維持預設曉伊音
-                ref_audio, ref_text = _resolve_emotion_ref(emo, ref_audio, ref_text)
-            
             # 🛡️ 符號與專有名詞防卡頓處理：過濾非發音顏文字 (如 (∠・ω<)⌒☆ )，波浪號/符號轉為元氣感嘆號「！」
             text = re.sub(r'[\(（][^\)）]*[\)）]', '', text)  # 移除括號表情如 (∠・ω<)
             text = re.sub(r'[⌒☆★♪♡♥✧✦๑•̀ㅂ•́و✧~～]+', '！', text)
@@ -322,48 +446,47 @@ def synthesize_xiaoyi_bytes_with_emotion(text: str, emotion=None) -> bytes:
             text = re.sub(r'[，,]{2,}', '，', text)
             text = re.sub(r'[！!]{2,}', '！', text)
             text = re.sub(r'[？?]{2,}', '？', text).strip(' ，,')
+            if not text:
+                return b""
 
-            inputs = {
-                "text": text,
-                "text_lang": text_lang,
-                "ref_audio_path": ref_audio,
-                "prompt_text": ref_text,
-                "prompt_lang": ref_lang,
-                "top_k": top_k,
-                "top_p": top_p,
-                "temperature": temp,
-                "text_split_method": "cut5",
-                "batch_size": 2, # 適度放大 batch_size 加速顯卡推理
-                "speed_factor": speed,
-                "repetition_penalty": 1.35,
-            }
-            
-            try:
-                import services.web_dashboard as web_dash
-                web_dash.broadcast_event("tts_progress", {
-                    "active": True,
-                    "stage": "啟動神經語音合成...",
-                    "percent": 5,
-                    "text": text[:35]
-                })
-            except Exception:
-                pass
-
-            with capture_tts_output():
-                gen = _tts_pipeline.run(inputs)
-                chunks = list(gen)
-            if not chunks:
+            # 🌏 混血句按文字拆段：假名段走日語、漢字段走中文（舊邏輯「見假名就整句轉日語」是 SRY•スリー整句變日語的元兇）
+            segments = _split_by_script(text)
+            audios = []
+            sr = 0
+            for seg_text, seg_is_ja in segments:
+                params = _lang_params_for(seg_text, emo)
+                inputs = {
+                    "text": seg_text,
+                    "text_lang": params["text_lang"],
+                    "ref_audio_path": params["ref_audio"],
+                    "prompt_text": params["ref_text"],
+                    "prompt_lang": params["ref_lang"],
+                    "top_k": params["top_k"],
+                    "top_p": params["top_p"],
+                    "temperature": params["temp"],
+                    "text_split_method": "cut5",
+                    "batch_size": 2, # 適度放大 batch_size 加速顯卡推理
+                    "speed_factor": params["speed"],
+                    "repetition_penalty": 1.35,
+                }
+                seg_sr, seg_audio = _run_tts_inputs(inputs, preview_text=text[:35])
+                if seg_audio is None:
+                    continue
+                if sr == 0:
+                    sr = seg_sr
+                elif seg_sr != sr:
+                    seg_audio = _resample_audio(seg_audio, seg_sr, sr)
+                audios.append(seg_audio)
+            if not audios:
                 try:
                     import services.web_dashboard as web_dash
                     web_dash.broadcast_event("tts_progress", {"active": False, "stage": "完成", "percent": 100})
                 except Exception:
                     pass
                 return b""
-            sr = chunks[0][0]
-            if len(chunks) == 1:
-                audio = chunks[0][1]
-            else:
-                audio = np.concatenate([c for _, c in chunks])
+            audio = audios[0] if len(audios) == 1 else np.concatenate(audios)
+            
+            # （各段已在 _run_tts_inputs 內合成並拼接，sr 取自首段）
             
             # 轉為 16-bit PCM numpy 陣列
             if audio.dtype != np.int16:

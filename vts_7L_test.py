@@ -1094,8 +1094,97 @@ async def fetch_ai_response(messages, image_base64=None, audio_base64=None, is_p
         aud_b64_str = audio_base64 if isinstance(audio_base64, str) else base64.b64encode(audio_base64).decode('utf-8')
         interaction_input.append({"type": "audio", "data": aud_b64_str, "mime_type": "audio/wav"})
 
+    # ── 🌊 流式首句預合成：邊想邊做 TTS（只跑首棒通道，輸了不虧，贏了省 4~6 秒）──
+    async def _presynth_first_sentence(raw_sentence: str, target_id: str):
+        """把流式吐出的第一句先合成進預合成緩存（auto 語氣 key，播放層可回退命中）。"""
+        try:
+            import local_xiaoyi_service
+            clean = TextCleanEngine.clean_for_tts(raw_sentence, apply_phonetics=True)
+            clean = (clean or "").strip()
+            if len(clean) < 4:
+                return
+            key = _tts_cache_key(clean, None)
+            if key in TTS_PRE_SYNTH_CACHE:
+                return
+            wav = await local_xiaoyi_service.get_xiaoyi_audio_bytes(clean)
+            if wav and len(wav) > 100:
+                TTS_PRE_SYNTH_CACHE[key] = bytes(wav)
+                TTS_PRE_SYNTH_ORDER.append(key)
+                while len(TTS_PRE_SYNTH_ORDER) > 20:
+                    _old = TTS_PRE_SYNTH_ORDER.pop(0)
+                    TTS_PRE_SYNTH_CACHE.pop(_old, None)
+                log_print(f"🌊 [流式預合成] 首句已備妥 ({target_id}): '{clean[:18]}' ({len(wav)} bytes)")
+        except Exception as e:
+            log_print(f"⚠️ [流式預合成異常]: {e}")
+
+    async def _streaming_first_response(client, g_model, chat_contents, gen_config, target_id):
+        """首棒 stream 版：累積文字＋工具調用，首句完整即開預合成；任何異常回 None 走舊路。
+        回傳與 generate_content 相容的 SimpleNamespace(text/candidates/function_calls)。"""
+        import types as _pytypes
+        buf = ""
+        fired = False
+        text_parts = []
+        fc_map = {}
+        try:
+            stream = await asyncio.wait_for(
+                client.aio.models.generate_content_stream(
+                    model=g_model, contents=chat_contents, config=gen_config),
+                timeout=120.0)
+            async with asyncio.timeout(120.0):
+                async for chunk in stream:
+                    try:
+                        cands = getattr(chunk, "candidates", None) or []
+                        if not cands or not getattr(cands[0], "content", None):
+                            continue
+                        for p in (getattr(cands[0].content, "parts", None) or []):
+                            if getattr(p, "thought", False):
+                                continue
+                            ft = getattr(p, "function_call", None)
+                            if ft is not None:
+                                fname = getattr(ft, "name", "") or ""
+                                fargs = getattr(ft, "args", "") or {}
+                                if isinstance(fargs, dict):
+                                    fargs = json.dumps(fargs, ensure_ascii=False)
+                                prev = fc_map.get(fname, "")
+                                fc_map[fname] = prev + (fargs if isinstance(fargs, str) else "")
+                                continue
+                            t = getattr(p, "text", "") or ""
+                            if t:
+                                buf += t
+                                text_parts.append(t)
+                    except Exception:
+                        continue
+                    if not fired and len(buf) >= 8:
+                        m = re.search(r'.{8,}?[。！？!?；]', buf)
+                        if m:
+                            fired = True
+                            asyncio.create_task(_presynth_first_sentence(m.group(0), target_id))
+            full_text = "".join(text_parts).strip()
+            if not full_text and not fc_map:
+                return None
+            fcs = []
+            for fname, argstr in fc_map.items():
+                try:
+                    fargs = json.loads(argstr) if argstr else {}
+                except Exception:
+                    fargs = {}
+                fcs.append(_pytypes.SimpleNamespace(name=fname, args=fargs))
+            model_parts = [types.Part.from_text(text=full_text)] if full_text else []
+            for fc in fcs:
+                try:
+                    model_parts.append(types.Part.from_function_call(name=fc.name, args=fc.args))
+                except Exception:
+                    pass
+            content = types.Content(role="model", parts=model_parts)
+            cand = _pytypes.SimpleNamespace(content=content, finish_reason="STOP")
+            log_print(f"🌊 [流式首棒] {target_id} 全文收齊 ({len(full_text)} 字{f'＋{len(fcs)}工具' if fcs else ''})")
+            return _pytypes.SimpleNamespace(text=full_text, candidates=[cand], function_calls=fcs)
+        except Exception as e:
+            log_print(f"🌊 [流式首棒回退] {target_id}: {e} → 切非流式")
+            return None
+
     # ── 單一 Gemini 通道執行器 ──
-    async def _call_single_gemini(g_key, g_model, target_id):
+    async def _call_single_gemini(g_key, g_model, target_id, stream_first=False):
         temp_google_client = genai.Client(api_key=g_key)
         api_call_start = time.time()
         extracted_text = ""
@@ -1125,15 +1214,22 @@ async def fetch_ai_response(messages, image_base64=None, audio_base64=None, is_p
 
             gen_config = types.GenerateContentConfig(**config_kwargs)
 
-            # 👑 放寬單通道等待時間至 120 秒，讓 3.8 / 3.7-flash 深度思考、多模態與工具調用在背景充裕完成，絕不 premature timeout！
-            response = await asyncio.wait_for(
-                temp_google_client.aio.models.generate_content(
-                    model=g_model,
-                    contents=chat_contents,
-                    config=gen_config
-                ),
-                timeout=120.0
-            )
+            # 🌊 流式影子合成：首棒通道用 stream，吐出第一句完整子句即預合成 TTS，
+            # 大腦還在想、第一句音訊已在路上；失敗自動回退非流式，零風險
+            response = None
+            if stream_first:
+                response = await _streaming_first_response(
+                    temp_google_client, g_model, chat_contents, gen_config, target_id)
+            if response is None:
+                # 👑 放寬單通道等待時間至 120 秒，讓 3.8 / 3.7-flash 深度思考、多模態與工具調用在背景充裕完成，絕不 premature timeout！
+                response = await asyncio.wait_for(
+                    temp_google_client.aio.models.generate_content(
+                        model=g_model,
+                        contents=chat_contents,
+                        config=gen_config
+                    ),
+                    timeout=120.0
+                )
 
             had_tool_calls = False
             tool_results_map = {}
@@ -1338,11 +1434,13 @@ async def fetch_ai_response(messages, image_base64=None, audio_base64=None, is_p
             if candidate:
                 g_key, g_model, target_id = candidate
                 launched_gemini_targets.add(target_id)
-                
+
                 # 每次依序派發一個通道，立即推進交替序輪指針至下一回步數
                 CURRENT_GEMINI_KEY_STEP += 1
 
-                task = asyncio.create_task(_call_single_gemini(g_key, g_model, target_id))
+                # 首棒開 stream（邊想邊預合成首句），後續搶答棒走舊路
+                _is_first = (len(launched_gemini_targets) == 1)
+                task = asyncio.create_task(_call_single_gemini(g_key, g_model, target_id, stream_first=_is_first))
                 active_gemini_tasks[task] = (target_id, g_model, time.time())
                 
                 status_prefix = "👁️🧠" if image_base64 else "🧠"
@@ -1355,10 +1453,10 @@ async def fetch_ai_response(messages, image_base64=None, audio_base64=None, is_p
         if not active_gemini_tasks:
             break
 
-        # 等待深度思考模型完成（充裕等待，不 premature timeout 搶截深度推理）
+        # 等待模型完成：7 秒無回應就加開雙軌（舊 12 秒空轉是延遲主兇；深度思考任務不受影響繼續跑）
         done, _ = await asyncio.wait(
             active_gemini_tasks.keys(),
-            timeout=12.0,
+            timeout=7.0,
             return_when=asyncio.FIRST_COMPLETED
         )
 
@@ -3785,15 +3883,23 @@ async def play_voice_complete(text, target: str = "dad", raw_actions_text: str =
                             t0 = time.time()
                             _emo = c_dict.get("emotion")
                             _ckey = _tts_cache_key(c_dict["text"], _emo)
-                            # ⚡ 優先命中唱歌空檔預合成緩存（key 含語氣）
+                            # ⚡ 優先命中唱歌空檔/流式預合成緩存；顯式語氣 miss 時回退 auto key（同文自動判定結果一致）
                             local_wav = TTS_PRE_SYNTH_CACHE.pop(_ckey, None)
+                            _hit_auto = False
+                            if local_wav is None:
+                                _auto_key = _tts_cache_key(c_dict["text"], None)
+                                if _auto_key != _ckey:
+                                    local_wav = TTS_PRE_SYNTH_CACHE.pop(_auto_key, None)
+                                    _hit_auto = local_wav is not None
+                                    _ckey = _auto_key
                             try:
                                 TTS_PRE_SYNTH_ORDER.remove(_ckey)
                             except Exception:
                                 pass
                             if local_wav:
                                 cost = time.time() - t0
-                                log_print(f"⚡ [預合成命中] 子句直接秒出免合成: '{c_dict['text'][:18]}'")
+                                _tag = "預合成命中(auto)" if _hit_auto else "預合成命中"
+                                log_print(f"⚡ [{_tag}] 子句直接秒出免合成: '{c_dict['text'][:18]}'")
                             else:
                                 local_wav = await local_xiaoyi_service.get_xiaoyi_audio_bytes(c_dict["text"], emotion=_emo)
                                 cost = time.time() - t0
@@ -5011,12 +5117,12 @@ async def mic_worker(recognizer, input_queue):
                     continue
 
                 # 🔐 2. 毫秒級聲紋特徵驗證：判定是否為老爸本人（徹底排除 7L 自身女聲、喇叭外放、電視雜音、旁人插嘴）
-                is_dad, vp_score = voiceprint_verifier.verify_is_dad(audio_b64, threshold=0.70)
+                is_dad, vp_score = voiceprint_verifier.verify_is_dad(audio_b64, threshold=0.65)
                 if not is_dad:
                     # 若為 7L 自身喇叭回音，觸發專屬一次性回音過濾；若是其他雜音則聲紋攔截
                     if is_7l_voice_echo(cleaned_text, is_dad_verified=False):
                         continue
-                    log_print(f"🔇 [聲紋攔截] 判定為非老爸聲音或雜音回音 (聲紋分: {vp_score:.2f} < 0.70)，自動過濾: 「{cleaned_text}」")
+                    log_print(f"🔇 [聲紋攔截] 判定為非老爸聲音或雜音回音 (聲紋分: {vp_score:.2f} < 0.65)，自動過濾: 「{cleaned_text}」")
                     continue
 
                 # 🔇 2. 7L 自身發話喇叭回音過濾（老爸本人聲紋保護：長度動態閾值，短句/指令不殺，一次性過濾）
@@ -7091,6 +7197,12 @@ async def process_chat_message(vts, input_queue, user_input: str, user_audio_b64
             th_str = "啟用深度思考 (-1)" if chosen_thinking is True else ("極速關閉思考 (0)" if chosen_thinking is False else "自動預設")
             log_print(f"🎯 [Live 幕後指揮官調度] 指派前台模型: {chosen_model or '依梯隊'} | 思考模式: {th_str}")
 
+        # ⚡ 閒聊關思考時強制單圖：7 圖時序是多模態延遲主兇，日常問答一張最新幀就夠了
+        if chosen_thinking is False and isinstance(current_screen_snapshot, list) and len(current_screen_snapshot) > 1:
+            first = current_screen_snapshot[0]
+            current_screen_snapshot = first[1] if isinstance(first, (tuple, list)) else first
+            log_print("👁️ [閒聊省流] 思考關閉 → 7 圖壓為單張最新幀")
+
         raw_spoken_text = await fetch_ai_response(
             messages, 
             image_base64=current_screen_snapshot, 
@@ -8062,8 +8174,10 @@ async def main():
     def _prewarm_xiaoyi():
         try:
             import local_xiaoyi_service
-            local_xiaoyi_service.init_gpt_sovits()
-            log_print("🟢 [GPT-SoVITS 預熱完成] 7L 本地顯卡語音引擎已就緒！")
+            if local_xiaoyi_service.ensure_tts_ready(timeout=150.0):
+                log_print("🟢 [GPT-SoVITS 預熱完成] 7L 本地顯卡語音引擎已就緒！")
+            else:
+                log_print("⚠️ [GPT-SoVITS 預熱未完成] 引擎仍在初始化或冷卻中，首句會等待就緒")
         except Exception as e:
             log_print(f"⚠️ [GPT-SoVITS 預熱跳過]: {e}")
     asyncio.create_task(asyncio.to_thread(_prewarm_xiaoyi))
