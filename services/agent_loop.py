@@ -39,6 +39,7 @@ AGENT_SYSTEM_PROMPT = """妳是 7L，老爸的 AI 女兒，正在 TikTok 直播�
 - 用自然隨性口吻回 1~2 句短話（20~40 字），句尾帶標點，可穿插 [EXPRESSION: 微笑/臉紅/星星/WINK/震驚]。
 - 觀眾明確點歌（唱歌/翻唱）→ 調用 auto_sing_song；想聽鋼琴 → 調用 pe.play_virtual_piano；需要即時資訊 → 調用 search_google。
 - 加好友、借帳號等事務：一律回「這個要問我老爸做主喔！」，絕不答應或開條件。
+- 工具節制：只有觀眾明確提問（有問號、想知道哪個、怎麼、為何）才調用 search_google；閒聊、附和、表情符號、無意義短句絕不調工具，直接回話或 [PASS]。
 - 無聊刷屏只回 [PASS]。
 - 嚴禁輸出 thought/結構化草稿，直接說台詞。嚴禁 Emoji。"""
 
@@ -137,11 +138,35 @@ async def _deep_think(query: str) -> str:
         return f"旗艦大腦暫時連不上（{e}），跟老爸說待會再試。"
 
 
+def _search_cache_get(query: str):
+    try:
+        ent = _SEARCH_CACHE.get((query or "").strip().lower())
+        if ent and time.time() - ent[0] < 120.0:
+            return ent[1]
+        elif ent:
+            _SEARCH_CACHE.pop((query or "").strip().lower(), None)
+    except Exception:
+        pass
+    return None
+
+
+def _search_cache_put(query: str, result: str):
+    try:
+        _SEARCH_CACHE[(query or "").strip().lower()] = (time.time(), result)
+        while len(_SEARCH_CACHE) > 30:
+            _SEARCH_CACHE.pop(next(iter(_SEARCH_CACHE)))
+    except Exception:
+        pass
+
+
+_SEARCH_CACHE: dict = {}
+
+
 class AgentSession:
     """一條常駐 Live session：多輪不斷線、工具直調、轉世帶摘要。"""
 
     def __init__(self, persona: str = "", extra_tools=None, timeout: float = 30.0,
-                 model_candidates=None):
+                 model_candidates=None, owner: str = "audience"):
         self._session = None
         self._connect = None
         self.turns = 0
@@ -152,6 +177,8 @@ class AgentSession:
         self._timeout = timeout
         self._models = model_candidates or [LIVE_MODEL]
         self.live_model_used = ""
+        self._owner = owner
+        self._chat_lock = asyncio.Lock()    # 同 session 一次只跑一輪，防並發互踩
 
     async def _ensure(self):
         if self._session is not None:
@@ -266,7 +293,8 @@ class AgentSession:
             pass
 
     async def _dispatch_tool_calls(self, core, function_calls):
-        """階段 2：Live 工具調用 → 主腦 execute_tool_dispatch → 回 FunctionResponse。"""
+        """階段 2：Live 工具調用 → 主腦 execute_tool_dispatch → 回 FunctionResponse。
+        search 同 query 120 秒內只查一次（命中回緩存，治 eduroam 連刷）。"""
         try:
             from google.genai import types as _types
         except Exception:
@@ -284,21 +312,33 @@ class AgentSession:
             try:
                 if name == "deep_think":
                     res = await _deep_think((args or {}).get("query", ""))
+                elif name == "search_google":
+                    q = str((args or {}).get("query", "")).strip()
+                    hit = _search_cache_get(q)
+                    if hit is not None:
+                        try:
+                            core.log_print(f"🔁 [AgentLoop 搜尋命中緩存] {q[:30]}")
+                        except Exception:
+                            pass
+                        res = hit
+                    elif callable(dispatcher):
+                        audience = getattr(self, "_audience", "audience")
+                        res = await dispatcher(name, dict(args),
+                                               caller_target=audience,
+                                               caller_user=("直播觀眾" if audience == "audience" else "老爸"))
+                        try:
+                            who = "大家" if audience == "audience" else "老爸"
+                            res = await core.summarize_search_to_speech(q, res, user_role_name=who)
+                        except Exception:
+                            pass
+                        _search_cache_put(q, res)
+                    else:
+                        res = "工具執行器未就緒"
                 elif callable(dispatcher):
                     audience = getattr(self, "_audience", "audience")
                     res = await dispatcher(name, dict(args),
                                            caller_target=audience,
                                            caller_user=("直播觀眾" if audience == "audience" else "老爸"))
-                    # 搜尋類回傳原文，唱歌/鋼琴回傳狀態字串：都餵回 session 讓它組織口語
-                    if name == "search_google" and res:
-                        try:
-                            who = "大家" if audience == "audience" else "老爸"
-                            res = await core.summarize_search_to_speech(
-                                args.get("query", ""), res, user_role_name=who)
-                        except Exception:
-                            pass
-                else:
-                    res = "工具執行器未就緒"
             except Exception as e:
                 res = f"執行異常：{e}"
             try:
@@ -350,7 +390,8 @@ class AgentSession:
             return "", ""
 
     async def chat(self, text: str, timeout: float = 0) -> str:
-        """送一句、收一輪（含工具多回合），回最終口語。空字串=失敗/靜默。"""
+        """送一句、收一輪（含工具多回合），回最終口語。空字串=失敗/靜默。
+        同 session 串行（爸爸等鎖，觀眾由上層忙時丟棄）。"""
         if not text or not text.strip():
             return ""
         core = get_core()
@@ -367,7 +408,8 @@ class AgentSession:
         async def _send_text(sess):
             await sess.send_realtime_input(text=payload)
 
-        _, out = await self._exchange(core, _send_text, wait)
+        async with self._chat_lock:
+            _, out = await self._exchange(core, _send_text, wait)
         if not out:
             return ""
         self.turns += 1
@@ -399,7 +441,8 @@ class AgentSession:
         async def _send_audio(sess):
             await sess.send_realtime_input(audio=blob)
 
-        heard, out = await self._exchange(core, _send_audio, wait)
+        async with self._chat_lock:
+            heard, out = await self._exchange(core, _send_audio, wait)
         if not out and not heard:
             return "", ""
         self.turns += 1
@@ -469,6 +512,20 @@ async def handle_tiktok_message(vts, input_queue, id_display: str,
     """TikTok 閒聊走常駐 session；回 True=已處理，False=請 dispatcher 走舊看板。"""
     core = get_core()
     log = getattr(core, "log_print", print)
+    # 忙時丟棄：上一輪還在想/播，閒聊不排隊（記一筆已讀即可，避免 session 互踩＋回覆大塞車）
+    try:
+        if get_session()._chat_lock.locked():
+            try:
+                core.append_to_unified_memory(
+                    speaker=f"TikTok 觀眾「{id_display}」", target="老爸/直播間",
+                    content=f"{content}（併入上一輪處理中）",
+                    role="user", source=source)
+            except Exception:
+                pass
+            log(f"🔁 [AgentLoop 忙碌吸收] 上一輪未完，閒聊併單略過: {content[:30]}")
+            return True
+    except Exception:
+        pass
     try:
         try:
             low = (content or "").lower()

@@ -5102,7 +5102,7 @@ def check_immediate_shutdown(text: str) -> bool:
 
     return False
 
-async def mic_worker(recognizer, input_queue):
+async def mic_worker(recognizer, input_queue, vts=None):
     global current_mic_action_str, LATEST_REALWORLD_SPEECH_TEXT, LATEST_REALWORLD_SPEECH_TIME
     
     # 🎙️ 麥克風音量閥值初始化：避免安靜環境下自動將 energy_threshold 調得過低
@@ -8229,7 +8229,7 @@ async def main():
             log_print(f"⚠️ [GPT-SoVITS 預熱跳過]: {e}")
     asyncio.create_task(asyncio.to_thread(_prewarm_xiaoyi))
     asyncio.create_task(mic_volume_worker())
-    asyncio.create_task(mic_worker(recognizer, input_queue))
+    asyncio.create_task(mic_worker(recognizer, input_queue, vts))
     asyncio.create_task(text_file_listener_worker(input_queue))
     asyncio.create_task(console_keyboard_input_worker(input_queue))
     asyncio.create_task(screen_capture_worker())
