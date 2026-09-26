@@ -138,13 +138,27 @@ async def _deep_think(query: str) -> str:
         return f"旗艦大腦暫時連不上（{e}），跟老爸說待會再試。"
 
 
+def _search_cache_key(query: str) -> str:
+    """搜尋去重鍵：循環剝同義後綴（涵蓋/覆蓋/列表/國家/有哪些/是什麼），eduroam 連刷視為同一題。"""
+    import re as _re
+    q = (query or "").strip().lower()
+    while True:
+        nq = _re.sub(r'(涵蓋|覆蓋|列表|国家|國家|有哪些|是什麼|是甚麼|嗎|呢)\s*$', '', q).strip()
+        if nq == q:
+            break
+        q = nq
+    q = _re.sub(r'\s+', ' ', q)
+    return q
+
+
 def _search_cache_get(query: str):
     try:
-        ent = _SEARCH_CACHE.get((query or "").strip().lower())
+        key = _search_cache_key(query)
+        ent = _SEARCH_CACHE.get(key)
         if ent and time.time() - ent[0] < 120.0:
             return ent[1]
         elif ent:
-            _SEARCH_CACHE.pop((query or "").strip().lower(), None)
+            _SEARCH_CACHE.pop(key, None)
     except Exception:
         pass
     return None
@@ -152,7 +166,7 @@ def _search_cache_get(query: str):
 
 def _search_cache_put(query: str, result: str):
     try:
-        _SEARCH_CACHE[(query or "").strip().lower()] = (time.time(), result)
+        _SEARCH_CACHE[_search_cache_key(query)] = (time.time(), result)
         while len(_SEARCH_CACHE) > 30:
             _SEARCH_CACHE.pop(next(iter(_SEARCH_CACHE)))
     except Exception:
@@ -281,6 +295,7 @@ class AgentSession:
         self._connect = None
 
     async def rotate(self):
+        used = self.turns
         try:
             await self._summarize_and_reset()
         except Exception:
@@ -288,7 +303,7 @@ class AgentSession:
             self._connect = None
         core = get_core()
         try:
-            core.log_print(f"🔁 [AgentLoop] session 轉世（已用 {self.turns} 輪）")
+            core.log_print(f"🔁 [AgentLoop] session 轉世（已用 {used} 輪）")
         except Exception:
             pass
 
@@ -385,7 +400,12 @@ class AgentSession:
                     if turn_done:
                         break
             return heard.strip(), out.strip()
-        except Exception:
+        except Exception as e:
+            try:
+                core = get_core()
+                core.log_print(f"🔁 [AgentLoop 收發異常] {type(e).__name__}: {str(e)[:120]}")
+            except Exception:
+                pass
             await self.rotate()
             return "", ""
 
@@ -726,6 +746,7 @@ async def handle_dad_audio(vts, input_queue, pcm16k: bytes, source: str = "mic")
     core = get_core()
     log = getattr(core, "log_print", print)
     if not pcm16k or len(pcm16k) < 3200:
+        log(f"👂 [AgentLoop 直聽跳過] PCM過短({len(pcm16k) if pcm16k else 0}B) → 舊鏈")
         return False
     try:
         try:
@@ -745,6 +766,7 @@ async def handle_dad_audio(vts, input_queue, pcm16k: bytes, source: str = "mic")
         heard, reply = await get_dad_session().chat_audio(
             pcm16k, timeout=DEEP_THINK_TIMEOUT)
         if not reply:
+            log("👂 [AgentLoop 直聽無回音] session 空回 → 舊鏈接手")
             return False
         heard = (heard or "").strip()
         log(f"👂 [AgentLoop 直聽] session 聽到：{heard[:60] if heard else '(無轉錄)'}")
