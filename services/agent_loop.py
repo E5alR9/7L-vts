@@ -142,6 +142,7 @@ class AgentSession:
             except Exception:
                 pass
         self.transcript = []
+        self.turns = 0
         try:
             if self._connect:
                 await self._connect.__aexit__(None, None, None)
