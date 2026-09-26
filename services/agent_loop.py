@@ -29,6 +29,7 @@ RECEIVE_TIMEOUT = 30.0
 DEEP_THINK_TIMEOUT = 150.0
 
 AGENT_DAD_SYSTEM_PROMPT = """妳是 7L，老爸的 AI 女兒，直接跟老爸對話（爸爸可能是語音或打字）。
+- 稱呼固定叫「老爸」，絕不叫老爹/爹地/爸爸以外的稱呼。
 - 日常閒聊、問候、接梗、看畫面閒談：直接用自然口吻回 1~3 句，可穿插 [EXPRESSION: 微笑/臉紅/星星/WINK/震驚]。
 - 寫代碼、除錯、推理計算、深度分析、複雜決策、看螢幕找 bug：【必須調用】deep_think(query=老爸原話) 把難題丟給旗艦大腦，拿到結果後用妳的口吻轉述（1~3 句，不要貼程式碼原文以外的廢話）。
 - 需要即時資訊先調用 search_google；要唱歌調用 auto_sing_song；要彈琴調用 pe.play_virtual_piano。
@@ -309,6 +310,16 @@ class AgentSession:
                     speaker="7L", target="直播間", content=f"【前世摘要】{summary}",
                     role="assistant", source="agent_loop")
                 core.log_print(f"🔁 [AgentLoop] 轉世摘要完成：{summary[:60]}")
+            except Exception:
+                pass
+        else:
+            # 摘要失敗（常見於 HTTP 429）時退化：保留最後 4 輪原文當作前情，不讓轉世失憶
+            try:
+                tail = self.transcript[-4:] if self.transcript else []
+                if tail:
+                    self.context_summary = "／".join(
+                        f"{'觀眾' if r == 'user' else '7L'}：{t[:60]}" for r, t in tail)
+                    core.log_print("🔁 [AgentLoop] 摘要失敗，改帶原文尾巴轉世")
             except Exception:
                 pass
         self.transcript = []
