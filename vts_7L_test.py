@@ -1818,6 +1818,8 @@ async def call_gemini_live_audience_reply(vts, input_queue, audience_user: str, 
 
         # 預熱背景鋼琴曲譜（若觀眾發言包含歌名）
         asyncio.create_task(prefetch_song_midi_background(audience_content))
+        # 👂 翻唱預取（嚴格唱歌意圖閘＋暫存隔離，閒聊絕不下載）
+        asyncio.create_task(_prefetch_cover_if_singing(audience_content))
 
         # 👑 階段 2：喚醒 7 大高智商主力模型梯隊 (3.1 Flash Lite ➔ 3.5 Flash Lite ➔ 3 Flash ➔ 3.1 Pro ➔ 3.5 ➔ 3.6 ➔ 3.7) 讀取 100 句記憶精準開口
         sys_instruction_with_100m = f"""{sys_instruction}
@@ -6454,6 +6456,14 @@ async def prefetch_song_midi_background(song_query: str):
     except Exception:
         pass
 
+async def _prefetch_cover_if_singing(raw_text: str):
+    """翻唱預取鉤（意圖閘在管線內，閒聊直接略過，零 API 消耗）"""
+    try:
+        import services.auto_cover_pipeline as _acp
+        await _acp.maybe_prefetch_cover(raw_text)
+    except Exception:
+        pass
+
 # ────────────────────────────────────────────────────────
 # 🧠 15. 全集中全景時序記憶中樞與對話派發系統 (Unified Mind-Stream Architecture)
 # ────────────────────────────────────────────────────────
@@ -6502,6 +6512,10 @@ def add_to_streamer_mind_board(user_display: str, unique_id: str, content: str, 
         
     unread_count = sum(1 for m in STREAMER_MIND_BOARD if m["status"] == "unread")
     log_print(f"📥 [記憶腦袋 寫入] {user_display}: {content} (🧠 看板累積未讀: {unread_count} 筆)")
+
+    # 👂 翻唱預取（嚴格唱歌意圖閘＋暫存隔離，寫入看板即判斷，閒聊零消耗）
+    if content:
+        asyncio.create_task(_prefetch_cover_if_singing(content))
     
     # 🎹 依老爸鐵律判定是否為點歌意圖（必須有「彈」或明顯歌名），再交由 Gemini 確認
     if pe.is_piano_active and pe.current_piano_song_title and content and is_piano_song_request(content):
