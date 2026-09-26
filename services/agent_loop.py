@@ -230,8 +230,19 @@ class AgentSession:
                     self._connect = mgr
                     self.turns = 0
                     self.live_model_used = live_model
+                    # 🔊 音訊包相容探測（SDK 版本各異：AudioBlob 新名 / Blob 舊名；audio_stream_end 支援度）
                     try:
-                        core.log_print(f"🔁 [AgentLoop] Live session 已連線：{live_model}（常駐迴路啟動）")
+                        self._blob_cls = getattr(_types, "AudioBlob", None) or getattr(_types, "Blob", None)
+                    except Exception:
+                        self._blob_cls = None
+                    try:
+                        import inspect as _insp
+                        self._end_kw = "audio_stream_end" in _insp.signature(self._session.send_realtime_input).parameters
+                    except Exception:
+                        self._end_kw = True
+                    try:
+                        _blob_name = getattr(self._blob_cls, "__name__", "?")
+                        core.log_print(f"🔁 [AgentLoop] Live session 已連線：{live_model}（常駐迴路啟動，音訊包={_blob_name}，掛電話信號={self._end_kw}）")
                     except Exception:
                         pass
                     return True
@@ -452,9 +463,23 @@ class AgentSession:
         if not await self._ensure():
             return "", ""
         wait = timeout or self._timeout or RECEIVE_TIMEOUT
+        blob_cls = getattr(self, "_blob_cls", None)
+        if blob_cls is None:
+            try:
+                from google.genai import types as _t2
+                blob_cls = getattr(_t2, "AudioBlob", None) or getattr(_t2, "Blob", None)
+            except Exception:
+                blob_cls = None
+        if blob_cls is None:
+            try:
+                core = get_core()
+                core.log_print("👂 [AgentLoop 直聽組包失敗] SDK 無 AudioBlob/Blob")
+            except Exception:
+                pass
+            return "", ""
+        end_kw = getattr(self, "_end_kw", True)
         try:
-            from google.genai import types as _types
-            blob = _types.AudioBlob(data=pcm16k, mime_type="audio/pcm;rate=16000")
+            blob = blob_cls(data=pcm16k, mime_type="audio/pcm;rate=16000")
         except Exception as e:
             try:
                 core = get_core()
@@ -466,10 +491,11 @@ class AgentSession:
         async def _send_audio(sess):
             await sess.send_realtime_input(audio=blob)
             # 📞 說完掛電話：整段話一次送完，明確告知 server 話筒結束，否則 VAD 空等回空輪
-            try:
-                await sess.send_realtime_input(audio_stream_end=True)
-            except Exception:
-                pass
+            if end_kw:
+                try:
+                    await sess.send_realtime_input(audio_stream_end=True)
+                except Exception:
+                    pass
 
         async with self._chat_lock:
             heard, out = await self._exchange(core, _send_audio, wait)
@@ -758,6 +784,30 @@ async def handle_dad_audio(vts, input_queue, pcm16k: bytes, source: str = "mic")
     if not pcm16k or len(pcm16k) < 3200:
         log(f"👂 [AgentLoop 直聽跳過] PCM過短({len(pcm16k) if pcm16k else 0}B) → 舊鏈")
         return False
+    # ✂️ 靜音修剪＋25 秒封頂：VAD 常因環境音收不了口（整段 30 秒灌過去又慢又暈），
+    # 留有人聲段＋尾部，server 轉錄更快更準
+    try:
+        import numpy as _np
+        pcm_arr = _np.frombuffer(pcm16k, dtype=_np.int16).astype(_np.float32)
+        frame = 320  # 20ms @16k
+        nfr = max(1, len(pcm_arr) // frame)
+        rms = _np.sqrt((_np.abs(pcm_arr[:nfr * frame].reshape(nfr, frame).astype(_np.float64) ** 2)).mean(axis=1))
+        voiced = rms > 400.0
+        if voiced.any():
+            first, last = int(_np.argmax(voiced)), nfr - 1 - int(_np.argmax(voiced[::-1]))
+            first = max(0, first - 15)   # 前留 0.3s
+            last = min(nfr - 1, last + 25)  # 後留 0.5s
+            pcm_arr = pcm_arr[first * frame:(last + 1) * frame]
+            max_bytes = 16000 * 2 * 25
+            if len(pcm_arr) * 2 > max_bytes:
+                pcm_arr = pcm_arr[-max_bytes // 2:]
+            pcm16k = pcm_arr.astype(_np.int16).tobytes()
+            log(f"👂 [AgentLoop 直聽修剪] 靜音切除後 ≈ {len(pcm16k) / 2 / 16000:.1f}s")
+        if len(pcm16k) < 3200:
+            log("👂 [AgentLoop 直聽跳過] 修剪後過短 → 舊鏈")
+            return False
+    except Exception as _e_trim:
+        log(f"👂 [AgentLoop 直聽修剪失敗，用原音] {_e_trim}")
     # 🧾 自證 PCM：存檔供人耳驗證（16k 單聲道），若檔裡是正常語速人話 yet session 空回 → 轉向查 turn 完成信號
     try:
         import wave as _wv
