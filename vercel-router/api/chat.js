@@ -257,7 +257,9 @@ async function nvidiaEmbed(texts, apiKey) {
     if (!r.ok) throw new Error(((j && j.detail) || (j.error && j.error.message)) || ("HTTP " + r.status));
     const out = (j.data || []).map((d) => d.embedding).filter((v) => Array.isArray(v));
     if (!out.length) throw new Error("empty embedding");
-    return out;
+    const u = j.usage || {};
+    const tokens = Number(u.prompt_tokens ?? u.total_tokens) || 0;   // embedding 實耗（計費依據；快取命中不算）
+    return { vecs: out, tokens };
   } finally { clearTimeout(tm); }
 }
 /** 從 older 裡按向量相似度撿 top-k（塞得進 budgetEst 才拿）；回 {msgs:[system塊], count} */
@@ -277,13 +279,16 @@ async function retrieveRelevant(older, query, budgetEst, apiKey) {
   const qh = sumHash("emb1:q:" + qText);
   let qv = await embCacheGet(qh);
   const freshTexts = qv ? missed : [qText, ...missed];
+  let embTokens = 0;
   if (freshTexts.length) {
     const got = await nvidiaEmbed(freshTexts, apiKey);   // 一次批量，1 個 request
+    embTokens = got.tokens || 0;   // 只有新算的向量才計費
     let p = 0;
-    if (!qv) { qv = got[p++]; await embCacheSet(qh, qv); }
+    const vv = got.vecs;
+    if (!qv) { qv = vv[p++]; await embCacheSet(qh, qv); }
     for (const i of missedIdx) {
       const h = sumHash("emb1:" + docs[i].text);
-      vecs[i] = got[p++];
+      vecs[i] = vv[p++];
       await embCacheSet(h, vecs[i]);
     }
   }
@@ -305,7 +310,7 @@ async function retrieveRelevant(older, query, budgetEst, apiKey) {
   picked.sort((a, b) => a.i - b.i);   // 按時間序排回來，模型好讀
   const block = "[相關歷史原文（與你本問最相關，按時間序；session 完整保留）]\n" +
     picked.map((d, n) => `〈片段${n + 1}〉${d.text}`).join("\n");
-  return { msgs: [{ role: "system", content: block }], count: picked.length };
+  return { msgs: [{ role: "system", content: block }], count: picked.length, embTokens };
 }
 
 /** 把舊訊息分段壓成摘要：system 留首、最近 2 則原文、其餘濃縮；單一超長訊息則砍其前段 */
@@ -379,7 +384,7 @@ async function compressMessages(msgs, targetEst, gkey, roundKeys) {
   }
   const note = `[前文壓縮摘要（${older.length}則舊訊息濃縮，原文 session 完整保留）]\n${summary}`;
   let out = [...sys, { role: "system", content: note }, ...recent];
-  let rag = 0;
+  let rag = 0, embCost = 0, embTokens = 0;
   // RAG 補中間缺失：剩餘預算夠＋有本問＋有 key → 向量撿回最相關的原文片段（失敗就跳過，不擋路）
   try {
     const remain = targetEst - estPromptPts({ messages: out }) - 150;
@@ -387,6 +392,7 @@ async function compressMessages(msgs, targetEst, gkey, roundKeys) {
     const nvKey = remain > 900 && lastU ? await getNvidiaKey() : "";
     if (nvKey) {
       const rr = await retrieveRelevant(older, lastU.content, remain, nvKey);
+      embTokens = rr.embTokens || 0;
       if (rr.count > 0) {
         const out2 = [...sys, { role: "system", content: note }, ...rr.msgs, ...recent];
         if (estPromptPts({ messages: out2 }) <= targetEst) { out = out2; rag = rr.count; }
@@ -394,7 +400,13 @@ async function compressMessages(msgs, targetEst, gkey, roundKeys) {
     }
   } catch { /* RAG 失敗 → 只有摘要，一樣能過 */ }
   if (estPromptPts({ messages: out }) > targetEst) return null;   // 壓完還超 → 交給 trim 收尾
-  return { messages: out, folded: older.length, dropped: 0, summary, sumCost, fromCache, rag };
+  if (embTokens > 0) {
+    try {
+      const ep = await store.getPricing().catch(() => ({}));
+      embCost = store.costFor(EMBED_MODEL, embTokens, 0, ep);   // embedding 按站內價計入本次帳單
+    } catch { embCost = 0; }
+  }
+  return { messages: out, folded: older.length, dropped: 0, summary, sumCost, fromCache, rag, embCost };
 }
 
 /** ITPM 收斂器：先壓縮（保語義），壓不動才截斷；回 {body, folded, dropped, sumCost} 或 null */
@@ -580,7 +592,7 @@ module.exports = async (req, res) => {
   const wantStream = body.stream === true;
 
   // 本發帳本：壓縮摘要花的點數（併入實扣，1:1 如實轉嫁）與展示字串
-  let summaryCostTotal = 0, summaryNote = "", summaryFolded = 0, summaryRag = 0;
+  let summaryCostTotal = 0, summaryNote = "", summaryFolded = 0, summaryRag = 0, embCostTotal = 0;
   const pickSummaryKey = (arr) => {
     const now = Date.now();
     return arr.find((k) => (STATE.cooldownUntil.get("k:" + k) || 0) <= now) || arr[0];
@@ -598,6 +610,7 @@ module.exports = async (req, res) => {
         if (c && estPromptPts({ messages: c.messages }) <= limHint - 400) {
           body = { ...body, messages: c.messages };
           summaryCostTotal += c.sumCost || 0;
+          embCostTotal += c.embCost || 0;
           summaryFolded += c.folded || 0;
           summaryRag += c.rag || 0;
           if (c.folded > 0) summaryNote = `${c.folded}則舊訊息→摘要${c.fromCache ? "（快取）" : ""}${c.rag > 0 ? `＋RAG撿回${c.rag}段原文` : ""}`;
@@ -703,6 +716,7 @@ module.exports = async (req, res) => {
         if (channelName) res.setHeader("x-router-channel", channelName);
         if (summaryNote) { try { res.setHeader("x-context-summary", `folded=${summaryFolded}+rag=${summaryRag}`); } catch {} }
         if (summaryCostTotal > 0) { try { res.setHeader("x-summary-cost", String(summaryCostTotal)); } catch {} }
+        if (embCostTotal > 0) { try { res.setHeader("x-emb-cost", String(embCostTotal)); } catch {} }
         // ZDR（Zero Data Retention）：本中轉全程不存訊息內容，只記 token 流量
         if (channelZdr || process.env.ZDR === "1") res.setHeader("x-router-zdr", "1");
 
@@ -744,7 +758,7 @@ module.exports = async (req, res) => {
             ? { pt: realUsage.prompt_tokens, ct: realUsage.completion_tokens } : est;
           const total = u2.pt + u2.ct;
           const baseCost = store.costFor(model, u2.pt, u2.ct, await store.getPricing());
-          const cost = Math.max(0.000001, Math.round((baseCost + summaryCostTotal) * 1e6) / 1e6);
+          const cost = Math.max(0.000001, Math.round((baseCost + summaryCostTotal + embCostTotal) * 1e6) / 1e6);
           let billedLeft = null, planFedFlag = false;
           let win5 = null, winWk = null, cap5 = 0, capWk = 0;   // 方案用量%（給前端顯示）
           if (caller.kind === "user" && caller.user.credits !== -1) {
@@ -785,6 +799,7 @@ module.exports = async (req, res) => {
               inject.x_left = billedLeft;
               inject.x_plan = planFedFlag ? 1 : 0;
               if (summaryCostTotal > 0) inject.x_sumcost = Math.round(summaryCostTotal * 1e6) / 1e6;
+              if (embCostTotal > 0) inject.x_embcost = Math.round(embCostTotal * 1e6) / 1e6;
               if (summaryNote) inject.x_summary = summaryNote;
               if (summaryRag > 0) inject.x_rag = summaryRag;
               if (win5 !== null) inject.x_win = { u5: win5, c5: cap5, uw: winWk, cw: capWk };   // 方案用量%
@@ -805,7 +820,7 @@ module.exports = async (req, res) => {
         const realTokens = usage.pt + usage.ct;
         // 計費：直接按官方價（訂閱期間此值只進窗口/ROI，不動餘額；Free 則照扣）＋壓縮摘要成本
         const baseCost = store.costFor(model, usage.pt, usage.ct, await store.getPricing());
-        const cost = Math.max(0.000001, Math.round((baseCost + summaryCostTotal) * 1e6) / 1e6);
+        const cost = Math.max(0.000001, Math.round((baseCost + summaryCostTotal + embCostTotal) * 1e6) / 1e6);
         try { await store.recordKeyStat(gkey, { tokens: realTokens }); } catch {}
         try { await store.recordSpeed({ model, tokens: realTokens,
           tps: realTokens / Math.max(0.05, (Date.now() - t0) / 1000),
@@ -891,6 +906,7 @@ module.exports = async (req, res) => {
           if (sh) {
             body = sh.body;
             summaryCostTotal += sh.sumCost || 0;
+            embCostTotal += sh.embCost || 0;
             summaryFolded += sh.folded || 0;
             summaryRag += sh.rag || 0;
             if (sh.folded > 0) summaryNote = `${summaryFolded}則舊訊息→摘要${sh.rag > 0 ? `＋RAG撿回${sh.rag}段原文` : ""}`;

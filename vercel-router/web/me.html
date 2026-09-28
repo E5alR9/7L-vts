@@ -215,7 +215,7 @@
       <div class="rule"><b>⑥ 活動倍率</b>：🎉 活動期間，「簽到 / 推薦 / 方案5h與週上限」<b>全部 ×N</b>（管理頁一開關即生效，到期日自動失效）。</div>
       <div class="rule"><b>⑦ 划算公式</b>：月含額≈月費×2（Plus：10/週 → 月約43 免費額 vs 直接付20只有20用量）＋簽到差額——訂閱嚴格划算，打滿2倍回本、重度會撞窗。</div>
       <div class="rule"><b>⑧ 降級自由</b>：隨時按 Free 降回（不退費），帳上點數照樣能花；方案表數字全部可在管理端 🎉活動/方案 即改即生效。</div>
-      <div class="rule"><b>⑨ 免費層輸入上限（ITPM）</b>：Groq on_demand <b>單發輸入 ≈7,000 tokens/模型</b>（org層，分key無效——key多買的是併發，不是單發天花板），超標回 413——中轉會<b>先把舊訊息分段壓成摘要，再用向量 RAG（NVIDIA embedding，你的 key）撿回跟本問最相關的原文片段</b>（session 完整保留，回應標 📝 壓幾則＋🔍 撿幾段）；<b>重複前綴會命中 Groq prompt cache</b>（同 key/org 讀半價又更快，所以大輸入優先挑同一把高上限 key）；要打滿模型131k長上下文 → 升級 Groq Dev Tier 或 🧹 開新對話。</div>
+      <div class="rule"><b>⑨ 免費層輸入上限（ITPM）</b>：Groq on_demand <b>單發輸入 ≈7,000 tokens/模型</b>（org層，分key無效——key多買的是併發，不是單發天花板），超標回 413——中轉會<b>先把舊訊息分段壓成摘要，再用向量 RAG（NVIDIA embedding，你的 key）撿回跟本問最相關的原文片段，兩邊成本都按站內價計入本次扣點</b>（session 完整保留，回應標 📝 壓幾則＋🔍 撿幾段）；<b>重複前綴會命中 Groq prompt cache</b>（同 key/org 讀半價又更快，所以大輸入優先挑同一把高上限 key）；要打滿模型131k長上下文 → 升級 Groq Dev Tier 或 🧹 開新對話。</div>
     </div>
   </section>
 
@@ -1088,7 +1088,7 @@ async function playRun(){
   const bub = addMsg("ai", '<span class="cursor">▍</span>');
   const btn = $("playBtn");
   if(btn) btn.disabled = true;
-  let ans = "", why = "", usage = null, xCost = null, xLeft = null, xValue = null, xPlan = 0, xWin = null, xSumCost = null, xSummary = "", xRag = 0, finishReason = "";
+  let ans = "", why = "", usage = null, xCost = null, xLeft = null, xValue = null, xPlan = 0, xWin = null, xSumCost = null, xEmbCost = null, xSummary = "", xRag = 0, finishReason = "";
   const paint = (cursor) => {
     bub.innerHTML = (why ? `<div class="reason">🤔 ${esc(why)}</div>` : "") + md(ans) + (cursor ? '<span class="cursor">▍</span>' : "");
     box.scrollTop = box.scrollHeight;
@@ -1127,6 +1127,7 @@ async function playRun(){
           if(j.x_plan) xPlan = 1;
           if(j.x_win) xWin = j.x_win;
           if(j.x_sumcost !== undefined) xSumCost = j.x_sumcost;
+          if(j.x_embcost !== undefined) xEmbCost = j.x_embcost;
           if(j.x_summary) xSummary = j.x_summary;
           if(j.x_rag !== undefined) xRag = j.x_rag;
           const d = (j.choices && j.choices[0] && j.choices[0].delta) || {};
@@ -1171,7 +1172,12 @@ async function playRun(){
       return m ? `${m[1]}則舊訊息→摘要` : (h || "");
     })();
     if (csH) parts.push(`📝 前文已壓縮成摘要（${esc(csH)}，原文 session 完整保留）${xSumCost ? (xPlan === 1 ? ` · 壓縮成本 <b>${fmtPts(xSumCost)}</b> 點方案內行使（實扣0）` : ` · 壓縮成本 <b>${fmtPts(xSumCost)}</b> 點已計入本次扣點`) : ""}`);
-    if (xRag > 0) parts.push(`🔍 RAG 撿回 <b>${xRag}</b> 段最相關原文（向量檢索，走你的 NVIDIA 額度，站內不扣點）`);
+    if (xRag > 0) {
+      const eh = r.headers.get("x-emb-cost");
+      const ec = xEmbCost != null ? xEmbCost : (eh != null && eh !== "" ? Number(eh) : NaN);
+      const ecTxt = Number.isFinite(ec) ? (xPlan === 1 ? ` · embedding 成本 <b>${fmtPts(ec)}</b> 點方案內行使（實扣0）` : ` · embedding 成本 <b>${fmtPts(ec)}</b> 點已計入本次扣點`) : "";
+      parts.push(`🔍 RAG 撿回 <b>${xRag}</b> 段最相關原文（向量檢索${ecTxt}）`);
+    }
     const tail = parts.length ? `<div class="costline">${parts.join(" · ")}</div>` : "";
     bub.innerHTML = (why ? `<div class="reason">🤔 ${esc(why)}</div>` : "") + md(ans) + tail;
     box.scrollTop = box.scrollHeight;
