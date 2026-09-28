@@ -1163,7 +1163,7 @@ async function playRun(){
       if (m && m[2] !== undefined) xRag = Number(m[2]);
       return m ? `${m[1]}則舊訊息→摘要` : (h || "");
     })();
-    if (csH) parts.push(`📝 前文已壓縮成摘要（${esc(csH)}，原文 session 完整保留）${xSumCost ? ` · 壓縮成本 <b>${fmtPts(xSumCost)}</b> 點已計入本次扣點` : ""}`);
+    if (csH) parts.push(`📝 前文已壓縮成摘要（${esc(csH)}，原文 session 完整保留）${xSumCost ? (xPlan === 1 ? ` · 壓縮成本 <b>${fmtPts(xSumCost)}</b> 點方案內行使（實扣0）` : ` · 壓縮成本 <b>${fmtPts(xSumCost)}</b> 點已計入本次扣點`) : ""}`);
     if (xRag > 0) parts.push(`🔍 RAG 撿回 <b>${xRag}</b> 段最相關原文（向量檢索，走你的 NVIDIA 額度，站內不扣點）`);
     const tail = parts.length ? `<div class="costline">${parts.join(" · ")}</div>` : "";
     bub.innerHTML = (why ? `<div class="reason">🤔 ${esc(why)}</div>` : "") + md(ans) + tail;
