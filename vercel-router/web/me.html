@@ -923,6 +923,7 @@ function clearChat(){ newChat(); toast("已開新對話（舊對話保留在左�
 function newChat(){
   CUR_CHAT = null;
   PLAY_HIST = [];
+  autoRounds = 0;   // 新對話重置自動續寫計數
   const box = $("playOut");
   delete box.dataset.started;
   box.innerHTML = '<div class="msg ai"><div class="bubble muted">全新對話：上下文從零開始。舊對話都在左側清單，隨時點回來續聊。</div></div>';
@@ -1050,6 +1051,7 @@ document.addEventListener("click", (e) => {
 });
 /* ── 輸入歷史：↑帶上次輸入（連按回溯）、↓往新/清空 ── */
 let INPUT_HIST = [], INPUT_IDX = -1;
+let autoRounds = 0;   // 被截斷自動續寫計數（上限5輪，防無限迴圈+爆費）
 function playKey(e){
   if (e.key === "Enter") { playRun(); return; }
   if (e.key === "ArrowUp") {
@@ -1180,6 +1182,14 @@ async function playRun(){
     }
     saveChat();                                             // 自動存成 session（左側清單）
     if(IS_ADMIN) loadLogs();
+    // 被長度截斷 → 自動續寫到結束（上限5輪防爆費；失敗走 catch 不重試）
+    if(finishReason === "length" && autoRounds < 5){
+      autoRounds++;
+      toast(`被長度截斷，自動續寫（${autoRounds}/5）…`);
+      setTimeout(()=>continueWrite(true), 600);
+    } else {
+      autoRounds = 0;   // 自然結束就清零，下一輪重算
+    }
   }catch(e){
     // 失敗不再抽掉輸入：保留這句並存進 session（重載/切頁都還在）；同句重試不會重複入史
     const rawMsg = (e && e.message) || String(e);
@@ -1191,12 +1201,12 @@ async function playRun(){
   }
   if(btn) btn.disabled = false;
 }
-function continueWrite(){
+function continueWrite(auto){
   const inp = $("playText");
-  if(inp && inp.value.trim()){ toast("輸入框有字，先送出或清空再續寫", true); return; }
-  if(!PLAY_HIST.length){ toast("沒有上下文可續寫", true); return; }
+  if(!auto && inp && inp.value.trim()){ toast("輸入框有字，先送出或清空再續寫", true); return; }
+  if(!PLAY_HIST.length){ if(!auto) toast("沒有上下文可續寫", true); return; }
   if(inp) inp.value = "請從剛才斷掉的地方繼續往下寫，不要重複前文。";
-  playRun();   // 走正常發送路徑（入史、串流、存檔全自動）
+  playRun();   // 走正常發送路徑（入史、串流、存檔、計費全自動，每輪照常計費）
 }
 async function loadChannels(){
   try{
