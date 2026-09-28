@@ -188,6 +188,8 @@ const DEFAULT_PRICING = {
   "openai/gpt-oss-120b": 1,
   "openai/gpt-oss-20b": 1,
   "allam-2-7b": 1,
+  "deepseek-ai/deepseek-v4.1-flash": 1,
+  "z-ai/glm-5.3-flash": 1,
   "openai/gpt-oss-safeguard-20b": 1,
   "meta-llama/llama-prompt-guard-2-22m": 1,
   "meta-llama/llama-prompt-guard-2-86m": 1,
@@ -564,8 +566,15 @@ async function getKeyStat() {
   } catch { return { day: "", keys: {} }; }
 }
 
+/** NVIDIA 直連聊天模型（走你的 nvapi key；上游免費額度，站內按下方站內價計點，管理頁可改）
+ *  只有「此帳號實測 200 過的」才會列進來；404 無權的不加。 */
+const NV_CHAT_MODELS = {
+  "deepseek-ai/deepseek-v4.1-flash": { label: "DeepSeek V4.1 Flash（推理）" },
+  "z-ai/glm-5.3-flash":              { label: "GLM 5.3 Flash（快速）" },
+};
 /** 模型官方參考價（$/1M tokens，input/output；以 Groq 公告為準）
- *  扣點規則：站內實付 = total_tokens × 倍率（倍率見 DEFAULT_PRICING） */
+ *  扣點規則：站內實付 = total_tokens × 倍率（倍率見 DEFAULT_PRICING）
+ *  註：nv/ 開頭為 NVIDIA 站內價（上游免費額度 $0，費率由站長定，計費表可改） */
 /** 模型官方價（對齊 console.groq.com/docs/models 現行目錄 = 你的帳號11模型，一模一樣、無未列）
  *  非 token 計價模型（STT/TTS）用 unit 顯示、input/output=0（聊天端點打不到它們） */
 const MODEL_PRICES = {
@@ -574,6 +583,9 @@ const MODEL_PRICES = {
   "openai/gpt-oss-120b": { input: 0.15,  output: 0.60, note: "推理較強" },
   "openai/gpt-oss-20b":  { input: 0.075, output: 0.30, note: "計費基準" },
   "allam-2-7b":          { input: 0,     output: 0,    note: "免費（$0 計價）" },
+  // NVIDIA 站內價（上游免費額度 $0；對標同級 Groq 價，計費表可改）
+  "deepseek-ai/deepseek-v4.1-flash": { input: 0.15,  output: 0.60, note: "NV · 站內價（推理，對標120b級）" },
+  "z-ai/glm-5.3-flash":              { input: 0.075, output: 0.30, note: "NV · 站內價（快速，對標20b級）" },
   // 安全模型（3）
   "openai/gpt-oss-safeguard-20b": { input: 0.075, output: 0.30, note: "安全模型" },
   "meta-llama/llama-prompt-guard-2-22m": { input: 0.03, output: 0.03, note: "安全審查" },
@@ -695,4 +707,4 @@ async function setConfig(cfg) {
   await k.set("gr:config", JSON.stringify(cfg || {}));
 }
 
-module.exports = { kv, hasKV, envKeys, mask, getManagedKeys, setManagedKeys, allKeys, getUsers, setUsers, isSeeded, markSeeded, recordUsage, getUsage, dayKey, getInvites, setInvites, newInviteCode, getPricing, setPricing, priceFor, DEFAULT_PRICING, MODEL_PRICES, MODEL_SPECS, POINTS_PER_USD, costFor, logRequest, getLogs, logUserReq, getUserReqs, ensureMonthlyQuota, getChannels, setChannels, newChannelId, pickChannel, getPlans, setPlans, DEFAULT_PLANS, activePlanOf, planCapsFor, maybeRenew, addHourlySpend, hourlySpend, streakDays, streakMult, getEvent, setEvent, activeEvent, keyStatHash, recordKeyStat, getKeyStat, recordSpeed, getSpeed, getChats, setChats, getConfig, setConfig, setItpmCap, getItpmCaps };
+module.exports = { kv, hasKV, envKeys, mask, getManagedKeys, setManagedKeys, allKeys, getUsers, setUsers, isSeeded, markSeeded, recordUsage, getUsage, dayKey, getInvites, setInvites, newInviteCode, getPricing, setPricing, priceFor, DEFAULT_PRICING, MODEL_PRICES, MODEL_SPECS, POINTS_PER_USD, costFor, logRequest, getLogs, logUserReq, getUserReqs, ensureMonthlyQuota, getChannels, setChannels, newChannelId, pickChannel, getPlans, setPlans, DEFAULT_PLANS, activePlanOf, planCapsFor, maybeRenew, addHourlySpend, hourlySpend, streakDays, streakMult, getEvent, setEvent, activeEvent, keyStatHash, recordKeyStat, getKeyStat, recordSpeed, getSpeed, getChats, setChats, getConfig, setConfig, setItpmCap, getItpmCaps, NV_CHAT_MODELS };

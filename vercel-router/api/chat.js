@@ -19,6 +19,7 @@
 
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 const MODELS_URL = "https://api.groq.com/openai/v1/models";
+const NV_URL = "https://integrate.api.nvidia.com/v1/chat/completions";   // NVIDIA 直連（nvapi key 存服務端，只寫不讀）
 
 const store = require("../lib/store");
 const libAuth = require("../lib/auth");
@@ -641,6 +642,20 @@ module.exports = async (req, res) => {
       }
     } catch { /* 渠道讀取失敗就用全池 */ }
 
+    // NVIDIA 直連模型：走 nvapi 單 key（存服務端 KV，只寫不讀），不吃 Groq 輪替池；
+    // 失敗就記錯並跳下一階（Groq 梯隊兜底）
+    const nvSpec = store.NV_CHAT_MODELS[model];
+    if (nvSpec) {
+      let nk = "";
+      try { nk = await getNvidiaKey(); } catch {}
+      if (!nk) {
+        lastError = { status: 500, payload: { error: { message: "未設定 NVIDIA 金鑰（管理頁 config.set nvidiaKey）" } } };
+        if (model === ladder[0] && !reqError) reqError = lastError;
+        continue;   // 下一階
+      }
+      roundKeys = [nk];   // 單 key 跑完這圈
+    }
+
     // 大輸入（近/超 ITPM）→ 優先挑「沒被 org ITPM 拒過、或上限吃得下」的 key：
     // 將來掛一把 Dev Tier 的 key 就會自然被選中跑長上下文（免費 key 全被牆擋也照跑）
     const inputEst = estPromptPts(body);
@@ -666,7 +681,13 @@ module.exports = async (req, res) => {
 
       let upstream;
       try {
-        upstream = await fetch(GROQ_URL, init);
+        // 100s 上限（< Vercel 120s）：上游排隊太久就換下一把/下一階，不讓整發陪葬；
+        // 只包 fetch 本身，串流 body 不受影響
+        const ac = new AbortController();
+        const tm = setTimeout(() => ac.abort(), 100000);
+        try {
+          upstream = await fetch(nvSpec ? NV_URL : GROQ_URL, { ...init, signal: ac.signal });
+        } finally { clearTimeout(tm); }
       } catch (e) {
         coolKey(gkey, 503);
         try { await store.recordKeyStat(gkey, { err: true }); } catch {}
@@ -676,6 +697,7 @@ module.exports = async (req, res) => {
 
       if (upstream.ok) {
         res.setHeader("x-router-model", model);
+        res.setHeader("x-router-upstream", nvSpec ? "nvidia" : "groq");
         res.setHeader("x-router-key-index", String(idx));
         res.setHeader("x-router-key-count", String(roundKeys.length));
         if (channelName) res.setHeader("x-router-channel", channelName);

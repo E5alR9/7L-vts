@@ -15,7 +15,8 @@ function staticFallback() {
   // 上游掛了的最後手段：本側已知價目當目錄
   return JSON.stringify({
     object: "list",
-    data: Object.keys(store.MODEL_PRICES).map((id) => ({ id, object: "model", owned_by: "groq" })),
+    data: Object.keys(store.MODEL_PRICES).map((id) => ({ id, object: "model",
+      owned_by: store.NV_CHAT_MODELS[id] ? "nvidia" : "groq" })),
   });
 }
 
@@ -39,8 +40,19 @@ module.exports = async (req, res) => {
 
   try {
     const upstream = await fetch(MODELS_URL, { headers: { Authorization: `Bearer ${keys[0]}` } });
-    const text = await upstream.text();
+    let text = await upstream.text();
     if (upstream.ok) {
+      // 併入 NVIDIA 直連模型（靜態清單，不打上游）
+      try {
+        const j = JSON.parse(text);
+        if (j && Array.isArray(j.data)) {
+          const have = new Set(j.data.map((m) => m.id));
+          for (const id of Object.keys(store.NV_CHAT_MODELS)) {
+            if (!have.has(id)) j.data.push({ id, object: "model", owned_by: "nvidia" });
+          }
+          text = JSON.stringify(j);
+        }
+      } catch { /* 解析失敗就原樣回傳 */ }
       CACHE = { at: Date.now(), text };
       return reply(res, 200, text);
     }

@@ -1086,7 +1086,7 @@ async function playRun(){
   const bub = addMsg("ai", '<span class="cursor">▍</span>');
   const btn = $("playBtn");
   if(btn) btn.disabled = true;
-  let ans = "", why = "", usage = null, xCost = null, xLeft = null, xValue = null, xPlan = 0, xWin = null, xSumCost = null, xSummary = "", xRag = 0;
+  let ans = "", why = "", usage = null, xCost = null, xLeft = null, xValue = null, xPlan = 0, xWin = null, xSumCost = null, xSummary = "", xRag = 0, finishReason = "";
   const paint = (cursor) => {
     bub.innerHTML = (why ? `<div class="reason">🤔 ${esc(why)}</div>` : "") + md(ans) + (cursor ? '<span class="cursor">▍</span>' : "");
     box.scrollTop = box.scrollHeight;
@@ -1128,6 +1128,8 @@ async function playRun(){
           if(j.x_summary) xSummary = j.x_summary;
           if(j.x_rag !== undefined) xRag = j.x_rag;
           const d = (j.choices && j.choices[0] && j.choices[0].delta) || {};
+          const fr = j.choices && j.choices[0] && j.choices[0].finish_reason;
+          if(fr) finishReason = fr;   // 上游直傳，原樣保留：stop=自然結束，length=被max_tokens截斷
           why += d.reasoning_content || d.reasoning || "";
           ans += d.content || "";
         }catch{}
@@ -1151,6 +1153,9 @@ async function playRun(){
     }
     if(usage && usage.total_tokens){
       parts.push(`🔤 <b>${usage.total_tokens}</b> tokens（in ${usage.prompt_tokens ?? "?"} / out ${usage.completion_tokens ?? "?"} · ${usage.estimated ? "約估＝扣點依據" : "實測＝扣點依據"}）`);
+    }
+    if(finishReason === "length"){
+      parts.push(`✂️ 回應被長度上限截斷（max_tokens） <button onclick="continueWrite()">▶ 從斷點繼續寫</button>`);
     }
     const stH = r.headers.get("server-timing");
     const stM = stH && stH.match(/dur=(\d+)/);
@@ -1185,6 +1190,13 @@ async function playRun(){
     saveChat();   // 把「輸入」也留下——不再讓它消失
   }
   if(btn) btn.disabled = false;
+}
+function continueWrite(){
+  const inp = $("playText");
+  if(inp && inp.value.trim()){ toast("輸入框有字，先送出或清空再續寫", true); return; }
+  if(!PLAY_HIST.length){ toast("沒有上下文可續寫", true); return; }
+  if(inp) inp.value = "請從剛才斷掉的地方繼續往下寫，不要重複前文。";
+  playRun();   // 走正常發送路徑（入史、串流、存檔全自動）
 }
 async function loadChannels(){
   try{
