@@ -679,4 +679,20 @@ async function setItpmCap(prefix, info) {
   } catch { /* 記失敗不擋路 */ }
 }
 
-module.exports = { kv, hasKV, envKeys, mask, getManagedKeys, setManagedKeys, allKeys, getUsers, setUsers, isSeeded, markSeeded, recordUsage, getUsage, dayKey, getInvites, setInvites, newInviteCode, getPricing, setPricing, priceFor, DEFAULT_PRICING, MODEL_PRICES, MODEL_SPECS, POINTS_PER_USD, costFor, logRequest, getLogs, logUserReq, getUserReqs, ensureMonthlyQuota, getChannels, setChannels, newChannelId, pickChannel, getPlans, setPlans, DEFAULT_PLANS, activePlanOf, planCapsFor, maybeRenew, addHourlySpend, hourlySpend, streakDays, streakMult, getEvent, setEvent, activeEvent, keyStatHash, recordKeyStat, getKeyStat, recordSpeed, getSpeed, getChats, setChats, setItpmCap, getItpmCaps };
+/** 站務設定 gr:config（放第三方金鑰等敏感值；只經 TLS，不進代碼/git/前端） */
+async function getConfig() {
+  const k = kv();
+  if (!k) return {};
+  try {
+    const raw = await k.get("gr:config");
+    const o = raw ? (typeof raw === "string" ? JSON.parse(raw) : raw) : {};
+    return o && typeof o === "object" ? o : {};
+  } catch { return {}; }
+}
+async function setConfig(cfg) {
+  const k = kv();
+  if (!k) throw new Error("NO_KV");
+  await k.set("gr:config", JSON.stringify(cfg || {}));
+}
+
+module.exports = { kv, hasKV, envKeys, mask, getManagedKeys, setManagedKeys, allKeys, getUsers, setUsers, isSeeded, markSeeded, recordUsage, getUsage, dayKey, getInvites, setInvites, newInviteCode, getPricing, setPricing, priceFor, DEFAULT_PRICING, MODEL_PRICES, MODEL_SPECS, POINTS_PER_USD, costFor, logRequest, getLogs, logUserReq, getUserReqs, ensureMonthlyQuota, getChannels, setChannels, newChannelId, pickChannel, getPlans, setPlans, DEFAULT_PLANS, activePlanOf, planCapsFor, maybeRenew, addHourlySpend, hourlySpend, streakDays, streakMult, getEvent, setEvent, activeEvent, keyStatHash, recordKeyStat, getKeyStat, recordSpeed, getSpeed, getChats, setChats, getConfig, setConfig, setItpmCap, getItpmCaps };

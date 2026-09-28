@@ -233,6 +233,25 @@ module.exports = async (req, res) => {
       return sendJson(res, 200, { ok: true });
     }
 
+    // ── 站務設定（僅管理員；敏感值只寫不讀，讀只回遮蔽）──
+    if (action === "config.set" || action === "config.get") {
+      const ALLOW = ["nvidiaKey"];   // 白名單：只有這些 key 能存
+      if (action === "config.set") {
+        const k = String(body.key || "");
+        if (!ALLOW.includes(k)) return sendJson(res, 400, { ok: false, error: { message: "不允許的設定項" } });
+        const v = String(body.value || "");
+        if (!v || v.length < 8) return sendJson(res, 400, { ok: false, error: { message: "值太短" } });
+        const cfg = await store.getConfig();
+        cfg[k] = v;
+        await store.setConfig(cfg);
+        return sendJson(res, 200, { ok: true, key: k, saved: true });
+      }
+      const cfg = await store.getConfig();
+      const out = {};
+      for (const k of ALLOW) out[k] = cfg[k] ? `已設定(${String(cfg[k]).length}字,尾${String(cfg[k]).slice(-4)})` : "";
+      return sendJson(res, 200, { ok: true, config: out });
+    }
+
     // ── 邀請碼（加額度用，不是擋註冊）──
     if (action === "invites") {
       const inv = await store.getInvites();

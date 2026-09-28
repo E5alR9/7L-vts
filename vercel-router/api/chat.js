@@ -201,6 +201,112 @@ async function summarizeChunkResilient(chunkText, roundKeys, badKey) {
   return summarizeWithModels(chunkText, roundKeys, badKey, SUMMARY_MODELS);
 }
 
+/** 向量 RAG（NVIDIA nemotron-3-embed-1b，dim 2048）：從被折疊的舊訊息裡撿回跟本問最相關的原文片段
+ *  embeddings 走你自己的 NVIDIA key＋免費額度（站內不扣點）；向量快取 30 天 */
+const EMBED_MODEL = "nvidia/nemotron-3-embed-1b";
+const EMBED_MEM = new Map();
+async function getNvidiaKey() {
+  if (process.env.NVIDIA_API_KEY) return process.env.NVIDIA_API_KEY;
+  try {
+    const cfg = await store.getConfig();
+    return (cfg && cfg.nvidiaKey) || "";
+  } catch { return ""; }
+}
+function cosSim(a, b) {
+  let s = 0, na = 0, nb = 0;
+  const n = Math.min(a.length, b.length);
+  for (let i = 0; i < n; i++) { s += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i]; }
+  return (na > 0 && nb > 0) ? s / (Math.sqrt(na) * Math.sqrt(nb)) : 0;
+}
+async function embCacheGet(h) {
+  if (EMBED_MEM.has(h)) return EMBED_MEM.get(h);
+  try {
+    const k = store.kv();
+    if (!k) return null;
+    const raw = await k.get("gr:emb:" + h);
+    if (!raw) return null;
+    const v = typeof raw === "string" ? JSON.parse(raw) : raw;
+    if (Array.isArray(v) && v.length > 100) {
+      if (EMBED_MEM.size > 200) EMBED_MEM.clear();
+      EMBED_MEM.set(h, v);
+      return v;
+    }
+  } catch {}
+  return null;
+}
+async function embCacheSet(h, vec) {
+  try {
+    if (EMBED_MEM.size > 200) EMBED_MEM.clear();
+    EMBED_MEM.set(h, vec);
+    const k = store.kv();
+    if (k) await k.set("gr:emb:" + h, JSON.stringify(vec), { ex: 30 * 86400 });
+  } catch {}
+}
+async function nvidiaEmbed(texts, apiKey) {
+  const ac = new AbortController();
+  const tm = setTimeout(() => ac.abort(), 30000);
+  try {
+    const r = await fetch("https://integrate.api.nvidia.com/v1/embeddings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+      signal: ac.signal,
+      body: JSON.stringify({ model: EMBED_MODEL, input: texts, encoding_format: "float", truncate: "END" }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(((j && j.detail) || (j.error && j.error.message)) || ("HTTP " + r.status));
+    const out = (j.data || []).map((d) => d.embedding).filter((v) => Array.isArray(v));
+    if (!out.length) throw new Error("empty embedding");
+    return out;
+  } finally { clearTimeout(tm); }
+}
+/** 從 older 裡按向量相似度撿 top-k（塞得進 budgetEst 才拿）；回 {msgs:[system塊], count} */
+async function retrieveRelevant(older, query, budgetEst, apiKey) {
+  const docs = older
+    .map((m, i) => ({ i, text: `${m.role === "user" ? "user" : "assistant"}: ${String(m.content ?? "")}`.slice(0, 2000) }))
+    .filter((d) => d.text.replace(/^(user|assistant):\s*/, "").trim().length > 0);
+  if (!docs.length || !String(query || "").trim()) return { msgs: [], count: 0 };
+  const vecs = new Array(docs.length).fill(null);
+  const missed = [], missedIdx = [];
+  for (let i = 0; i < docs.length; i++) {
+    const c = await embCacheGet(sumHash("emb1:" + docs[i].text));
+    if (c) vecs[i] = c;
+    else { missed.push(docs[i].text); missedIdx.push(i); }
+  }
+  const qText = String(query).slice(0, 2000);
+  const qh = sumHash("emb1:q:" + qText);
+  let qv = await embCacheGet(qh);
+  const freshTexts = qv ? missed : [qText, ...missed];
+  if (freshTexts.length) {
+    const got = await nvidiaEmbed(freshTexts, apiKey);   // 一次批量，1 個 request
+    let p = 0;
+    if (!qv) { qv = got[p++]; await embCacheSet(qh, qv); }
+    for (const i of missedIdx) {
+      const h = sumHash("emb1:" + docs[i].text);
+      vecs[i] = got[p++];
+      await embCacheSet(h, vecs[i]);
+    }
+  }
+  if (!qv) return { msgs: [], count: 0 };
+  const scored = docs.map((d, i) => ({ ...d, s: vecs[i] ? cosSim(qv, vecs[i]) : -1 }))
+    .filter((d) => d.s > 0.3)
+    .sort((a, b) => b.s - a.s);
+  if (!scored.length) return { msgs: [], count: 0 };
+  const picked = [];
+  let used = 0;
+  for (const d of scored) {   // 貪心塞 budget，最多 4 段
+    if (picked.length >= 4) break;
+    const e = estPromptPts({ messages: [{ role: "system", content: d.text }] });
+    if (used + e > budgetEst) continue;
+    used += e;
+    picked.push(d);
+  }
+  if (!picked.length) return { msgs: [], count: 0 };
+  picked.sort((a, b) => a.i - b.i);   // 按時間序排回來，模型好讀
+  const block = "[相關歷史原文（與你本問最相關，按時間序；session 完整保留）]\n" +
+    picked.map((d, n) => `〈片段${n + 1}〉${d.text}`).join("\n");
+  return { msgs: [{ role: "system", content: block }], count: picked.length };
+}
+
 /** 把舊訊息分段壓成摘要：system 留首、最近 2 則原文、其餘濃縮；單一超長訊息則砍其前段 */
 async function compressMessages(msgs, targetEst, gkey, roundKeys) {
   const sys = msgs.filter((m) => m.role === "system");
@@ -271,9 +377,23 @@ async function compressMessages(msgs, targetEst, gkey, roundKeys) {
     await sumCacheSet(h, summary);
   }
   const note = `[前文壓縮摘要（${older.length}則舊訊息濃縮，原文 session 完整保留）]\n${summary}`;
-  const out = [...sys, { role: "system", content: note }, ...recent];
+  let out = [...sys, { role: "system", content: note }, ...recent];
+  let rag = 0;
+  // RAG 補中間缺失：剩餘預算夠＋有本問＋有 key → 向量撿回最相關的原文片段（失敗就跳過，不擋路）
+  try {
+    const remain = targetEst - estPromptPts({ messages: out }) - 150;
+    const lastU = [...msgs].reverse().find((m) => m.role === "user");
+    const nvKey = remain > 900 && lastU ? await getNvidiaKey() : "";
+    if (nvKey) {
+      const rr = await retrieveRelevant(older, lastU.content, remain, nvKey);
+      if (rr.count > 0) {
+        const out2 = [...sys, { role: "system", content: note }, ...rr.msgs, ...recent];
+        if (estPromptPts({ messages: out2 }) <= targetEst) { out = out2; rag = rr.count; }
+      }
+    }
+  } catch { /* RAG 失敗 → 只有摘要，一樣能過 */ }
   if (estPromptPts({ messages: out }) > targetEst) return null;   // 壓完還超 → 交給 trim 收尾
-  return { messages: out, folded: older.length, dropped: 0, summary, sumCost, fromCache };
+  return { messages: out, folded: older.length, dropped: 0, summary, sumCost, fromCache, rag };
 }
 
 /** ITPM 收斂器：先壓縮（保語義），壓不動才截斷；回 {body, folded, dropped, sumCost} 或 null */
@@ -459,7 +579,7 @@ module.exports = async (req, res) => {
   const wantStream = body.stream === true;
 
   // 本發帳本：壓縮摘要花的點數（併入實扣，1:1 如實轉嫁）與展示字串
-  let summaryCostTotal = 0, summaryNote = "", summaryFolded = 0;
+  let summaryCostTotal = 0, summaryNote = "", summaryFolded = 0, summaryRag = 0;
   const pickSummaryKey = (arr) => {
     const now = Date.now();
     return arr.find((k) => (STATE.cooldownUntil.get("k:" + k) || 0) <= now) || arr[0];
@@ -478,7 +598,8 @@ module.exports = async (req, res) => {
           body = { ...body, messages: c.messages };
           summaryCostTotal += c.sumCost || 0;
           summaryFolded += c.folded || 0;
-          if (c.folded > 0) summaryNote = `${c.folded}則舊訊息→摘要${c.fromCache ? "（快取）" : ""}`;
+          summaryRag += c.rag || 0;
+          if (c.folded > 0) summaryNote = `${c.folded}則舊訊息→摘要${c.fromCache ? "（快取）" : ""}${c.rag > 0 ? `＋RAG撿回${c.rag}段原文` : ""}`;
         }
       } catch { /* 預壓失敗 → 走正常流程，413 時再收斂 */ }
     }
@@ -558,7 +679,7 @@ module.exports = async (req, res) => {
         res.setHeader("x-router-key-index", String(idx));
         res.setHeader("x-router-key-count", String(roundKeys.length));
         if (channelName) res.setHeader("x-router-channel", channelName);
-        if (summaryNote) { try { res.setHeader("x-context-summary", `folded=${summaryFolded}`); } catch {} }
+        if (summaryNote) { try { res.setHeader("x-context-summary", `folded=${summaryFolded}+rag=${summaryRag}`); } catch {} }
         if (summaryCostTotal > 0) { try { res.setHeader("x-summary-cost", String(summaryCostTotal)); } catch {} }
         // ZDR（Zero Data Retention）：本中轉全程不存訊息內容，只記 token 流量
         if (channelZdr || process.env.ZDR === "1") res.setHeader("x-router-zdr", "1");
@@ -643,6 +764,7 @@ module.exports = async (req, res) => {
               inject.x_plan = planFedFlag ? 1 : 0;
               if (summaryCostTotal > 0) inject.x_sumcost = Math.round(summaryCostTotal * 1e6) / 1e6;
               if (summaryNote) inject.x_summary = summaryNote;
+              if (summaryRag > 0) inject.x_rag = summaryRag;
               if (win5 !== null) inject.x_win = { u5: win5, c5: cap5, uw: winWk, cw: capWk };   // 方案用量%
             }
             res.write(`data: ${JSON.stringify(inject)}\n\n`);
@@ -748,11 +870,12 @@ module.exports = async (req, res) => {
             body = sh.body;
             summaryCostTotal += sh.sumCost || 0;
             summaryFolded += sh.folded || 0;
-            if (sh.folded > 0) summaryNote = `${summaryFolded}則舊訊息→摘要`;
+            summaryRag += sh.rag || 0;
+            if (sh.folded > 0) summaryNote = `${summaryFolded}則舊訊息→摘要${sh.rag > 0 ? `＋RAG撿回${sh.rag}段原文` : ""}`;
             tries--;                                       // 同一發預算內立刻重打
             try {
               res.setHeader("x-context-trimmed", String(sh.dropped || 0));
-              if (sh.folded > 0) res.setHeader("x-context-summary", `folded=${sh.folded}`);
+              if (sh.folded > 0) res.setHeader("x-context-summary", `folded=${sh.folded}+rag=${sh.rag || 0}`);
             } catch {}
             continue;
           }
