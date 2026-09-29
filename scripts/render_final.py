@@ -121,6 +121,14 @@ def main():
     stereo = np.stack([glue(stereo[:, c], thr_db=-22.0, ratio=5.0) for c in range(2)], axis=1)
     n = min(len(stereo), len(voc))
     mix = stereo[:n] * 0.8 + voc[:n] * 1.0
+    # 寬度自動對標 0.42：只收人聲側邊（靜態增益，無 pumping）
+    L0, R0 = mix[:, 0].copy(), mix[:, 1].copy()
+    _m, _s = (L0 + R0) / 2, (L0 - R0) / 2
+    _w = float(np.sqrt((_s ** 2).mean()) / (np.sqrt((_m ** 2).mean()) + 1e-9))
+    if _w > 0.45:
+        _k = 0.42 / _w
+        mix[:, 0], mix[:, 1] = _m + _s * _k, _m - _s * _k
+    mix = np.stack([glue(mix[:, c], thr_db=-22.0, ratio=5.0) for c in range(2)], axis=0).T
     mix = np.tanh(mix * 0.85)
     mix /= max(1e-6, np.max(np.abs(mix)))
     mix *= 10.0 ** (-1.0 / 20.0)  # 軟上限 -1dBFS（處方，不靠 peak normalize 撐）
