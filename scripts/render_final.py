@@ -12,8 +12,8 @@ import numpy as np
 
 SR = 44100
 SF2 = os.path.join(BASE, "soundfonts", "FluidR3_GM_GS.sf2")
-VOICES = {"Guitar": (0, 30), "Piano": (0, 0), "BassRoots": (0, 33),
-          "Other": (0, 48), "Drums": (128, 0)}
+VOICES = {"Guitar": (0, 30), "Piano": None, "BassRoots": (0, 33),
+          "Other": (0, 48), "Drums": (128, 0)}  # Piano=None：原曲無鋼琴（分離桶誤判，直接靜音）
 
 
 def main():
@@ -28,7 +28,9 @@ def main():
     master = np.zeros(int(SR * total) + 8, dtype=np.float64)
     for track in mid.tracks:
         name = getattr(track, "name", "")
-        bk, prog = VOICES.get(name, (0, 0))
+        if name not in VOICES or VOICES[name] is None:
+            continue  # 未列名或靜音軌跳過
+        bk, prog = VOICES[name]
         abs_t = 0.0
         for msg in track:
             abs_t += mido.tick2second(msg.time, mid.ticks_per_beat, tempo)
