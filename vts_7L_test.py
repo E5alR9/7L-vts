@@ -273,6 +273,39 @@ INTERACTIONS_TOOLS = [
     },
     {
         "type": "function",
+        "name": "midi.inspect",
+        "description": "🎼 讀譜：看 MIDI 檔的軌數／音符數／時長／各軌音色音域。改編前先看結構時調用！",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "midi_sheets/ 下檔名或完整路徑"}
+            },
+            "required": ["path"]
+        }
+    },
+    {
+        "type": "function",
+        "name": "midi.edit",
+        "description": "🎼 改譜：移調／力度／量化／換音色／加音符／刪音區（二選一動作 op）。當老爸或觀眾說『升調』、『對齊拍子』、『小聲點』、『換小提琴』、『加一段』時調用！改完自動進曲庫，可直接 pe.play_midi_band 演奏。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "midi_sheets/ 下檔名或完整路徑"},
+                "op": {"type": "string", "description": "transpose（需 semitones）／velocity（需 scale）／quantize（grid 4/8/16/32）／program（需 channel＋program）／add（需 notes JSON 陣列）／delrange（需 lo＋hi）"},
+                "semitones": {"type": "integer", "description": "移調半音數"},
+                "scale": {"type": "number", "description": "力度倍率 0.1-2.0"},
+                "grid": {"type": "string", "description": "量化網格"},
+                "channel": {"type": "integer", "description": "通道 0-15（鼓 9 拒絕）"},
+                "program": {"type": "integer", "description": "音色 0-127"},
+                "notes": {"type": "string", "description": "加音符 JSON 陣列 [{pitch,start_beat,duration_beats,velocity,channel}]"},
+                "lo": {"type": "integer", "description": "刪音區下限"},
+                "hi": {"type": "integer", "description": "刪音區上限"}
+            },
+            "required": ["path", "op"]
+        }
+    },
+    {
+        "type": "function",
         "name": "pe.mashup_virtual_piano",
         "description": "7L 將多首高難度鋼琴曲同時並發演奏 (無數量限制！可同時彈 2首、3首、4首甚至更多，多軌多色瀑布流極限演奏)。當老爸或觀眾說『把A跟B混在一起彈』、『同時彈A、B、C』、『A x B x C 合體』、『A + B + C 多曲合奏』、『把多首練習曲雜在一起彈』時調用。",
         "parameters": {
@@ -846,6 +879,34 @@ async def execute_tool_dispatch(fn_name: str, fn_args: dict, caller_target: str 
             extracted_text += f" （系統回報：AI 作曲已生成（{_res.get('file', '')}），請播報）"
         else:
             extracted_text += f" （系統回報：AI 作曲失敗：{_res.get('error', '')}）"
+    elif fn_name in ["midi.inspect", "inspect_midi"]:
+        import services.midi_editor as _me
+        _info = _me.inspect_midi(fn_args.get("path", ""))
+        extracted_text += f" （系統回報：讀譜：{_info if isinstance(_info, str) else str(_info)[:500]}）"
+    elif fn_name in ["midi.edit", "edit_midi"]:
+        import services.midi_editor as _me2
+        _op = str(fn_args.get("op", "")).lower()
+        _mp = fn_args.get("path", "")
+        _r = {"ok": False, "error": f"未知 op：{_op}"}
+        try:
+            if _op == "transpose":
+                _r = _me2.transpose(_mp, int(fn_args.get("semitones", 0)))
+            elif _op == "velocity":
+                _r = _me2.set_velocity(_mp, float(fn_args.get("scale", 1.0)))
+            elif _op == "quantize":
+                _r = _me2.quantize(_mp, str(fn_args.get("grid", "16")))
+            elif _op == "program":
+                _r = _me2.set_program(_mp, int(fn_args.get("channel", 0)), int(fn_args.get("program", 0)))
+            elif _op == "add":
+                import json as _js
+                _notes = fn_args.get("notes", "[]")
+                _notes = _js.loads(_notes) if isinstance(_notes, str) else _notes
+                _r = _me2.add_notes(_mp, _notes)
+            elif _op == "delrange":
+                _r = _me2.delete_pitch_range(_mp, int(fn_args.get("lo", 0)), int(fn_args.get("hi", 127)))
+        except Exception as _e:
+            _r = {"ok": False, "error": str(_e)[:150]}
+        extracted_text += f" （系統回報：改譜 {_op}：{str(_r)[:300]}）"
     elif fn_name in ["pe.play_midi_band", "play_midi_band"]:
         mf = fn_args.get("midi_file", "")
         preset = fn_args.get("band_preset", "")
