@@ -125,9 +125,12 @@ def test_hot_apply_non_restart_keys(tmp_path, monkeypatch):
     monkeypatch.delenv("TTS_ENGINE", raising=False)
     ec.update_settings({"TTS_ENGINE": "edge"}, path=p)
     assert "TTS_ENGINE" not in os.environ
-    # 熱套用的函式立刻看得到
+    # 熱套用的函式立刻看得到（MODE=companion 下測操作者通道；vtuber 模式強制關閉）
+    monkeypatch.setenv("MODE", "companion")
     from core.utils import operator_input_enabled
     assert operator_input_enabled() is True
+    monkeypatch.setenv("MODE", "vtuber")
+    assert operator_input_enabled() is False
 
 
 def test_quoting_for_special_values(tmp_path):

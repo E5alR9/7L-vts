@@ -218,6 +218,20 @@ INTERACTIONS_TOOLS = [
     },
     {
         "type": "function",
+        "name": "pe.play_midi_band",
+        "description": "🎺 MIDI 樂隊演奏：多軌 MIDI 保留原通道＋音色同時發聲（小提琴拉主旋律＋鋼琴伴奏＋貝斯＋鼓組一次到位）。當老爸或觀眾說『樂隊演奏』、『多種樂器一起』、『小提琴加鋼琴』、『完整編制』時調用！",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "midi_file": {"type": "string", "description": "本地 .mid 檔案路徑（midi_sheets/ 下）"},
+                "band_preset": {"type": "string", "description": "配器預設：piano_trio（鋼琴+貝斯+鼓）／violin_lead（小提琴主奏）／guitar_band（吉他樂隊）／strings（弦樂）"},
+                "title": {"type": "string", "description": "曲名（播報用）"}
+            },
+            "required": ["midi_file"]
+        }
+    },
+    {
+        "type": "function",
         "name": "pe.compose_and_play_original_piano",
         "description": "7L 現場自主即興作曲並親自演奏原創 88 鍵鋼琴曲。當老爸或觀眾說『妳自己寫一首歌來彈』、『現場自創一首』、『即興彈一首』、『自己創作一首鋼琴曲』、『來首妳自己原創的曲子』時調用！",
         "parameters": {
@@ -227,6 +241,18 @@ INTERACTIONS_TOOLS = [
                 "mood_or_style": {"type": "string", "description": "音樂風格與情緒氛圍 (如：'治癒抒情', '日系ACG', '輕快俏皮', '溫柔憂傷')"}
             },
             "required": []
+        }
+    },
+    {
+        "type": "function",
+        "name": "video.request_watch",
+        "description": "📺 觀眾點播看全片：把 YouTube 網址排入點播隊列，7L 後台看完播報（字幕→音軌轉錄→抽幀看圖→摘要）。當觀眾說『看這個』、『點播』、『幫我看這部片』並貼網址時調用！",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "YouTube 影片網址或 11 碼 ID"}
+            },
+            "required": ["url"]
         }
     },
     {
@@ -479,7 +505,7 @@ from core.llm_engine import (
     get_dynamic_live_key_candidates,
     UNRESTRICTED_SAFETY_SETTINGS
 )
-from core.memory import init_unified_memory, fetch_from_long_term_memory, save_to_long_term_memory, append_to_unified_memory, clear_all_memories, get_recent_100_memory_context, get_viewer_profile, save_viewer_profile, record_bot_message, get_cloud_knowledge, update_cloud_prompt_field, UNIFIED_LIVE_MEMORY, UNIFIED_DIALOGUE_MEMORY, UNIFIED_THOUGHT_MEMORY, get_recent_thoughts_by_chars, TIKTOK_CHATROOM_MEMORY, STREAMER_MIND_BOARD, DEFAULT_CHANNEL_ID, save_cloud_knowledge, get_unified_memory_context, RECENT_BOT_MESSAGES, evaluate_memory_demand, MemoryDemandLevel
+from core.memory import init_unified_memory, fetch_from_long_term_memory, save_to_long_term_memory, append_to_unified_memory, clear_all_memories, get_recent_100_memory_context, get_viewer_profile, save_viewer_profile, record_bot_message, get_cloud_knowledge, update_cloud_prompt_field, UNIFIED_LIVE_MEMORY, UNIFIED_DIALOGUE_MEMORY, UNIFIED_THOUGHT_MEMORY, get_recent_thoughts_by_chars, TIKTOK_CHATROOM_MEMORY, STREAMER_MIND_BOARD, DEFAULT_CHANNEL_ID, save_cloud_knowledge, get_unified_memory_context, RECENT_BOT_MESSAGES, evaluate_memory_demand, MemoryDemandLevel, USER_PROFILE_FILE, MODE
 
 
 
@@ -532,7 +558,7 @@ def get_prioritized_gemini_models(user_query: str = "", has_image: bool = False,
     if is_high_iq:
         priority_heads = list(HIGH_IQ_GEMINI_MODELS)
     else:
-        # ⚡ 根據實測速度極速排列 (越快排越前面 1 ➔ 8)
+        # ⚡ 根據實測速度極速排列 (越快排越前面 1 ➔ 7)
         priority_heads = [
             "gemini-3.5-flash-lite",               # 🥇 第 1 位：0.95s ~ 1.21s 極速秒回王 (超低延遲輕量防線)
             "gemini-3.6-flash",                    # 🥈 第 2 位：1.59s 高智商極速主力 (兼具高智商與超低延遲)
@@ -541,7 +567,6 @@ def get_prioritized_gemini_models(user_query: str = "", has_image: bool = False,
             "gemini-3.5-flash",                    # 🛡️ 第 5 位：10s ~ 14s 高智商穩定主力保底
             "gemini-3.7-flash",                    # 👑 第 6 位：頂配旗艦大腦
             "gemini-3.8-flash",                    # 🚀 第 7 位：2026 全新頂配旗艦大腦
-            "gemini-3.1-pro-preview",              # 🧠 第 8 位：超高智商 Pro 預覽
         ]
         
     ordered = []
@@ -626,6 +651,7 @@ GENAI_TOOLS = build_genai_declarations(is_proactive=False)
 GENAI_PROACTIVE_TOOLS = build_genai_declarations(is_proactive=True)
 
 async def summarize_search_to_speech(query: str, search_raw: str, user_role_name: str = "老爸") -> str:
+    """PROVIDER: GROQ（core.groq_router.groq_chat 純文字提煉；見 docs/AI_SOURCES.md）"""
     """將搜尋到的原始資料，以 7L 招牌自然口語（1~3 句，親切隨性）進行提煉整理。
     具備多模型與多金鑰自動容災（Gemini Flash Lite -> Groq LLaMA -> 本機提煉器），絕不直接傾倒原文！"""
     global CURRENT_GEMINI_KEY_STEP
@@ -793,6 +819,23 @@ async def execute_tool_dispatch(fn_name: str, fn_args: dict, caller_target: str 
         # ⚠️ 絕不將內部系統提示拼入 extracted_text 作為語音口語！
         if p_res and "[EXPRESSION:" in p_res:
             extracted_text += f" {p_res}"
+    elif fn_name in ["pe.play_midi_band", "play_midi_band"]:
+        mf = fn_args.get("midi_file", "")
+        preset = fn_args.get("band_preset", "")
+        b_title = fn_args.get("title", "")
+        bmap = dict(pe.BAND_PRESETS.get(preset, pe.BAND_PRESETS["piano_trio"])) if preset in pe.BAND_PRESETS else None
+        req_t = caller_target or ("audience" if CURRENT_SPEAKING_TARGET == "audience" else "dad")
+        band_res = await pe.play_midi_band(mf, band_map=bmap, title=b_title or os.path.basename(mf))
+        if band_res and "[EXPRESSION:" in band_res:
+            extracted_text += f" {band_res}"
+    elif fn_name in ["video.request_watch", "request_watch"]:
+        vw_url = fn_args.get("url", "")
+        req_u = caller_user or "觀眾"
+        vw_res = await video_watch.request_watch(vw_url, requester=req_u)
+        if vw_res.get("ok"):
+            extracted_text += f" （系統回報：已排入點播隊列，看完播報）" if vw_res.get("queued") else f" （系統回報：該片已在隊列中）"
+        else:
+            extracted_text += f" （系統回報：點播失敗：{vw_res.get('error', '')}）"
     elif fn_name in ["pe.compose_and_play_original_piano", "compose_and_play_original_piano"]:
         theme = fn_args.get("theme_or_title", "")
         mood = fn_args.get("mood_or_style", "")
@@ -870,6 +913,7 @@ async def execute_tool_dispatch(fn_name: str, fn_args: dict, caller_target: str 
 
 
 def build_rag_section(query: str, k: int = 3) -> str:
+    """PROVIDER: LOCAL-RAG（chromadb＋fastembed；多模態幀走 embedding-2 API；見 docs/AI_SOURCES.md）"""
     """📚 同步 RAG 檢索 -> 可直接拼進 prompt 的段落（失敗或無命中回空字串）"""
     if not query or not str(query).strip():
         return ""
@@ -880,7 +924,7 @@ def build_rag_section(query: str, k: int = 3) -> str:
         return ""
 
 async def get_lightweight_gemini_vision(image_base64: str, temporal_frames: list | None = None) -> str:
-    """👁️ 【3.1-flash-lite 深度視覺認真看】：受 Live API 哨兵喚醒時才精準啟動，支援傳入上次看到現在的所有時序影格，形成動態視覺感知。"""
+    """PROVIDER: GEMINI-VISION（3.1-flash-lite→3.6-flash；見 docs/AI_SOURCES.md）👁️ 【3.1-flash-lite 深度視覺認真看】：受 Live API 哨兵喚醒時才精準啟動，支援傳入上次看到現在的所有時序影格，形成動態視覺感知。"""
     if not image_base64:
         return ""
         
@@ -969,6 +1013,7 @@ async def get_lightweight_gemini_vision(image_base64: str, temporal_frames: list
     return ""
 
 async def fetch_ai_response(messages, image_base64=None, audio_base64=None, is_proactive=False, request_start_time: Optional[float] = None):
+    """PROVIDER: GEMINI（主腦 generate_content＋Live；純文字正遷 Groq；見 docs/AI_SOURCES.md）"""
     """
     🧠 多模態大腦推理總入口 (文字 + 視覺 + 音訊 + 工具調用)
     
@@ -1454,7 +1499,8 @@ async def fetch_ai_response(messages, image_base64=None, audio_base64=None, is_p
     return ""
 
 async def fetch_fast_text_reply(user_input: str, custom_name: str, situation_prompt: str = "", history: Optional[List[Dict]] = None) -> Tuple[str, str, float]:
-    """⚡ 【真人感即時第一反應 (Reflex)】：在收到訊息第一時間，由極速文字大腦 (Groq / Gemini Flash Lite) 毫秒級搶先開口！"""
+    """PROVIDER: GROQ-primary（groq_chat 秒回；見 docs/AI_SOURCES.md）
+    ⚡ 【真人感即時第一反應 (Reflex)】：在收到訊息第一時間，由極速文字大腦 (Groq / Gemini Flash Lite) 毫秒級搶先開口！"""
     start_t = time.time()
     if not user_input or not user_input.strip():
         return ("", "", 0.0)
@@ -1550,7 +1596,9 @@ async def fetch_fast_text_reply(user_input: str, custom_name: str, situation_pro
         pass
 
     # 1. 🌟 絕對第一優先：Gemini 極速輕量前鋒矩陣 (高智商、自然口語、超大額度、具備完整工具調用能力)
-    if GEMINI_KEYS:
+    #    GROQ_ONLY 降級模式時跳過（Gemini 全滅保直播不斷，只剩 Groq 前鋒）
+    from core.groq_router import groq_only as _groq_only
+    if GEMINI_KEYS and not _groq_only():
         target_k_idx = get_pingpong_alternating_index(len(GEMINI_KEYS), CURRENT_GEMINI_KEY_STEP)
         target_key = GEMINI_KEYS[target_k_idx]
         try:
@@ -1606,6 +1654,7 @@ async def fetch_fast_text_reply(user_input: str, custom_name: str, situation_pro
 
 
 async def call_gemini_live_audience_reply(vts, input_queue, audience_user: str, audience_content: str) -> bool:
+    """PROVIDER: GEMINI-LIVE（gemini-3.8-live 全雙工；見 docs/AI_SOURCES.md）"""
     """⚡ 【TikTok 直播觀眾專屬 Live 管道】：具備雙軌熱備 Live API、觀眾檔案識別、自身帳號意識與嚴格 [PASS] 靜默過濾"""
     global last_interaction_time
     start_t = time.time()
@@ -1918,6 +1967,7 @@ async def call_gemini_live_audience_reply(vts, input_queue, audience_user: str, 
 from core.prompts import TextCleanEngine, PromptTemplateEngine
 
 import services.tiktok_listener as tk_listener
+import services.video_watch as video_watch
 import services.vts_client as vc
 from services.vts_client import RobustVTSClient, move_vts_spatial, apply_spatial_position, set_vts_expression, trigger_vts_expression
 
@@ -2076,11 +2126,10 @@ GEMINI_MODELS = [
     "gemini-3.1-flash-lite",               # 🥉 第 3 位：1.6s ~ 3.3s 自然口語秒回首選
     "gemini-3-flash-preview",              # ⚡ 第 4 位：3.1s ~ 4.2s 閃電推理預覽
     
-    # 🧠 第 5~8 位：主力保底與旗艦深度推理大腦
+    # 🧠 第 5~7 位：主力保底與旗艦深度推理大腦
     "gemini-3.5-flash",                    # 🛡️ 第 5 位：10s ~ 14s 高智商穩定主力保底
     "gemini-3.7-flash",                    # 👑 第 6 位：頂配旗艦大腦
     "gemini-3.8-flash",                    # 🚀 第 7 位：2026 全新頂配旗艦大腦
-    "gemini-3.1-pro-preview",              # 🧠 第 8 位：超高智商 Pro 預覽
 ]
 
 # 👑 高智商任務專屬倒序模型梯隊 (由 3.8 旗艦深度思考領銜，專攻找歌判斷、找譜語意、代碼、哲學與高難度推理)
@@ -2401,6 +2450,14 @@ def get_api_stress_metrics():
 
 async def set_sleep_mode(enable: bool):
     global IS_SLEEPING, current_ai_status_str, current_ai_state
+    if enable:
+        try:
+            from core.identity import is_vtuber
+            if is_vtuber():
+                log_print("🚫 [系統] VTuber 模式禁用休眠（7x24 觀眾互動不打烊）")
+                return False
+        except Exception:
+            pass
     IS_SLEEPING = bool(enable)
     if IS_SLEEPING:
         current_ai_status_str = "😴 閉眼沉睡中 (0 API 消耗)"
@@ -2538,7 +2595,9 @@ def is_system_overloaded():
 #    - 儲存 TikTok 直播觀眾個人檔案（稱呼、關係、印象、最後見面時間），自動雙向同步至本地 JSON 快取。
 
 db = None
-if FIREBASE_CRED_JSON:
+# PROVIDER: FIRESTORE（預設拔除：FIREBASE_ENABLED=1 才連；全呼叫點另有本地 JSON 備援）
+_FIREBASE_ON = (os.getenv("FIREBASE_ENABLED", "0") or "0").strip().lower() in ("1", "true", "yes")
+if FIREBASE_CRED_JSON and _FIREBASE_ON:
     try:
         cred_dict = json.loads(FIREBASE_CRED_JSON)
         import core.db as db_module
@@ -2548,7 +2607,7 @@ if FIREBASE_CRED_JSON:
     except Exception as e:
         print(f"【⚠️ 系統警告】Firebase 連線失敗: {e}，將僅使用本地快取。")
 else:
-    print("【⚠️ 系統警告】未設定 FIREBASE_CRED_JSON，僅使用本地快取模式。")
+    print("【ℹ️ 系統通知】純本地模式（Firebase 預設拔除；多機同步需設 FIREBASE_ENABLED=1＋FIREBASE_CRED_JSON）。")
 
 async def get_user_profile():
     profile = None
@@ -2559,7 +2618,7 @@ async def get_user_profile():
         except Exception: pass
         
     if not profile:
-        file_path = os.path.join(DATA_DIR, "user_profile_local.json")
+        file_path = USER_PROFILE_FILE
         if os.path.exists(file_path):
             try:
                 with open(file_path, "r", encoding="utf-8") as f: profile = json.load(f)
@@ -2578,7 +2637,7 @@ async def save_user_profile(custom_name=None, impression=None):
         except Exception: pass
         
     try:
-        with open(os.path.join(DATA_DIR, "user_profile_local.json"), "w", encoding="utf-8") as f:
+        with open(USER_PROFILE_FILE, "w", encoding="utf-8") as f:
             json.dump(profile, f, ensure_ascii=False, indent=2)
     except Exception: pass
 
@@ -2623,36 +2682,8 @@ def extract_text_from_content(content):
     if isinstance(content, list): return " ".join([p.get("text", "") for p in content if p.get("type") == "text"])
     return ""
 
-async def get_embedding_vector(text):
-    """呼叫 Gemini Embedding 2 將文字轉換為潛意識數字陣列"""
-    if not GEMINI_KEYS: return None
-    try:
-        g_key = random.choice(GEMINI_KEYS)
-        temp_google_client = genai.Client(api_key=g_key)
-        response = await asyncio.wait_for(
-            temp_google_client.aio.models.embed_content(
-                model="gemini-embedding-2", 
-                contents=text
-            ),
-            timeout=5.0
-        )
-        return response.embeddings[0].values
-    except Exception:
-        try:
-            temp_google_client = genai.Client(api_key=random.choice(GEMINI_KEYS))
-            response = await asyncio.wait_for(
-                temp_google_client.aio.models.embed_content(
-                    model="gemini-embedding-001", 
-                    contents=text
-                ),
-                timeout=5.0
-            )
-            return response.embeddings[0].values
-        except Exception as e:
-            print(f"\n⚠️ [潛意識轉換失敗]: {e}")
-            return None
-
 async def update_daily_diary(channel_id, recent_chat):
+    """PROVIDER: GEMINI（日記濃縮走 fetch_ai_response；向量已刪；見 docs/AI_SOURCES.md）"""
     tz = ZoneInfo("Asia/Taipei")
     today_str = datetime.now(tz).strftime("%Y-%m-%d")
     chat_text = "\n".join([f"{msg['role']}: {extract_text_from_content(msg['content'])}" for msg in recent_chat if extract_text_from_content(msg['content']).strip()])
@@ -2690,15 +2721,10 @@ async def update_daily_diary(channel_id, recent_chat):
     updated_summary = await fetch_ai_response(messages, is_proactive=True)
     
     if updated_summary and "沉默" not in updated_summary:
-        log_print("🧠 [潛意識系統] 正在將今日記憶編碼上傳雲端...")
-        vector_data = await get_embedding_vector(updated_summary.strip())
-        
         diary_payload = {
             "summary": updated_summary.strip(), 
             "date": today_str
         }
-        if vector_data:
-            diary_payload["embedding_vector"] = vector_data
             
         if db is not None:
             try:
@@ -2873,7 +2899,7 @@ IMAGE_GEN_MODELS = [
 ]
 
 async def generate_ai_image(prompt: str) -> str:
-    """使用 Google 頂尖 AI 生圖模型 (Nano Banana / Gemini Image / Imagen / FLUX) 繪製高品質圖片、二次元插圖或藝術創作，並自動在老爸的螢幕上彈出展示。
+    """PROVIDER: GEMINI-IMAGE（Nano Banana 系；⚠️ 配額表全系 0/0/0，現降級中；見 docs/AI_SOURCES.md）使用 Google 頂尖 AI 生圖模型 (Nano Banana / Gemini Image / Imagen / FLUX) 繪製高品質圖片、二次元插圖或藝術創作，並自動在老爸的螢幕上彈出展示。
     
     Args:
         prompt: 畫面內容的詳細描述提示詞（建議包含主體、外貌、風格、色彩、光影等豐富細節）。
@@ -2993,6 +3019,7 @@ def control_microphone(is_enabled: bool) -> str:
 
 
 def search_internet(query):
+    """PROVIDER: LOCAL-SCRAPE（search_google 無 API；Tavily 另見 search 呼叫點；見 docs/AI_SOURCES.md）"""
     return search_google(query)
 
 
@@ -3435,7 +3462,7 @@ async def live_api_direct_sentence_emotions(clean_text: str, total_duration: flo
 嚴禁輸出任何廢話或分析，只輸出時間戳標籤！""")])
             )
             async with asyncio.timeout(2.5):
-                async with client.aio.live.connect(model="gemini-3.1-flash-live-preview", config=live_cfg) as session:
+                async with client.aio.live.connect(model="gemini-3.8-live", config=live_cfg) as session:
                     await session.send_realtime_input(text=f"7L 正在發話：「{clean_text.strip()}」（語音總時長 {total_duration:.1f} 秒）")
                     output_text = ""
                     async for resp in session.receive():
@@ -3944,16 +3971,13 @@ def capture_system_audio_chunk(duration: float = 2.5):
         return None, 0.0
 
 def transcribe_audio_bytes(wav_bytes: bytes) -> str:
-    """記憶體內極速語音辨識 (STT)"""
+    """PROVIDER: GOOGLE-WEB-SPEECH 為主＋LOCAL faster-whisper 為備（services/stt；見 docs/AI_SOURCES.md）
+    記憶體內極速語音辨識 (STT）"""
     if not wav_bytes:
         return ""
-    r = sr.Recognizer()
     try:
-        buf = io.BytesIO(wav_bytes)
-        with sr.AudioFile(buf) as source:
-            audio = r.record(source)
-        text = r.recognize_google(audio, language="zh-TW")
-        return text.strip()
+        from services.stt import transcribe_wav
+        return transcribe_wav(wav_bytes)
     except Exception:
         return ""
 
@@ -4227,7 +4251,7 @@ async def check_screen_change_via_live_api(img_bytes: bytes, current_context: st
 嚴禁輸出任何多餘的解釋或對話，只輸出 [NO_CHANGE] 或 [LOOK_SERIOUS]！""")]),
             )
             async with asyncio.timeout(3.8):
-                async with client.aio.live.connect(model="gemini-3.1-flash-live-preview", config=live_cfg) as session:
+                async with client.aio.live.connect(model="gemini-3.8-live", config=live_cfg) as session:
                     await session.send_realtime_input(video={"data": img_bytes, "mime_type": "image/jpeg"})
                     eval_prompt = f"前次已知畫面狀態：『{current_context}』。請看當前畫面，是否有出現重大新事件需要認真看？只輸出 [NO_CHANGE] 或 [LOOK_SERIOUS]："
                     await session.send_realtime_input(text=eval_prompt)
@@ -4715,6 +4739,7 @@ async def mic_volume_worker():
 
 def listen_once_fast(recognizer):
     global is_user_listening, listen_start_time, current_mic_action_str
+    # PROVIDER: GOOGLE-WEB-SPEECH 快覽＋GEMINI-LIVE 深層語音理解（audio_b64；見 docs/AI_SOURCES.md）
     text = ""
     audio_b64 = None
     try:
@@ -5027,7 +5052,7 @@ HAS_INITIAL_VISION_LOOK = False
 
 async def peripheral_vision_worker():
     """👁️ 【背景餘光雙層感知協程】：
-    - 頂層哨兵：採用 Gemini Live API (3.1-flash-live-preview) 實時注視螢幕畫面（0 額度消耗、0 描述輸出），
+    - 頂層哨兵：採用 Gemini Live API (3.8-live) 實時注視螢幕畫面（0 額度消耗、0 描述輸出），
       只極速判定 [NO_CHANGE] 還是 [LOOK_SERIOUS]。
     - 深度眼睛：唯有 Live 哨兵判定出現全新重大視窗/報錯/事件時，才喚醒 3.1-flash-lite 認真細看一次！
     - 徹底告別每 20 秒無謂消耗 3.1-flash-lite 說話額度的浪費行為。
@@ -6221,13 +6246,30 @@ def add_to_streamer_mind_board(user_display: str, unique_id: str, content: str, 
     
     # 🌟 寫入全集中記憶中樞（確保老爸輸入與觀眾彈幕統一匯流，精準辨別對話目標）
     if unique_id == "dad" or source in ["mic", "text_file", "console"]:
-        speaker = "老爸"
-        mem_target = "7L"
+        try:
+            from core.identity import get_owner_name, get_character_name
+            speaker = get_owner_name()
+            mem_target = get_character_name()
+        except Exception:
+            speaker = "老爸"
+            mem_target = "7L"
+    elif source == "owner_interject":
+        try:
+            from core.identity import get_owner_name as _gon
+            speaker = f"主持「{_gon()}」"
+        except Exception:
+            speaker = "主持"
+        mem_target = "觀眾"
     else:
-        _platform = {"twitch": "Twitch", "youtube": "YouTube"}.get(source, "TikTok")
-        speaker = f"{_platform} 觀眾「{user_display}」"
+        _platform = {"twitch": "Twitch", "youtube": "YouTube", "owner_interject": "主持"}.get(source, "TikTok")
+        speaker = f"{_platform} 觀眾「{user_display}」" if source != "owner_interject" else f"主持「{user_display}」"
         lower_c = (content or "").lower()
-        is_addressed_to_7l = any(tag in lower_c for tag in ["7l", "@7l", "小7", "7寶", "草莓"])
+        try:
+            from core.identity import get_character_name as _gcn
+            _cn = _gcn().lower()
+        except Exception:
+            _cn = "7l"
+        is_addressed_to_7l = any(tag in lower_c for tag in ["7l", "@7l", "小7", "7寶", "草莓", _cn])
         mem_target = "7L" if is_addressed_to_7l else "老爸/直播間"
 
     append_to_unified_memory(
@@ -6312,7 +6354,7 @@ async def judge_subconscious_intent_via_live_api(memory_context: str, unread_bat
 嚴禁輸出任何多餘聊天內容，只輸出 [SILENCE] 或 [SPEAK: ...]！""")])
             )
             async with asyncio.timeout(3.5):
-                async with client.aio.live.connect(model="gemini-3.1-flash-live-preview", config=live_cfg) as session:
+                async with client.aio.live.connect(model="gemini-3.8-live", config=live_cfg) as session:
                     prompt_eval = f"""【最新滾動記憶與近期全景上下文】：
 {memory_context}
 
@@ -7182,7 +7224,8 @@ async def chat_processor_worker(vts, input_queue):
                 is_dad_source = (source in ["mic", "text_file", "console", "web_console"] or user_audio_b64)
                 has_wake_word = any(w in user_input for w in wake_keywords)
                 
-                if is_dad_source and has_wake_word:
+                # VTuber 模式無休眠可喚：睡眠只屬於伴侶，操作者通道關閉時誰也別想叫醒
+                if is_dad_source and has_wake_word and operator_input_enabled():
                     log_print(f"☀️ [語音喚醒] 收到老爸喚醒指令：「{user_input}」，7L 立即解除休眠睜開雙眼！")
                     await set_sleep_mode(False)
                     speech_item = {
@@ -7281,7 +7324,8 @@ async def chat_processor_worker(vts, input_queue):
                     or clean_disp_check in ["7lβ", "7lbeta", "7l主播", "老爸"]
                 )
 
-                if is_dad_account:
+                # VTuber 模式：擁有者公開帳號留言視同觀眾（無特權；插話請走 /api/interject）
+                if is_dad_account and operator_input_enabled():
                     log_print(f"👑 [老爸幕後指令] 收到老爸在直播間留言: {aud_c}")
                     current_dad_task = asyncio.create_task(
                         process_chat_message(vts, input_queue, aud_c, None, request_start_time=req_time, source="tiktok_dad")
@@ -7289,6 +7333,18 @@ async def chat_processor_worker(vts, input_queue):
                 else:
                     # 寫入 7L 滾動記憶腦袋，由 streamer_mind_loop_worker 自主排程讀取與發話
                     add_to_streamer_mind_board(id_display, v_unique_id, aud_c, source)
+
+            # -------------------------------------------------------------
+            # 📢 擁有者公開插話（owner_interject）：走觀眾軌道公開播出，不私聊、走觀眾工具牆
+            # -------------------------------------------------------------
+            elif source == "owner_interject":
+                from core.identity import get_owner_name as _gon2
+                try:
+                    _owner_nm = raw_input_item.get("user") or _gon2()
+                except Exception:
+                    _owner_nm = raw_input_item.get("user") or "主持"
+                log_print(f"📢 [擁有者公開插話] {_owner_nm}：{user_input[:80]}")
+                add_to_streamer_mind_board(f"{_owner_nm}（主持）", f"owner:{_owner_nm}", user_input, "owner_interject")
 
             # -------------------------------------------------------------
             # 🔇 軌道 3：TikTok 背景瑣碎動態 (tiktok_ambient: 點讚/進房/分享)
@@ -7321,7 +7377,7 @@ async def background_mind_stream_worker(vts, input_queue):
     - 💡 核心目的：
       落實老爸提出的「心想就是持續在腦內說話的思維推導，像 DeepSeek 一樣一個字一個字連續思考連續打字，採用 API Live 連續感測」。
     - ⚙️ 運作架構：
-      1. 【主力通道】：100% 採用 Google GenAI Live API 全雙工雙向通道 (gemini-3.1-flash-live-preview) 進行即時神經思維流淌。
+      1. 【主力通道】：100% 採用 Google GenAI Live API 全雙工雙向通道 (gemini-3.8-live) 進行即時神經思維流淌。
       2. 【雙軌熱備】：若 Live API 連線遇阻或金鑰冷卻，0 秒無縫回退至 gemini-3.5-flash-lite 串流保底。
       3. 【字字串流】：後端透過 WebSocket 即時推播 Token Chunks，前端以 DeepSeek 擬真游標與計時器一個字一個字敲擊在面板上。
       4. 【性格統一】：100% 讀取雲端知識庫 persona 設定，不硬編碼任何死板標籤。
@@ -7408,7 +7464,7 @@ async def background_mind_stream_worker(vts, input_queue):
                         system_instruction=types.Content(parts=[types.Part(text=f"妳是 7L。\n{persona_ctx}妳正在腦海深處展開 DeepSeek 模式的連續自問自答推導思考。")])
                     )
                     async with asyncio.timeout(8.5):
-                        async with client.aio.live.connect(model="gemini-3.1-flash-live-preview", config=live_cfg) as session:
+                        async with client.aio.live.connect(model="gemini-3.8-live", config=live_cfg) as session:
                             web_dash.broadcast_event("ai_thought_start", {
                                 "id": stream_id,
                                 "time_str": datetime.now().strftime("%H:%M:%S")
@@ -7611,7 +7667,7 @@ async def proactive_worker(vts, input_queue):
                         tools=GENAI_PROACTIVE_TOOLS
                     )
                     async with asyncio.timeout(5.0):
-                        async with client.aio.live.connect(model="gemini-3.1-flash-live-preview", config=live_cfg) as session:
+                        async with client.aio.live.connect(model="gemini-3.8-live", config=live_cfg) as session:
                             if img_bytes:
                                 await session.send_realtime_input(video={"data": img_bytes, "mime_type": "image/jpeg"})
                             await session.send_realtime_input(text="（妳現在陪伴在老爸身邊看著螢幕。如果老爸正在專心且妳沒有特別想開口說的話，請回傳 [SILENCE] 保持自然安靜陪伴。）")
@@ -8020,29 +8076,51 @@ async def main():
             log_print(f"⚠️ [TTS 預熱跳過]: {e}（首句會自動降級到備援引擎）")
     asyncio.create_task(asyncio.to_thread(_prewarm_tts))
     asyncio.create_task(mic_volume_worker())
-    # 🚫 操作者輸入預設停用（OPERATOR_INPUT=1 才開）：直播輸入只收聊天室觀眾留言
+    # 🎭 運行模式裝配（MODE=companion|vtuber）：決定裝哪些 worker
+    from core.identity import get_mode as _get_run_mode
+    _RUN_MODE = _get_run_mode()
+    _IS_VTUBER = (_RUN_MODE == "vtuber")
+    log_print(f"🎭 [運行模式] MODE={_RUN_MODE}（companion=1對1伴侶 / vtuber=只對觀眾7x24）")
+    # 🚫 操作者輸入預設停用（OPERATOR_INPUT=1 才開；vtuber 模式強制關）：直播輸入只收聊天室觀眾留言
     if operator_input_enabled():
         asyncio.create_task(mic_worker(recognizer, input_queue))
         asyncio.create_task(text_file_listener_worker(input_queue))
         asyncio.create_task(console_keyboard_input_worker(input_queue))
     else:
-        log_print("🚫 操作者輸入通道已停用（OPERATOR_INPUT=0）：麥克風/鍵盤/文字檔/Web 打字一律忽略")
-    asyncio.create_task(screen_capture_worker())
+        log_print("🚫 操作者輸入通道已停用（OPERATOR_INPUT=0／vtuber 模式）：麥克風/鍵盤/文字檔/Web 打字一律忽略")
+    if _IS_VTUBER:
+        # 📺 VTuber 隔離：無休眠、不看主人螢幕、無主動搭話主人、無 Discord 遙控、無 YT 伴看
+        # （IS_SLEEPING 預設 False；set_sleep_mode 在 vtuber 模式拒絕啟用，故此處無需再寫）
+        try:
+            yt_comp.IS_YT_WATCHER_ENABLED = False
+        except Exception:
+            pass
+        log_print("📺 [VTuber 隔離] 休眠禁用／螢幕感知關／proactive 關／系統音監聽關／Discord 關／YT 伴看關")
+    else:
+        # 💗 伴侶模式：看著主人、聽著主人、主動陪伴
+        asyncio.create_task(screen_capture_worker())
+        asyncio.create_task(proactive_worker(vts, input_queue))
+        asyncio.create_task(peripheral_vision_worker())
+        asyncio.create_task(system_audio_worker())
     asyncio.create_task(chat_processor_worker(vts, input_queue))
     asyncio.create_task(streamer_mind_loop_worker(vts, input_queue))
-    asyncio.create_task(proactive_worker(vts, input_queue))
     asyncio.create_task(background_mind_stream_worker(vts, input_queue))
     asyncio.create_task(anti_watermark_worker(vts))
     asyncio.create_task(cma_monitor_worker())
-    asyncio.create_task(peripheral_vision_worker())
     asyncio.create_task(speech_queue_worker(vts, input_queue))
-    asyncio.create_task(system_audio_worker())
     asyncio.create_task(expression_keeper_worker(vts))
     asyncio.create_task(autonomous_wander_worker())
     asyncio.create_task(pe.piano_focus_udp_worker())
     asyncio.create_task(pe.piano_liveness_watchdog_worker())
     asyncio.create_task(tk_listener.tiktok_live_worker(input_queue))
+    # 📺 觀眾點播看全片（兩模式共用；空隊列時靜默待命）
+    asyncio.create_task(video_watch.video_watch_worker())
     # 📺 直播聊天室觀眾輸入（TWITCH_CHANNELS / YOUTUBE_LIVE_ID 有設才真正連線，未設僅提示）
+    #    註冊進 chat_source 註冊表：控制台 /api/chat_sources 可看狀態
+    from services import chat_source as _cs
+    _cs.bind_chat_workers(input_queue)
+    _cs.register_chat_worker("twitch", twitch_live_worker)
+    _cs.register_chat_worker("youtube", youtube_live_worker)
     asyncio.create_task(twitch_live_worker(input_queue))
     asyncio.create_task(youtube_live_worker(input_queue))
     asyncio.create_task(pe.auto_restore_piano_state_on_startup())
@@ -8060,7 +8138,7 @@ async def main():
                 log_print(f"⚠️ [Discord 機器人連線提示]: {e}，15 秒後自動重連...")
                 await asyncio.sleep(15.0)
 
-    if DISCORD_TOKEN:
+    if DISCORD_TOKEN and not _IS_VTUBER:
         asyncio.create_task(safe_discord_runner())
 
     # 💓 註冊鋼琴狀態即時監聽回調：當鋼琴強制關閉或離線時，秒級切換回 IDLE

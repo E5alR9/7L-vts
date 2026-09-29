@@ -40,7 +40,8 @@ fastembed                  # 本地嵌入模型（ONNX，離線）
 faiss-cpu                  # 向量相似度（RVC / 檢索共用）
 
 # ── 其他 ───────────────────────────────────────────────────────
-firebase-admin
+# firebase-admin 僅舊 7L.py 用；主程式走 REST（google-auth），預設純本地不連雲
+# firebase-admin                 # 選配：多機同步才需安裝
 opencv-python
 Pillow
 pyautogui

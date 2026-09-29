@@ -18,6 +18,7 @@ r"""
 📦 介面：
    await get_tts_audio_bytes(text)  ->  WAV/MP3 bytes（與原 get_xiaoyi_audio_bytes 相容）
    get_active_engine()              ->  目前生效的引擎名稱（供儀表板/日誌）
+PROVIDER: LOCAL-kokoro/cosyvoice/xiaoyi＋CLOUD-edge/elevenlabs（見 docs/AI_SOURCES.md）
 """
 
 import os

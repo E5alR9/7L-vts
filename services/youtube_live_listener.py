@@ -166,7 +166,15 @@ def parse_live_chat_response(data):
         if not text:
             continue
         author = _find_simple(renderer, "authorName") or "觀眾"
-        messages.append({"user": author, "message": text})
+        msg_id = str(renderer.get("id") or "")
+        thumbs = ((renderer.get("authorPhoto") or {}).get("thumbnails") or [])
+        avatar = str((thumbs[-1] or {}).get("url", "")) if thumbs else ""
+        try:
+            sent_at = float(int(renderer.get("timestampUsec"))) / 1e6 if renderer.get("timestampUsec") else time.time()
+        except Exception:
+            sent_at = time.time()
+        messages.append({"user": author, "message": text, "id": msg_id,
+                         "avatar": avatar, "sent_at": sent_at})
 
     cont = lc.get("continuation")
     if not cont:                                  # 下一代 token 藏在 continuations 陣列裡
@@ -188,30 +196,40 @@ def parse_live_chat_response(data):
     return messages, cont, wait
 
 
-def build_queue_item(user: str, message: str) -> dict:
-    """與 TikTok/Twitch 相容的格式（軌道2 正則可解析；無 (@id) 時自動用暱稱當 id）"""
+def build_queue_item(user: str, message: str, message_id: str = "", avatar: str = "") -> dict:
+    """與 TikTok/Twitch 相容的格式（軌道2 正則可解析；無 (@id) 時自動用暱稱當 id）
+    text 格式凍結不可改；多出 message_id/avatar/user 欄位給控制台顯示用。"""
     return {
         "text": f"【YouTube 直播觀眾 {user}】：{message}",
         "audio_base64": None,
         "timestamp": time.time(),
         "source": "youtube",
+        "message_id": message_id or "",
+        "user": user,
+        "avatar": avatar or "",
     }
 
 
 async def youtube_live_worker(input_queue):
     """背景協程：頻道模式（YOUTUBE_CHANNEL → 跟進目前直播）優先，否則用直播 ID。
+    去重＋指數退避＋狀態回報；頻道離線自動待命（60s 再查），開播自動跟進。
 
     頻道模式：每 60s 查 {channel}/live 的 canonical + isLiveContent；
               在播 → 輪詢聊天室；不在播 → 記錄狀態待命。
     """
+    from services import chat_source as cs
     vid = normalize_video_id(os.getenv("YOUTUBE_LIVE_ID") or "")
     channel = normalize_channel(os.getenv("YOUTUBE_CHANNEL") or "")
     if not vid and not channel:
         log_print("ℹ️ [YouTube] 未設定 YOUTUBE_CHANNEL 或 YOUTUBE_LIVE_ID，聊天室監聽未啟動")
+        cs.report_chat_status("youtube", "disabled", "未設定 YOUTUBE_CHANNEL / YOUTUBE_LIVE_ID")
         return
 
     headers = {"User-Agent": _UA, "Content-Type": "application/json"}
     warned_no_cont = False
+    dedup = cs.DedupTracker()
+    attempt = 0
+    live_reported = False
 
     async with httpx.AsyncClient(timeout=25, headers={"User-Agent": _UA}) as cli:
         # ── 頻道模式的前置解析：{channel}/live → canonical + isLiveContent ──
@@ -223,18 +241,22 @@ async def youtube_live_worker(input_queue):
                 return None, False, "", False
 
         if channel and not vid:
-            video_id, is_live, title, ok = await resolve_channel()
-            if not ok or not video_id:
-                log_print(f"⚠️ [YouTube] 頻道 {channel} 解析失敗（YouTube 改版？），60 秒後重試")
-                await asyncio.sleep(60)
-                return
-            if not is_live:
-                log_print(f"📺 [YouTube] 頻道 {channel} 目前沒有直播（最近：{title or video_id}），60 秒後再查")
-                # 暫時不用 input_queue.put：靜默待命，避免每分鐘灌一次「沒直播」
-                await asyncio.sleep(60)
-                return
-            vid = video_id
-            log_print(f"📺 [YouTube] 頻道 {channel} 正在直播：{title or vid}（ID={vid}），開始輪詢聊天室")
+            while not vid:                            # 離線/解析失敗就待命重查，不直接 return（開播自動跟進）
+                video_id, is_live, title, ok = await resolve_channel()
+                if not ok or not video_id:
+                    log_print(f"⚠️ [YouTube] 頻道 {channel} 解析失敗（YouTube 改版？），60 秒後重試")
+                    cs.report_chat_status("youtube", "error", "頻道解析失敗")
+                    await asyncio.sleep(60)
+                    continue
+                if not is_live:
+                    log_print(f"📺 [YouTube] 頻道 {channel} 目前沒有直播（最近：{title or video_id}），60 秒後再查")
+                    # 暫時不用 input_queue.put：靜默待命，避免每分鐘灌一次「沒直播」
+                    cs.report_chat_status("youtube", "waiting", f"未開播（{title or video_id}）")
+                    await asyncio.sleep(60)
+                    continue
+                vid = video_id
+                log_print(f"📺 [YouTube] 頻道 {channel} 正在直播：{title or vid}（ID={vid}），開始輪詢聊天室")
+            cs.report_chat_status("youtube", "connecting", vid)
 
         cont = None
         while True:                                   # 外層：取得（或重新取得）continuation
@@ -246,37 +268,51 @@ async def youtube_live_worker(input_queue):
                         if not warned_no_cont:
                             log_print(f"⚠️ [YouTube] 取不到 continuation（ID={vid} —— 該影片正在直播嗎？），15 秒後重試")
                             warned_no_cont = True
+                        cs.report_chat_status("youtube", "connecting", "等 continuation")
                         await asyncio.sleep(15)
                         continue
                     warned_no_cont = False
                     log_print(f"📺 [YouTube] 已連線 live_chat：{vid}")
+                    cs.report_chat_status("youtube", "connecting", vid)
 
                 while True:                           # 內層：輪詢聊天
                     resp = await cli.post(_API, headers=headers,
                                           json={"context": {"client": _CLIENT}, "continuation": cont})
                     if resp.status_code != 200:
-                        log_print(f"⚠️ [YouTube] get_live_chat HTTP {resp.status_code} → 重新抓 continuation")
-                        cont = None
-                        await asyncio.sleep(10)
-                        break
+                        raise RuntimeError(f"get_live_chat HTTP {resp.status_code}")
 
                     msgs, next_cont, wait = parse_live_chat_response(resp.json())
+                    attempt = 0
+                    if msgs and not live_reported:
+                        live_reported = True
+                        cs.report_chat_status("youtube", "live", vid)
                     for m in msgs:
-                        await input_queue.put(build_queue_item(m["user"], m["message"]))
+                        if dedup.seen(m.get("id", "")):
+                            continue                # 重 poll 的舊留言，直接丟
+                        await input_queue.put(build_queue_item(
+                            m["user"], m["message"],
+                            message_id=m.get("id", ""), avatar=m.get("avatar", "")))
                         try:
                             import services.web_dashboard as wd
-                            wd.broadcast_event("youtube_comment", m)
+                            wd.broadcast_event("youtube_comment", {
+                                "user": m["user"], "text": m["message"],
+                                "message_id": m.get("id", ""), "avatar": m.get("avatar", ""),
+                            })
                         except Exception:
                             pass
 
                     if not next_cont:
                         log_print("ℹ️ [YouTube] continuation 結束（直播可能已結束），20 秒後重抓")
+                        cs.report_chat_status("youtube", "connecting", "continuation 結束")
                         cont = None
                         await asyncio.sleep(20)
                         break
                     cont = next_cont
                     await asyncio.sleep(wait)
             except Exception as e:
-                log_print(f"⚠️ [YouTube] 輪詢異常：{type(e).__name__}: {e}，10 秒後重試")
+                attempt += 1
+                delay = cs.backoff_delay(attempt)
+                log_print(f"⚠️ [YouTube] 輪詢異常：{type(e).__name__}: {e}，{delay:.0f} 秒後重試")
+                cs.report_chat_status("youtube", "error", f"{type(e).__name__}: {e}")
                 cont = None
-                await asyncio.sleep(10)
+                await asyncio.sleep(delay)

@@ -113,6 +113,10 @@ img.vision{width:100%;border-radius:8px;border:1px solid var(--line);background:
 .tool .ttl{font-weight:600}
 .tool .desc{color:var(--dim);font-size:12px;margin:3px 0 6px}
 .danger-zone{display:flex;gap:8px;flex-wrap:wrap}
+.modetabs{display:inline-flex;gap:4px;margin-left:8px}
+.modetabs button{padding:3px 10px;font-size:12px;opacity:.55}
+.modetabs button.on{opacity:1;border-color:var(--acc);color:var(--acc)}
+section[data-mode]{scroll-margin-top:70px}
 .muted{color:var(--dim);font-size:12px}
 @media(max-width:760px){main{grid-template-columns:1fr}.grid2{grid-template-columns:1fr}}
 </style>
@@ -129,11 +133,16 @@ img.vision{width:100%;border-radius:8px;border:1px solid var(--line);background:
   <button id="btnMic">麥克風</button>
   <button id="btnSleep">睡眠</button>
   <button class="primary" onclick="scrollToSection('secChat')">💬 傳話</button>
+  <span class="modetabs" id="modeTabs">
+    <button data-mt="companion" onclick="setModeTab('companion')">💗 伴侶</button>
+    <button data-mt="vtuber" onclick="setModeTab('vtuber')">📺 主播</button>
+    <button data-mt="shared" class="on" onclick="setModeTab('shared')">🧩 共用</button>
+  </span>
 </header>
 
 <main>
   <!-- 即時狀態 -->
-  <section id="secStatus">
+  <section id="secStatus" data-mode="shared">
     <h2>⚡ 即時狀態 <small id="stState">--</small></h2>
     <div class="kv" id="kvStatus"></div>
     <label>麥克風音量</label>
@@ -142,13 +151,20 @@ img.vision{width:100%;border-radius:8px;border:1px solid var(--line);background:
     <div class="bar"><i id="stressBar" style="width:0%"></i></div>
   </section>
 
-  <!-- 對話 -->
-  <section id="secChat">
+  <!-- 對話（伴侶私聊）＋擁有者公開插話（主播） -->
+  <section id="secChat" data-mode="companion">
     <h2>💬 對話佇列 <small>送出後 7L 會在下一個對話循環回應</small></h2>
     <textarea id="chatText" placeholder="輸入要送給 7L 的訊息或指令…"></textarea>
     <div style="display:flex;gap:8px;margin-top:8px">
       <button class="primary" id="btnSend">送出給 7L</button>
       <button onclick="document.getElementById('chatText').value=''">清空</button>
+    </div>
+    <div style="margin-top:12px;border-top:1px dashed var(--line);padding-top:10px">
+      <label>📢 擁有者公開插話 <span class="muted">（走觀眾軌道公開播出，不私聊）</span></label>
+      <textarea id="interjectText" placeholder="以主持身份對全場觀眾說…"></textarea>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button class="primary" onclick="sendInterject()">公開插話</button>
+      </div>
     </div>
     <div id="chatDisabled" class="muted" style="display:none;margin-top:8px;color:var(--warn)">
       🚫 操作者輸入通道已停用（.env 的 <code>OPERATOR_INPUT=0</code>）：此處送出的訊息會被忽略。
@@ -158,28 +174,30 @@ img.vision{width:100%;border-radius:8px;border:1px solid var(--line);background:
     <div id="recentMsgs" class="muted">尚無資料</div>
   </section>
 
-  <!-- TikTok -->
-  <section id="secTikTok">
-    <h2>📱 TikTok 直播</h2>
+  <!-- 直播間（三家聊天來源） -->
+  <section id="secTikTok" data-mode="vtuber">
+    <h2>📺 直播間 <small>TikTok / Twitch / YouTube</small></h2>
     <div class="kv" id="kvTiktok"></div>
+    <label style="margin-top:8px">Twitch / YouTube 聊天來源</label>
+    <div class="kv" id="kvLive"></div>
   </section>
 
   <!-- 視覺 -->
-  <section id="secVision">
+  <section id="secVision" data-mode="companion">
     <h2>👁️ 最近視覺畫面 <small>每 5 秒自動更新</small></h2>
     <img id="visionImg" class="vision" alt="loading…">
     <div class="kv" id="kvVision" style="margin-top:8px"></div>
   </section>
 
   <!-- 開關 -->
-  <section id="secSwitches">
+  <section id="secSwitches" data-mode="shared">
     <h2>🎛️ 系統開關 <small id="swCount"></small></h2>
     <div class="tabs" id="swTabs"></div>
     <div id="swList"></div>
   </section>
 
   <!-- 工具 -->
-  <section id="secTools">
+  <section id="secTools" data-mode="shared">
     <h2>🔧 工具手動呼叫 <small id="toolCount"></small></h2>
     <input type="text" id="toolFilter" placeholder="搜尋工具名稱／說明…">
     <div id="toolList" style="margin-top:8px;max-height:420px;overflow:auto"></div>
@@ -189,7 +207,7 @@ img.vision{width:100%;border-radius:8px;border:1px solid var(--line);background:
   </section>
 
   <!-- 記憶 -->
-  <section id="secMemory" class="wide">
+  <section id="secMemory" class="wide" data-mode="companion">
     <h2>🧠 記憶庫 <small id="memCount"></small></h2>
     <div class="grid2">
       <div>
@@ -220,7 +238,7 @@ img.vision{width:100%;border-radius:8px;border:1px solid var(--line);background:
   </section>
 
   <!-- 提示詞 -->
-  <section id="secPrompts" class="wide">
+  <section id="secPrompts" class="wide" data-mode="shared">
     <h2>📝 雲端提示詞庫 <small id="promptTime">--</small></h2>
     <div id="promptForm" class="muted">載入中…</div>
     <div style="display:flex;gap:8px;margin-top:10px">
@@ -230,7 +248,7 @@ img.vision{width:100%;border-radius:8px;border:1px solid var(--line);background:
   </section>
 
   <!-- 系統設定（.env） -->
-  <section id="secSettings">
+  <section id="secSettings" data-mode="shared">
     <h2>⚙️ 系統設定 <small id="setCount">.env 白名單，直改即上線</small></h2>
     <div id="setForm" class="muted">載入中…</div>
     <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
@@ -245,19 +263,19 @@ img.vision{width:100%;border-radius:8px;border:1px solid var(--line);background:
   </section>
 
   <!-- 心流 -->
-  <section id="secMind" class="wide">
+  <section id="secMind" class="wide" data-mode="vtuber">
     <h2>🧘 Mind-Stream 心流看板</h2>
     <div id="mindBoard" class="muted">尚無資料</div>
   </section>
 
   <!-- 事件 -->
-  <section id="secEvents" class="wide">
+  <section id="secEvents" class="wide" data-mode="shared">
     <h2>📡 即時事件流 <small>WebSocket 廣播</small></h2>
     <div id="eventLog" class="log muted">等待事件…</div>
   </section>
 
   <!-- 危險區 -->
-  <section id="secDanger">
+  <section id="secDanger" data-mode="shared">
     <h2>⚡ 獎懲與系統</h2>
     <div class="danger-zone">
       <button onclick="reward()">💖 摸頭獎勵</button>
@@ -358,6 +376,36 @@ function renderStatus(data){
     : '<span class="muted">尚無資料</span>';
 
   renderRecent(data.recent_memory);
+  loadChatSources();
+}
+async function loadChatSources(){
+  try{
+    const j = await api("/api/chat_sources");
+    const stIcon = s=>s==="live"?"🔴":(s==="connecting"||s==="waiting"?"🟡":(s==="error"?"🔴":"⚪"));
+    $("kvLive").innerHTML = ((j.sources||[]).map(s=>
+      [`${s.name}`, `${stIcon(s.state)} ${esc(s.state)}${s.target?" · "+esc(s.target):""}${s.alive?"":"（未運行）"}${s.detail?" · "+esc(s.detail):""}`]
+    )).map(([k,v])=>`<div>${esc(k)}</div><div>${v}</div>`).join("") || '<div class="muted">尚無資料</div>';
+  }catch(e){ /* 主程式未啟動時靜默 */ }
+}
+
+/* ── 模式頁籤（伴侶／主播／共用）＋擁有者公開插話 ── */
+let MODE_TAB = "shared";
+function setModeTab(t){
+  MODE_TAB = t;
+  document.querySelectorAll("#modeTabs button").forEach(b=>b.classList.toggle("on", b.dataset.mt===t));
+  document.querySelectorAll("main section[data-mode]").forEach(s=>{
+    s.style.display = (t==="shared" || s.dataset.mode===t || s.dataset.mode==="shared") ? "" : "none";
+  });
+  try{ localStorage.setItem("dashModeTab", t); }catch(e){}
+}
+async function sendInterject(){
+  const t = $("interjectText").value.trim(); if(!t) return toast("請先輸入插話內容", true);
+  try{
+    await api("/api/interject","POST",{text:t});
+    toast("已送入觀眾軌道公開播出");
+    $("interjectText").value = "";
+    logEvent("chat_sent", {text:t, from:"主持 (公開插話)"});
+  }catch(e){ toast("插話失敗："+e.message, true); }
 }
 function short(s, n){ s = s==null?"":String(s); return s.length>(n||90) ? s.slice(0,(n||90))+"…" : s; }
 function renderRecent(list){
@@ -807,6 +855,7 @@ $("toolFilter").addEventListener("input", renderTools);
 
 /* ── 啟動 ──────────────────────────────────────────── */
 (async function boot(){
+  try{ setModeTab(localStorage.getItem("dashModeTab") || "shared"); }catch(e){ setModeTab("shared"); }
   connectWS();
   await Promise.all([refreshStatus(), loadSwitches(), loadMemory(true), loadTools(), loadPrompts(), loadSettings(true)]);
   refreshVision();

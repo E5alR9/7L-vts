@@ -109,7 +109,7 @@ class MicLiveAudioAnalyzer:
   "suggested_reaction": "給 7L 後續第二階段深度補說的建議"
 }}"""
 
-            # 🌐 階段 1：優先採用 Gemini 3 官方 Live API (gemini-3.1-flash-live-preview 雙向 WebSocket 實時串流連線)
+            # 🌐 階段 1：優先採用 Gemini 3 官方 Live API (gemini-3.8-live 雙向 WebSocket 實時串流連線)
             for g_key in self.api_keys[:3]:
                 try:
                     live_client = genai.Client(api_key=g_key)
@@ -119,7 +119,7 @@ class MicLiveAudioAnalyzer:
                         system_instruction=types.Content(parts=[types.Part(text=system_instruction)])
                     )
                     async with asyncio.timeout(8.0):
-                        async with live_client.aio.live.connect(model="gemini-3.1-flash-live-preview", config=live_cfg) as session:
+                        async with live_client.aio.live.connect(model="gemini-3.8-live", config=live_cfg) as session:
                             await session.send_realtime_input(audio={"data": raw_bytes, "mime_type": "audio/wav"})
                             if stt_draft:
                                 await session.send_realtime_input(text=f"（老爸開口說話，STT 快速參考：『{stt_draft}』。請依據老爸真實發音與語調情緒自主思考，輸出純 JSON 格式）")
@@ -145,7 +145,7 @@ class MicLiveAudioAnalyzer:
                                     try:
                                         data = json.loads(json_m.group(0))
                                         data["success"] = True
-                                        data["model"] = "gemini-3.1-flash-live"
+                                        data["model"] = "gemini-3.8-live"
                                         if tool_call_dict and not data.get("tool_call"):
                                             data["tool_call"] = tool_call_dict
                                         return data
@@ -165,7 +165,7 @@ class MicLiveAudioAnalyzer:
                                     "acoustic_vibe": "Live 串流",
                                     "suggested_reaction": "延續即時互動",
                                     "success": True,
-                                    "model": "gemini-3.1-flash-live"
+                                    "model": "gemini-3.8-live"
                                 }
                 except Exception:
                     continue

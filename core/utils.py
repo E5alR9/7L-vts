@@ -30,7 +30,14 @@ def operator_input_enabled() -> bool:
 
     預設**關閉**：直播輸入只接受 Twitch / YouTube Live 聊天室的觀眾留言。
     要恢復操作者輸入：.env 設 OPERATOR_INPUT=1。
+    VTuber 模式（MODE=vtuber）強制關閉：只與觀眾互動，不理電腦前的人。
     """
+    try:
+        from core.identity import is_vtuber
+        if is_vtuber():
+            return False
+    except Exception:
+        pass
     return (os.getenv("OPERATOR_INPUT", "0") or "0").strip().lower() in ("1", "true", "yes")
 
 # ⏱️ 7L 統一神經時間心跳中樞 (Unified Tick Engine: 1 Tick = 1 秒)

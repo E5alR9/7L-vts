@@ -1,5 +1,6 @@
 """
 ⚡ Groq 極速文字路由器 (Groq Text Router)
+PROVIDER: GROQ（api.groq.com 直連；見 docs/AI_SOURCES.md）
 
 🎯 目的：
    把所有「純文字」AI 呼叫（發言哨兵、背景決策、記憶審查、搜尋提煉、觀眾回應）
@@ -95,6 +96,12 @@ async def throttle_rpm() -> None:
 
 GROQ_KEYS: List[str] = _load_keys()
 MODEL_LADDER: List[str] = _load_ladder()
+
+
+def groq_only() -> bool:
+    """Groq-only 降級模式（GROQ_ONLY=1）：Gemini 全滅時純 Groq 撐直播，不打 Gemini。
+    惰性讀取，控制台熱切換即生效（restart=False）。"""
+    return (os.getenv("GROQ_ONLY", "0") or "0").strip().lower() in ("1", "true", "yes")
 
 _clients: List[Any] = []
 _client_error: Optional[str] = None

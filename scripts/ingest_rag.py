@@ -36,13 +36,18 @@ sys.path.insert(0, BASE_DIR)
 DATA_DIR = os.path.join(BASE_DIR, "data")
 KNOW_DIR = os.path.join(BASE_DIR, "knowledge")
 
+def _mode() -> str:
+    m = (os.getenv("MODE") or "vtuber").strip().lower()
+    return m if m in ("companion", "vtuber") else "vtuber"
+
+
 MEM_FILES = {
-    "unified_memory.json": "unified_memory",
-    "dialogue_memory.json": "dialogue_memory",
-    "thought_memory.json": "thought_memory",
+    f"unified_memory_{_mode()}.json": "unified_memory",
+    f"dialogue_memory_{_mode()}.json": "dialogue_memory",
+    f"thought_memory_{_mode()}.json": "thought_memory",
 }
-VIEWER_FILE = "viewer_profiles_local.json"
-KNOW_FILE = "cloud_knowledge_local.json"
+VIEWER_FILE = f"viewer_profiles_local_{_mode()}.json"
+KNOW_FILE = f"cloud_knowledge_local_{_mode()}.json"
 
 MAX_CHUNK = 400        # 單 chunk 上限字數
 MIN_CHUNK = 30         # 太短的碎片不收

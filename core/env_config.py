@@ -20,6 +20,13 @@ _KEY_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=")
 
 # type: str / int / float / bool / choice    restart: 是否要重啟 V7 才生效
 SETTINGS_SPECS: List[Dict[str, Any]] = [
+    # ── 身份與模式（core/identity.py；MODE 切換需重啟）──
+    {"key": "MODE", "label": "運行模式（companion=1對1伴侶 / vtuber=觀眾直播）", "type": "choice",
+     "choices": ["vtuber", "companion"], "restart": True, "default": "vtuber"},
+    {"key": "OWNER_NAME", "label": "擁有者稱謂（舊預設：老爸）", "type": "str", "restart": True, "default": "老爸"},
+    {"key": "CHARACTER_NAME", "label": "角色名（舊預設：7L）", "type": "str", "restart": True, "default": "7L"},
+    {"key": "FIREBASE_ENABLED", "label": "Firebase 雲同步（預設關=純本地）", "type": "bool",
+     "restart": True, "default": "0"},
     # ── 語音 ──
     {"key": "TTS_ENGINE", "label": "TTS 主引擎（優先序，逗號分隔）", "type": "str", "restart": True},
     {"key": "TTS_FALLBACK", "label": "TTS 備援引擎（逗號分隔）", "type": "str", "restart": True},
@@ -40,6 +47,14 @@ SETTINGS_SPECS: List[Dict[str, Any]] = [
     {"key": "OPERATOR_SPEECH", "label": "對操作者也發聲", "type": "bool", "restart": False, "default": "0"},
     {"key": "GROQ_REQUESTS_PER_MINUTE", "label": "Groq 每分鐘上限（0=不限）", "type": "int",
      "restart": False, "default": "20"},
+    {"key": "GROQ_ONLY", "label": "Groq-only 降級（Gemini 全滅時保直播）", "type": "bool",
+     "restart": False, "default": "0"},
+    {"key": "GEMMA_ENABLED", "label": "Gemma 本地腿（需本機 Ollama）", "type": "bool",
+     "restart": True, "default": "0"},
+    {"key": "GEMMA_HOST", "label": "Ollama 位址", "type": "str", "restart": True,
+     "default": "http://127.0.0.1:11434"},
+    {"key": "GEMMA_TEXT_MODEL", "label": "Gemma 文字／視覺模型", "type": "str", "restart": True,
+     "default": "gemma3:4b"},
     # ── LLM / 網路 ──
     {"key": "GROQ_TEXT_MODELS", "label": "Groq 模型梯隊（空=預設）", "type": "str", "restart": True, "optional": True},
     {"key": "WEB_BIND_HOST", "label": "控制台綁定位址", "type": "choice",
@@ -52,6 +67,7 @@ SETTINGS_SPECS: List[Dict[str, Any]] = [
     {"key": "SIGN_API_KEY", "label": "TikTok 簽章金鑰", "type": "str", "restart": True, "secret": True},
     {"key": "TAVILY_KEYS", "label": "Tavily 搜尋金鑰", "type": "str", "restart": True, "secret": True},
     {"key": "MONGO_URI", "label": "MongoDB 連線字串", "type": "str", "restart": True, "secret": True},
+    {"key": "FIREBASE_CRED_JSON", "label": "Firebase 服務帳號 JSON（需同時開 FIREBASE_ENABLED）", "type": "str", "restart": True, "secret": True},
 ]
 
 SPEC_BY_KEY = {s["key"]: s for s in SETTINGS_SPECS}

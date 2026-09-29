@@ -13,6 +13,7 @@ r"""
 
 注意：查詢端與文件端必須使用同一個 embedder，維度才能對得上；
       rag_store 會把目前使用的 model 名稱寫進 collection metadata。
+PROVIDER: LOCAL-fastembed為主／GEMINI為備援（RAG_EMBED_BACKEND 可切；見 docs/AI_SOURCES.md）
 """
 
 import os

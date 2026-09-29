@@ -105,7 +105,10 @@ async def main():
 
     # 載入真實記憶
     real_memories = []
-    mem_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "unified_memory.json")
+    _m = (os.getenv("MODE") or "vtuber").strip().lower()
+    if _m not in ("companion", "vtuber"):
+        _m = "vtuber"
+    mem_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", f"unified_memory_{_m}.json")
     if os.path.exists(mem_file):
         try:
             import json

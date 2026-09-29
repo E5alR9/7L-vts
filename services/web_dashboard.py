@@ -622,7 +622,10 @@ async def get_full_telemetry(include_full_memory: bool = False) -> Dict[str, Any
                 pass
         if not recent_memory:
             try:
-                mem_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "unified_memory.json")
+                _m = (os.getenv("MODE") or "vtuber").strip().lower()
+                if _m not in ("companion", "vtuber"):
+                    _m = "vtuber"
+                mem_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", f"unified_memory_{_m}.json")
                 if os.path.exists(mem_path):
                     with open(mem_path, "r", encoding="utf-8") as f:
                         recent_memory = json.load(f)
@@ -839,6 +842,43 @@ async def api_send_message(request):
         return web.json_response({"ok": False, "error": "對話隊列尚未初始化"}, status=503)
     except Exception as e:
         return web.json_response({"ok": False, "error": str(e)}, status=500)
+
+async def api_interject(request):
+    """📢 擁有者公開插話：走觀眾軌道公開播出，不私聊、走觀眾工具牆（VTuber 模式唯一擁有者通道）"""
+    try:
+        body = await request.json()
+        text = body.get("text", "").strip()
+        if not text:
+            return web.json_response({"ok": False, "error": "訊息內容不可為空"}, status=400)
+        try:
+            from core.identity import get_owner_name
+            owner = body.get("user") or get_owner_name()
+        except Exception:
+            owner = body.get("user") or "主持"
+
+        if INPUT_QUEUE:
+            record_interaction_tick()
+            await INPUT_QUEUE.put({
+                "text": text,
+                "audio_base64": None,
+                "timestamp": time.time(),
+                "source": "owner_interject",
+                "user": owner,
+            })
+            broadcast_event("chat_sent", {"text": text, "from": f"{owner} (公開插話)"})
+            return web.json_response({"ok": True, "message": "已送入觀眾軌道公開播出"})
+        return web.json_response({"ok": False, "error": "對話隊列尚未初始化"}, status=503)
+    except Exception as e:
+        return web.json_response({"ok": False, "error": str(e)}, status=500)
+
+async def api_chat_sources(request):
+    """📺 直播聊天來源狀態（twitch/youtube worker 狀態＋目標頻道）"""
+    try:
+        from services import chat_source as cs
+        return web.json_response({"ok": True, "sources": cs.chat_workers_status()})
+    except Exception as e:
+        return web.json_response({"ok": False, "error": str(e)}, status=500)
+
 
 async def api_toggle_mic(request):
     """切換麥克風狀態"""
@@ -1330,6 +1370,8 @@ async def start_web_dashboard(
     app.router.add_post("/api/memory/capacity", api_set_memory_capacity)
     app.router.add_get("/api/last_vision_image", api_last_vision_image)
     app.router.add_post("/api/send_message", api_send_message)
+    app.router.add_post("/api/interject", api_interject)
+    app.router.add_get("/api/chat_sources", api_chat_sources)
     app.router.add_post("/api/toggle_mic", api_toggle_mic)
     app.router.add_post("/api/set_sleep", api_set_sleep)
     app.router.add_post("/api/trigger_expression", api_trigger_expression)

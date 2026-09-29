@@ -14,7 +14,14 @@ from mic_live_plugin import os_desktop_sensor
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
 
-DEFAULT_USER_TITLE = "老爸"  # 預設使用者稱謂，若雲端無自訂名稱時使用
+from core.identity import get_owner_name as _get_owner_name
+
+
+def _default_user_title() -> str:
+    return _get_owner_name()
+
+
+DEFAULT_USER_TITLE = _default_user_title()  # 預設使用者稱謂（env OWNER_NAME 可配；雲端自訂名稱優先）
 
 
 class TextCleanEngine:

@@ -11,20 +11,43 @@ from typing import List, Dict, Any, Optional
 
 # Project imports
 from core.utils import log_print, sys_notify, get_current_time_string
+from core.identity import get_mode, get_owner_name, get_character_name
 import services.piano_engine as pe
 import core.db as db_module
 from core.prompts import PromptTemplateEngine
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
 
+# ── 模式隔離（MODE=companion|vtuber）：記憶檔案按模式後綴，兩邊永不互通 ──
+MODE = get_mode()
+
+
+def mode_path(filename: str) -> str:
+    """data/ 下檔案按模式後綴（如 unified_memory_vtuber.json）。"""
+    base, dot, ext = filename.rpartition(".")
+    return os.path.join(DATA_DIR, f"{base}_{MODE}.{ext}" if dot else f"{filename}_{MODE}")
+
+
+UNIFIED_MEMORY_FILE = mode_path("unified_memory.json")
+DIALOGUE_MEMORY_FILE = mode_path("dialogue_memory.json")
+THOUGHT_MEMORY_FILE = mode_path("thought_memory.json")
+VIEWER_PROFILES_FILE = mode_path("viewer_profiles_local.json")
+CLOUD_KNOWLEDGE_FILE = mode_path("cloud_knowledge_local.json")
+USER_PROFILE_FILE = mode_path("user_profile_local.json")
+MEMORY_CONFIG_FILE = os.path.join(DATA_DIR, "memory_config.json")  # 容量設定兩模式共用
+
 # ── 全域狀態變數（須在所有函式之前宣告）──────────────────────────────────────
 CLOUD_KNOWLEDGE_CACHE = None
 CLOUD_KNOWLEDGE_CACHE_TIME = 0.0
 
-UNIFIED_MEMORY_FILE = os.path.join(DATA_DIR, "unified_memory.json")
-DIALOGUE_MEMORY_FILE = os.path.join(DATA_DIR, "dialogue_memory.json")
-THOUGHT_MEMORY_FILE = os.path.join(DATA_DIR, "thought_memory.json")
-MEMORY_CONFIG_FILE = os.path.join(DATA_DIR, "memory_config.json")
+UNIFIED_MEMORY_FILE = mode_path("unified_memory.json")
+DIALOGUE_MEMORY_FILE = mode_path("dialogue_memory.json")
+THOUGHT_MEMORY_FILE = mode_path("thought_memory.json")
+VIEWER_PROFILES_FILE = mode_path("viewer_profiles_local.json")
+CLOUD_KNOWLEDGE_FILE = mode_path("cloud_knowledge_local.json")
+USER_PROFILE_FILE = mode_path("user_profile_local.json")
+MEMORY_CONFIG_FILE = os.path.join(DATA_DIR, "memory_config.json")  # 容量設定兩模式共用
+# 舊無後綴檔（unified_memory.json 等）已廢棄：重建不相容，不再讀寫，留置磁碟僅供人工查閱。
 
 def load_memory_capacity_setting() -> int:
     """載入記憶池容量設定（0 = 無上限，預設 500 句）"""
@@ -52,7 +75,7 @@ _LAST_UNIFIED_SAVE_TIME = 0.0
 TIKTOK_CHATROOM_MEMORY: List[Dict[str, Any]] = []
 STREAMER_MIND_BOARD: deque = deque(maxlen=200)
 
-DEFAULT_CHANNEL_ID = "vts_local_user"
+DEFAULT_CHANNEL_ID = f"vts_{MODE}_user"
 
 RECENT_BOT_MESSAGES: List[str] = []
 CURRENT_TTS_ID: int = 0
@@ -69,7 +92,7 @@ async def get_viewer_profile(tiktok_name: str) -> dict:
                 prof = {**default, **doc.to_dict()}
         except Exception:
             pass
-    local_path = os.path.join(DATA_DIR, "viewer_profiles_local.json")
+    local_path = VIEWER_PROFILES_FILE
     if os.path.exists(local_path):
         try:
             with open(local_path, "r", encoding="utf-8") as f:
@@ -104,7 +127,7 @@ async def save_viewer_profile(tiktok_name: str, call: str = None, relationship: 
             await db_module.db.collection("viewer_profiles").document(tiktok_name).set(profile, merge=True)
         except Exception:
             pass
-    local_path = os.path.join(DATA_DIR, "viewer_profiles_local.json")
+    local_path = VIEWER_PROFILES_FILE
     try:
         all_profiles = {}
         if os.path.exists(local_path):
@@ -133,7 +156,7 @@ async def get_cloud_knowledge() -> dict:
             pass
 
     if not knowledge:
-        local_path = os.path.join(DATA_DIR, "cloud_knowledge_local.json")
+        local_path = CLOUD_KNOWLEDGE_FILE
         if os.path.exists(local_path):
             try:
                 with open(local_path, "r", encoding="utf-8") as f:
@@ -266,7 +289,9 @@ async def clear_all_memories() -> str:
             await db_module.db.collection("user_memory").document(DEFAULT_CHANNEL_ID).delete()
         except Exception:
             pass
-    for fp in [os.path.join(DATA_DIR, f"memory_{DEFAULT_CHANNEL_ID}.json"), os.path.join(DATA_DIR, "memory_tiktok_live_stream.json"), os.path.join(DATA_DIR, "user_profile_local.json"), os.path.join(DATA_DIR, "unified_memory.json"), DIALOGUE_MEMORY_FILE, THOUGHT_MEMORY_FILE]:
+    for fp in [os.path.join(DATA_DIR, f"memory_{DEFAULT_CHANNEL_ID}.json"), USER_PROFILE_FILE,
+                 UNIFIED_MEMORY_FILE, DIALOGUE_MEMORY_FILE, THOUGHT_MEMORY_FILE,
+                 VIEWER_PROFILES_FILE, CLOUD_KNOWLEDGE_FILE]:
         if os.path.exists(fp):
             try:
                 os.remove(fp)
@@ -435,11 +460,17 @@ def init_unified_memory():
         except Exception:
             pass
 
-    # 若尚無 dialogue_memory.json，自動從歷史老爸與直播對話庫救援復原
+    # 若尚無模式記憶，從舊檔按模式救援（companion 只吃擁有者檔，vtuber 只吃觀眾檔；一次性）
     if not loaded_dialogues:
         recovered = []
-        for fp, spk_def in [(os.path.join(DATA_DIR, f"memory_{DEFAULT_CHANNEL_ID}.json"), "老爸"),
-                            (os.path.join(DATA_DIR, "memory_tiktok_live_stream.json"), "TikTok 觀眾")]:
+        _owner = get_owner_name()
+        _char = get_character_name()
+        if MODE == "companion":
+            _sources = [(os.path.join(DATA_DIR, "memory_vts_local_user.json"), _owner),
+                        (os.path.join(DATA_DIR, f"memory_vts_{MODE}_user.json"), _owner)]
+        else:
+            _sources = [(os.path.join(DATA_DIR, "memory_tiktok_live_stream.json"), "TikTok 觀眾")]
+        for fp, spk_def in _sources:
             if os.path.exists(fp):
                 try:
                     with open(fp, "r", encoding="utf-8") as f:
@@ -449,8 +480,8 @@ def init_unified_memory():
                                 r = it.get("role", "user")
                                 cnt = it.get("content", "").strip()
                                 if not cnt: continue
-                                spk = "7L" if r == "assistant" else spk_def
-                                tgt = "老爸" if spk == "7L" else "7L"
+                                spk = _char if r == "assistant" else spk_def
+                                tgt = _owner if spk == _char else _char
                                 recovered.append({
                                     "time": time.time() - 3600,
                                     "time_str": "歷史",
@@ -905,7 +936,7 @@ async def save_cloud_knowledge(knowledge: dict):
         except Exception as e:
             log_print(f"⚠️ [雲端記憶寫入異常]: {e}")
 
-    local_path = os.path.join(DATA_DIR, "cloud_knowledge_local.json")
+    local_path = CLOUD_KNOWLEDGE_FILE
     try:
         with open(local_path, "w", encoding="utf-8") as f:
             json.dump(knowledge, f, ensure_ascii=False, indent=2)

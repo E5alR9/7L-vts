@@ -136,7 +136,8 @@ def _sample_response(with_author=True, with_timeout=True):
 
 def test_parse_live_chat_response_basic():
     msgs, cont, wait = parse_live_chat_response(_sample_response())
-    assert msgs == [{"user": "路人甲", "message": "7L 唱一首！"}]
+    assert len(msgs) == 1
+    assert msgs[0]["user"] == "路人甲" and msgs[0]["message"] == "7L 唱一首！"
     assert cont == "NEXT_CONT_TOKEN"
     assert wait == 5.0
 

@@ -233,7 +233,7 @@ async def _yt_companion_session_loop(target_hwnd, initial_rect, initial_title):
 
     api_key = GEMINI_KEYS[0]
     client = genai.Client(api_key=api_key)
-    model = "gemini-3.1-flash-live-preview"
+    model = "gemini-3.8-live"
 
     CURRENT_YT_TITLE = initial_title
     IS_YT_COMPANION_ACTIVE = True

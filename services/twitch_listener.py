@@ -53,6 +53,7 @@ def parse_irc_line(line: str):
         "channel": m2.group("chan").lstrip("#"),
         "message": m2.group("msg").strip(),
         "badges": tags.get("badges", ""),
+        "id": tags.get("id", "") or "",
     }
 
 
@@ -61,28 +62,37 @@ def parse_channels(raw: str) -> list:
     return [c.strip().lower().lstrip("#") for c in re.split(r"[,\s;]+", raw or "") if c.strip()]
 
 
-def build_queue_item(user: str, display: str, message: str) -> dict:
+def build_queue_item(user: str, display: str, message: str, message_id: str = "") -> dict:
     """組成與 TikTok 相容的格式：【Twitch 直播觀眾 顯示名 (@id)】：內容
-    （主程式軌道2 的正則靠這個格式抓出暱稱與 ID）"""
+    （主程式軌道2 的正則靠這個格式抓出暱稱與 ID；text 格式凍結不可改）"""
     who = f"{display} (@{user})" if display and display.lower() != user.lower() else user
     return {
         "text": f"【Twitch 直播觀眾 {who}】：{message}",
         "audio_base64": None,
         "timestamp": time.time(),
         "source": "twitch",
+        "message_id": message_id or "",
+        "user": user,
+        "display": display,
     }
 
 
 async def twitch_live_worker(input_queue):
-    """背景協程：連 Twitch IRC、轉發留言（斷線自動重連）"""
+    """背景協程：連 Twitch IRC、轉發留言（去重＋指數退避重連＋狀態回報）"""
+    from services import chat_source as cs
     channels = parse_channels(os.getenv("TWITCH_CHANNELS") or "")
     if not channels:
         log_print("ℹ️ [Twitch] 未設定 TWITCH_CHANNELS，聊天室監聽未啟動")
+        cs.report_chat_status("twitch", "disabled", "未設定 TWITCH_CHANNELS")
         return
 
     nick = f"justinfan{int(time.time()) % 90000 + 10000}"
     import websockets
 
+    dedup = cs.DedupTracker()
+    attempt = 0
+    targets = ",".join("#" + c for c in channels)
+    cs.report_chat_status("twitch", "connecting", targets)
     while True:
         try:
             async with websockets.connect(_IRWS, max_size=2 ** 20, open_timeout=15, ping_interval=30) as ws:
@@ -90,7 +100,9 @@ async def twitch_live_worker(input_queue):
                 await ws.send("PASS SCHMOOPIIE")      # 匿名連線慣例
                 await ws.send(f"NICK {nick}")
                 await ws.send("JOIN " + ",".join(f"#{c}" for c in channels))
-                log_print(f"📺 [Twitch] 已連線並加入：{', '.join('#' + c for c in channels)}（匿名 {nick}）")
+                log_print(f"📺 [Twitch] 已連線並加入：{targets}（匿名 {nick}）")
+                cs.report_chat_status("twitch", "live", targets)
+                attempt = 0
 
                 async for raw in ws:
                     for line in str(raw).split("\r\n"):
@@ -102,12 +114,29 @@ async def twitch_live_worker(input_queue):
                             continue
                         if "message" not in msg or not msg["message"]:
                             continue
-                        await input_queue.put(build_queue_item(msg["user"], msg["display"], msg["message"]))
+                        if dedup.seen(msg.get("id", "")):
+                            continue                    # 重連/重送的舊留言，直接丟
+                        await input_queue.put(build_queue_item(
+                            msg["user"], msg["display"], msg["message"],
+                            message_id=msg.get("id", "")))
                         try:
                             import services.web_dashboard as wd
-                            wd.broadcast_event("twitch_comment", {"user": msg["display"], "text": msg["message"]})
+                            wd.broadcast_event("twitch_comment", {
+                                "user": msg["display"], "text": msg["message"],
+                                "message_id": msg.get("id", ""),
+                                "channel": msg.get("channel", ""),
+                            })
                         except Exception:
                             pass
+            # 連線被對端關閉（沒丟例外）：照退避重連
+            attempt += 1
+            delay = cs.backoff_delay(attempt)
+            log_print(f"⚠️ [Twitch] 連線被關閉，{delay:.0f} 秒後重連")
+            cs.report_chat_status("twitch", "connecting", f"斷線重連中（{delay:.0f}s）")
+            await asyncio.sleep(delay)
         except Exception as e:
-            log_print(f"⚠️ [Twitch] 連線中斷：{type(e).__name__}: {e}，5 秒後重連")
-            await asyncio.sleep(5)
+            attempt += 1
+            delay = cs.backoff_delay(attempt)
+            log_print(f"⚠️ [Twitch] 連線中斷：{type(e).__name__}: {e}，{delay:.0f} 秒後重連")
+            cs.report_chat_status("twitch", "error", f"{type(e).__name__}: {e}")
+            await asyncio.sleep(delay)

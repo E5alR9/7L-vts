@@ -34,7 +34,7 @@ class MainProxy:
         if hasattr(__main__, name):
             return getattr(__main__, name)
         if name in ("HIGH_IQ_GEMINI_MODELS", "STREAMER_MIND_MODELS"):
-            return ["gemini-2.5-flash", "gemini-2.0-flash"]
+            return ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite"]
         if name in ("DEAD_GEMINI_MODELS", "PROACTIVE_EXCLUDED_MODELS"):
             return set()
         if name == "speech_queue":
@@ -265,6 +265,9 @@ class ClassicalPianoSoundEngine:
         # 使用 15 個獨立 MIDI 通道 (0~8, 10~15，避開 Channel 9 打擊樂) 進行多軌語音輪替 (Voice Pooling)
         self.usable_channels = [0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15]
         self.channel_idx = 0
+        # 🎺 MIDI 樂隊：每通道獨立音色 {channel: program}；Channel 9 為打擊樂專用
+        self.channel_programs = {}
+        self.drum_channel = 9
         # 記錄各音符當前佔用的通道: {midi_num: [channel_list]}
         self.active_note_channels = collections.defaultdict(list)
         # 復音上限守護隊列: deque of (midi_num, channel)
@@ -292,7 +295,8 @@ class ClassicalPianoSoundEngine:
         try:
             cc7_val = int(min(100, self.volume) * 1.27)
             for ch in self.usable_channels:
-                self.midi_out.set_instrument(self.current_instrument, channel=ch)
+                prog = self.channel_programs.get(ch, self.current_instrument)
+                self.midi_out.set_instrument(prog, channel=ch)
                 self.midi_out.write_short(0xB0 + ch, 91, 80) # CC 91: Reverb 80 (飽滿自然空間共鳴)
                 self.midi_out.write_short(0xB0 + ch, 93, 25) # CC 93: Chorus 琴弦共鳴
                 self.midi_out.write_short(0xB0 + ch, 72, 85) # CC 72: Release Time 85 (自然飽滿共鳴餘韻，徹底杜絕掐音消音)
@@ -302,8 +306,9 @@ class ClassicalPianoSoundEngine:
             pass
 
     def set_instrument(self, program_num: int):
-        """切換 MIDI 發聲音色 (Program Change 0 ~ 127)"""
+        """切換 MIDI 發聲音色 (Program Change 0 ~ 127；樂隊模式請用 set_channel_program 逐軌配器)"""
         self.current_instrument = max(0, min(127, int(program_num)))
+        self.channel_programs = {}
         if self.midi_out:
             try:
                 for ch in self.usable_channels:
@@ -322,7 +327,23 @@ class ClassicalPianoSoundEngine:
             except Exception:
                 pass
 
-    def note_on(self, midi_num: int, velocity: int = 105):
+    def set_channel_program(self, channel: int, program_num: int):
+        """🎺 樂隊配器：指定某通道的音色（program_change 直達，不影響其他軌）"""
+        channel = max(0, min(15, int(channel)))
+        program_num = max(0, min(127, int(program_num)))
+        self.channel_programs[channel] = program_num
+        if self.midi_out:
+            try:
+                if channel == self.drum_channel:
+                    return                      # 打擊樂通道無視 program
+                self.midi_out.set_instrument(program_num, channel=channel)
+            except Exception:
+                pass
+
+    def note_on(self, midi_num: int, velocity: int = 105, channel: int = None, program: int = None):
+        """channel/program 指定時走樂隊軌（保留原通道直發）；否則走鋼琴輪替池。鼓軌 (ch9) 不受 88 鍵範圍限制。"""
+        if channel is not None:
+            return self._band_note_on(int(channel), midi_num, velocity, program)
         if self.midi_out and 21 <= midi_num <= 108 and self.volume > 0:
             try:
                 # 1. 輪替選取下一個可用頻道 (Round-Robin Voice Allocation)
@@ -351,6 +372,40 @@ class ClassicalPianoSoundEngine:
             except Exception:
                 pass
         return None
+
+    def _band_note_on(self, channel: int, midi_num: int, velocity: int = 105, program: int = None):
+        """樂隊軌直發：保留原通道（多音色同時演奏＋鼓組）。"""
+        if not self.midi_out or self.volume <= 0:
+            return None
+        try:
+            channel = max(0, min(15, int(channel)))
+            lo, hi = (35, 81) if channel == self.drum_channel else (21, 108)
+            if not (lo <= midi_num <= hi):
+                return None
+            if program is not None and channel != self.drum_channel:
+                program = max(0, min(127, int(program)))
+                if self.channel_programs.get(channel) != program:
+                    self.channel_programs[channel] = program
+                    try:
+                        self.midi_out.set_instrument(program, channel=channel)
+                    except Exception:
+                        pass
+            scaled_v = int(velocity * (self.volume / 100.0))
+            v = max(1, min(127, scaled_v))
+            while len(self.active_voices_fifo) >= self.MAX_POLYPHONY:
+                old_note, old_ch = self.active_voices_fifo.popleft()
+                try:
+                    self.midi_out.note_off(old_note, 0, old_ch)
+                    if old_ch in self.active_note_channels[old_note]:
+                        self.active_note_channels[old_note].remove(old_ch)
+                except Exception:
+                    pass
+            self.midi_out.note_on(midi_num, v, channel)
+            self.active_note_channels[midi_num].append(channel)
+            self.active_voices_fifo.append((midi_num, channel))
+            return channel
+        except Exception:
+            return None
 
     def note_off(self, midi_num: int, channel: Optional[int] = None):
         if self.midi_out and 21 <= midi_num <= 108:
@@ -1010,6 +1065,87 @@ def get_midi_file_duration(midi_path: str) -> float:
         return float(mid.length) if mid.length > 0 else 120.0
     except Exception:
         return 120.0
+
+# ── 🎺 MIDI 樂隊（多音色同時演奏）：保留 MIDI 原通道＋program，直發引擎 ──
+# 通道慣例：0 主奏（鋼琴/小提琴）／1 貝斯／2 鋪底（弦樂）／9 鼓組
+BAND_PRESETS = {
+    "piano_trio": {0: 0, 1: 33},        # 鋼琴＋貝斯＋鼓
+    "violin_lead": {0: 40, 1: 33, 2: 48},  # 小提琴主奏＋貝斯＋弦樂＋鼓
+    "guitar_band": {0: 27, 1: 33, 2: 48},  # 清音吉他＋貝斯＋弦樂＋鼓
+    "strings": {0: 48, 1: 42, 2: 52},   # 弦樂＋大提琴＋合唱（無鼓）
+}
+BAND_DRUMS = {36, 38, 42, 46, 49, 51}  # kick/snare/hat/tom/crash/ride（僅供作曲自動配鼓參考）
+
+
+async def play_midi_band(midi_path: str, band_map: dict = None, speed: float = 1.0,
+                         title: str = "", session_id: int = 0) -> str:
+    """🎺 MIDI 樂隊演奏：多軌 MIDI 保留原通道＋音色同時發聲（小提琴拉主旋律＋鋼琴伴奏＋鼓打底一次到位）。
+    band_map 例：{0: 40, 1: 33}（ch0 換小提琴、ch1 換貝斯；缺席通道沿用檔內 program，9 鼓恆免配器）。"""
+    global is_piano_active, current_piano_song_title, current_piano_midi_file
+    import mido
+    if not midi_path or not os.path.exists(midi_path):
+        return "（系統回報：樂隊譜不存在）"
+    if session_id and session_id != PIANO_SESSION_ID:
+        return ""
+    init_piano_synthesizer()
+    if not SOUND_ENGINE or not SOUND_ENGINE.midi_out:
+        return "（系統回報：無 MIDI 輸出裝置，樂隊靜音）"
+    if band_map:
+        for ch, prog in (band_map or {}).items():
+            try:
+                SOUND_ENGINE.set_channel_program(int(ch), int(prog))
+            except Exception:
+                pass
+    if title:
+        is_piano_active = True
+        current_piano_song_title = title
+        current_piano_midi_file = midi_path
+    try:
+        mid = mido.MidiFile(midi_path, clip=True)
+    except Exception as e:
+        return f"（系統回報：樂譜解析失敗: {e}）"
+    speed = float(speed or 1.0)
+    if speed <= 0:
+        speed = 1.0
+    log_print(f"🎺 [MIDI 樂隊] 開演《{title or os.path.basename(midi_path)}》（{len(mid.tracks)} 軌，倍速 {speed}x）")
+    try:
+        for msg in mid:
+            if session_id and session_id != PIANO_SESSION_ID:
+                break
+            if not is_piano_active:
+                break
+            dt = (msg.time or 0) / speed
+            if dt > 0:
+                await asyncio.sleep(min(dt, 2.0))
+            if msg.type == "note_on" and msg.velocity > 0:
+                SOUND_ENGINE.note_on(msg.note, msg.velocity, channel=getattr(msg, "channel", 0))
+            elif msg.type == "note_off" or (msg.type == "note_on" and msg.velocity == 0):
+                SOUND_ENGINE.note_off(msg.note, channel=getattr(msg, "channel", 0))
+            elif msg.type == "program_change":
+                try:
+                    SOUND_ENGINE.set_channel_program(getattr(msg, "channel", 0), msg.program)
+                except Exception:
+                    pass
+            elif msg.type == "control_change":
+                try:
+                    SOUND_ENGINE.midi_out.write_short(0xB0 + getattr(msg, "channel", 0), msg.control, msg.value)
+                except Exception:
+                    pass
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:
+        log_print(f"⚠️ [MIDI 樂隊演奏異常]: {e}")
+    return f"（系統回報：樂隊演奏《{title or os.path.basename(midi_path)}》完畢） [EXPRESSION: 星星眼]"
+
+
+def stop_midi_band():
+    """樂隊急停（全通道靜音）。"""
+    try:
+        if SOUND_ENGINE:
+            SOUND_ENGINE.all_notes_off()
+    except Exception:
+        pass
+
 
 async def stop_virtual_piano() -> str:
     """收起鋼琴（停止演奏、關閉桌面鋼琴介面並讓 7L 回到原本位置）。"""
@@ -2403,35 +2539,70 @@ async def compose_and_play_original_piano(theme_or_title: str = "", mood_or_styl
             for p, sb, db, v in bar:
                 notes.append({"pitch": p, "start_beat": sb, "duration_beats": db, "velocity": v})
 
-    # 使用 mido 壓制為標準 MIDI 檔案
+    # 使用 mido 壓制為標準三軌樂隊 MIDI（主旋律 ch0 鋼琴＋貝斯 ch1＋鼓組 ch9）
     try:
-        mid = mido.MidiFile(ticks_per_beat=ticks_per_beat)
-        track = mido.MidiTrack()
-        mid.tracks.append(track)
-        
+        mid = mido.MidiFile(type=1, ticks_per_beat=ticks_per_beat)
         tempo = mido.bpm2tempo(bpm)
-        track.append(mido.MetaMessage('set_tempo', tempo=tempo, time=0))
-        track.append(mido.MetaMessage('track_name', name="7L Original Piano", time=0))
 
-        events = []
+        def _mk_track(name, prog=None):
+            t = mido.MidiTrack()
+            t.append(mido.MetaMessage('track_name', name=name, time=0))
+            t.append(mido.MetaMessage('set_tempo', tempo=tempo, time=0))
+            if prog is not None:
+                t.append(mido.Message('program_change', program=prog, channel=0, time=0))
+            return t
+
+        melody = _mk_track("7L Melody Piano", prog=0)
+        bass = _mk_track("7L Bass", prog=33)
+        drums = _mk_track("7L Drums")
+        mid.tracks.extend([melody, bass, drums])
+
+        def _fill(track, evs, channel):
+            evs.sort(key=lambda x: (x[0], 0 if x[1] == 'note_off' else 1))
+            cur = 0
+            for tick, typ, pitch, vel in evs:
+                delta = max(0, tick - cur)
+                track.append(mido.Message(typ, note=pitch, velocity=vel, channel=channel, time=delta))
+                cur = tick
+
+        mel_evs, bass_evs, drum_evs = [], [], []
+        total_beats = 0.0
         for n in notes:
             p = int(n.get("pitch", 60))
-            p = max(21, min(108, p)) # 限制在 88 鍵範圍內
             sb = float(n.get("start_beat", 0.0))
             db = max(0.1, float(n.get("duration_beats", 1.0)))
             v = max(20, min(127, int(n.get("velocity", 80))))
-            start_tick = int(sb * ticks_per_beat)
-            end_tick = int((sb + db) * ticks_per_beat)
-            events.append((start_tick, 'note_on', p, v))
-            events.append((end_tick, 'note_off', p, 0))
-
-        events.sort(key=lambda x: (x[0], 0 if x[1] == 'note_off' else 1))
-
-        current_tick = 0
-        for tick, event_type, pitch, vel in events:
-            delta = max(0, tick - current_tick)
-            track.append(mido.Message(event_type, note=pitch, velocity=vel, time=delta))
-            current_tick = tick
+            total_beats = max(total_beats, sb + db)
+            hand = str(n.get("hand", "")).lower()
+            if hand == "left" or (not hand and p < 60):
+                p = max(28, min(67, p - 12))  # 貝斯下移八度
+                mel_off = int(sb * ticks_per_beat)
+                mel_end = int((sb + db) * ticks_per_beat)
+                bass_evs.append((mel_off, 'note_on', p, v))
+                bass_evs.append((mel_end, 'note_off', p, 0))
+            else:
+                p = max(21, min(108, p))  # 限制在 88 鍵範圍內
+                mel_off = int(sb * ticks_per_beat)
+                mel_end = int((sb + db) * ticks_per_beat)
+                mel_evs.append((mel_off, 'note_on', p, v))
+                mel_evs.append((mel_end, 'note_off', p, 0))
+        # 自動鼓組：大鼓拍點＋軍鼓 2/4 拍＋踩鈸八分音符
+        nbars = max(1, int((total_beats + 3.99) // 4))
+        for bar in range(nbars):
+            for beat in range(4):
+                b0 = int((bar * 4 + beat) * ticks_per_beat)
+                drum_evs.append((b0, 'note_on', 36, 100))
+                drum_evs.append((b0 + 60, 'note_off', 36, 0))
+                if beat in (1, 3):
+                    drum_evs.append((b0, 'note_on', 38, 90))
+                    drum_evs.append((b0 + 60, 'note_off', 38, 0))
+                for half in range(2):
+                    h0 = b0 + half * ticks_per_beat // 2
+                    drum_evs.append((h0, 'note_on', 42, 60))
+                    drum_evs.append((h0 + 30, 'note_off', 42, 0))
+        _fill(melody, mel_evs, 0)
+        _fill(bass, bass_evs, 1)
+        _fill(drums, drum_evs, 9)
 
         out_midi_path = os.path.join(MIDI_SHEETS_DIR, f"{created_song_title}.mid")
         mid.save(out_midi_path)

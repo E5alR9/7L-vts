@@ -10,6 +10,7 @@ import core.websocket_patch  # 🔧 修復 Live API additional_headers 相容性
 from core.utils import log_print
 
 # --- LLM Engine Configuration & Standby Manager ---
+# PROVIDER: GEMINI（google-genai；視覺＋Live 全雙工；見 docs/AI_SOURCES.md）
 
 # 🛡️ 解除全域安全審查限制：將所有危害類別門檻設為 BLOCK_NONE，確保不被惡意熔斷或過度審查
 UNRESTRICTED_SAFETY_SETTINGS = [
@@ -111,7 +112,6 @@ STREAMER_MIND_MODELS = [
     "gemini-3.5-flash",                    # 🛡️ 第 5 位：10s ~ 14s 高智商穩定主力保底
     "gemini-3.7-flash",                    # 👑 第 6 位：頂配旗艦大腦
     "gemini-3.8-flash",                    # 🚀 第 7 位：2026 全新頂配旗艦大腦
-    "gemini-3.1-pro-preview",              # 🧠 第 8 位：超高智商 Pro 預覽
 ]
 
 KEYS_VISION        = GEMINI_KEYS[12:18] if len(GEMINI_KEYS) >= 18 else GEMINI_KEYS
@@ -121,10 +121,9 @@ HIGH_IQ_GEMINI_MODELS = [
     "gemini-3.7-flash",                    # 👑 第 2 位：頂配旗艦大腦（深度思考 Thinking 原生開啟）
     "gemini-3.6-flash",                    # 👑 第 3 位：高智商旗艦主力，視覺與工具調用精確
     "gemini-3.5-flash",                    # 🥈 第 4 位：高智商穩定主力保底
-    "gemini-3.1-pro-preview",              # 🧠 第 5 位：超高智商 Pro 預覽
-    "gemini-3-flash-preview",              # ⚡ 第 6 位：閃電推理預覽
-    "gemini-3.5-flash-lite",               # 🛡️ 第 7 位：超大額度輕量保底防線
-    "gemini-3.1-flash-lite",               # ⚡ 第 8 位：超低延遲輕量秒回
+    "gemini-3-flash-preview",              # ⚡ 第 5 位：閃電推理預覽
+    "gemini-3.5-flash-lite",               # 🛡️ 第 6 位：超大額度輕量保底防線
+    "gemini-3.1-flash-lite",               # ⚡ 第 7 位：超低延遲輕量秒回
 ]
 
 PROACTIVE_EXCLUDED_MODELS = {
@@ -133,5 +132,4 @@ PROACTIVE_EXCLUDED_MODELS = {
     "gemini-3.6-flash",
     "gemini-3.5-flash",
     "gemini-3-flash-preview",
-    "gemini-3.1-pro-preview"
 }
