@@ -224,7 +224,8 @@ INTERACTIONS_TOOLS = [
             "type": "object",
             "properties": {
                 "midi_file": {"type": "string", "description": "本地 .mid 檔案路徑（midi_sheets/ 下）"},
-                "band_preset": {"type": "string", "description": "配器預設：piano_trio（鋼琴+貝斯+鼓）／violin_lead（小提琴主奏）／guitar_band（吉他樂隊）／strings（弦樂）"},
+                "band_preset": {"type": "string", "description": "配器預設：piano_trio／violin_lead／guitar_band／strings／rock_band／jazz_trio／brass_band／folk_band／synth_band／orchestra"},
+                "layers": {"type": "string", "description": "疊層合奏（可選）：更多 .mid 路徑逗號分隔，同時合奏"},
                 "title": {"type": "string", "description": "曲名（播報用）"}
             },
             "required": ["midi_file"]
@@ -253,6 +254,21 @@ INTERACTIONS_TOOLS = [
                 "url": {"type": "string", "description": "YouTube 影片網址或 11 碼 ID"}
             },
             "required": ["url"]
+        }
+    },
+    {
+        "type": "function",
+        "name": "music.generate_song",
+        "description": "🎵 AI 作曲（ACE-Step 本地服務）：文字→完整歌曲（含人聲編曲，慢任務）。當老爸或觀眾說『寫一首歌』、『AI 作曲』、『生成一首歌』時調用！（需 ACESTEP_ENABLED=1，否則安全跳過）",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "caption": {"type": "string", "description": "風格描述（如：溫柔抒情流行歌、鋼琴+弦樂、128BPM）"},
+                "lyrics": {"type": "string", "description": "歌詞（可空，空＝純音樂）"},
+                "duration": {"type": "integer", "description": "時長秒數（10-600，預設 120）"},
+                "style": {"type": "string", "description": "補充風格標籤"}
+            },
+            "required": ["caption"]
         }
     },
     {
@@ -819,13 +835,29 @@ async def execute_tool_dispatch(fn_name: str, fn_args: dict, caller_target: str 
         # ⚠️ 絕不將內部系統提示拼入 extracted_text 作為語音口語！
         if p_res and "[EXPRESSION:" in p_res:
             extracted_text += f" {p_res}"
+    elif fn_name in ["music.generate_song", "generate_song"]:
+        import services.acestep_music as _am
+        _cap = fn_args.get("caption", "")
+        _lyr = fn_args.get("lyrics", "")
+        _dur = int(fn_args.get("duration", 120) or 120)
+        _sty = fn_args.get("style", "")
+        _res = await _am.generate_song(_cap, _lyr, _dur, _sty)
+        if _res.get("ok"):
+            extracted_text += f" （系統回報：AI 作曲已生成（{_res.get('file', '')}），請播報）"
+        else:
+            extracted_text += f" （系統回報：AI 作曲失敗：{_res.get('error', '')}）"
     elif fn_name in ["pe.play_midi_band", "play_midi_band"]:
         mf = fn_args.get("midi_file", "")
         preset = fn_args.get("band_preset", "")
         b_title = fn_args.get("title", "")
         bmap = dict(pe.BAND_PRESETS.get(preset, pe.BAND_PRESETS["piano_trio"])) if preset in pe.BAND_PRESETS else None
+        _layers = []
+        for i, lp in enumerate(str(fn_args.get("layers", "") or "").replace(";", ",").split(",")):
+            lp = lp.strip()
+            if lp and os.path.exists(lp):
+                _layers.append({"midi_path": lp, "channel_shift": 4 * (i + 1), "program": None})
         req_t = caller_target or ("audience" if CURRENT_SPEAKING_TARGET == "audience" else "dad")
-        band_res = await pe.play_midi_band(mf, band_map=bmap, title=b_title or os.path.basename(mf))
+        band_res = await pe.play_midi_band(mf, band_map=bmap, title=b_title or os.path.basename(mf), layers=_layers)
         if band_res and "[EXPRESSION:" in band_res:
             extracted_text += f" {band_res}"
     elif fn_name in ["video.request_watch", "request_watch"]:

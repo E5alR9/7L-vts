@@ -224,36 +224,155 @@ def generate_piano_tone(midi_num, duration=3.0):
 import pygame.midi
 
 # ────────────────────────────────────────────────────────
-# 🎻 General MIDI 精選音色庫
-# ────────────────────────────────────────────────────────
+# 🎻 General MIDI 完整音色庫（128 programs＋10 鼓組；program 號為 GM 標準，協議上限）
+# 家族：0-7 鍵盤／8-15 敲擊弦／16-23 風琴／24-31 吉他／32-39 貝斯／40-47 弦樂／
+#       48-55 合奏合唱／56-63 銅管／64-71 簧管／72-79 笛／80-87 主音合成／
+#       88-95 音墊／96-103 合成特效／104-111 民族／112-119 打擊／120-127 特效
 MIDI_INSTRUMENTS = {
+    # ── 鍵盤 ──
     "🎹 古典平台鋼琴 (Grand Piano)": 0,
     "✨ 晶亮平台鋼琴 (Bright Piano)": 1,
+    "🎹 電子大鋼琴 (Electric Grand)": 2,
+    "🍺 酒吧鋼琴 (Honky-tonk)": 3,
     "⚡ 經典電鋼琴 (Rhodes EP)": 4,
     "🌌 FM 數位電鋼琴 (DX7 EP)": 5,
     "🎼 古典大鍵琴 (Harpsichord)": 6,
+    "🕰️ 古鋼琴 (Clavinet)": 7,
+    # ── 敲擊弦／鈴 ──
     "🔔 夢幻鋼片琴 (Celesta)": 8,
+    "🔔 鐘琴 (Glockenspiel)": 9,
+    "🎠 音樂盒 (Music Box)": 10,
+    "🎻 顫音琴 (Vibraphone)": 11,
     "🎵 溫暖木琴 (Marimba)": 12,
+    "🎵 木琴 (Xylophone)": 13,
+    "🔔 管鐘 (Tubular Bells)": 14,
+    "🥁 大力揚琴 (Dulcimer)": 15,
+    # ── 風琴 ──
+    "🎹 爵士風琴 (Drawbar Organ)": 16,
+    "🎹 敲擊風琴 (Percussive Organ)": 17,
+    "🎹 搖滾風琴 (Rock Organ)": 18,
     "⛪ 教堂管風琴 (Church Organ)": 19,
+    "🎹 簧片風琴 (Reed Organ)": 20,
     "🪗 浪漫手風琴 (Accordion)": 21,
+    "🪗 口琴 (Harmonica)": 22,
+    "🪗 探戈手風琴 (Bandoneon)": 23,
+    # ── 吉他 ──
     "🎸 古典尼龍吉他 (Nylon Guitar)": 24,
     "🎸 民謠鋼弦吉他 (Steel Guitar)": 25,
+    "🎸 爵士電吉他 (Jazz Guitar)": 26,
     "🎸 清音電吉他 (Clean Guitar)": 27,
+    "🎸 悶音電吉他 (Muted Guitar)": 28,
     "⚡ 破音電吉他 (Overdrive)": 29,
     "⚡ 重金屬吉他 (Distortion)": 30,
+    "🎸 吉他泛音 (Harmonics)": 31,
+    # ── 貝斯 ──
+    "🎸 原聲貝斯 (Acoustic Bass)": 32,
     "🎸 指彈電貝斯 (Electric Bass)": 33,
+    "🎸 撥片貝斯 (Picked Bass)": 34,
+    "🎸 無品貝斯 (Fretless Bass)": 35,
+    "🎸 貝斯 Slap 一式 (Slap Bass)": 36,
+    "🎸 貝斯 Slap 二式 (Slap Bass 2)": 37,
+    "🎸 合成貝斯 (Synth Bass)": 38,
+    "🎸 酸性貝斯 (Acid Bass)": 39,
+    # ── 弦樂獨奏 ──
     "🎻 獨奏小提琴 (Violin)": 40,
+    "🎻 中提琴 (Viola)": 41,
     "🎻 抒情大提琴 (Cello)": 42,
+    "🎻 低音提琴 (Contrabass)": 43,
+    "🎻 顫音弦樂 (Tremolo Strings)": 44,
+    "🎻 撥弦 (Pizzicato)": 45,
     "🪕 天使豎琴 (Harp)": 46,
+    "🥁 定音鼓 (Timpani)": 47,
+    # ── 合奏合唱 ──
     "🎻 華麗交響弦樂 (String Ensemble)": 48,
+    "🎻 慢弦樂 (Slow Strings)": 49,
+    "🎻 合成弦樂 (Synth Strings)": 50,
+    "🎻 合成弦樂二式 (Synth Strings 2)": 51,
     "👼 空靈人聲合唱 (Choir Aahs)": 52,
+    "🗣️ 人聲嘟聲 (Voice Oohs)": 53,
+    "🎺 合成銅管 (Synth Voice)": 54,
+    "🎺 管弦齊奏 (Orchestra Hit)": 55,
+    # ── 銅管 ──
     "🎺 爵士小號 (Trumpet)": 56,
+    "🎺 長號 (Trombone)": 57,
+    "🎺 大號 (Tuba)": 58,
+    "🎺 弱音小號 (Muted Trumpet)": 59,
+    "📯 法國號 (French Horn)": 60,
+    "🎺 銅管合奏 (Brass Section)": 61,
+    "🎺 合成銅管2 (Synth Brass)": 62,
+    "🎺 合成銅管3 (Synth Brass 2)": 63,
+    # ── 簧管 ──
+    "🎷 高音薩克斯 (Soprano Sax)": 64,
     "🎷 浪漫薩克斯風 (Alto Sax)": 65,
+    "🎷 次中音薩克斯 (Tenor Sax)": 66,
+    "🎷 上低音薩克斯 (Baritone Sax)": 67,
+    "🎷 雙簧管 (Oboe)": 68,
+    "🎷 英國管 (English Horn)": 69,
+    "🎷 巴松管 (Bassoon)": 70,
+    "🎷 單簧管 (Clarinet)": 71,
+    # ── 笛 ──
+    "🪈 短笛 (Piccolo)": 72,
     "🪈 清新長笛 (Flute)": 73,
+    "🪈 豎笛 (Recorder)": 74,
+    "🪈 排簫 (Pan Flute)": 75,
+    "🪈 吹瓶子 (Bottle)": 76,
+    "🪈 尺八 (Shakuhachi)": 77,
+    "🪈 口哨 (Whistle)": 78,
+    "🪈 陶笛 (Ocarina)": 79,
+    # ── 主音合成 ──
+    "🎹 方波主音 (Square Lead)": 80,
     "🎹 復古合成器 (Saw Lead)": 81,
+    "🎹 遊戲主音 (Calliope Lead)": 82,
+    "🎹 吹管主音 (Chiff Lead)": 83,
+    "🎹 金屬掃弦主音 (Charang Lead)": 84,
+    "🎹 人聲主音 (Voice Lead)": 85,
+    "🎹 五度主音 (Fifths Lead)": 86,
+    "🎹 貝斯主音 (Bass Lead)": 87,
+    # ── 音墊 ──
+    "🌸 新世紀音墊 (New Age Pad)": 88,
     "🌸 夢幻合成音墊 (Warm Pad)": 89,
+    "🌸 復 Poly 音墊 (Poly Pad)": 90,
+    "🌸 空靈音墊 (Ghost Pad)": 91,
+    "🌸 弓弦音墊 (Bowed Pad)": 92,
+    "🌸 金屬音墊 (Metallic Pad)": 93,
+    "🌸 光環音墊 (Halo Pad)": 94,
+    "🌸 掃掠音墊 (Sweep Pad)": 95,
+    # ── 合成特效 ──
+    "🌧️ 雨聲 (Rain FX)": 96,
+    "🎬 電影音景 (Soundtrack)": 97,
+    "🔮 水晶 (Crystal)": 98,
+    "🌊 海浪 (Atmosphere)": 99,
+    "🌟 明亮 (Brightness)": 100,
+    "👺 妖怪 (Goblins)": 101,
+    "👽 回聲 (Echoes)": 102,
+    "🚀 科幻 (Sci-Fi)": 103,
+    # ── 民族 ──
+    "🪕 西塔琴 (Sitar)": 104,
+    "🪕 班鳩琴 (Banjo)": 105,
+    "🪕 三味線 (Shamisen)": 106,
     "🪕 日本古箏 (Koto)": 107,
-    "🪵 非洲拇指琴 (Kalimba)": 108
+    "🪵 非洲拇指琴 (Kalimba)": 108,
+    "👜 蘇格蘭風笛 (Bagpipe)": 109,
+    "🎻 提琴 (Fiddle)": 110,
+    "🎻 沙那笛 (Shanai)": 111,
+    # ── 打擊 ──
+    "🔔 丁丁鈴 (Tinkle Bell)": 112,
+    "🔔 鈴 (Agogo)": 113,
+    "🥁 鋼鼓 (Steel Drums)": 114,
+    "🪵 木魚 (Woodblock)": 115,
+    "🥁 太鼓 (Taiko)": 116,
+    "🎵 旋律鼓 (Melodic Tom)": 117,
+    "🥁 合成鼓 (Synth Drum)": 118,
+    "🔔 反轉鈸 (Reverse Cymbal)": 119,
+    # ── 特效 ──
+    "🎸 吉他品絲噪音 (Fret Noise)": 120,
+    "🌬️ 呼吸噪音 (Breath Noise)": 121,
+    "🌊 海浪聲 (Seashore)": 122,
+    "🐦 鳥鳴 (Bird Tweet)": 123,
+    "📞 電話鈴 (Telephone)": 124,
+    "🚁 直升機 (Helicopter)": 125,
+    "👏 掌聲 (Applause)": 126,
+    "🔫 槍聲 (Gunshot)": 127,
 }
 
 class ClassicalPianoSoundEngine:
@@ -379,8 +498,8 @@ class ClassicalPianoSoundEngine:
             return None
         try:
             channel = max(0, min(15, int(channel)))
-            lo, hi = (35, 81) if channel == self.drum_channel else (21, 108)
-            if not (lo <= midi_num <= hi):
+            # 樂隊軌音域全開 0-127（短笛上探、倍低音下潛；鼓軌亦放寬，交由音源決定）
+            if not (0 <= midi_num <= 127):
                 return None
             if program is not None and channel != self.drum_channel:
                 program = max(0, min(127, int(program)))
@@ -1073,14 +1192,22 @@ BAND_PRESETS = {
     "violin_lead": {0: 40, 1: 33, 2: 48},  # 小提琴主奏＋貝斯＋弦樂＋鼓
     "guitar_band": {0: 27, 1: 33, 2: 48},  # 清音吉他＋貝斯＋弦樂＋鼓
     "strings": {0: 48, 1: 42, 2: 52},   # 弦樂＋大提琴＋合唱（無鼓）
+    "rock_band": {0: 30, 1: 36, 2: 61},  # 重金屬吉他＋Slap貝斯＋銅管＋鼓
+    "jazz_trio": {0: 4, 1: 32, 2: 65},  # 電鋼＋原聲貝斯＋薩克斯（鼓檔輕）
+    "brass_band": {0: 56, 1: 57, 2: 61},  # 小號＋長號＋銅管合奏＋鼓
+    "folk_band": {0: 107, 1: 32, 2: 46},  # 古箏＋原聲貝斯＋豎琴＋鼓
+    "synth_band": {0: 81, 1: 38, 2: 89},  # 合成主音＋合成貝斯＋音墊＋鼓
+    "orchestra": {0: 48, 1: 43, 2: 60, 3: 73},  # 弦樂＋低音提琴＋法國號＋長笛＋鼓
 }
 BAND_DRUMS = {36, 38, 42, 46, 49, 51}  # kick/snare/hat/tom/crash/ride（僅供作曲自動配鼓參考）
 
 
 async def play_midi_band(midi_path: str, band_map: dict = None, speed: float = 1.0,
-                         title: str = "", session_id: int = 0) -> str:
+                         title: str = "", session_id: int = 0, layers: list = None) -> str:
     """🎺 MIDI 樂隊演奏：多軌 MIDI 保留原通道＋音色同時發聲（小提琴拉主旋律＋鋼琴伴奏＋鼓打底一次到位）。
-    band_map 例：{0: 40, 1: 33}（ch0 換小提琴、ch1 換貝斯；缺席通道沿用檔內 program，9 鼓恆免配器）。"""
+    band_map 例：{0: 40, 1: 33}（ch0 換小提琴、ch1 換貝斯；缺席通道沿用檔內 program，9 鼓恆免配器）。
+    layers 疊層例：[{"midi_path": "b.mid", "channel_shift": 4, "program": 48}]
+      → 多首同時合奏（mashup 樂隊版）；channel_shift 平移通道避撞（鼓 ch9 永不平移）。"""
     global is_piano_active, current_piano_song_title, current_piano_midi_file
     import mido
     if not midi_path or not os.path.exists(midi_path):
@@ -1101,34 +1228,88 @@ async def play_midi_band(midi_path: str, band_map: dict = None, speed: float = 1
         current_piano_song_title = title
         current_piano_midi_file = midi_path
     try:
-        mid = mido.MidiFile(midi_path, clip=True)
-    except Exception as e:
-        return f"（系統回報：樂譜解析失敗: {e}）"
+        from services.piano_engine import SOUND_ENGINE as _SE  # noqa (self-ref safe)
+    except Exception:
+        pass
+    # ── 疊層合併：主檔＋layers 多首同時合奏（通道平移避撞，鼓 ch9 永不平移）──
+    def _remap(ch, shift):
+        if ch == 9:
+            return 9
+        m = (int(ch) + int(shift or 0)) % 16
+        return 10 if m == 9 else m
+
+    def _load_events(path, shift=0, prog=None):
+        evs = []
+        try:
+            m = mido.MidiFile(path, clip=True)
+        except Exception:
+            return evs
+        abs_t = 0.0
+        prog_chs = set()
+        for msg in m:
+            abs_t += (msg.time or 0)
+            ch = getattr(msg, "channel", 0)
+            if msg.type == "note_on" and msg.velocity > 0:
+                nch = _remap(ch, shift)
+                if prog is not None and nch != 9 and nch not in prog_chs:
+                    prog_chs.add(nch)
+                    evs.append((0.0, 2, ("program", nch, int(prog))))
+                evs.append((abs_t, 1 if False else 1, ("on", nch, msg.note, msg.velocity)))
+            elif msg.type == "note_off" or (msg.type == "note_on" and msg.velocity == 0):
+                evs.append((abs_t, 0, ("off", _remap(ch, shift), msg.note)))
+            elif msg.type == "program_change":
+                nch = _remap(ch, shift)
+                if prog is None or nch == 9:
+                    evs.append((abs_t, 2, ("program", nch, msg.program)))
+            elif msg.type == "control_change":
+                evs.append((abs_t, 2, ("cc", _remap(ch, shift), msg.control, msg.value)))
+        return evs
+
+    events = _load_events(midi_path)
+    n_files = 1
+    for layer in (layers or []):
+        try:
+            lp = (layer or {}).get("midi_path", "")
+            if lp and os.path.exists(lp):
+                events += _load_events(lp, (layer or {}).get("channel_shift", 0), (layer or {}).get("program"))
+                n_files += 1
+        except Exception:
+            pass
+    if not events:
+        return f"（系統回報：樂譜無可演奏事件）"
+    events.sort(key=lambda e: (e[0], e[1]))
     speed = float(speed or 1.0)
     if speed <= 0:
         speed = 1.0
-    log_print(f"🎺 [MIDI 樂隊] 開演《{title or os.path.basename(midi_path)}》（{len(mid.tracks)} 軌，倍速 {speed}x）")
+    log_print(f"🎺 [MIDI 樂隊] 開演《{title or os.path.basename(midi_path)}》（{n_files} 首疊層共 {len(events)} 事件，倍速 {speed}x）")
     try:
-        for msg in mid:
+        last_t = 0.0
+        for abs_t, _prio, ev in events:
             if session_id and session_id != PIANO_SESSION_ID:
                 break
             if not is_piano_active:
                 break
-            dt = (msg.time or 0) / speed
+            dt = (abs_t - last_t) / speed
+            last_t = abs_t
             if dt > 0:
                 await asyncio.sleep(min(dt, 2.0))
-            if msg.type == "note_on" and msg.velocity > 0:
-                SOUND_ENGINE.note_on(msg.note, msg.velocity, channel=getattr(msg, "channel", 0))
-            elif msg.type == "note_off" or (msg.type == "note_on" and msg.velocity == 0):
-                SOUND_ENGINE.note_off(msg.note, channel=getattr(msg, "channel", 0))
-            elif msg.type == "program_change":
+            kind = ev[0]
+            if kind == "on":
+                _, ch, note, vel = ev
+                SOUND_ENGINE.note_on(note, vel, channel=ch)
+            elif kind == "off":
+                _, ch, note = ev
+                SOUND_ENGINE.note_off(note, channel=ch)
+            elif kind == "program":
+                _, ch, prog = ev
                 try:
-                    SOUND_ENGINE.set_channel_program(getattr(msg, "channel", 0), msg.program)
+                    SOUND_ENGINE.set_channel_program(ch, prog)
                 except Exception:
                     pass
-            elif msg.type == "control_change":
+            elif kind == "cc":
+                _, ch, cc, val = ev
                 try:
-                    SOUND_ENGINE.midi_out.write_short(0xB0 + getattr(msg, "channel", 0), msg.control, msg.value)
+                    SOUND_ENGINE.midi_out.write_short(0xB0 + ch, cc, val)
                 except Exception:
                     pass
     except asyncio.CancelledError:
