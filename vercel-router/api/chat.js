@@ -243,7 +243,7 @@ async function embCacheSet(h, vec) {
     if (k) await k.set("gr:emb:" + h, JSON.stringify(vec), { ex: 30 * 86400 });
   } catch {}
 }
-async function nvidiaEmbed(texts, apiKey) {
+async function nvidiaEmbed(texts, apiKey, inputType) {
   const ac = new AbortController();
   const tm = setTimeout(() => ac.abort(), 30000);
   try {
@@ -251,7 +251,7 @@ async function nvidiaEmbed(texts, apiKey) {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
       signal: ac.signal,
-      body: JSON.stringify({ model: EMBED_MODEL, input: texts, encoding_format: "float", truncate: "END" }),
+      body: JSON.stringify({ model: EMBED_MODEL, input: texts, ...(inputType ? { input_type: inputType } : {}), encoding_format: "float", truncate: "END" }),
     });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(((j && j.detail) || (j.error && j.error.message)) || ("HTTP " + r.status));
@@ -267,46 +267,48 @@ async function retrieveRelevant(older, query, budgetEst, apiKey) {
   const docs = older
     .map((m, i) => ({ i, text: `${m.role === "user" ? "user" : "assistant"}: ${String(m.content ?? "")}`.slice(0, 2000) }))
     .filter((d) => d.text.replace(/^(user|assistant):\s*/, "").trim().length > 0);
-  if (!docs.length || !String(query || "").trim()) return { msgs: [], count: 0 };
+  if (!docs.length || !String(query || "").trim()) return { msgs: [], count: 0, embTokens: 0 };
   const vecs = new Array(docs.length).fill(null);
   const missed = [], missedIdx = [];
   for (let i = 0; i < docs.length; i++) {
-    const c = await embCacheGet(sumHash("emb1:" + docs[i].text));
+    const c = await embCacheGet(sumHash("emb2:" + docs[i].text));
     if (c) vecs[i] = c;
     else { missed.push(docs[i].text); missedIdx.push(i); }
   }
   const qText = String(query).slice(0, 2000);
-  const qh = sumHash("emb1:q:" + qText);
+  const qh = sumHash("emb2:q:" + qText);
   let qv = await embCacheGet(qh);
-  const freshTexts = qv ? missed : [qText, ...missed];
   let embTokens = 0;
-  if (freshTexts.length) {
-    const got = await nvidiaEmbed(freshTexts, apiKey);   // 一次批量，1 個 request
-    embTokens = got.tokens || 0;   // 只有新算的向量才計費
-    let p = 0;
-    const vv = got.vecs;
-    if (!qv) { qv = vv[p++]; await embCacheSet(qh, qv); }
-    for (const i of missedIdx) {
-      const h = sumHash("emb1:" + docs[i].text);
-      vecs[i] = vv[p++];
-      await embCacheSet(h, vecs[i]);
-    }
+  // query 走 query 模式、文件走 passage 模式（官方：混用大掉準確率），分兩批各 1 個 request；前綴換 emb2 避免吃到舊混算快取
+  if (!qv) {
+    const gq = await nvidiaEmbed([qText], apiKey, "query");
+    embTokens += gq.tokens || 0;
+    qv = gq.vecs[0];
+    await embCacheSet(qh, qv);
   }
-  if (!qv) return { msgs: [], count: 0 };
+  if (missed.length) {
+    const gd = await nvidiaEmbed(missed, apiKey, "passage");
+    embTokens += gd.tokens || 0;
+    missedIdx.forEach((i, k) => { vecs[i] = gd.vecs[k]; });
+    for (const i of missedIdx) if (vecs[i]) await embCacheSet(sumHash("emb2:" + docs[i].text), vecs[i]);
+  }
+  if (!qv) return { msgs: [], count: 0, embTokens };
   const scored = docs.map((d, i) => ({ ...d, s: vecs[i] ? cosSim(qv, vecs[i]) : -1 }))
-    .filter((d) => d.s > 0.3)
     .sort((a, b) => b.s - a.s);
-  if (!scored.length) return { msgs: [], count: 0 };
+  // 實測 query/passage 分數整體偏低（相關 ~0.23、無關 ~0.1）：0.15 門檻＋只拿與最佳接近的，雜訊不燒 token
+  const best = scored.length ? scored[0].s : 0;
+  const rel = scored.filter((d) => d.s > 0.15 && d.s >= best * 0.6);
+  if (!rel.length) return { msgs: [], count: 0, embTokens };
   const picked = [];
   let used = 0;
-  for (const d of scored) {   // 貪心塞 budget，最多 4 段
+  for (const d of rel) {   // 貪心塞 budget，最多 4 段
     if (picked.length >= 4) break;
     const e = estPromptPts({ messages: [{ role: "system", content: d.text }] });
     if (used + e > budgetEst) continue;
     used += e;
     picked.push(d);
   }
-  if (!picked.length) return { msgs: [], count: 0 };
+  if (!picked.length) return { msgs: [], count: 0, embTokens };
   picked.sort((a, b) => a.i - b.i);   // 按時間序排回來，模型好讀
   const block = "[相關歷史原文（與你本問最相關，按時間序；session 完整保留）]\n" +
     picked.map((d, n) => `〈片段${n + 1}〉${d.text}`).join("\n");

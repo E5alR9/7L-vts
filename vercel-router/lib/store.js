@@ -598,7 +598,7 @@ const MODEL_PRICES = {
   "canopylabs/orpheus-v1-english":   { input: 0, output: 0, unit: "$22 / 1M 字元", note: "文字轉語音" },
   "canopylabs/orpheus-arabic-saudi": { input: 0, output: 0, unit: "$40 / 1M 字元", note: "文字轉語音" },
   // 向量檢索（只收 input；上游免費額度，站內價計入突破 7K 的請求帳單）
-  "nvidia/nemotron-3-embed-1b": { input: 0.02, output: 0, note: "NV · 站內價（向量檢索用，上游免費額度）" },
+  "nvidia/nemotron-3-embed-1b": { input: 0.02, output: 0, note: "NV · 對標市場地板（OpenAI small / Voyage-lite / Jina v3 同級 $0.02）；上游免費額度" },
 };
 
 /** 模型規格表（Groq 官方 console 資料：速度 T/s、開發層限流、上下文、最長輸出、檔案上限）
