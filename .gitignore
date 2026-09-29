@@ -55,3 +55,64 @@ pretrained_models/
 # vercel 轉發器（已獨立為 ../groq-router，不在本倉）
 .vercel/
 .env.local
+
+# --- Windows user profile system folders (since repo is in user home) ---
+desktop.ini
+NTUSER.DAT*
+ntuser.dat*
+ntuser.ini
+AppData/
+Application Data/
+Local Settings/
+My Documents/
+Cookies/
+Recent/
+SendTo/
+Templates/
+NetHood/
+PrintHood/
+Favorites/
+Searches/
+Links/
+OneDrive/
+Desktop/
+Downloads/
+Documents/
+Contacts/
+Saved Games/
+Videos/
+Music/
+Pictures/
+3D Objects/
+「開始」功能表/
+
+# --- Local IDE / Tools ---
+.vscode/
+.idea/
+.antigravity-ide/
+ai-ide/
+.gemini/
+.lmstudio/
+.local/
+.kiro/
+.kiro-shared/
+.cline/
+.aws/
+.dsh/
+.config/
+.lmstudio-home-pointer
+.python_history
+.gitconfig
+.npmrc
+.cache/
+
+# --- Local scratch models & datasets ---
+GPT-SoVITS/
+GPT_SoVITS/
+curseforge/
+xiaoyi_dataset/
+finetune_data/
+songs_library/
+*.onnx
+*.bin
+data_backup_before_sync/
