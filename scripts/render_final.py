@@ -32,14 +32,24 @@ def main():
             continue  # 未列名或靜音軌跳過
         bk, prog = VOICES[name]
         abs_t = 0.0
+        pending = {}
+        notes = []
         for msg in track:
             abs_t += mido.tick2second(msg.time, mid.ticks_per_beat, tempo)
             if msg.type == "note_on" and msg.velocity > 0:
-                w = bank.render_note(bk, prog, msg.note, msg.velocity, 1.5, SR)
-                idx = int(abs_t * SR)
-                end = min(len(master), idx + len(w))
-                if idx < len(master):
-                    master[idx:end] += w[:end - idx] * 0.7
+                pending.setdefault(msg.note, []).append((abs_t, msg.velocity))
+            elif msg.type == "note_off" or (msg.type == "note_on" and msg.velocity == 0):
+                q = pending.get(msg.note) or []
+                if q:
+                    s, v = q.pop(0)
+                    notes.append((s, msg.note, v, max(0.05, abs_t - s)))
+        for s, midi, vel, dur in notes:
+            dur = min(dur + 0.15, 3.0)  # 真實時值＋15% 自然延音（鼓類短音不糊）
+            w = bank.render_note(bk, prog, midi, vel, dur, SR)
+            idx = int(s * SR)
+            end = min(len(master), idx + len(w))
+            if idx < len(master):
+                master[idx:end] += w[:end - idx] * (0.8 if name == "Drums" else 1.0)
     # 原音人聲疊頂
     voc, sr = sf.read(os.path.join(BASE, "data", "stem_pack", "x8jAY2CoOBg", "vocals.wav"),
                       dtype="float32", always_2d=True)
