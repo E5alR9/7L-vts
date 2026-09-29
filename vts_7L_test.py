@@ -319,6 +319,18 @@ INTERACTIONS_TOOLS = [
     },
     {
         "type": "function",
+        "name": "music.stem_pack",
+        "description": "🎸 扒帶包：一鍵產出分軌（人聲/鼓/貝斯/吉他/鋼琴/其他）＋去人聲卡拉＋75%降速＋和弦進行＋旋律MIDI。當老爸或觀眾說『扒這首歌』、『要伴奏』、『分軌』並貼網址時調用！（慢任務，十幾分鐘）",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "YouTube 網址或 11 碼 ID"}
+            },
+            "required": ["url"]
+        }
+    },
+    {
+        "type": "function",
         "name": "pe.mashup_virtual_piano",
         "description": "7L 將多首高難度鋼琴曲同時並發演奏 (無數量限制！可同時彈 2首、3首、4首甚至更多，多軌多色瀑布流極限演奏)。當老爸或觀眾說『把A跟B混在一起彈』、『同時彈A、B、C』、『A x B x C 合體』、『A + B + C 多曲合奏』、『把多首練習曲雜在一起彈』時調用。",
         "parameters": {
@@ -958,6 +970,14 @@ async def execute_tool_dispatch(fn_name: str, fn_args: dict, caller_target: str 
                                f"→ {os.path.basename(_tres['file'])}，已進曲庫可演奏）")
         else:
             extracted_text += f" （系統回報：逆向失敗：{_tres.get('error', '')}）"
+    elif fn_name in ["music.stem_pack", "stem_pack"]:
+        import services.stem_pack as _sp
+        _sres = await _sp.build_pack(fn_args.get("url", ""))
+        if _sres.get("ok"):
+            extracted_text += (f" （系統回報：扒帶包完成（{len(_sres['stems'])} 軌＋卡拉＋降速＋和弦＋旋律 MIDI）"
+                               f"→ {os.path.basename(_sres['dir'])}，請播報）")
+        else:
+            extracted_text += f" （系統回報：扒帶失敗：{_sres.get('error', '')}）"
     elif fn_name in ["pe.mashup_virtual_piano", "mashup_virtual_piano"]:
         s1 = fn_args.get("song_name1", "")
         s2 = fn_args.get("song_name2", "")
