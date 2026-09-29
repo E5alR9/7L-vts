@@ -306,6 +306,19 @@ INTERACTIONS_TOOLS = [
     },
     {
         "type": "function",
+        "name": "music.transcribe_song",
+        "description": "🎧 逆向譜面：YT 下載音檔→人聲分離→旋律轉 MIDI＋和弦辨識→進曲庫。當老爸或觀眾說『把這首歌扒下來』、『轉成譜』、『學這首歌』並貼網址時調用！（慢任務，後台跑）",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "YouTube 網址或 11 碼 ID"},
+                "title": {"type": "string", "description": "存檔曲名（可空）"}
+            },
+            "required": ["url"]
+        }
+    },
+    {
+        "type": "function",
         "name": "pe.mashup_virtual_piano",
         "description": "7L 將多首高難度鋼琴曲同時並發演奏 (無數量限制！可同時彈 2首、3首、4首甚至更多，多軌多色瀑布流極限演奏)。當老爸或觀眾說『把A跟B混在一起彈』、『同時彈A、B、C』、『A x B x C 合體』、『A + B + C 多曲合奏』、『把多首練習曲雜在一起彈』時調用。",
         "parameters": {
@@ -937,6 +950,14 @@ async def execute_tool_dispatch(fn_name: str, fn_args: dict, caller_target: str 
         cp_res = await pe.compose_and_play_original_piano(theme, mood, requester_name=req_u, target=req_t)
         if cp_res and "[EXPRESSION:" in cp_res:
             extracted_text += f" {cp_res}"
+    elif fn_name in ["music.transcribe_song", "transcribe_song"]:
+        import services.audio_to_score as _as
+        _tres = await _as.transcribe_song(fn_args.get("url", ""), fn_args.get("title", ""))
+        if _tres.get("ok"):
+            extracted_text += (f" （系統回報：逆向完成（{_tres['notes']} 音符，和弦 {_tres['chords']}）"
+                               f"→ {os.path.basename(_tres['file'])}，已進曲庫可演奏）")
+        else:
+            extracted_text += f" （系統回報：逆向失敗：{_tres.get('error', '')}）"
     elif fn_name in ["pe.mashup_virtual_piano", "mashup_virtual_piano"]:
         s1 = fn_args.get("song_name1", "")
         s2 = fn_args.get("song_name2", "")
