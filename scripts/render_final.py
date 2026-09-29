@@ -57,8 +57,67 @@ def main():
         import librosa
         voc = np.stack([librosa.resample(voc[:, c], orig_sr=sr, target_sr=SR)
                         for c in range(voc.shape[1])], axis=1)
-    n = min(len(master), len(voc))
-    mix = np.column_stack((master, master))[:n] * 0.8 + voc[:n] * 1.0
+    # ── 混音台：立體聲＋EQ 配平＋殘響＋膠水（對標原曲 width 0.42／crest 3.2）──
+    def Schroeder(x, sr=SR):
+        from scipy import signal as _ss
+        y = np.zeros_like(x)
+        for d_ms, g in ((29.7, 0.75), (33.7, 0.74), (36.6, 0.73), (42.7, 0.72)):
+            d = int(sr * d_ms / 1000)
+            b = np.zeros(d + 1)
+            b[0], b[d] = 1.0, g
+            a = np.zeros(d + 1)
+            a[0], a[d] = 1.0, g
+            y = y + _ss.lfilter(b, a, x)
+        y /= 4.0
+        for d_ms, g in ((5.0, 0.6), (1.7, 0.6)):
+            d = int(sr * d_ms / 1000)
+            b = np.zeros(d + 1)
+            b[0], b[d] = -g, 1.0
+            a = np.zeros(d + 1)
+            a[0], a[d] = 1.0, -g
+            y = _ss.lfilter(b, a, y)
+        return y
+
+    def eq_match(x, sr=SR):
+        import librosa
+        S = librosa.stft(x, n_fft=4096)
+        fr = librosa.fft_frequencies(sr=sr, n_fft=4096)
+        # 目標＝原曲－渲染（dB，上限 ±6）：sub+5.4 high-1.8 air+1.5
+        targets = [((20, 120), 5.0), ((120, 500), 0.0), ((500, 2000), 0.0),
+                   ((2000, 8000), -1.8), ((8000, 20000), 1.5)]
+        g = np.ones(S.shape[0])
+        for (lo, hi), db in targets:
+            g[(fr >= lo) & (fr < hi)] = 10.0 ** (db / 20.0)
+        y = librosa.istft(S * g[:, None], length=len(x))
+        return y
+
+    def glue(x, sr=SR, thr_db=-18.0, ratio=4.0):
+        thr = 10.0 ** (thr_db / 20.0)
+        hop = 256
+        fr = np.abs(x[::hop])
+        a_a, a_r = np.exp(-hop / (sr * 0.005)), np.exp(-hop / (sr * 0.150))
+        e = 0.0
+        env = np.empty_like(fr)
+        for i, a in enumerate(fr):
+            e = a_a * e + (1 - a_a) * a if a > e else a_r * e + (1 - a_r) * a
+            env[i] = e
+        env = np.repeat(env, hop)[:len(x)]
+        gain = np.where(env > thr, (thr + (env - thr) / ratio) / (env + 1e-9), 1.0)
+        y = x * gain
+        y /= max(1e-9, np.max(np.abs(y))) / (10.0 ** (-1.0 / 20.0))
+        return y
+
+    mono = master / max(1e-9, np.max(np.abs(master)))
+    mono = eq_match(mono)
+    wet = Schroeder(mono) * 0.12          # 空間殘響（收斂：不過度）
+    dry = mono * 0.95
+    haas = int(SR * 0.007)                # 7ms Haas 展寬（對標 width ~0.42）
+    L = np.concatenate([dry + wet, np.zeros(haas)])
+    R = np.concatenate([np.zeros(haas), dry + wet])
+    stereo = np.column_stack((L, R))
+    stereo = np.stack([glue(stereo[:, c], thr_db=-22.0, ratio=5.0) for c in range(2)], axis=1)
+    n = min(len(stereo), len(voc))
+    mix = stereo[:n] * 0.8 + voc[:n] * 1.0
     mix = np.tanh(mix * 0.85)
     mix /= max(1e-6, np.max(np.abs(mix)))
     out = os.path.join(BASE, "songs_ai", "sun_burn_out_final.wav")
