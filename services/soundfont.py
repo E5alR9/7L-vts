@@ -184,7 +184,11 @@ class SoundFontBank:
                             offset=start * 2).astype(np.float32) / 32768.0
         return raw
 
-    def render_note(self, bank_no, program, midi, velocity=90, duration=2.0, sr=44100):
+    def render_note(self, bank_no, program, midi, velocity=90, duration=2.0, sr=44100,
+                    attack_ms=10.0, release_ms=80.0, loop_xfade=64):
+        """單音渲染 → mono float32（無聲回 zeros，絕不拋錯）。
+        處方（Gemini 混音驗收）：循環接縫 64 點 crossfade 消 rclick；
+        升調重採樣加一階低通抗混疊；包絡按樂器類給（鼓 1/5ms、撥弦 10/80ms、弦樂墊 50/200ms）。"""
         """單音渲染 → mono float32（無聲回 zeros，絕不拋錯）。"""
         n = int(sr * max(0.05, duration))
         try:
@@ -200,9 +204,15 @@ class SoundFontBank:
             ratio = (2.0 ** (semis / 12.0)) * (rate / sr)
             need = int(n * ratio) + 8
             if loopm in (1, 3) and loop_e > loop_s + 8 and need > len(raw):
-                # 循環延展：head＋loop 段重複
+                # 循環延展＋接縫 crossfade（消 rclick；處方）
                 head = raw[:loop_s]
-                loop = raw[loop_s:loop_e]
+                loop = raw[loop_s:loop_e].copy()
+                cf = min(loop_xfade, len(loop) // 3)
+                if cf >= 16:
+                    fade_in = np.linspace(0, 1, cf)
+                    fade_out = np.linspace(1, 0, cf)
+                    loop[-cf:] = loop[-cf:] * fade_out + loop[:cf] * fade_in
+                    loop = loop[:-cf]
                 reps = (need - len(head)) // len(loop) + 2
                 raw = np.concatenate([head] + [loop] * reps)[:need]
             elif need > len(raw):
@@ -214,11 +224,16 @@ class SoundFontBank:
             frac = idx - i0
             i1 = np.minimum(i0 + 1, len(raw) - 1)
             out = raw[i0] * (1 - frac) + raw[i1] * frac
-            # 簡包絡：10ms attack＋尾部 80ms release（打擊樂 one-shot 不衰）
-            a = min(len(out), int(sr * 0.01))
+            if ratio > 1.0:
+                # 升調抗混疊：一階低通（處方；向量版）
+                from scipy import signal as _ss
+                a = float(np.exp(-2.0 * np.pi / max(2.0, ratio * 2.0)))
+                out = _ss.lfilter([1 - a], [1, -a], out).astype(out.dtype)
+            # 包絡（按類；鼓 1/5ms 由呼叫端傳入）
+            a = min(len(out), max(1, int(sr * attack_ms / 1000.0)))
             out[:a] *= np.linspace(0, 1, a)
             if not (bank_no == 128 and loopm == 0):
-                r = min(len(out), int(sr * 0.08))
+                r = min(len(out), max(1, int(sr * release_ms / 1000.0)))
                 out[-r:] *= np.linspace(1, 0, r)
             gain = (10.0 ** (-atten_db / 20.0)) * (velocity / 100.0)
             return (out * gain).astype(np.float32)

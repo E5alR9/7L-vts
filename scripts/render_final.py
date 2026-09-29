@@ -45,7 +45,10 @@ def main():
                     notes.append((s, msg.note, v, max(0.05, abs_t - s)))
         for s, midi, vel, dur in notes:
             dur = min(dur + 0.15, 3.0)  # 真實時值＋15% 自然延音（鼓類短音不糊）
-            w = bank.render_note(bk, prog, midi, vel, dur, SR)
+            if name == "Drums":
+                w = bank.render_note(bk, prog, midi, vel, dur, SR, attack_ms=1.0, release_ms=5.0)
+            else:
+                w = bank.render_note(bk, prog, midi, vel, dur, SR)
             idx = int(s * SR)
             end = min(len(master), idx + len(w))
             if idx < len(master):
@@ -109,9 +112,9 @@ def main():
 
     mono = master / max(1e-9, np.max(np.abs(master)))
     mono = eq_match(mono)
-    wet = Schroeder(mono) * 0.12          # 空間殘響（收斂：不過度）
+    wet = Schroeder(mono) * 0.10          # 空間殘響（再收斂）
     dry = mono * 0.95
-    haas = int(SR * 0.007)                # 7ms Haas 展寬（對標 width ~0.42）
+    haas = int(SR * 0.005)                # 5ms Haas（對標 width ~0.42）
     L = np.concatenate([dry + wet, np.zeros(haas)])
     R = np.concatenate([np.zeros(haas), dry + wet])
     stereo = np.column_stack((L, R))
@@ -120,8 +123,9 @@ def main():
     mix = stereo[:n] * 0.8 + voc[:n] * 1.0
     mix = np.tanh(mix * 0.85)
     mix /= max(1e-6, np.max(np.abs(mix)))
+    mix *= 10.0 ** (-1.0 / 20.0)  # 軟上限 -1dBFS（處方，不靠 peak normalize 撐）
     out = os.path.join(BASE, "songs_ai", "sun_burn_out_final.wav")
-    sf.write(out, (mix * 0.9).astype(np.float32), SR)
+    sf.write(out, mix.astype(np.float32), SR)
     print("WAV:", out, f"({os.path.getsize(out)//1024} KB)")
 
 
