@@ -37,6 +37,11 @@ STOP_7L.flag
 # --- large binaries / regenerable artifacts ---
 # Kokoro 模型檔請用 scripts 下載，不入庫（合計約 361MB）
 models/
+# SoundFont 音源（scripts/render_sf.py 用；用下載重建，不入庫，144MB）
+soundfonts/*.sf2
+soundfonts/*.zip
+# 逆向譜面工作區（YT 下載音檔，不入庫）
+data/score_in/
 # RAG 向量庫（用 python scripts/ingest_rag.py 重建）
 data/rag/
 # bat 依賴安裝完成旗標
