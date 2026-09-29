@@ -47,8 +47,6 @@ third_party/
 venvs/
 pretrained_models/
 
-# vercel 轉發器
+# vercel 轉發器（已獨立為 ../groq-router，不在本倉）
 .vercel/
 .env.local
-vercel-router/.vercel/
-vercel-router/.env.local
