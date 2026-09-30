@@ -19,7 +19,7 @@
 #  8. 🛠️ Google GenAI 官方 Function Calling 工具清單 (GENAI_TOOLS & Dispatcher)
 #     8.1 🎹 88 鍵平台鋼琴發聲與樂譜演奏引擎 (Virtual Piano 88K & MIDI Player)
 #  9. 🛡️ 防跳針與記憶去重系統 (Code-Level Anti-Repetition)
-# 10. 🔊 語音合成、音訊分析與字幕工具 (Edge-TTS & Subtitle File Updater)
+# 10. 🔊 語音合成、音訊分析與字幕工具
 # 11. 👁️ 視覺感知、畫面截圖與輕量眼角餘光 (Screen Vision & get_lightweight_gemini_vision)
 # 12. 🧠 旗艦多模態大腦推理核心 (fetch_ai_response: Gemini Multimodal Dispatcher)
 # 13. 🕹️ 使用者指令、電腦控制與計時器動作 (execute_actions & System Controls)
@@ -76,7 +76,6 @@ import aiohttp
 import websockets
 import core.websocket_patch  # 🔧 自動修復 websockets 12.0 與 google-genai Live API 的 additional_headers 相容性
 import pyvts
-# import edge_tts  # 🛑 已全面拔除，100% 走本地 RTX 3080 Ti 顯卡 GPT-SoVITS
 import pygame
 import time
 import json
@@ -6413,6 +6412,16 @@ def add_to_streamer_mind_board(user_display: str, unique_id: str, content: str, 
         role="user",
         source=source
     )
+    
+    # 即時推送觀眾留言/老爸發言給網頁後台
+    try:
+        import services.web_dashboard as _wd
+        if source in ["mic", "text_file", "console", "web_console"]:
+            _wd.broadcast_event("chat_sent", {"text": content, "from": speaker})
+        else:
+            _wd.broadcast_event("tiktok_comment", {"user": user_display, "text": content})
+    except Exception:
+        pass
         
     unread_count = sum(1 for m in STREAMER_MIND_BOARD if m["status"] == "unread")
     log_print(f"📥 [記憶腦袋 寫入] {user_display}: {content} (🧠 看板累積未讀: {unread_count} 筆)")
@@ -6992,6 +7001,10 @@ async def process_chat_message(vts, input_queue, user_input: str, user_audio_b64
         cloud_kn = await get_cloud_knowledge()
         cloud_kn_prompt = PromptTemplateEngine.format_cloud_knowledge_prompt(cloud_kn)
         rag_sec = build_rag_section(user_input)   # 📚 主對話路徑的 RAG 記憶檢索（離線、失敗自動略過）
+        
+        trending_news_prompt = ""
+        if need_news:
+            trending_news_prompt = await get_trending_news_briefing()
 
         # 💬 依據自主判定配額動態調取歷史記憶（h_lim=0 時 0 毫秒秒過，完全不讀舊資料庫；最高調取上百句）
         history = (await fetch_from_long_term_memory(DEFAULT_CHANNEL_ID, user_input, limit=max(h_lim, 150))) if h_lim > 0 else []
@@ -7037,7 +7050,15 @@ async def process_chat_message(vts, input_queue, user_input: str, user_audio_b64
         if not is_direct_event:
             log_print(f"🚨 [Live 潛意識哨兵 喚醒主力] 判定應回應老爸！焦點: {log_focus}")
 
-        effective_situation = f"{situation_prompt}\n{recent_chat_prompt}\n{trending_news_prompt}\n{cloud_kn_prompt}\n{rag_sec}".strip()
+        # 🧩 模組化 Context 注入 (Modular Context Injection)
+        context_blocks = []
+        if situation_prompt: context_blocks.append(f"【即時情境】\n{situation_prompt.strip()}")
+        if trending_news_prompt: context_blocks.append(trending_news_prompt.strip())
+        if yt_comp.get_yt_memory_context(): context_blocks.append(yt_comp.get_yt_memory_context().strip())
+        if recent_chat_prompt: context_blocks.append(recent_chat_prompt.strip())
+        if rag_sec: context_blocks.append(rag_sec.strip())
+
+        effective_situation = "\n\n".join(context_blocks)
 
         # ── 👑 老爸全能旗艦主腦大腦 (語音多模態 + 螢幕截圖視覺 + 深度記憶 + 完整系統提示詞) ──
         
@@ -7057,7 +7078,7 @@ async def process_chat_message(vts, input_queue, user_input: str, user_audio_b64
             is_piano_active=pe.is_piano_active,
             current_piano_song_title=pe.current_piano_song_title,
             live_audio_emotion_prompt="",
-            situation_prompt=f"{situation_prompt}\n{trending_news_prompt}\n\n{yt_comp.get_yt_memory_context()}".strip(),
+            situation_prompt=effective_situation,
             system_specs=system_specs,
             impression_text=impression_text,
             cloud_knowledge_prompt=cloud_kn_prompt,
@@ -8238,7 +8259,7 @@ async def main():
         asyncio.create_task(system_audio_worker())
     asyncio.create_task(chat_processor_worker(vts, input_queue))
     asyncio.create_task(streamer_mind_loop_worker(vts, input_queue))
-    asyncio.create_task(background_mind_stream_worker(vts, input_queue))
+    # 心流已經停用: asyncio.create_task(background_mind_stream_worker(vts, input_queue))
     asyncio.create_task(anti_watermark_worker(vts))
     asyncio.create_task(cma_monitor_worker())
     asyncio.create_task(speech_queue_worker(vts, input_queue))

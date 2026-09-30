@@ -33,8 +33,8 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 KOKORO_DIR = os.path.join(BASE_DIR, "models", "kokoro")
 
 # ── 設定 ─────────────────────────────────────────────────────────────────────
-ENGINE_ORDER = [e.strip().lower() for e in (os.getenv("TTS_ENGINE") or "kokoro").split(",") if e.strip()]
-_FALLBACK = [e.strip().lower() for e in (os.getenv("TTS_FALLBACK") or "edge,xiaoyi").split(",") if e.strip()]
+ENGINE_ORDER = [e.strip().lower() for e in (os.getenv("TTS_ENGINE") or "xiaoyi").split(",") if e.strip()]
+_FALLBACK = [e.strip().lower() for e in (os.getenv("TTS_FALLBACK") or "edge,kokoro").split(",") if e.strip()]
 
 # 依序嘗試的完整引擎鏈（去重、保序）
 _seen = set()
@@ -408,6 +408,71 @@ async def _synth_cosyvoice(text: str) -> bytes:
         raise RuntimeError("cosyvoice 回傳空白音訊")
     return data
 
+async def _synth_cloud_gptsovits(text: str) -> bytes:
+    """傳送到 Google Colab 的遠端 GPT-SoVITS API 伺服器 (api_v2)"""
+    colab_url = (os.getenv("COLAB_SOVITS_URL") or "").rstrip("/")
+    if not colab_url:
+        raise RuntimeError("未設定 COLAB_SOVITS_URL 環境變數")
+        
+    lang = detect_language(text)
+    text = _clean_text(text, lang)
+    if not text:
+        return b""
+        
+    # GPT-SoVITS 的語系代碼通常為 "zh", "ja", "en" 等
+    req_lang = "zh" if lang != "ja" else "ja"
+    
+    # 這些是你原本給 GPT-SoVITS 的參考音訊與文字，需根據你的模型微調
+    ref_audio = os.getenv("TTS_SOVITS_REF_AUDIO") or ""
+    prompt_text = os.getenv("TTS_SOVITS_PROMPT_TEXT") or ""
+    prompt_lang = os.getenv("TTS_SOVITS_PROMPT_LANG") or "zh"
+    
+    import httpx
+    async with httpx.AsyncClient(timeout=45.0) as cli:
+        # 呼叫官方 api_v2.py 的寫法
+        payload = {
+            "text": text,
+            "text_language": req_lang,
+            "ref_audio_path": ref_audio,
+            "prompt_text": prompt_text,
+            "prompt_language": prompt_lang,
+            "cut_punc": "，。！？"
+        }
+        r = await cli.post(f"{colab_url}/tts", json=payload)
+        if r.status_code != 200:
+            detail = r.text[:180]
+            raise RuntimeError(f"Colab GPT-SoVITS HTTP {r.status_code}: {detail}")
+        data = r.content
+        
+    if not data:
+        raise RuntimeError("Colab GPT-SoVITS 回傳空白音訊")
+    return data
+
+async def _synth_cloud_colab(text: str) -> bytes:
+    """傳送到 Google Colab 的遠端 Kokoro API 伺服器"""
+    colab_url = (os.getenv("COLAB_API_URL") or "").rstrip("/")
+    if not colab_url:
+        raise RuntimeError("未設定 COLAB_API_URL 環境變數")
+        
+    lang = detect_language(text)
+    text = _clean_text(text, lang)
+    if not text:
+        return b""
+        
+    voice = ZH_VOICE if lang != "ja" else JA_VOICE
+    
+    import httpx
+    async with httpx.AsyncClient(timeout=30.0) as cli:
+        r = await cli.post(f"{colab_url}/generate", json={"text": text, "voice": voice})
+        if r.status_code != 200:
+            detail = r.text[:180]
+            raise RuntimeError(f"Colab TTS HTTP {r.status_code}: {detail}")
+        data = r.content
+        
+    if not data:
+        raise RuntimeError("Colab TTS 回傳空白音訊")
+    return data
+
 
 _ENGINES = {
     "kokoro": _synth_kokoro,
@@ -415,6 +480,8 @@ _ENGINES = {
     "xiaoyi": _synth_xiaoyi,
     "elevenlabs": _synth_elevenlabs,
     "cosyvoice": _synth_cosyvoice,
+    "cloud_colab": _synth_cloud_colab,
+    "cloud_gptsovits": _synth_cloud_gptsovits,
 }
 
 

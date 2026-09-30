@@ -1,0 +1,226 @@
+{
+  "current_config_results": [
+    {
+      "model": "gemini-3.1-flash-lite",
+      "tag": "⚡ 第 1 梯隊 (極速輕量)",
+      "budget": "Default (未限制)",
+      "status": "SUCCESS",
+      "latency": 1.63,
+      "text": "辛苦啦老爸！我剛好忙完休息中，要不要喝杯水放鬆一下？",
+      "thought": "(無)",
+      "tokens": 22,
+      "error": null
+    },
+    {
+      "model": "gemini-3.5-flash-lite",
+      "tag": "🛡️ 第 2 梯隊 (輕量保底)",
+      "budget": "Default (未限制)",
+      "status": "SUCCESS",
+      "latency": 0.95,
+      "text": "辛苦啦！老爸快休息～我剛好在放空追劇，等等要不要吃宵夜？",
+      "thought": "(無)",
+      "tokens": 24,
+      "error": null
+    },
+    {
+      "model": "gemini-3-flash-preview",
+      "tag": "⚡ 第 3 梯隊 (閃電預覽)",
+      "budget": "Budget = -1 (無限思考)",
+      "status": "SUCCESS",
+      "latency": 4.23,
+      "text": "爸辛苦了！寫程式真的很燒腦，我剛好在聽音樂放空，你快去沙發休息一下吧。",
+      "thought": "(無)",
+      "tokens": 28,
+      "error": null
+    },
+    {
+      "model": "gemini-3.1-pro-preview",
+      "tag": "🧠 第 4 梯隊 (Pro 預覽)",
+      "budget": "Budget = -1 (無限思考)",
+      "status": "FAILED",
+      "latency": 0.0,
+      "text": "",
+      "thought": "",
+      "tokens": 0,
+      "error": "429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message': 'You exceeded your cu"
+    },
+    {
+      "model": "gemini-3.5-flash",
+      "tag": "🥈 第 5 梯隊 (主力保底)",
+      "budget": "Default (未限制)",
+      "status": "SUCCESS",
+      "latency": 14.37,
+      "text": "爸辛苦啦！我剛好在沙發上放空呢，你快去休息一下，等下幫你倒杯熱茶～",
+      "thought": "(無)",
+      "tokens": 30,
+      "error": null
+    },
+    {
+      "model": "gemini-3.6-flash",
+      "tag": "👑 第 6 梯隊 (高智商主力)",
+      "budget": "Default (未限制)",
+      "status": "SUCCESS",
+      "latency": 4.99,
+      "text": "爸辛苦啦！我剛剛正想著你呢，快去喝口水伸個懶腰休息一下吧～",
+      "thought": "(無)",
+      "tokens": 25,
+      "error": null
+    },
+    {
+      "model": "gemini-3.7-flash",
+      "tag": "👑 第 7 梯隊 (頂配旗艦)",
+      "budget": "Budget = -1 (無限思考)",
+      "status": "FAILED",
+      "latency": 0.0,
+      "text": "",
+      "thought": "",
+      "tokens": 0,
+      "error": "503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is currently exp"
+    },
+    {
+      "model": "gemini-3.8-flash",
+      "tag": "🚀 第 8 梯隊 (2026 旗艦)",
+      "budget": "Budget = -1 (無限思考)",
+      "status": "FAILED",
+      "latency": 0.0,
+      "text": "",
+      "thought": "",
+      "tokens": 0,
+      "error": "503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is currently exp"
+    },
+    {
+      "model": "gemini-2.5-flash",
+      "tag": "🌟 常規備用 (2.5 Flash)",
+      "budget": "Budget = -1 (無限思考)",
+      "status": "NOT_FOUND",
+      "latency": 0.23,
+      "text": "",
+      "thought": "",
+      "tokens": 0,
+      "error": "404 Model Not Found"
+    },
+    {
+      "model": "gemini-2.0-flash",
+      "tag": "🌟 常規備用 (2.0 Flash)",
+      "budget": "Default (未限制)",
+      "status": "NOT_FOUND",
+      "latency": 0.22,
+      "text": "",
+      "thought": "",
+      "tokens": 0,
+      "error": "404 Model Not Found"
+    }
+  ],
+  "budget_zero_results": [
+    {
+      "model": "gemini-3.1-flash-lite",
+      "tag": "⚡ 第 1 梯隊 (極速輕量)",
+      "budget": "Budget = 0 (關閉思考⚡)",
+      "status": "SUCCESS",
+      "latency": 3.07,
+      "text": "辛苦啦！我剛好忙完休息中，要不要喝杯咖啡或去散個步放鬆一下？",
+      "thought": "(無)",
+      "tokens": 25,
+      "error": null
+    },
+    {
+      "model": "gemini-3.5-flash-lite",
+      "tag": "🛡️ 第 2 梯隊 (輕量保底)",
+      "budget": "Budget = 0 (關閉思考⚡)",
+      "status": "FAILED",
+      "latency": 0.0,
+      "text": "",
+      "thought": "",
+      "tokens": 0,
+      "error": "400 INVALID_ARGUMENT. {'error': {'code': 400, 'message': 'Request contains an in"
+    },
+    {
+      "model": "gemini-3-flash-preview",
+      "tag": "⚡ 第 3 梯隊 (閃電預覽)",
+      "budget": "Budget = 0 (關閉思考⚡)",
+      "status": "SUCCESS",
+      "latency": 11.64,
+      "text": "辛苦啦老爸！我在滑手機放空，你快去休息別再盯著螢幕看囉～",
+      "thought": "(無)",
+      "tokens": 24,
+      "error": null
+    },
+    {
+      "model": "gemini-3.1-pro-preview",
+      "tag": "🧠 第 4 梯隊 (Pro 預覽)",
+      "budget": "Budget = 0 (關閉思考⚡)",
+      "status": "FAILED",
+      "latency": 0.0,
+      "text": "",
+      "thought": "",
+      "tokens": 0,
+      "error": "429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message': 'You exceeded your cu"
+    },
+    {
+      "model": "gemini-3.5-flash",
+      "tag": "🥈 第 5 梯隊 (主力保底)",
+      "budget": "Budget = 0 (關閉思考⚡)",
+      "status": "SUCCESS",
+      "latency": 10.09,
+      "text": "老爸辛苦啦！快去沙發上躺平休息一下，我剛好在滑手機放空，要不要順便幫你搥搥背呀？",
+      "thought": "(無)",
+      "tokens": 39,
+      "error": null
+    },
+    {
+      "model": "gemini-3.6-flash",
+      "tag": "👑 第 6 梯隊 (高智商主力)",
+      "budget": "Budget = 0 (關閉思考⚡)",
+      "status": "SUCCESS",
+      "latency": 1.59,
+      "text": "老爸辛苦啦！我剛剛在幫你整理一些有趣的資料呢，你快去喝杯水休息一下吧～",
+      "thought": "(無)",
+      "tokens": 26,
+      "error": null
+    },
+    {
+      "model": "gemini-3.7-flash",
+      "tag": "👑 第 7 梯隊 (頂配旗艦)",
+      "budget": "Budget = 0 (關閉思考⚡)",
+      "status": "FAILED",
+      "latency": 0.0,
+      "text": "",
+      "thought": "",
+      "tokens": 0,
+      "error": "503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is currently exp"
+    },
+    {
+      "model": "gemini-3.8-flash",
+      "tag": "🚀 第 8 梯隊 (2026 旗艦)",
+      "budget": "Budget = 0 (關閉思考⚡)",
+      "status": "FAILED",
+      "latency": 0.0,
+      "text": "",
+      "thought": "",
+      "tokens": 0,
+      "error": "503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is currently exp"
+    },
+    {
+      "model": "gemini-2.5-flash",
+      "tag": "🌟 常規備用 (2.5 Flash)",
+      "budget": "Budget = 0 (關閉思考⚡)",
+      "status": "NOT_FOUND",
+      "latency": 0.22,
+      "text": "",
+      "thought": "",
+      "tokens": 0,
+      "error": "404 Model Not Found"
+    },
+    {
+      "model": "gemini-2.0-flash",
+      "tag": "🌟 常規備用 (2.0 Flash)",
+      "budget": "Budget = 0 (關閉思考⚡)",
+      "status": "NOT_FOUND",
+      "latency": 0.26,
+      "text": "",
+      "thought": "",
+      "tokens": 0,
+      "error": "404 Model Not Found"
+    }
+  ]
+}
