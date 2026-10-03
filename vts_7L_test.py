@@ -1511,7 +1511,7 @@ async def fetch_ai_response(messages, image_base64=None, audio_base64=None, is_p
         g_model = "gemini-3.5-flash-lite" if not image_base64 and not audio_base64 else "gemini-3.5-flash"
         temp_client = genai.Client(api_key=g_key)
         gen_config = types.GenerateContentConfig(temperature=0.85, safety_settings=UNRESTRICTED_SAFETY_SETTINGS)
-        return temp_client.aio.models.generate_content_stream(
+        return await temp_client.aio.models.generate_content_stream(
             model=g_model,
             contents=chat_contents,
             config=gen_config
