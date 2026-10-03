@@ -7268,7 +7268,9 @@ async def process_chat_message(vts, input_queue, user_input: str, user_audio_b64
     except asyncio.CancelledError:
         pass
     except Exception as e:
-        print(f"\n❌ [對話處理發生異常]: {e}")
+        import traceback
+        traceback.print_exc()
+        print(f"\n❌ [對話處理發生異常]: {repr(e)}")
     finally:
         realtime_task_mgr.finish_dad_task()
         realtime_task_mgr.mark_dad_input_read()

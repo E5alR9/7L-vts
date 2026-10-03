@@ -1,8 +1,5 @@
 {
-  "timestamp": 1790998611.0059986,
-  "gemini_available": 5,
-  "locks": {
-    "G0_3.5-flash-lite": 16,
-    "G0_3.1-flash-lite": 17
-  }
+  "timestamp": 1790999992.8137174,
+  "gemini_available": 7,
+  "locks": {}
 }
