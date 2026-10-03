@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-🌐 YouTube & 音訊轉 MIDI 轉錄中樞 (Audio & YouTube to MIDI Pipeline)
+ YouTube & 音訊轉 MIDI 轉錄中樞 (Audio & YouTube to MIDI Pipeline)
 功能：
 1. 自動將 YouTube 鋼琴/原曲音訊下載為高取樣率音訊。
 2. 調用【諧波泛音消除 + 基頻顯著性】高精度轉錄引擎，產出標準 88 鍵雙手 MIDI 樂譜。

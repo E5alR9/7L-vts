@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
 """
 ==============================================================================
- 🌸 7L 專屬超高清 NDI 透明接收器 (7L Transparent Resizable NDI Viewer)
- 👑 特色：
-   1. 🪟 完美支援 Alpha 通道透明背景（Live2D 角色無邊框懸浮於桌面）
-   2. 📐 滑鼠滾輪即時縮放 + 視窗八向邊界自由拉伸大小
-   3. 🖱️ 隨處拖曳移動 + 總在最上層 (Always-on-Top) + 滑鼠穿透 (Click-Through)
-   4. 📡 局域網 / Hyper-V 虛擬機 NDI 來源自動發現與秒級無縫切換
-   5. ⚡ 60 FPS 硬件級流暢渲染，低 CPU 佔用
+  7L 專屬超高清 NDI 透明接收器 (7L Transparent Resizable NDI Viewer)
+  特色：
+   1.  完美支援 Alpha 通道透明背景（Live2D 角色無邊框懸浮於桌面）
+   2.  滑鼠滾輪即時縮放 + 視窗八向邊界自由拉伸大小
+   3.  隨處拖曳移動 + 總在最上層 (Always-on-Top) + 滑鼠穿透 (Click-Through)
+   4.  局域網 / Hyper-V 虛擬機 NDI 來源自動發現與秒級無縫切換
+   5.  60 FPS 硬件級流暢渲染，低 CPU 佔用
 ==============================================================================
 """
 
@@ -50,7 +50,7 @@ class NDIWorkerThread(QThread):
 
     def run(self):
         if not ndi.initialize():
-            self.status_message.emit("❌ NDI 初始化失敗！")
+            self.status_message.emit(" NDI 初始化失敗！")
             return
 
         # 建立 NDI 來源探索器 (配置本機與局域網探索)
@@ -59,10 +59,10 @@ class NDIWorkerThread(QThread):
         find_settings.extra_ips = "127.0.0.1,localhost,172.31.116.232,172.22.212.232,172.22.208.1,172.31.112.1,192.168.1.104,192.168.1.0/24"
         self.find_handle = ndi.find_create_v2(find_settings)
         if not self.find_handle:
-            self.status_message.emit("❌ 無法建立 NDI 尋找器")
+            self.status_message.emit(" 無法建立 NDI 尋找器")
             return
 
-        self.status_message.emit("🔍 正在搜尋本機 / 局域網 NDI 來源...")
+        self.status_message.emit(" 正在搜尋本機 / 局域網 NDI 來源...")
 
         last_search_time = 0
         discovered_names = []
@@ -134,7 +134,7 @@ class NDIWorkerThread(QThread):
         """連接到指定 NDI 來源"""
         self.disconnect_source()
         self.current_source_name = source_name
-        self.status_message.emit(f"🔗 連接中: {source_name}")
+        self.status_message.emit(f" 連接中: {source_name}")
 
         sources = ndi.find_get_current_sources(self.find_handle)
         target_source = None
@@ -150,12 +150,12 @@ class NDIWorkerThread(QThread):
             recv_create.bandwidth = ndi.RECV_BANDWIDTH_HIGHEST
             self.recv_handle = ndi.recv_create_v3(recv_create)
             if self.recv_handle:
-                self.status_message.emit(f"✅ 已連接: {source_name}")
+                self.status_message.emit(f" 已連接: {source_name}")
             else:
-                self.status_message.emit(f"❌ 連接失敗: {source_name}")
+                self.status_message.emit(f" 連接失敗: {source_name}")
                 self.current_source_name = ""
         else:
-            self.status_message.emit(f"⚠️ 找不到來源: {source_name}")
+            self.status_message.emit(f" 找不到來源: {source_name}")
             self.current_source_name = ""
 
     def disconnect_source(self):
@@ -169,11 +169,11 @@ class NDIWorkerThread(QThread):
 
 
 class NDIViewerWindow(QWidget):
-    """🌸 7L 可調大小/全透明/懸浮 NDI 接收器視窗"""
+    """ 7L 可調大小/全透明/懸浮 NDI 接收器視窗"""
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("🌸 7L NDI 透明接收器")
+        self.setWindowTitle(" 7L NDI 透明接收器")
         self.setMinimumSize(200, 200)
         self.resize(480, 640)
 
@@ -267,24 +267,24 @@ class NDIViewerWindow(QWidget):
         ctrl_layout.setSpacing(6)
 
         # 標題與圖示
-        self.lbl_title = QLabel("🌸 7L NDI", self.ctrl_bar)
+        self.lbl_title = QLabel(" 7L NDI", self.ctrl_bar)
         self.lbl_title.setStyleSheet("color: #ff80b3; font-weight: bold; font-size: 13px;")
         ctrl_layout.addWidget(self.lbl_title)
 
         # 來源下拉選單
         self.combo_sources = QComboBox(self.ctrl_bar)
-        self.combo_sources.addItem("🔍 搜尋來源中...")
+        self.combo_sources.addItem(" 搜尋來源中...")
         self.combo_sources.currentTextChanged.connect(self.on_source_selected)
         ctrl_layout.addWidget(self.combo_sources, 1)
 
         # 重新搜尋按鈕
-        self.btn_refresh = QPushButton("🔄", self.ctrl_bar)
+        self.btn_refresh = QPushButton("", self.ctrl_bar)
         self.btn_refresh.setToolTip("重新搜尋 NDI 來源")
         self.btn_refresh.clicked.connect(self.refresh_sources)
         ctrl_layout.addWidget(self.btn_refresh)
 
         # 置頂切換按鈕
-        self.btn_pin = QPushButton("📌", self.ctrl_bar)
+        self.btn_pin = QPushButton("", self.ctrl_bar)
         self.btn_pin.setToolTip("切換是否永遠置頂 (Always on Top)")
         self.btn_pin.clicked.connect(self.toggle_always_on_top)
         ctrl_layout.addWidget(self.btn_pin)
@@ -333,7 +333,7 @@ class NDIViewerWindow(QWidget):
         self.combo_sources.blockSignals(True)
         self.combo_sources.clear()
         if not sources:
-            self.combo_sources.addItem("🔍 搜尋中 (未發現來源)...")
+            self.combo_sources.addItem(" 搜尋中 (未發現來源)...")
         else:
             for s in sources:
                 self.combo_sources.addItem(s)
@@ -358,7 +358,7 @@ class NDIViewerWindow(QWidget):
             self.status_label.show()
 
     # ────────────────────────────────────────────────────────
-    # 🎨 繪製事件 (支援透明背景與等比例縮放)
+    #  繪製事件 (支援透明背景與等比例縮放)
     # ────────────────────────────────────────────────────────
     def paintEvent(self, event: QPaintEvent):
         painter = QPainter(self)
@@ -385,7 +385,7 @@ class NDIViewerWindow(QWidget):
             painter.drawPixmap(x, y, scaled)
 
     # ────────────────────────────────────────────────────────
-    # 🖱️ 滑鼠拖曳、滾輪縮放與快捷操作
+    #  滑鼠拖曳、滾輪縮放與快捷操作
     # ────────────────────────────────────────────────────────
     def mousePressEvent(self, event: QMouseEvent):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -418,7 +418,7 @@ class NDIViewerWindow(QWidget):
         """切換視窗置頂"""
         self.is_always_on_top = not self.is_always_on_top
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, self.is_always_on_top)
-        self.btn_pin.setText("📌" if self.is_always_on_top else "📍")
+        self.btn_pin.setText("" if self.is_always_on_top else "")
         self.btn_pin.setToolTip("已開啟置頂" if self.is_always_on_top else "已關閉置頂")
         self.show()
         self.save_config()
@@ -468,7 +468,7 @@ class NDIViewerWindow(QWidget):
 
                 self.is_always_on_top = cfg.get("is_always_on_top", True)
                 self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, self.is_always_on_top)
-                self.btn_pin.setText("📌" if self.is_always_on_top else "📍")
+                self.btn_pin.setText("" if self.is_always_on_top else "")
 
                 self.show_control_bar = cfg.get("show_control_bar", True)
                 if not self.show_control_bar:
@@ -535,15 +535,15 @@ class NDIViewerWindow(QWidget):
             }
         """)
 
-        act_ctrl = menu.addAction("👁️ 顯示/隱藏頂部工具列 (H)")
+        act_ctrl = menu.addAction(" 顯示/隱藏頂部工具列 (H)")
         act_ctrl.triggered.connect(self.toggle_control_bar)
 
-        act_pin = menu.addAction("📌 切換永遠置頂 (Always on Top)")
+        act_pin = menu.addAction(" 切換永遠置頂 (Always on Top)")
         act_pin.setCheckable(True)
         act_pin.setChecked(self.is_always_on_top)
         act_pin.triggered.connect(self.toggle_always_on_top)
 
-        act_color = menu.addAction("🎨 色彩通道校準 (按 C 鍵切換)")
+        act_color = menu.addAction(" 色彩通道校準 (按 C 鍵切換)")
         act_color.setCheckable(True)
         act_color.setChecked(self.ndi_thread.color_swap)
         act_color.triggered.connect(self.toggle_color_swap)
@@ -551,25 +551,25 @@ class NDIViewerWindow(QWidget):
         menu.addSeparator()
         
         # 背景切換子選單
-        bg_menu = menu.addMenu("🎨 背景顏色模式")
-        act_bg_trans = bg_menu.addAction("✨ 完全透明 (Transparent)")
+        bg_menu = menu.addMenu(" 背景顏色模式")
+        act_bg_trans = bg_menu.addAction(" 完全透明 (Transparent)")
         act_bg_trans.triggered.connect(lambda: self.set_background_mode("TRANSPARENT"))
-        act_bg_green = bg_menu.addAction("🟩 綠幕背景 (Green Screen)")
+        act_bg_green = bg_menu.addAction(" 綠幕背景 (Green Screen)")
         act_bg_green.triggered.connect(lambda: self.set_background_mode("GREEN"))
-        act_bg_glass = bg_menu.addAction("🖤 深色磨砂 (Dark Glass)")
+        act_bg_glass = bg_menu.addAction(" 深色磨砂 (Dark Glass)")
         act_bg_glass.triggered.connect(lambda: self.set_background_mode("DARK_GLASS"))
 
         menu.addSeparator()
 
         # 預設尺寸捷徑
-        size_menu = menu.addMenu("📐 快速預設大小")
+        size_menu = menu.addMenu(" 快速預設大小")
         size_menu.addAction("小尺寸 (320x420)").triggered.connect(lambda: self.resize(320, 420))
         size_menu.addAction("中尺寸 (480x640)").triggered.connect(lambda: self.resize(480, 640))
         size_menu.addAction("大尺寸 (640x860)").triggered.connect(lambda: self.resize(640, 860))
         size_menu.addAction("超大尺寸 (800x1080)").triggered.connect(lambda: self.resize(800, 1080))
 
         menu.addSeparator()
-        act_exit = menu.addAction("❌ 關閉接收器")
+        act_exit = menu.addAction(" 關閉接收器")
         act_exit.triggered.connect(self.close)
 
         menu.exec(pos)

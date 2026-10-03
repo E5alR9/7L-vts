@@ -22,7 +22,7 @@ async def main():
     is_sleeping = False
     mock_api_calls = 3
 
-    # 🎧 電腦全系統聲音 (WASAPI Loopback) 即時音量採樣
+    #  電腦全系統聲音 (WASAPI Loopback) 即時音量採樣
     real_sys_vol = 0
     def _preview_loopback_sampler():
         nonlocal real_sys_vol
@@ -46,7 +46,7 @@ async def main():
         calc_energy = max(5.0, round(100.0 - (mock_api_calls * 0.4), 1))
         if is_sleeping:
             return {
-                "ai_status": "😴 閉眼沉睡中 (0 API 消耗)",
+                "ai_status": " 閉眼沉睡中 (0 API 消耗)",
                 "ai_state": "sleep",
                 "is_sleeping": True,
                 "mic_action": "已暫停",
@@ -70,7 +70,7 @@ async def main():
                 }
             }
         return {
-            "ai_status": "🟢 正常運作中",
+            "ai_status": " 正常運作中",
             "ai_state": "idle",
             "is_sleeping": False,
             "mic_action": "待命",
@@ -216,7 +216,7 @@ async def main():
             item = await dummy_queue.get()
             txt = item.get("text", "")
             if is_sleeping:
-                # 🌙 已停用語言喚醒，休眠中忽略所有文字與語音，僅限點擊按鈕喚醒
+                #  已停用語言喚醒，休眠中忽略所有文字與語音，僅限點擊按鈕喚醒
                 continue
             else:
                 if any(w in txt for w in ["睡覺", "去睡吧", "去睡覺", "晚安", "/sleep"]):

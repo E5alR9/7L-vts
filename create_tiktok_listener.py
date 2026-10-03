@@ -15,7 +15,7 @@ import services.piano_engine as pe
 
 # Globals
 IS_STREAMING = False
-current_tiktok_status_str = '[📱 TikTok: 待命中]'
+current_tiktok_status_str = '[ TikTok: 待命中]'
 
 """
 

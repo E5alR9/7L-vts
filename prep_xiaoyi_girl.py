@@ -11,7 +11,7 @@ OUTPUT_WAV = "xiaoyi_girl_ref.wav"
 
 async def generate_girl_ref():
     print(f"正在生成溫柔甜美少女參考音 (自然音調，消除刺耳高音): {VOICE} ...")
-    # 🎧 溫柔自然甜美少女調音：移除 +30Hz 刺耳高音，保持 Xiaoyi 標誌性親切甜妹原聲
+    #  溫柔自然甜美少女調音：移除 +30Hz 刺耳高音，保持 Xiaoyi 標誌性親切甜妹原聲
     communicate = edge_tts.Communicate(GIRL_TEXT, VOICE, rate="+0%", pitch="+0Hz")
     await communicate.save(OUTPUT_MP3)
     

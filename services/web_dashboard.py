@@ -37,6 +37,8 @@ GET_SWITCHES_CALLBACK = None
 SET_SWITCH_CALLBACK = None
 PUNISH_CALLBACK = None
 REWARD_CALLBACK = None
+APPROVE_YT_COMPANION_CALLBACK = None
+REJECT_YT_COMPANION_CALLBACK = None
 
 # 🛠️ 7L 工具調用紀錄隊列 (保持最近 200 筆)
 TOOL_HISTORY: list = []
@@ -582,6 +584,14 @@ async def ws_handler(request):
                     elif action == "shutdown":
                         broadcast_event("system_shutdown", {"message": "7L 系統正在安全關機退出..."})
                         asyncio.create_task(perform_shutdown())
+                    elif action == "approve_yt_companion":
+                        if APPROVE_YT_COMPANION_CALLBACK:
+                            ok = bool(APPROVE_YT_COMPANION_CALLBACK())
+                            await ws.send_str(json.dumps({"type": "yt_companion_status", "data": {"ok": ok}}, ensure_ascii=False))
+                    elif action == "reject_yt_companion":
+                        if REJECT_YT_COMPANION_CALLBACK:
+                            REJECT_YT_COMPANION_CALLBACK()
+                            await ws.send_str(json.dumps({"type": "yt_companion_status", "data": {"ok": True, "status": "rejected"}}, ensure_ascii=False))
                 except Exception as ex:
                     print(f"⚠️ [Web後台 WS處理異常]: {ex}")
     finally:
@@ -1151,6 +1161,24 @@ async def api_shutdown(request):
     except Exception as e:
         return web.json_response({"ok": False, "error": str(e)}, status=500)
 
+async def api_yt_companion_approve(request):
+    if APPROVE_YT_COMPANION_CALLBACK:
+        try:
+            ok = bool(APPROVE_YT_COMPANION_CALLBACK())
+            return web.json_response({"ok": ok})
+        except Exception as e:
+            return web.json_response({"ok": False, "error": str(e)}, status=500)
+    return web.json_response({"ok": False, "error": "Callback not initialized"}, status=500)
+
+async def api_yt_companion_reject(request):
+    if REJECT_YT_COMPANION_CALLBACK:
+        try:
+            REJECT_YT_COMPANION_CALLBACK()
+            return web.json_response({"ok": True})
+        except Exception as e:
+            return web.json_response({"ok": False, "error": str(e)}, status=500)
+    return web.json_response({"ok": False, "error": "Callback not initialized"}, status=500)
+
 LAST_CACHED_IMG_HASH = None
 LAST_CACHED_THUMB_BYTES = None
 
@@ -1347,6 +1375,13 @@ async def start_web_dashboard(
     SET_SWITCH_CALLBACK = set_switch_cb
     PUNISH_CALLBACK = punish_cb
     REWARD_CALLBACK = reward_cb
+    
+    global APPROVE_YT_COMPANION_CALLBACK, REJECT_YT_COMPANION_CALLBACK
+    import services.yt_companion_service as yt_comp
+    if hasattr(yt_comp, 'approve_pending_video'):
+        APPROVE_YT_COMPANION_CALLBACK = yt_comp.approve_pending_video
+    if hasattr(yt_comp, 'reject_pending_video'):
+        REJECT_YT_COMPANION_CALLBACK = yt_comp.reject_pending_video
 
     app = web.Application()
     
@@ -1389,6 +1424,8 @@ async def start_web_dashboard(
     app.router.add_get("/api/settings/backup", api_download_env_backup)
     app.router.add_post("/api/restart", api_restart)
     app.router.add_post("/api/shutdown", api_shutdown)
+    app.router.add_post("/api/yt_companion/approve", api_yt_companion_approve)
+    app.router.add_post("/api/yt_companion/reject", api_yt_companion_reject)
 
     async def index(request):
         index_file = os.path.join(web_dir, "index.html")

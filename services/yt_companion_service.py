@@ -70,22 +70,32 @@ _live_session = None
 _loopback_streamer = None
 _service_task = None
 
+def is_video_window(title: str) -> bool:
+    title_lower = title.lower()
+    if "youtube music" in title_lower:
+        return False
+    keywords = ["youtube", "twitch", "netflix", "bilibili", "vlc media player", "potplayer", "movies & tv", "電影與電視", "picture-in-picture", "子母畫面"]
+    extensions = [".mp4", ".mkv", ".avi", ".webm", ".mov"]
+    if any(k in title_lower for k in keywords):
+        return True
+    if any(ext in title_lower for ext in extensions):
+        return True
+    return False
+
 def find_youtube_window():
     """
     🎯 嚴格前景判定 (Strict Focus Detection)：
-    只鎖定「當前操作中的前景焦點視窗 (GetForegroundWindow)」或「置頂浮動子母畫面 (PiP Topmost)」。
-    若使用者切換至 VS Code、遊戲或桌面在背景播放音樂，一律返回 None，徹底杜絕 Token 浪費。
+    只鎖定「當前操作中的前景焦點視窗」或「置頂浮動子母畫面」。
     """
     if not HAS_WIN32:
         return None, None, ""
 
-    # 1. 檢測當前前景焦點視窗 (最重要核心判斷)
+    # 1. 檢測當前前景焦點視窗
     try:
         fg_hwnd = win32gui.GetForegroundWindow()
         if fg_hwnd and win32gui.IsWindowVisible(fg_hwnd) and not win32gui.IsIconic(fg_hwnd):
             fg_title = win32gui.GetWindowText(fg_hwnd)
-            # 排除純 YouTube Music (music.youtube.com) 標籤，專注影片
-            if ("YouTube" in fg_title or "- YouTube" in fg_title) and "YouTube Music" not in fg_title:
+            if is_video_window(fg_title):
                 r = win32gui.GetWindowRect(fg_hwnd)
                 w, h = r[2] - r[0], r[3] - r[1]
                 if w > 300 and h > 200:
@@ -93,16 +103,15 @@ def find_youtube_window():
     except Exception:
         pass
 
-    # 2. 檢測置頂浮動子母畫面 (PiP / Topmost 視窗，例如 Chrome 懸浮看片)
+    # 2. 檢測置頂浮動子母畫面
     pip_hwnd, pip_rect, pip_title = None, None, ""
     def _enum_topmost_cb(hwnd, _):
         nonlocal pip_hwnd, pip_rect, pip_title
         if win32gui.IsWindowVisible(hwnd) and not win32gui.IsIconic(hwnd):
-            # 檢查是否有 WS_EX_TOPMOST 置頂屬性
             ex_style = win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE)
             if ex_style & win32con.WS_EX_TOPMOST:
                 title = win32gui.GetWindowText(hwnd)
-                if ("YouTube" in title or "- YouTube" in title or "Picture-in-Picture" in title or "子母畫面" in title) and "YouTube Music" not in title:
+                if is_video_window(title):
                     r = win32gui.GetWindowRect(hwnd)
                     w, h = r[2] - r[0], r[3] - r[1]
                     if w > 200 and h > 150:
@@ -372,15 +381,44 @@ async def _yt_companion_session_loop(target_hwnd, initial_rect, initial_title):
         IS_YT_COMPANION_ACTIVE = False
         LATEST_YT_FRAME_BYTES = None
 
+PENDING_VIDEO_REQUEST = None
+LAST_REQUEST_TIME = 0
+
+def approve_pending_video():
+    global PENDING_VIDEO_REQUEST
+    if PENDING_VIDEO_REQUEST and not IS_YT_COMPANION_ACTIVE:
+        hwnd, rect, title = PENDING_VIDEO_REQUEST
+        PENDING_VIDEO_REQUEST = None
+        asyncio.create_task(_yt_companion_session_loop(hwnd, rect, title))
+        return True
+    return False
+
+def reject_pending_video():
+    global PENDING_VIDEO_REQUEST, LAST_REQUEST_TIME
+    PENDING_VIDEO_REQUEST = None
+    LAST_REQUEST_TIME = time.time() + 120  # 冷卻2分鐘
+    return True
+
 async def start_yt_auto_watcher():
-    """背景守護協程：持續偵測 YouTube 出現並自動連線眼耳感官"""
-    log_print("👀 [YT 眼耳雷達] 背景視窗偵測守護已啟動")
+    """背景守護協程：持續偵測影片出現，向 Web 儀表板推送確認請求"""
+    global PENDING_VIDEO_REQUEST, LAST_REQUEST_TIME
+    log_print("👀 [影片眼耳雷達] 背景視窗偵測守護已啟動 (需老爸手動授權)")
     while True:
         try:
             if IS_YT_WATCHER_ENABLED and not IS_YT_COMPANION_ACTIVE:
                 hwnd, rect, title = find_youtube_window()
                 if hwnd:
-                    await _yt_companion_session_loop(hwnd, rect, title)
+                    now = time.time()
+                    if PENDING_VIDEO_REQUEST is None or PENDING_VIDEO_REQUEST[0] != hwnd or (now - LAST_REQUEST_TIME) > 60:
+                        if now > LAST_REQUEST_TIME:
+                            PENDING_VIDEO_REQUEST = (hwnd, rect, title)
+                            LAST_REQUEST_TIME = now
+                            log_print(f"🔔 [影片伴看] 偵測到影片視窗《{title}》，請至 Web 後台點擊確認！")
+                            try:
+                                import services.web_dashboard as web_dash
+                                web_dash.broadcast_event('yt_companion_request', {"short_title": title[:20], "hwnd": hwnd})
+                            except Exception:
+                                pass
             await asyncio.sleep(1.5)
         except asyncio.CancelledError:
             break

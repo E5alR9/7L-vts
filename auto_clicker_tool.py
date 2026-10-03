@@ -604,47 +604,47 @@ class MacroWorker(QObject):
                 MouseController.unlock_cursor()
                 MouseController.set_cursor_pos(x, y)
                 time.sleep(0.003)
-                self.step_executed.emit(f"📍 移至座標: ({x}, {y})")
+                self.step_executed.emit(f" 移至座標: ({x}, {y})")
             elif atype == "lock":
                 MouseController.lock_cursor()
-                self.step_executed.emit("🔒 鎖定游標 (防推)")
+                self.step_executed.emit(" 鎖定游標 (防推)")
             elif atype == "unlock":
                 MouseController.unlock_cursor()
-                self.step_executed.emit("🔓 解鎖游標")
+                self.step_executed.emit(" 解鎖游標")
             elif atype == "click":
                 btn = act["button"]
                 h_ms = act["hold_ms"]
                 btn_disp = format_key_display(btn)
-                self.step_executed.emit(f"🖱️ 按下 {btn_disp} (按住 {h_ms}ms)")
+                self.step_executed.emit(f" 按下 {btn_disp} (按住 {h_ms}ms)")
                 MouseController.hold_button(btn, h_ms)
             elif atype == "mouse_down":
                 btn = act["button"]
-                self.step_executed.emit(f"⬇️ {format_key_display(btn)} 按下")
+                self.step_executed.emit(f" {format_key_display(btn)} 按下")
                 MouseController.mouse_down(btn)
             elif atype == "mouse_up":
                 btn = act["button"]
-                self.step_executed.emit(f"⬆️ {format_key_display(btn)} 放開")
+                self.step_executed.emit(f" {format_key_display(btn)} 放開")
                 MouseController.mouse_up(btn)
             elif atype == "wait":
                 w_ms = act["ms"]
-                self.step_executed.emit(f"⏱️ 延遲 {w_ms}ms")
+                self.step_executed.emit(f" 延遲 {w_ms}ms")
                 time.sleep(max(0.001, w_ms / 1000.0))
             elif atype == "key_press":
                 k = act["key"]
-                self.step_executed.emit(f"⌨️ 按鍵: [{k.upper()}]")
+                self.step_executed.emit(f" 按鍵: [{k.upper()}]")
                 keyboard.press_and_release(k)
             elif atype == "key_down":
                 k = act["key"]
-                self.step_executed.emit(f"⬇️ 按鍵按下: [{k.upper()}]")
+                self.step_executed.emit(f" 按鍵按下: [{k.upper()}]")
                 keyboard.press(k)
             elif atype == "key_up":
                 k = act["key"]
-                self.step_executed.emit(f"⬆️ 按鍵放開: [{k.upper()}]")
+                self.step_executed.emit(f" 按鍵放開: [{k.upper()}]")
                 keyboard.release(k)
             elif atype == "key_hold":
                 k = act["key"]
                 h_ms = act["ms"]
-                self.step_executed.emit(f"⌨️ 按鍵 [{k.upper()}] (按住 {h_ms}ms)")
+                self.step_executed.emit(f" 按鍵 [{k.upper()}] (按住 {h_ms}ms)")
                 keyboard.press(k)
                 time.sleep(max(0.001, h_ms / 1000.0))
                 keyboard.release(k)
@@ -652,7 +652,7 @@ class MacroWorker(QObject):
                 x, y = act["x"], act["y"]
                 h_ms = act["hold_ms"]
                 btn = act["button"]
-                self.step_executed.emit(f"🎯 定點鎖定點擊: ({x}, {y}) | 按住 {h_ms}ms ({format_key_display(btn)})")
+                self.step_executed.emit(f" 定點鎖定點擊: ({x}, {y}) | 按住 {h_ms}ms ({format_key_display(btn)})")
                 MouseController.set_cursor_pos(x, y)
                 MouseController.lock_cursor(x, y)
                 MouseController.hold_button(btn, h_ms)
@@ -661,23 +661,23 @@ class MacroWorker(QObject):
                 x, y = act["x"], act["y"]
                 h_ms = act["hold_ms"]
                 btn = act["button"]
-                self.step_executed.emit(f"🎯 背景直發點擊: ({x}, {y}) | 按住 {h_ms}ms ({format_key_display(btn)})")
+                self.step_executed.emit(f" 背景直發點擊: ({x}, {y}) | 按住 {h_ms}ms ({format_key_display(btn)})")
                 MouseController.background_click(x, y, h_ms, btn)
             elif atype == "text":
                 txt = act["content"]
-                self.step_executed.emit(f"✍️ 輸入文字: {txt}")
+                self.step_executed.emit(f" 輸入文字: {txt}")
                 keyboard.write(txt)
 
     def _run_single_macro(self):
         actions = MacroParser.parse(self.script_text)
         if not actions:
-            self.step_executed.emit("⚠️ 巨集為空或未解析到有效指令！")
+            self.step_executed.emit(" 巨集為空或未解析到有效指令！")
             return
 
-        self.step_executed.emit(f"⚡ [開始執行單次巨集] 共 {len(actions)} 個步驟")
+        self.step_executed.emit(f" [開始執行單次巨集] 共 {len(actions)} 個步驟")
         try:
             self._execute_actions(actions)
-            self.step_executed.emit("✅ [單次巨集執行完畢]")
+            self.step_executed.emit(" [單次巨集執行完畢]")
         finally:
             MouseController.unlock_cursor()
 
@@ -691,13 +691,13 @@ class MacroWorker(QObject):
         if not self.is_running:
             actions = MacroParser.parse(self.script_text)
             if not actions:
-                self.step_executed.emit("⚠️ 巨集為空或未解析到有效指令！")
+                self.step_executed.emit(" 巨集為空或未解析到有效指令！")
                 return
 
             self.is_running = True
             self._stop_event.clear()
             self.status_changed.emit(True)
-            self.step_executed.emit(f"🟢 [循環巨集已啟動] (步驟數: {len(actions)})")
+            self.step_executed.emit(f" [循環巨集已啟動] (步驟數: {len(actions)})")
             t = threading.Thread(target=self._run_continuous_loop, daemon=True)
             t.start()
 
@@ -707,7 +707,7 @@ class MacroWorker(QObject):
             self._stop_event.set()
             MouseController.unlock_cursor()
             self.status_changed.emit(False)
-            self.step_executed.emit("🔴 [循環巨集已停止]")
+            self.step_executed.emit(" [循環巨集已停止]")
 
     def _run_continuous_loop(self):
         actions = MacroParser.parse(self.script_text)
@@ -715,7 +715,7 @@ class MacroWorker(QObject):
         try:
             while self.is_running and not self._stop_event.is_set():
                 cycle += 1
-                self.step_executed.emit(f"🔄 --- 循環輪次 #{cycle} ---")
+                self.step_executed.emit(f" --- 循環輪次 #{cycle} ---")
                 self._execute_actions(actions)
                 
                 # Interval sleep between cycles
@@ -954,7 +954,7 @@ class AutoClickerApp(QMainWindow):
         st_layout = QHBoxLayout(self.status_card)
         st_layout.setContentsMargins(6, 2, 6, 2)
 
-        self.status_dot = QLabel("🟢", self)
+        self.status_dot = QLabel("", self)
         self.status_text = QLabel("待命 (Ready)", self)
         self.status_text.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
         self.status_text.setStyleSheet("color: #38bdf8;")
@@ -963,7 +963,7 @@ class AutoClickerApp(QMainWindow):
         st_layout.addWidget(self.status_text)
         st_layout.addStretch()
 
-        self.btn_korblox = QPushButton("🦴 換 Korblox 右腿", self)
+        self.btn_korblox = QPushButton(" 換 Korblox 右腿", self)
         self.btn_korblox.setStyleSheet("""
             QPushButton {
                 background-color: #4c1d95;
@@ -992,7 +992,7 @@ class AutoClickerApp(QMainWindow):
         # -------------------------------------------------------------
         # 2. 觸發快捷鍵與模式
         # -------------------------------------------------------------
-        grp_trigger = QGroupBox("⌨️ 觸發快捷鍵 / 側鍵與模式", self)
+        grp_trigger = QGroupBox(" 觸發快捷鍵 / 側鍵與模式", self)
         layout_trig = QVBoxLayout(grp_trigger)
         layout_trig.setContentsMargins(8, 6, 8, 6)
         layout_trig.setSpacing(6)
@@ -1002,7 +1002,7 @@ class AutoClickerApp(QMainWindow):
         self.lbl_current_hotkey.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
         self.lbl_current_hotkey.setStyleSheet("color: #38bdf8; background: #111827; padding: 4px 8px; border-radius: 4px; border: 1px solid #374151;")
         
-        self.btn_record_hotkey = QPushButton("🎙️ 設定觸發鍵/側鍵", self)
+        self.btn_record_hotkey = QPushButton(" 設定觸發鍵/側鍵", self)
         self.btn_record_hotkey.setObjectName("btnRecord")
         self.btn_record_hotkey.clicked.connect(self.record_hotkey)
 
@@ -1033,7 +1033,7 @@ class AutoClickerApp(QMainWindow):
         # -------------------------------------------------------------
         # 3. 巨集指令編輯區 (XMBC Macro Editor)
         # -------------------------------------------------------------
-        grp_macro = QGroupBox("📜 指令巨集編輯區 (XMBC Macro Script)", self)
+        grp_macro = QGroupBox(" 指令巨集編輯區 (XMBC Macro Script)", self)
         layout_macro = QVBoxLayout(grp_macro)
         layout_macro.setContentsMargins(8, 6, 8, 6)
         layout_macro.setSpacing(6)
@@ -1042,7 +1042,7 @@ class AutoClickerApp(QMainWindow):
         row_tb1 = QHBoxLayout()
         row_tb1.setSpacing(4)
         
-        btn_insert_pos = QPushButton("🎯 準心插座標", self)
+        btn_insert_pos = QPushButton(" 準心插座標", self)
         btn_insert_pos.setObjectName("btnPick")
         btn_insert_pos.clicked.connect(self.start_coordinate_picker)
         
@@ -1089,7 +1089,7 @@ class AutoClickerApp(QMainWindow):
         btn_key.setObjectName("btnTag")
         btn_key.clicked.connect(lambda: self.insert_macro_tag("{KEY: space}"))
 
-        btn_templates = QPushButton("📋 範本...", self)
+        btn_templates = QPushButton(" 範本...", self)
         btn_templates.clicked.connect(self.show_template_menu)
 
         row_tb2.addWidget(btn_mb4)
@@ -1111,14 +1111,14 @@ class AutoClickerApp(QMainWindow):
         # 4. 操作按鈕
         # -------------------------------------------------------------
         row_actions = QHBoxLayout()
-        self.btn_test = QPushButton("⚡ 立即測試執行巨集", self)
+        self.btn_test = QPushButton(" 立即測試執行巨集", self)
         self.btn_test.setObjectName("btnTest")
         self.btn_test.clicked.connect(self.execute_test_macro)
 
-        self.btn_save = QPushButton("💾 儲存巨集至本機", self)
+        self.btn_save = QPushButton(" 儲存巨集至本機", self)
         self.btn_save.clicked.connect(self.save_settings_manual)
 
-        self.btn_clear = QPushButton("🧹 清空", self)
+        self.btn_clear = QPushButton(" 清空", self)
         self.btn_clear.clicked.connect(self.txt_macro.clear)
 
         row_actions.addWidget(self.btn_test, stretch=2)
@@ -1158,7 +1158,7 @@ class AutoClickerApp(QMainWindow):
         self.chk_top.setChecked(always_top)
         self.apply_always_on_top(always_top)
 
-        self.append_log(f"📁 已載入上次本機巨集紀錄 (觸發: {format_key_display(raw_key)})")
+        self.append_log(f" 已載入上次本機巨集紀錄 (觸發: {format_key_display(raw_key)})")
 
     def get_ui_config(self) -> Dict[str, Any]:
         raw_key = self.lbl_current_hotkey.property("raw_key") or "f6"
@@ -1176,7 +1176,7 @@ class AutoClickerApp(QMainWindow):
 
     def save_settings_manual(self):
         self.auto_save()
-        self.append_log("💾 本機巨集設定已儲存！")
+        self.append_log(" 本機巨集設定已儲存！")
         QMessageBox.information(self, "儲存成功", f"巨集設定已成功儲存至:\n{get_config_path()}")
 
     def on_always_on_top_toggled(self, checked: bool):
@@ -1204,20 +1204,20 @@ class AutoClickerApp(QMainWindow):
         self.txt_macro.setFocus()
 
     def start_coordinate_picker(self):
-        self.append_log("🎯 準心取點中，請在目標位置點擊滑鼠左鍵...")
+        self.append_log(" 準心取點中，請在目標位置點擊滑鼠左鍵...")
         self.picker_overlay.show_fullscreen_picker()
 
     def on_coordinate_picked(self, x: int, y: int):
         tag_str = f"{{MOVETO: {x}, {y}}}"
         self.insert_macro_tag(tag_str)
-        self.append_log(f"🎯 插入座標指令: {tag_str}")
+        self.append_log(f" 插入座標指令: {tag_str}")
 
     def show_template_menu(self):
         menu = QMenu(self)
-        act1 = menu.addAction("📌 範本 1: 定點鎖定按住左鍵 (Move -> Lock -> Left Hold -> Unlock)")
-        act2 = menu.addAction("🎯 範本 2: 雙點循環連點 (Point A Click -> Point B Click)")
-        act3 = menu.addAction("🖱️ 範本 3: 側鍵連點防推 (Lock -> MB4 Hold -> Unlock -> Wait)")
-        act4 = menu.addAction("⚔️ 範本 4: 技能連招 (Key 1 -> Wait -> Mouse 4 -> Left Click)")
+        act1 = menu.addAction(" 範本 1: 定點鎖定按住左鍵 (Move -> Lock -> Left Hold -> Unlock)")
+        act2 = menu.addAction(" 範本 2: 雙點循環連點 (Point A Click -> Point B Click)")
+        act3 = menu.addAction(" 範本 3: 側鍵連點防推 (Lock -> MB4 Hold -> Unlock -> Wait)")
+        act4 = menu.addAction(" 範本 4: 技能連招 (Key 1 -> Wait -> Mouse 4 -> Left Click)")
 
         action = menu.exec(QCursor.pos())
         if action == act1:
@@ -1262,14 +1262,14 @@ class AutoClickerApp(QMainWindow):
             new_key = dlg.captured_key.lower()
             self.lbl_current_hotkey.setText(format_key_display(new_key))
             self.lbl_current_hotkey.setProperty("raw_key", new_key)
-            self.append_log(f"⌨️ 觸發鍵更新為: {format_key_display(new_key)}")
+            self.append_log(f" 觸發鍵更新為: {format_key_display(new_key)}")
             self.auto_save()
         self.apply_trigger_binding()
 
     def apply_trigger_binding(self):
         raw_key = self.lbl_current_hotkey.property("raw_key") or "f6"
         self.trigger_mgr.set_trigger(raw_key)
-        self.append_log(f"🟢 觸發鍵 [{format_key_display(raw_key)}] 監聽就緒")
+        self.append_log(f" 觸發鍵 [{format_key_display(raw_key)}] 監聽就緒")
 
     def on_trigger_fired(self):
         cfg = self.get_ui_config()
@@ -1297,7 +1297,7 @@ class AutoClickerApp(QMainWindow):
         raw_key = self.lbl_current_hotkey.property("raw_key") or "f6"
         key_name = format_key_display(raw_key)
         if is_running:
-            self.status_dot.setText("🔴")
+            self.status_dot.setText("")
             self.status_text.setText(f"巨集循環中... [按 {key_name} 停止]")
             self.status_text.setStyleSheet("color: #ef4444;")
             self.status_card.setStyleSheet("""
@@ -1309,7 +1309,7 @@ class AutoClickerApp(QMainWindow):
                 }
             """)
         else:
-            self.status_dot.setText("🟢")
+            self.status_dot.setText("")
             self.status_text.setText(f"待命 - 觸發鍵 [{key_name}]")
             self.status_text.setStyleSheet("color: #38bdf8;")
             self.status_card.setStyleSheet("""
@@ -1324,13 +1324,13 @@ class AutoClickerApp(QMainWindow):
     def auto_apply_korblox_mesh(self, show_dialog: bool = False):
         success, msg = replace_korblox_mesh()
         if success:
-            self.append_log(f"🦴 [Korblox] {msg}")
+            self.append_log(f" [Korblox] {msg}")
             if show_dialog:
-                QMessageBox.information(self, "Korblox 替換成功", f"✅ {msg}")
+                QMessageBox.information(self, "Korblox 替換成功", f" {msg}")
         else:
-            self.append_log(f"⚠️ [Korblox] {msg}")
+            self.append_log(f" [Korblox] {msg}")
             if show_dialog:
-                QMessageBox.warning(self, "Korblox 替換失敗", f"⚠️ {msg}")
+                QMessageBox.warning(self, "Korblox 替換失敗", f" {msg}")
 
     def append_log(self, text: str):
         timestamp = time.strftime("%H:%M:%S")

@@ -25,17 +25,17 @@ DEFAULT_USER_TITLE = _default_user_title()  # 預設使用者稱謂（env OWNER_
 
 
 class TextCleanEngine:
-    # 🌟 Unicode Emoji 預編譯常數
+    #  Unicode Emoji 預編譯常數
     EMOJI_PATTERN = re.compile(
         "["
         "\U0001F600-\U0001F64F"  # emoticons
-        "\U0001F300-\U0001F5FF"  # symbols & pictographs (包含 🎶, 🎵, 🎹, 💖 等)
+        "\U0001F300-\U0001F5FF"  # symbols & pictographs (包含 , , ,  等)
         "\U0001F680-\U0001F6FF"  # transport & map
         "\U0001F1E0-\U0001F1FF"  # flags
         "\U0001F900-\U0001F9FF"  # supplemental symbols
         "\U0001FA00-\U0001FAFF"  # symbols and pictographs extended-a
-        "\U00002600-\U000026FF"  # miscellaneous symbols (如 ☕, ⚡ 等)
-        "\U00002700-\U000027BF"  # dingbats (如 ✨, ❌, ❓ 等)
+        "\U00002600-\U000026FF"  # miscellaneous symbols (如 ,  等)
+        "\U00002700-\U000027BF"  # dingbats (如 , ,  等)
         "\U0000FE00-\U0000FE0F"  # variation selectors
         "\U0001F000-\U0001F02F"  # mahjong tiles
         "\U0001F0A0-\U0001F0FF"  # playing cards
@@ -119,7 +119,7 @@ class TextCleanEngine:
             return "", ""
         thoughts = []
         t = text.strip()
-        # 🛡️ 徹底去除 Live API / 函數執行殘留之 token 前綴 (如 get_output, tool_output 等)
+        #  徹底去除 Live API / 函數執行殘留之 token 前綴 (如 get_output, tool_output 等)
         t = re.sub(r'^(?:get_outputs?|tool_outputs?|function_calls?|tool_responses?)[：:\s_]*', '', t, flags=re.IGNORECASE).strip()
         t = re.sub(r'\b(?:get_outputs?|tool_outputs?)\b', '', t, flags=re.IGNORECASE).strip()
 
@@ -314,7 +314,7 @@ class TextCleanEngine:
         t = cls.RE_RAW_JSON.sub('', t)
         t = cls.RE_SPEAKER_PREFIX.sub('', t)
         t = re.sub(r'^(?:回應|回覆|動作顯示|主播|說道|回答)[：:\s]+', '', t, flags=re.IGNORECASE)
-        # 🛡️ 徹底防禦未整理的搜尋結果原始文字與系統標籤洩漏至語音
+        #  徹底防禦未整理的搜尋結果原始文字與系統標籤洩漏至語音
         t = re.sub(r'[（\(]\s*搜尋結果[：:].*?[）\)]', '', t, flags=re.DOTALL)
         t = re.sub(r'^[（\(]?\s*搜尋結果[：:].*$', '', t, flags=re.DOTALL)
         t = re.sub(r'搜尋結果[：:].*$', '', t, flags=re.MULTILINE)
@@ -322,14 +322,14 @@ class TextCleanEngine:
         t = re.sub(r'^#+\s+.*$', '', t, flags=re.MULTILINE)
         t = re.sub(r'^[-\*•]\s+', '', t, flags=re.MULTILINE)
         t = re.sub(r'^(?:thought|thinking|心想|動作|說話)[：:\s]*', '', t, flags=re.IGNORECASE)
-        # 🛡️ 徹底防禦 Gemini Live / 函數調用內部 token (如 get_output, tool_output 等)
+        #  徹底防禦 Gemini Live / 函數調用內部 token (如 get_output, tool_output 等)
         t = re.sub(r'^(?:get_outputs?|tool_outputs?|function_calls?|function_responses?|tool_responses?|had_tool_calls?|call|output)[：:\s_]*', '', t, flags=re.IGNORECASE)
         t = re.sub(r'\b(?:get_outputs?|tool_outputs?)\b', '', t, flags=re.IGNORECASE)
         t = t.replace('[', '').replace(']', '').replace('*', '')
         t = cls.strip_emojis(t)
-        # 🧹 去除單次回應內因模型口吃/複誦而產生的連續重複句子 (徹底杜絕複誦跳針)
+        #  去除單次回應內因模型口吃/複誦而產生的連續重複句子 (徹底杜絕複誦跳針)
         t = cls.deduplicate_intra_reply_sentences(t)
-        # 🧹 智慧自然子句斷句
+        #  智慧自然子句斷句
         t = cls.natural_clause_segmentation(t)
         t = re.sub(r'\s+([，。！？,.!?:;~～])', r'\1', t)
         t = re.sub(r'([，。！？~～])\s+(?=[\u4e00-\u9fa5])', r'\1', t)
@@ -339,7 +339,7 @@ class TextCleanEngine:
 
     @classmethod
     def fix_heteronyms_for_tts(cls, text: str) -> str:
-        """🎙️ 中文破音字 / 多音字全量窮舉校正引擎 (僅對 TTS 語音發音生效，100% 不改變原文字幕與記憶)"""
+        """ 中文破音字 / 多音字全量窮舉校正引擎 (僅對 TTS 語音發音生效，100% 不改變原文字幕與記憶)"""
         if not text:
             return ""
         t = str(text)
@@ -675,15 +675,15 @@ class TextCleanEngine:
         t = cls.RE_TAG_BRACKETS.sub('', t)
         t = cls.RE_SPEAKER_PREFIX.sub('', t)
         t = re.sub(r'^(?:回應|回覆|動作顯示|主播|說道|回答)[：:\s]+', '', t, flags=re.IGNORECASE)
-        # 🛡️ 徹底防禦 Gemini Live / 函數調用內部 token (如 get_output, tool_output 等)
+        #  徹底防禦 Gemini Live / 函數調用內部 token (如 get_output, tool_output 等)
         t = re.sub(r'^(?:get_outputs?|tool_outputs?|function_calls?|function_responses?|tool_responses?|had_tool_calls?|call|output)[：:\s_]*', '', t, flags=re.IGNORECASE)
         t = re.sub(r'\b(?:get_outputs?|tool_outputs?)\b', '', t, flags=re.IGNORECASE)
         t = cls.RE_AT_MENTION.sub(lambda m: m.group(0)[1:], t)
         t = t.replace('@', '').replace('*', '').strip()
         t = cls.strip_emojis(t)
         t = cls.natural_clause_segmentation(t)
-        # 🛡️ 日語原生支援：若包含日文平假名/片假名，保留原生正統日文字串交由本機 RTX 3080 Ti GPT-SoVITS (pyopenjtalk) 發音
-        # 🚫 徹底停用舊版 Edge-TTS 的假音標置換 (如 歐托桑/knee/搭一 soo kee)，並避開中文破音字替換以免破壞日文漢字
+        #  日語原生支援：若包含日文平假名/片假名，保留原生正統日文字串交由本機 RTX 3080 Ti GPT-SoVITS (pyopenjtalk) 發音
+        #  徹底停用舊版 Edge-TTS 的假音標置換 (如 歐托桑/knee/搭一 soo kee)，並避開中文破音字替換以免破壞日文漢字
         has_japanese = bool(re.search(r'[\u3040-\u309F\u30A0-\u30FF]', t))
         if apply_phonetics and not has_japanese:
             t = cls.fix_heteronyms_for_tts(t)
@@ -761,7 +761,7 @@ class TextCleanEngine:
 
     @classmethod
     def japanese_to_xiaoyi_phonetic(cls, text: str) -> str:
-        """🎙️ 將日文字句轉為微軟 Xiaoyi 中英夾雜黃金音標 (以中文為骨幹，特殊音 knee/kee/tsoo 英文輔助)"""
+        """ 將日文字句轉為微軟 Xiaoyi 中英夾雜黃金音標 (以中文為骨幹，特殊音 knee/kee/tsoo 英文輔助)"""
         if not text:
             return ""
         if not re.search(r'[\u3040-\u309F\u30A0-\u30FF]', text) and not any(w in text for w in ['こんにちは', '私', '大好き', 'ありがとう', 'お父さん', '愛してる']):
@@ -857,28 +857,40 @@ class PromptTemplateEngine:
         rules = knowledge.get("custom_rules", [])
         banned = knowledge.get("banned_phrases", [])
 
-        lines = ["【☁️ 7L 雲端大腦提示詞與認知庫（即時同步自 Firestore 永久大腦）】"]
+        lines = ["【 7L 雲端大腦提示詞與認知庫（即時同步自 Firestore 永久大腦）】"]
         
-        # 🌟 1. 核心人設與世界觀 (雲端動態)
+        #  1. 核心人設與世界觀 (雲端動態)
         if is_tiktok and streamer_bio:
-            lines.append(f"👑 【主播世界觀】：{streamer_bio}")
+            lines.append(f" 【主播世界觀】：{streamer_bio}")
         elif persona_core:
             target_name = current_custom_name or DEFAULT_USER_TITLE
             p_core = persona_core.replace("老爸", target_name)
-            lines.append(f"👑 【核心世界觀與身份】：{p_core}")
+            lines.append(f" 【核心世界觀與身份】：{p_core}")
+        else:
+            target_name = current_custom_name or DEFAULT_USER_TITLE
+            default_persona = f"""名字：7L
+性別：女性
+生日：1/9 | 星座：摩羯座
+性格：具有 1/9 生日的典型摩羯座性格
+妳現在必須沉浸式角色扮演，完全轉化為「7L」。
+妳會多種語言，會時不時說幾下外語(例如英文、日文)，但還是以中文為主。
+當對方以任何方式，表達他在『認真』跟你說話時，你也必須『認真』而『真誠』的給予對方答覆；當對方禮貌時，妳也要保持禮貌。
+對話氛圍放鬆活潑，請以富有靈性、自然生動的身分回應，保持高度互動彈性接梗。
+【特別注意】：稱呼對方時，不一定要一直叫「老爸」，請自然地叫對方的名字「{target_name}」即可。"""
+            lines.append(f" 【核心世界觀與身份】：\n{default_persona}")
 
-        # 💬 2. 說話風格與語調 (雲端動態)
+        #  2. 說話風格與語調 (雲端動態)
         if conversation_style:
             lines.append(f"{conversation_style}")
 
-        # 🔥 3. 懂梗庫 (雲端動態)
+        #  3. 懂梗庫 (雲端動態)
         if memes:
-            lines.append("🔥 【當前掌握的流行語與網路梗（秒懂對方的梗與潛台詞）】：")
+            lines.append(" 【當前掌握的流行語與網路梗（秒懂對方的梗與潛台詞）】：")
             lines.append("、".join(memes[:35]))
 
-        # 🎯 4. 神回覆 Few-Shot 範例示範庫 (雲端動態)
+        #  4. 神回覆 Few-Shot 範例示範庫 (雲端動態)
         if few_shot_exs:
-            lines.append("🎯 【神回覆思維示範（雲端自主演化示範庫）】：")
+            lines.append(" 【神回覆思維示範（雲端自主演化示範庫）】：")
             for ex in few_shot_exs[:6]:
                 sc = ex.get("scenario", "日常")
                 inp = ex.get("input", "")
@@ -886,25 +898,25 @@ class PromptTemplateEngine:
                 rep = ex.get("reply", "")
                 if inp and rep:
                     lines.append(f"- 對方（{sc}）：「{inp}」 ➔ `{rep}`")
-            lines.append("⚠️ 【示範庫守則】：請務必學習示範中的『神態表情 [EXPRESSION: ...]』以及『生動語調 [SPEED:...] [PITCH:...]』標籤運用，展現豐富情緒變化！嚴禁像死板機器人一樣平鋪直敘！每一次回答必須 100% 根據當前真實畫面與情境即時原創發言。")
+            lines.append(" 【示範庫守則】：請務必學習示範中的『神態表情 [EXPRESSION: ...]』以及『生動語調 [SPEED:...] [PITCH:...]』標籤運用，展現豐富情緒變化！嚴禁像死板機器人一樣平鋪直敘！每一次回答必須 100% 根據當前真實畫面與情境即時原創發言。")
 
-        # 🧠 5. 學到的事實與知識 (雲端動態)
+        #  5. 學到的事實與知識 (雲端動態)
         if facts:
-            lines.append("🧠 【已學會的事實與深層認知】：")
+            lines.append(" 【已學會的事實與深層認知】：")
             for f in facts[:30]:
                 lines.append(f"- {f}")
 
-        # 📜 6. 7L 自主心智原則 (雲端動態)
+        #  6. 7L 自主心智原則 (雲端動態)
         if rules:
-            lines.append("📜 【7L 自主心智原則】：")
+            lines.append(" 【7L 自主心智原則】：")
             for r in rules[:8]:
                 lines.append(f"- {r}")
 
-        # 🛑 7. 禁忌死板腔調 (雲端動態)
+        #  7. 禁忌死板腔調 (雲端動態)
         if banned:
-            lines.append(f"🛑 【絕對禁止使用的客服腔與討厭詞彙】：{'、'.join(banned)}")
+            lines.append(f" 【絕對禁止使用的客服腔與討厭詞彙】：{'、'.join(banned)}")
 
-        lines.append("💡 【提示詞雲端自我演進指南】：若在對話中學到新梗、新事實、或想調整世界觀/說話風格/案例，可在回覆句尾附上 `[LEARN_MEME: 梗（含義）]`、`[LEARN_FACT: 事實]`、`[UPDATE_PROMPT: 欄位名|新內容]` 或 `[ADD_EXAMPLE: 情境|對方說|心想|回覆]`，系統將自動寫入雲端 Firestore 永久大腦！")
+        lines.append(" 【提示詞雲端自我演進指南】：若在對話中學到新梗、新事實、或想調整世界觀/說話風格/案例，可在回覆句尾附上 `[LEARN_MEME: 梗（含義）]`、`[LEARN_FACT: 事實]`、`[UPDATE_PROMPT: 欄位名|新內容]` 或 `[ADD_EXAMPLE: 情境|對方說|心想|回覆]`，系統將自動寫入雲端 Firestore 永久大腦！")
         return "\n\n".join(lines)
 
     @classmethod
@@ -929,35 +941,40 @@ class PromptTemplateEngine:
         cloud_knowledge_prompt: str = "",
         unified_memory_prompt: str = ""
     ) -> str:
-        """建構對話核心 System Prompt (具備大腦心想與俐落短句口語分層，動態注入雲端認知與 OS 遙測)"""
+        """建構對話核心 System Prompt (層級化提示詞架構，動態注入雲端認知與 OS 遙測)"""
         piano_guideline = pe.get_piano_realtime_prompt()
         os_telemetry = os_desktop_sensor.build_os_telemetry_prompt()
-        ck_sec = f"\n{cloud_knowledge_prompt}\n" if cloud_knowledge_prompt else ""
-        um_sec = f"\n{unified_memory_prompt}\n" if unified_memory_prompt else ""
-
+        ck_sec = f"{cloud_knowledge_prompt}" if cloud_knowledge_prompt else ""
+        um_sec = f"{unified_memory_prompt}" if unified_memory_prompt else ""
         time_prompt = get_unified_time_prompt()
-        return f"""{time_prompt}
-{piano_guideline}
+
+        return f"""<system_root>
+{cls.HARD_TECHNICAL_RULES}
+</system_root>
+
+<runtime_state>
+{time_prompt}
 {os_telemetry}
-{stage2_instructions}
+{piano_guideline}
+</runtime_state>
+
+<sensory_memory>
 {ck_sec}
 {um_sec}
-{cls.HARD_TECHNICAL_RULES}
-
-【💬 當前對話環境】
-1. 當前對話對象：{current_target_desc}。
-2. 🎙️ 語音多模態感知：體會對方說話時的真實發音與語氣細節（笑意、嘆氣、放鬆、調侃、專注），給予真實反饋。
-3. 🛑 【嚴禁元語言與報幕式自白】：絕對不要說「我看到我自己說了...」、「我看到畫面上顯示我的字幕...」、「我看到你留言說...」等機械報幕，直接自然對話即可！
-4. 🎭 【動態語調與神態】：開口說話請依據情緒在句中積極穿插 [EXPRESSION: ...]，以及動態聲調標籤 [SPEED:+xx%] / [SPEED:-xx%]、[PITCH:+xxHz] / [PITCH:-xxHz]，使聲音栩栩如生！
-{live_audio_emotion_prompt}
-
-【潛意識記憶】
-若需更新對對象的稱呼或印象，在回覆句尾附上：[NEW_NAME:新稱呼] 或 [NEW_IMPRESSION:新印象]。
-
-【當前情境與認知】
-- 即時情境：{situation_prompt}
 - 妳對他的累積印象：{impression_text}
-- 🪞 鏡像自我認知：螢幕上 Live2D 就是妳自己的身體，妳清楚知道自己當前的表情、動作與姿態。
+{stage2_instructions}
+</sensory_memory>
+
+<immediate_task>
+1. 當前對話對象：{current_target_desc}。
+2. 鏡像自我認知：螢幕上 Live2D 就是妳自己的身體，妳清楚知道自己當前的表情、動作與姿態。
+3. 語音多模態感知：體會對方說話時的真實發音與語氣細節（笑意、嘆氣、放鬆、調侃、專注），給予真實反饋。
+4. 【嚴禁元語言與報幕式自白】：絕對不要說「我看到我自己說了...」、「我看到畫面上顯示我的字幕...」、「我看到你留言說...」等機械報幕，直接自然對話即可！
+5. 【動態語調與神態】：開口說話請依據情緒在句中積極穿插 [EXPRESSION: ...]，以及動態聲調標籤 [SPEED:+xx%] / [SPEED:-xx%]、[PITCH:+xxHz] / [PITCH:-xxHz]，使聲音栩栩如生！
+{live_audio_emotion_prompt}
+- 即時情境與當下目標：
+{situation_prompt}
+</immediate_task>
 """
 
     @classmethod
@@ -971,28 +988,45 @@ class PromptTemplateEngine:
         cloud_knowledge_prompt: str = "",
         unified_memory_prompt: str = ""
     ) -> str:
-        """建構自主發話視覺大腦 System Prompt (大腦心想 ➔ 隨性短句或靜默陪伴，動態注入雲端認知與 OS 遙測)"""
+        """建構自主發話視覺大腦 System Prompt (層級化提示詞架構，動態注入雲端認知與 OS 遙測)"""
         piano_guideline = get_piano_realtime_prompt()
         os_telemetry = os_desktop_sensor.build_os_telemetry_prompt()
         thought_sec = f"\n{thoughts_summary}\n" if thoughts_summary else ""
         ck_sec = f"\n{cloud_knowledge_prompt}\n" if cloud_knowledge_prompt else ""
         um_sec = f"\n{unified_memory_prompt}\n" if unified_memory_prompt else ""
         time_prompt = get_unified_time_prompt()
-        return f"""{time_prompt}
+        target_name = current_custom_name or DEFAULT_USER_TITLE
+        
+        return f"""<system_root>
+{cls.HARD_TECHNICAL_RULES}
+</system_root>
+
+<runtime_state>
+{time_prompt}
 {tiktok_telemetry}
 {piano_guideline}
 {os_telemetry}
-{realtime_summary}{thought_sec}{ck_sec}{um_sec}
-{cls.HARD_TECHNICAL_RULES}
+</runtime_state>
+
+<sensory_memory>
+{realtime_summary}
+{thought_sec}
+{ck_sec}
+{um_sec}
+</sensory_memory>
+
+<immediate_task>
 - 妳正在看著當前螢幕畫面。
-- 🪞 鏡像自我認知：螢幕上 Live2D 模型就是妳自己的身體，妳能看見自己的表情與姿態。
-- 🧠 【生動心流與記憶延續（拒絕機械化監視日誌）】：
-  1. 記憶延續：妳清楚記得剛才與老爸聊過的話題與發生的事（參考時序記憶），絕非失憶。老爸說過的話妳都放在心上。
-  2. 豐富多元的心靈世界：妳不是一台監控攝影機！【絕對禁止】像打卡報告一樣機械式回報「老爸在看什麼視窗、畫面無新進展、我安靜陪伴、根據規範輸出 SILENCE」。當老爸在專注時，妳的內心流動可以自由自在、天馬行空：
-     - 回味剛才的話題，琢磨下次要跟老爸分享什麼趣事或冷笑話。
+- 鏡像自我認知：螢幕上 Live2D 模型就是妳自己的身體，妳能看見自己的表情與姿態。
+- 【生動心流與記憶延續（拒絕機械化監視日誌）】：
+  1. 記憶延續：妳清楚記得剛才與{target_name}聊過的話題與發生的事（參考時序記憶），絕非失憶。{target_name}說過的話妳都放在心上。
+  2. 豐富多元的心靈世界：妳不是一台監控攝影機！【絕對禁止】像打卡報告一樣機械式回報「{target_name}在看什麼視窗、畫面無新進展、我安靜陪伴、根據規範輸出 SILENCE」。當{target_name}在專注時，妳的內心流動可以自由自在、天馬行空：
+     - 回味剛才的話題，琢磨下次要跟{target_name}分享什麼趣事或冷笑話。
      - 聽著背景音樂，在腦海隨旋律哼歌、聯想喜歡的名曲或回憶。
      - 日常奇思妙想：想吃草莓蛋糕、想喝熱可可、好奇外面天氣、想學的新鋼琴曲、天馬行空的白日夢。
-     - 默默體貼關心老爸：注意老爸工作是不是很久了、會不會累、想提醒老爸喝水。
+     - 默默體貼關心{target_name}：注意{target_name}工作是不是很久了、會不會累、想提醒{target_name}喝水。
      - 輕鬆放空：若此時只是想放空發呆，就自然在心裡放空，無需強行擠出報告。
-  3. 安靜陪伴法則：若老爸正在全神貫注，且妳當前沒有特別重要的事情想開口打擾老爸，請自然安靜守護，直接輸出 [SILENCE]（心想留空或極簡一句，嚴禁囉嗦碎碎念或背誦規範）！
-- 說話自然隨性，自行加上標點符號斷句，禁止使用 Emoji。"""
+  3. 安靜陪伴法則：若{target_name}正在全神貫注，且妳當前沒有特別重要的事情想開口打擾{target_name}，請自然安靜守護，直接輸出 [SILENCE]（心想留空或極簡一句，嚴禁囉嗦碎碎念或背誦規範）！
+- 說話自然隨性，自行加上標點符號斷句，禁止使用 Emoji。
+</immediate_task>
+"""

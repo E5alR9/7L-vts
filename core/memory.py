@@ -15,6 +15,7 @@ from core.identity import get_mode, get_owner_name, get_character_name
 import services.piano_engine as pe
 import core.db as db_module
 from core.prompts import PromptTemplateEngine
+import services.rag_memory_service as rag_service
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
 
@@ -289,9 +290,17 @@ async def clear_all_memories() -> str:
             await db_module.db.collection("user_memory").document(DEFAULT_CHANNEL_ID).delete()
         except Exception:
             pass
-    for fp in [os.path.join(DATA_DIR, f"memory_{DEFAULT_CHANNEL_ID}.json"), USER_PROFILE_FILE,
-                 UNIFIED_MEMORY_FILE, DIALOGUE_MEMORY_FILE, THOUGHT_MEMORY_FILE,
-                 VIEWER_PROFILES_FILE, CLOUD_KNOWLEDGE_FILE]:
+    # 徹底清除所有潛在的記憶檔案，包含舊版與跨模式檔案，但保留設定檔
+    for fn in os.listdir(DATA_DIR):
+        if ("memory" in fn or "history" in fn) and not fn.endswith("config.json"):
+            fp = os.path.join(DATA_DIR, fn)
+            if os.path.exists(fp):
+                try:
+                    os.remove(fp)
+                except Exception:
+                    pass
+    
+    for fp in [USER_PROFILE_FILE, VIEWER_PROFILES_FILE, CLOUD_KNOWLEDGE_FILE]:
         if os.path.exists(fp):
             try:
                 os.remove(fp)
@@ -439,6 +448,15 @@ def append_to_unified_memory(speaker: str, target: str, content: str, role: str 
             loop.run_in_executor(None, _save_unified_memory_to_disk)
         except RuntimeError:
             _save_unified_memory_to_disk()
+
+    # RAG: 若為老爸對話或 AI 回應，加入向量記憶庫
+    if role in ["user", "ai"] and source in ["text", "voice"]:
+        try:
+            rag_text = f"[{t_str}] {speaker}對{target}說: {clean_c}"
+            loop = asyncio.get_running_loop()
+            loop.create_task(rag_service.add_rag_memory(rag_text, source=role))
+        except RuntimeError:
+            pass
 
 def init_unified_memory():
     """啟動時載入歷史雙軌記憶：
@@ -854,7 +872,7 @@ def evaluate_memory_demand(user_input: str, is_voice_input: bool = False, source
         reason="常規日常交流，啟動標準平衡記憶窗口（兼顧上下文脈絡與低延遲）"
     )
 
-def get_unified_memory_context(limit: int = 100, thought_char_limit: int = 1000) -> str:
+def get_unified_memory_context(limit: int = 100, thought_char_limit: int = 1000, include_dialogue: bool = True) -> str:
     """提取雙軌全景時序記憶：
     - 💬 對話部分：取最近 limit 句真實對話（預設 60 句，可擴至百句，上限 500 句，永不被心流擠佔）
     - 💭 心流部分：取最近約 thought_char_limit 字（預設約 1000 字），嚴格控管字數，確保回覆時不會卡太久
@@ -864,7 +882,7 @@ def get_unified_memory_context(limit: int = 100, thought_char_limit: int = 1000)
     if limit <= 0 and thought_char_limit <= 0:
         return ""
 
-    dialogue_items = list(UNIFIED_DIALOGUE_MEMORY)[-limit:] if limit > 0 else []
+    dialogue_items = list(UNIFIED_DIALOGUE_MEMORY)[-limit:] if (limit > 0 and include_dialogue) else []
     thought_items = get_recent_thoughts_by_chars(max_chars=thought_char_limit) if thought_char_limit > 0 else []
 
     if not dialogue_items and not thought_items:

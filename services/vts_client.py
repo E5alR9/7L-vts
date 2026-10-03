@@ -24,7 +24,7 @@ frown_timer = 0.0
 GLOBAL_VTS = None
 MY_CONTROLLED_EXPS = ["黑脸.exp3.json", "爱心.exp3.json", "星星眼.exp3.json", "红脸.exp3.json"]
 CURRENT_ACTIVE_EXP = None
-EXPRESSION_HOLD_SECONDS = 3.5  # 🎭 說完話後表情持續保留的秒數（保持自然情緒餘韻）
+EXPRESSION_HOLD_SECONDS = 3.5  #  說完話後表情持續保留的秒數（保持自然情緒餘韻）
 
 VTS_EXPRESSION_MAP = {
     # 愛心 / 笑意
@@ -106,7 +106,7 @@ CURRENT_VTS_MODEL_SIZE = None
 
 
 class RobustVTSClient:
-    """🌟 高效能非同步 VTube Studio WebSocket 通訊引擎（支援無阻塞極速參數注入與 RequestID 精準匹配）"""
+    """ 高效能非同步 VTube Studio WebSocket 通訊引擎（支援無阻塞極速參數注入與 RequestID 精準匹配）"""
     def __init__(self, plugin_info=None, port=8001):
         self.plugin_info = plugin_info or {
             "plugin_name": "7L_AI_VTuber",
@@ -189,7 +189,7 @@ class RobustVTSClient:
 
     async def request_authenticate_token(self, timeout: float = 30.0):
         """向 VTube Studio 申請新 Token。
-        ⚠️ 重要：request() 的 timeout 必須足夠長（預設 30 秒），讓使用者有時間在 VTS 視窗點允許！
+         重要：request() 的 timeout 必須足夠長（預設 30 秒），讓使用者有時間在 VTS 視窗點允許！
         需要更久（例如手動領取腳本）可傳入 timeout=300。"""
         log_print("⏳ [VTS 授權] 正在向 VTube Studio 申請新授權 Token...")
         log_print("   ➡️  請在 VTube Studio 視窗中找到「允許插件連線」彈窗並點選【允許】！")
@@ -202,7 +202,7 @@ class RobustVTSClient:
                 "pluginName": self.plugin_info.get("plugin_name", "7L_AI_VTuber"),
                 "pluginDeveloper": self.plugin_info.get("developer", "e5_Studio")
             }
-        }, timeout=timeout)  # ⚠️ 讓使用者有時間在 VTS 視窗點允許
+        }, timeout=timeout)  #  讓使用者有時間在 VTS 視窗點允許
         token = resp.get("data", {}).get("authenticationToken")
         if token:
             self.authentic_token = token
@@ -518,7 +518,7 @@ async def move_vts_spatial(
         await fetch_vts_base_model_pos(target_vts)
         return True
 
-    # 🎯 每次位移/縮放前，即時向 VTS 查詢「當下真實模型位置與大小」
+    #  每次位移/縮放前，即時向 VTS 查詢「當下真實模型位置與大小」
     # 徹底解決老爸在 VTS 手動縮放或拖曳模型後，相對位移/放大縮小仍以舊紀錄為基準的突兀跳變問題
     await fetch_vts_current_model_pos(target_vts)
         
@@ -759,3 +759,99 @@ async def trigger_vts_expression(expression_name: str) -> str:
             await set_vts_expression(GLOBAL_VTS, clean_name)
             return f"已成功切換 Live2D 模型表情至：{clean_name}"
     return f"已記錄表情切換：{clean_name}"
+
+# ── 高階動作封裝 (High-Level Actions) ───────────────────────────────────────────
+async def trigger_wink(side=None):
+    """觸發眨眼放電"""
+    global wink_timer, wink_side
+    wink_timer = time.time() + 0.55
+    wink_side = side or random.choice(["left", "right"])
+
+async def trigger_shock():
+    """觸發驚訝縮瞳與物理顫抖"""
+    global shock_timer
+    shock_timer = time.time() + 4.0
+
+async def trigger_frown():
+    """觸發傲嬌八字皺眉/委屈表情"""
+    global frown_timer
+    frown_timer = time.time() + 4.0
+
+async def trigger_eye_roll():
+    """觸發翻白眼"""
+    global eye_roll_timer, is_tracking_mouse
+    is_tracking_mouse = False
+    eye_roll_timer = time.time() + 3.8
+
+async def set_tracking_mouse(enabled: bool):
+    """開關滑鼠追蹤"""
+    global is_tracking_mouse
+    is_tracking_mouse = enabled
+
+async def set_target_look(x: float, y: float):
+    """設定視線目標座標"""
+    global target_look_x, target_look_y, is_tracking_mouse
+    is_tracking_mouse = False
+    target_look_x = x
+    target_look_y = y
+
+async def update_vts_window_center(sw: float, sh: float):
+    """自動偵測 VTube Studio 視窗位置，計算相對於螢幕中心的偏移量 (每 3 秒自動更新)"""
+    import time
+    now = time.time()
+    
+    # 避免短時間內重複偵測
+    if hasattr(update_vts_window_center, "_last_update") and now - update_vts_window_center._last_update < 3.0:
+        return getattr(update_vts_window_center, "_cx", 0.5), getattr(update_vts_window_center, "_cy", 0.5)
+
+    found_win = None
+    try:
+        import pygetwindow as gw
+        for w in gw.getAllWindows():
+            if w.visible and w.width > 150 and w.height > 150:
+                win_t = (w.title or "").lower()
+                if 'vtube' in win_t or 'vts' in win_t:
+                    found_win = (w.left + w.width / 2, w.top + w.height / 2)
+                    break
+    except Exception:
+        pass
+    
+    if not found_win:
+        try:
+            import ctypes, ctypes.wintypes
+            user32 = ctypes.windll.user32
+            found = []
+            def enum_cb(hwnd, _):
+                if user32.IsWindowVisible(hwnd):
+                    buf = ctypes.create_unicode_buffer(256)
+                    user32.GetWindowTextW(hwnd, buf, 256)
+                    title = (buf.value or "").lower()
+                    if 'vtube' in title or 'vts' in title:
+                        rect = ctypes.wintypes.RECT()
+                        user32.GetWindowRect(hwnd, ctypes.byref(rect))
+                        w = rect.right - rect.left
+                        h = rect.bottom - rect.top
+                        if w > 150 and h > 150:
+                            cx = (rect.left + rect.right) / 2
+                            cy = (rect.top + rect.bottom) / 2
+                            found.append((cx, cy))
+                return 1
+            WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.wintypes.HWND, ctypes.wintypes.LPARAM)
+            user32.EnumWindows(WNDENUMPROC(enum_cb), 0)
+            if found:
+                found_win = found[0]
+        except Exception:
+            pass
+
+    if found_win:
+        cx = found_win[0] / sw
+        cy = found_win[1] / sh
+    else:
+        cx = getattr(update_vts_window_center, "_cx", 0.5)
+        cy = getattr(update_vts_window_center, "_cy", 0.5)
+
+    update_vts_window_center._cx = cx
+    update_vts_window_center._cy = cy
+    update_vts_window_center._last_update = now
+    return cx, cy
+

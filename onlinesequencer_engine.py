@@ -453,10 +453,10 @@ def fetch_and_download_first_match(query: str, save_dir: str = "midi_sheets") ->
         print("[OnlineSequencer] Chrome 無法啟動")
         return None
 
-    # 🌟 策略 1：優先使用 Google / Tavily 智慧語意搜尋（精準定位曲名、別名與法文/德文特殊字元）
+    #  策略 1：優先使用 Google / Tavily 智慧語意搜尋（精準定位曲名、別名與法文/德文特殊字元）
     results = search_onlinesequencer_via_google_tavily(query)
     
-    # 🌟 策略 2：若 Google 搜尋無果，降級至 OnlineSequencer 站內 CDP 搜尋
+    #  策略 2：若 Google 搜尋無果，降級至 OnlineSequencer 站內 CDP 搜尋
     if not results:
         print(f"[OnlineSequencer] Google 索引未命中，改用站內 CDP 輪詢搜尋: {query}...")
         results = search_onlinesequencer(query)

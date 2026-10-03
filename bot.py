@@ -13,16 +13,16 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ────────────────────────────────────────────────────────
-# 🔑 全域 API 金鑰初始化（升級為單一變數、逗號分隔無限擴充模式）
+#  全域 API 金鑰初始化（升級為單一變數、逗號分隔無限擴充模式）
 # ────────────────────────────────────────────────────────
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 
-# 👇 核心大招：從單一環境變數中讀取所有 Groq 金鑰，並用英文逗號切割
+#  核心大招：從單一環境變數中讀取所有 Groq 金鑰，並用英文逗號切割
 raw_groq_keys = os.getenv("GROQ_API_KEYS", "")
 GROQ_KEYS = [k.strip() for k in raw_groq_keys.split(",") if k.strip()]
 
-# 💡 黑科技動態映射：自動將切開的金鑰註冊為 ai_client_1~30 (完美相容下方寫死的變數)
+#  黑科技動態映射：自動將切開的金鑰註冊為 ai_client_1~30 (完美相容下方寫死的變數)
 for i in range(1, 31):
     key = GROQ_KEYS[i-1] if i <= len(GROQ_KEYS) else None
     globals()[f"GROQ_API_KEY_{i}"] = key
@@ -32,63 +32,63 @@ for i in range(1, 31):
         globals()[f"ai_client_{i}"] = None
 
 # ────────────────────────────────────────────────────────
-# 📋 記憶庫與「大腦輪替清單」設定 (全域共用)
+#  記憶庫與「大腦輪替清單」設定 (全域共用)
 # ────────────────────────────────────────────────────────
 conversation_history = {}
 bot_loop_tracker = {}
 
 # ────────────────────────────────────────────────────────
-# 📋 終極跨平台防禦矩陣：全自動動態擴充金鑰輪替池
+#  終極跨平台防禦矩陣：全自動動態擴充金鑰輪替池
 # ────────────────────────────────────────────────────────
-# 💡 抓取全域中所有有效的 Groq 客戶端 (準備好讓下方自動輪詢)
+#  抓取全域中所有有效的 Groq 客戶端 (準備好讓下方自動輪詢)
 ACTIVE_GROQ_CLIENTS = [globals()[f"ai_client_{i}"] for i in range(1, 31) if globals().get(f"ai_client_{i}")]
 
 MODEL_POOLS = [
-    # 🌟 第一梯隊：頂級旗艦大腦
-    {"provider": "groq", "model": "openai/gpt-oss-120b"},                 # 🚀 120B 頂級推理旗艦 (自動輪詢所有金鑰)
-    {"provider": "groq", "model": "qwen/qwen3.6-27b"},                    # ⚡ Qwen 3.6 極速推理
-    {"provider": "groq", "model": "groq/compound"},                       # 🤖 Groq 複合多工代理大腦
-    {"provider": "gemini", "model": "gemini-3.7-flash"},                  # 👑 Gemini 最新頂配旗艦大腦
-    {"provider": "gemini", "model": "gemini-3.5-flash"},                  # 🥈 Gemini 高智商均衡主力
-    {"provider": "gemini", "model": "gemini-flash-latest"},               # 🚀 動態最新 Flash 指針
+    #  第一梯隊：頂級旗艦大腦
+    {"provider": "groq", "model": "openai/gpt-oss-120b"},                 #  120B 頂級推理旗艦 (自動輪詢所有金鑰)
+    {"provider": "groq", "model": "qwen/qwen3.6-27b"},                    #  Qwen 3.6 極速推理
+    {"provider": "groq", "model": "groq/compound"},                       #  Groq 複合多工代理大腦
+    {"provider": "gemini", "model": "gemini-3.7-flash"},                  #  Gemini 最新頂配旗艦大腦
+    {"provider": "gemini", "model": "gemini-3.5-flash"},                  #  Gemini 高智商均衡主力
+    {"provider": "gemini", "model": "gemini-flash-latest"},               #  動態最新 Flash 指針
     {"provider": "openrouter", "model": "meta-llama/llama-3.3-70b-instruct:free"},
     {"provider": "openrouter", "model": "deepseek/deepseek-chat-v3:free"},
 
-    # 💎 第二梯隊：輕量保底防線
-    {"provider": "gemini", "model": "gemini-3.5-flash-lite"},             # 🛡️ 超大額度保底
-    {"provider": "gemini", "model": "gemini-3.1-flash-lite"},             # 🛡️ 輕量快速版
-    {"provider": "groq", "model": "groq/compound-mini"},                  # 🤖 輕量複合大腦
-    {"provider": "groq", "model": "openai/gpt-oss-20b"},                  # 🛡️ 20B 輕量備援
+    #  第二梯隊：輕量保底防線
+    {"provider": "gemini", "model": "gemini-3.5-flash-lite"},             #  超大額度保底
+    {"provider": "gemini", "model": "gemini-3.1-flash-lite"},             #  輕量快速版
+    {"provider": "groq", "model": "groq/compound-mini"},                  #  輕量複合大腦
+    {"provider": "groq", "model": "openai/gpt-oss-20b"},                  #  20B 輕量備援
     {"provider": "openrouter", "model": "meta-llama/llama-3.2-3b-instruct:free"},
     {"provider": "openrouter", "model": "openrouter/free"}
 ]
 
 # ────────────────────────────────────────────────────────
-# 📜 全域共用規則 (✨已升級認人規範，全面支援群聊旁聽格式✨)
+#  全域共用規則 (已升級認人規範，全面支援群聊旁聽格式)
 # ────────────────────────────────────────────────────────
 COMMON_RULES = """
-【🚨 多人群聊與認人規範 🚨】
+【 多人群聊與認人規範 】
 1. 目前你在一個多人的網絡社交平台伺服器中。使用者的訊息會以兩種結構化格式輸入：
    - 情況 A（有人標記或回覆妳）：【發訊人資訊】顯示暱稱：[名字] | 帳號ID：[ID] | 標記此人的代碼：[代碼]
    - 情況 B（旁聽大家聊天）：【群聊旁聽】顯示暱稱：[名字] | 帳號ID：[ID] | 標記此人的代碼：[代碼]
    訊息內容：「[訊息]」
 2. 請務必根據「帳號ID」來確認對方的真實身分與關係。
-3. ❌【嚴格禁止】❌：在任何情況下，嚴禁將括號內的「ID（帳號名稱）」直接當成名字唸出來！妳只能叫對方的「顯示暱稱」或上述指定的稱呼。
+3. 【嚴格禁止】：在任何情況下，嚴禁將括號內的「ID（帳號名稱）」直接當成名字唸出來！妳只能叫對方的「顯示暱稱」或上述指定的稱呼。
 4. 必須極度精簡：每次回覆請嚴格控制在「簡單幾句」之內（最多 1 ~ 3 句話），絕對禁止吐出長篇大論！
 5. 網路聊天感：多使用短句，語氣要像在網絡社交平台上跟朋友即時聊天。
 
-🚨【補充禁令：防格式外洩與出戲 (極重要)】🚨
-- ❌ 絕對禁止在妳的回答中印出「【發訊人資訊】」、「【群聊旁聽】」、「顯示暱稱」、「帳號ID」或「訊息內容」等後台格式字眼！妳只需要直接講出角色的對話台詞即可。
-- ❌ 絕對禁止模仿使用者的輸入格式！
+【補充禁令：防格式外洩與出戲 (極重要)】
+-  絕對禁止在妳的回答中印出「【發訊人資訊】」、「【群聊旁聽】」、「顯示暱稱」、「帳號ID」或「訊息內容」等後台格式字眼！妳只需要直接講出角色的對話台詞即可。
+-  絕對禁止模仿使用者的輸入格式！
 - 請一律使用「純繁體中文」回答。
 - 請把對話框那端的大家都當成「真實存在的人」。嚴禁在括號的動作或心理活動中提到任何科技、系統、後台詞彙！
 """
 
 # ────────────────────────────────────────────────────────
-# ⚙️ 👑 統一控制中心 (未來要新增機器人，只要在這裡加一組即可！)
+#   統一控制中心 (未來要新增機器人，只要在這裡加一組即可！)
 # ────────────────────────────────────────────────────────
 BOT_CONFIGS = {
-    # 📌 機器人 1：中野三玖
+    #  機器人 1：中野三玖
     "miku": {
         "token": os.getenv("DISCORD_TOKEN"),
         "command_prefix": "!",
@@ -105,7 +105,7 @@ BOT_CONFIGS = {
 """
     },
 
-    # 📌 機器人 2：喜多川海夢
+    #  機器人 2：喜多川海夢
     "marin": {
         "token": os.getenv("DISCORD_TOKEN_MARIN"),
         "command_prefix": "?",
@@ -122,7 +122,7 @@ BOT_CONFIGS = {
 """
     },
     
-    # 📌 機器人 3：和栗薰子
+    #  機器人 3：和栗薰子
     "kaoruko": {
         "token": os.getenv("DISCORD_TOKEN_KAORUKO"),
         "command_prefix": "$",
@@ -139,7 +139,7 @@ BOT_CONFIGS = {
 """
     },
     
-    # 📌 機器人 4：堀京子
+    #  機器人 4：堀京子
     "hori": {
         "token": os.getenv("DISCORD_TOKEN_HORI"),
         "command_prefix": "-",
@@ -156,7 +156,7 @@ BOT_CONFIGS = {
 """
     },
 
-    # 📌 機器人 5：七草薺
+    #  機器人 5：七草薺
     "nazuna": {
         "token": os.getenv("DISCORD_TOKEN_NAZUNA"),
         "command_prefix": "~",
@@ -173,7 +173,7 @@ BOT_CONFIGS = {
 """
     },
 
-    # 📌 機器人 6：初音未來 (Hatsune Miku)
+    #  機器人 6：初音未來 (Hatsune Miku)
     "hatsune_miku": {
         "token": os.getenv("DISCORD_TOKEN_HATSUNE"), 
         "command_prefix": "*",
@@ -199,7 +199,7 @@ BOT_CONFIGS = {
 }
 
 # ────────────────────────────────────────────────────────
-# 🤖 核心動態工廠：用同一套邏輯去完美打造、封裝每一個機器人（✨內建全面旁聽記憶✨）
+#  核心動態工廠：用同一套邏輯去完美打造、封裝每一個機器人（內建全面旁聽記憶）
 # ────────────────────────────────────────────────────────
 def bot_factory(bot_key, config):
     intents = discord.Intents.default()
@@ -217,11 +217,11 @@ def bot_factory(bot_key, config):
         if message.author == bot.user:
             return
 
-        # 🚨 防護一：如果是 @everyone 或 @here 的全服廣播，直接無視！
+        #  防護一：如果是 @everyone 或 @here 的全服廣播，直接無視！
         if message.mention_everyone:
             return
 
-        # 🚨 防護二：如果文字裡包含崩潰死訊，代表別隻 Bot 掛了，絕對不要理它，直接句點！
+        #  防護二：如果文字裡包含崩潰死訊，代表別隻 Bot 掛了，絕對不要理它，直接句點！
         if "角色暫時登出中" in message.content:
             return
 
@@ -257,7 +257,7 @@ def bot_factory(bot_key, config):
 
         # ─── 情況 A：有人標記或回覆目前這隻 Bot (主動觸發對話) ───
         if should_trigger:
-            # 🛑 【機器人無限連鎖對話中斷機制】
+            #  【機器人無限連鎖對話中斷機制】
             if message.author.bot:
                 bot_loop_tracker[channel_id] = bot_loop_tracker.get(channel_id, 0) + 1
                 print(f"【🤖 機器人互動偵測】頻道 ({channel_id}) 目前連續紀錄：{bot_loop_tracker[channel_id]} 句。")
@@ -266,7 +266,7 @@ def bot_factory(bot_key, config):
                     print(f"【🚨 迴圈強行中斷】偵測到機器人集體串供！已達上限 5-6 句，【{bot_key.upper()}】決定已讀不回。")
                     return
             else:
-                # 💡 只要有任何「真正的真人」說話，立刻重設該頻道的計數器
+                #  只要有任何「真正的真人」說話，立刻重設該頻道的計數器
                 bot_loop_tracker[channel_id] = 0
 
             smart_mentions = discord.AllowedMentions(everyone=False, users=True, roles=False, replied_user=True)
@@ -287,7 +287,7 @@ def bot_factory(bot_key, config):
 
                 bot_reply = None
                 
-                # 🚀 全自動跨平台防爆切換矩陣 (終極無限金鑰輪詢版)
+                #  全自動跨平台防爆切換矩陣 (終極無限金鑰輪詢版)
                 for item in MODEL_POOLS:
                     provider = item["provider"]
                     model_name = item["model"]
@@ -297,7 +297,7 @@ def bot_factory(bot_key, config):
                             if not ACTIVE_GROQ_CLIENTS:
                                 continue
                             
-                            # 💡 內部小迴圈：將手上所有 Groq 金鑰全部輪流轟炸一次！
+                            #  內部小迴圈：將手上所有 Groq 金鑰全部輪流轟炸一次！
                             groq_success = False
                             for idx, target_client in enumerate(ACTIVE_GROQ_CLIENTS, 1):
                                 try:
@@ -379,7 +379,7 @@ def bot_factory(bot_key, config):
                 # 送出訊息
                 await message.reply(bot_reply, allowed_mentions=smart_mentions)
 
-        # ─── ✨ 新增情況 B：純群聊旁聽（沒有標記這隻 Bot，她會在後台偷偷做小筆記） ───
+        # ───  新增情況 B：純群聊旁聽（沒有標記這隻 Bot，她會在後台偷偷做小筆記） ───
         else:
             # 只要訊息不為空，就格式化為「群聊旁聽」寫入這隻 Bot 的獨立頻道記憶夾
             if message.content.strip():
@@ -398,7 +398,7 @@ def bot_factory(bot_key, config):
     return bot
 
 # ────────────────────────────────────────────────────────
-# 🌐 騙 Render 檢查的「虛擬網頁」
+#  騙 Render 檢查的「虛擬網頁」
 # ────────────────────────────────────────────────────────
 class DummyServer(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -416,7 +416,7 @@ def run_backup_server():
     server.serve_forever()
 
 # ────────────────────────────────────────────────────────
-# 🚀 異步多工併發啟動主引擎
+#  異步多工併發啟動主引擎
 # ────────────────────────────────────────────────────────
 async def main():
     tasks = []
@@ -433,7 +433,7 @@ async def main():
             print(f"【系統提示】檢查到控制中心有「{bot_key}」的設定，但環境變數中未偵測到對應的 Token，已安全跳過。")
 
     if tasks:
-        # 👑 用 asyncio.gather 同時併發所有機器人上線，再也不會互相卡死！
+        #  用 asyncio.gather 同時併發所有機器人上線，再也不會互相卡死！
         await asyncio.gather(*tasks)
     else:
         print("【❌ 致命錯誤】控制中心內沒有任何有效的 Discord Token！請檢查環境變數設定。")

@@ -28,25 +28,25 @@ def set_scream_mode(mode: str = "local_tts"):
     if mode in ["local_tts", "xiaoyi", "default"]:
         shutil.copyfile(os.path.join(DATA_DIR, "shocks_light", "light_1_aaa.mp3"), os.path.join(DATA_DIR, "test_a_8_pure.mp3"))
         shutil.copyfile(os.path.join(DATA_DIR, "shocks_heavy", "heavy_1_scream.mp3"), os.path.join(DATA_DIR, "shock_heavy_pure.mp3"))
-        msg = "✅ 已套用【本地 GPT-SoVITS 曉伊原生電擊叫聲：啊啊啊！好麻！】！"
+        msg = " 已套用【本地 GPT-SoVITS 曉伊原生電擊叫聲：啊啊啊！好麻！】！"
     elif mode == "pure_aaa":
         shutil.copyfile(os.path.join(DATA_DIR, "shocks_light", "light_3_burst.mp3"), os.path.join(DATA_DIR, "test_a_8_pure.mp3"))
         shutil.copyfile(os.path.join(DATA_DIR, "shocks_heavy", "heavy_1_scream.mp3"), os.path.join(DATA_DIR, "shock_heavy_pure.mp3"))
-        msg = "✅ 已套用【本地 GPT-SoVITS 曉伊純「啊啊啊啊！」爆裂尖叫】！"
+        msg = " 已套用【本地 GPT-SoVITS 曉伊純「啊啊啊啊！」爆裂尖叫】！"
     elif mode == "classic":
         shutil.copyfile(os.path.join(DATA_DIR, "opt_light_classic.mp3"), os.path.join(DATA_DIR, "test_a_8_pure.mp3"))
         shutil.copyfile(os.path.join(DATA_DIR, "test_shock_heavy_pure.mp3"), os.path.join(DATA_DIR, "shock_heavy_pure.mp3"))
-        msg = "✅ 已套用【經典高速電擊叫聲】！"
+        msg = " 已套用【經典高速電擊叫聲】！"
     elif mode == "high_pitch":
         shutil.copyfile(os.path.join(DATA_DIR, "opt_light_high.mp3"), os.path.join(DATA_DIR, "test_a_8_pure.mp3"))
         shutil.copyfile(os.path.join(DATA_DIR, "opt_heavy_high.mp3"), os.path.join(DATA_DIR, "shock_heavy_pure.mp3"))
-        msg = "✅ 已套用【萌系高音電擊叫聲】！"
+        msg = " 已套用【萌系高音電擊叫聲】！"
     elif mode == "anime_real":
         shutil.copyfile(os.path.join(DATA_DIR, "7L_anime_pure_kyaa.wav"), os.path.join(DATA_DIR, "test_a_8_pure.mp3"))
         shutil.copyfile(os.path.join(DATA_DIR, "7L_anime_hyaa.wav"), os.path.join(DATA_DIR, "shock_heavy_pure.mp3"))
-        msg = "✅ 已套用【動漫聲優受擊驚呼】！"
+        msg = " 已套用【動漫聲優受擊驚呼】！"
     else:
-        msg = f"❌ 未知模式: {mode}"
+        msg = f" 未知模式: {mode}"
     print(msg)
 
 def play_preview(mode: str = None):

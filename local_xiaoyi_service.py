@@ -20,7 +20,7 @@ if hasattr(sys, '__stdout__') and hasattr(sys.__stdout__, 'reconfigure'):
     except Exception:
         pass
 
-# 🧭 路徑改為「環境變數優先、退回使用者家目錄」，不再寫死原作者電腦
+#  路徑改為「環境變數優先、退回使用者家目錄」，不再寫死原作者電腦
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from core.paths import GPT_SOVITS_DIR, FINETUNE_DATA_DIR, REF_VOICE_ZH, REF_VOICE_JA
 
@@ -159,7 +159,7 @@ def init_gpt_sovits():
         
         _tts_pipeline = TTS(config)
         
-        # ⚡ 核心預熱與常駐快取：初始化時即完成參考音與文字 BERT 萃取，使後續所有合成省去 80% 時間！
+        #  核心預熱與常駐快取：初始化時即完成參考音與文字 BERT 萃取，使後續所有合成省去 80% 時間！
         try:
             ref_audio = REF_VOICE_ZH
             ref_text = "哇！真的假的？太棒了吧！今天也要一起加油喔！嘿嘿～"
@@ -168,10 +168,10 @@ def init_gpt_sovits():
                 # 預熱一次
                 _dummy = next(_tts_pipeline.run({
                     "text": "哈囉",
-                    "text_lang": "all_zh",
+                    "text_lang": "auto",
                     "ref_audio_path": ref_audio,
                     "prompt_text": ref_text,
-                    "prompt_lang": "all_zh",
+                    "prompt_lang": "zh",
                     "batch_size": 1,
                     "speed_factor": 1.0,
                 }))
@@ -200,7 +200,7 @@ def synthesize_xiaoyi_bytes(text: str) -> bytes:
             return b""
             
         try:
-            # 🧠 智能全自動語言邊界判定 (精準區分「正統日語」vs「中文夾雜日文梗/外來語」)
+            #  智能全自動語言邊界判定 (精準區分「正統日語」vs「中文夾雜日文梗/外來語」)
             import re
             num_kana = len(re.findall(r'[\u3040-\u309F\u30A0-\u30FF]', text))
             num_hanzi = len(re.findall(r'[\u4E00-\u9FFF]', text))
@@ -220,43 +220,30 @@ def synthesize_xiaoyi_bytes(text: str) -> bytes:
                     is_real_japanese = True
             
             if is_real_japanese:
-                # 🇯🇵 正統日語模式：採用高音甜美版曉伊日語提示音（360Hz 少女高音）
+                #  正統日語模式：採用高音甜美版曉伊日語提示音（360Hz 少女高音）
                 ref_audio = REF_VOICE_JA
                 ref_text = "お兄ちゃん、今日も一日頑張ろうね！大好きだよ！"
                 ref_lang = "all_ja"
-                text_lang = "all_ja"
+                text_lang = "auto"
                 top_k = 15
                 top_p = 0.75
                 temp = 0.65
                 speed = 1.0
             else:
-                # 🇨🇳 中文主體模式：
-                # 若中文句子中夾雜常見二次元日語外來語/梗詞 (如「バカ」)，轉為標準中文音譯，防止模型誤跳日語發音
-                if num_kana > 0:
-                    LOANWORDS = {
-                        'バカ': '八嘎', 'ばか': '八嘎',
-                        'かわいい': '卡哇伊', 'カワイイ': '卡哇伊',
-                        'すごい': '斯國一', 'スゴイ': '斯國一',
-                        'すげえ': '斯國一', 'スゲエ': '斯國一',
-                        'やばい': '呀拜', 'ヤバイ': '呀拜',
-                        'おはよ': '歐嗨喲', 'オハヨ': '歐嗨喲',
-                        'ありがと': '阿里嘎多', 'アリガト': '阿里嘎多',
-                    }
-                    for k, v in LOANWORDS.items():
-                        text = text.replace(k, v)
-                        
+                #  中文主體模式：
+                # 採用中文參考音訊，但交由 GPT-SoVITS 原生的 'auto' 語言檢測來完美處理中日夾雜
                 ref_audio = REF_VOICE_ZH
                 ref_text = "哇！真的假的？太棒了吧！今天也要一起加油喔！嘿嘿～"
                 ref_lang = "all_zh"
-                text_lang = "zh" if re.search(r'[a-zA-Z]', text) else "all_zh"
+                text_lang = "auto"
                 top_k = 15
                 top_p = 0.80
                 temp = 0.80
                 speed = 1.05
             
-            # 🛡️ 符號與專有名詞防卡頓處理：過濾非發音顏文字 (如 (∠・ω<)⌒☆ )，波浪號/符號轉為元氣感嘆號「！」
+            #  符號與專有名詞防卡頓處理：過濾非發音顏文字 (如 (∠・ω<)⌒☆ )，波浪號/符號轉為元氣感嘆號「！」
             text = re.sub(r'[\(（][^\)）]*[\)）]', '', text)  # 移除括號表情如 (∠・ω<)
-            text = re.sub(r'[⌒☆★♪♡♥✧✦๑•̀ㅂ•́و✧~～]+', '！', text)
+            text = re.sub(r'[⌒☆★♪♡✧✦๑•̀ㅂ•́و✧~～]+', '！', text)
             text = text.replace("7L", "小七").replace("7l", "小七")
             text = re.sub(r'[，,]{2,}', '，', text)
             text = re.sub(r'[！!]{2,}', '！', text).strip(' ，,')
@@ -306,7 +293,7 @@ def synthesize_xiaoyi_bytes(text: str) -> bytes:
             # 轉為 16-bit PCM numpy 陣列
             if audio.dtype != np.int16:
                 if audio.dtype == np.float32 or audio.dtype == np.float64:
-                    # 🔒 Peak Normalize：峰值超過 0.95 時整體等比縮放，絕對杜絕削波爆音
+                    #  Peak Normalize：峰值超過 0.95 時整體等比縮放，絕對杜絕削波爆音
                     peak = np.abs(audio).max()
                     if peak > 0.95:
                         audio = audio * (0.92 / peak)

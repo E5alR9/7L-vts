@@ -360,7 +360,7 @@ class VoiceprintVerifier:
             candidates.extend(ref_paths)
 
         # 預設本地標準 7L 參考音檔母帶（統一路徑解析，檔案不存在會自動過濾）
-        from core.paths import ref_voices
+        from core.paths import ref_voices, GPT_SOVITS_DIR
         default_refs = ref_voices()
         for dr in default_refs:
             if os.path.exists(dr) and dr not in candidates:

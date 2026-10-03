@@ -1,32 +1,32 @@
 # ==============================================================================
-# 🌟 7L AI-VTuber 智慧一體化核心系統 (vts_7L_test.py)
-# 👑 作者: E5alR9 & 7L 開發團隊
-# 🎯 核心特色:
-#    - ⚡ Google GenAI Live API (全雙工雙向音訊、背景潛意識發言哨兵、雙軌熱備)
-#    - 🧠 8 大 Gemini 模型智能階梯調度 (3.1 Flash Lite ➔ 3.5 Flash Lite ➔ 3 Flash ➔ 3.1 Pro ➔ 3.5 ➔ 3.6 ➔ 3.7 ➔ 3.8 Flash)
-#    - 📜 100 句全景記憶滾動中樞 (Live2D 表情、視線走位、觀眾個人檔案 Firestore 雲端同步)
-#    - 🎹 88 鍵全音域平台鋼琴即時發聲與 MIDI 智能搜譜演奏
-#    - 👁️ 即時多螢幕視覺感知、眼角餘光與 WASAPI 電腦內部聲音監聽
-#    - 🎮 Python 本機沙盒遊樂場、Tavily 網路搜尋、Nano 生圖與 Discord CMA 狀態監控
-# 📑 腳本模組導覽目錄 (Table of Contents):
-#  1. 🔐 環境變數載入與金鑰矩陣分流 (API Keys, DualHotStandby Live Manager)
-#  2. 🧠 模型梯隊清單與排程定義 (GEMINI_MODELS 7-Tier Matrix)
-#  3. 🚦 API 頻率限制、冷卻與熔斷管理 (Circuit Breaker & Lock Cache)
-#  4. 🖥️ 全域狀態變數與硬體環境偵測 (Global State & Resolution)
-#  5. 💾 Firebase 雲端永久記憶與觀眾檔案 (Long-Term Memory & Viewer Profile)
-#  6. 🌐 VTube Studio WebSocket 引擎與 Live2D 控制 (VTSManager & Expression Dispatcher)
-#  7. 🎮 7L 本機遊樂場沙盒 (7L_Playground Python Sandbox)
-#  8. 🛠️ Google GenAI 官方 Function Calling 工具清單 (GENAI_TOOLS & Dispatcher)
-#     8.1 🎹 88 鍵平台鋼琴發聲與樂譜演奏引擎 (Virtual Piano 88K & MIDI Player)
-#  9. 🛡️ 防跳針與記憶去重系統 (Code-Level Anti-Repetition)
-# 10. 🔊 語音合成、音訊分析與字幕工具
-# 11. 👁️ 視覺感知、畫面截圖與輕量眼角餘光 (Screen Vision & get_lightweight_gemini_vision)
-# 12. 🧠 旗艦多模態大腦推理核心 (fetch_ai_response: Gemini Multimodal Dispatcher)
-# 13. 🕹️ 使用者指令、電腦控制與計時器動作 (execute_actions & System Controls)
-# 14. ⚙️ 專屬背景工作協程群 (Workers: Screen, Vision, WASAPI Loopback Audio, Proactive)
-# 15. 🤖 對話處理、Live 潛意識哨兵與 100 句記憶中樞 (Mind-Stream & Audience Live Channel)
-# 16. 🖥️ CMA 狀態監控檔案輸出與 Discord 機器人 (CMA Monitor & Discord Bot Commands)
-# 17. 🚀 主程式進入點與終端機即時狀態列 (main Entry Point & ANSI Status Bar)
+#  7L AI-VTuber 智慧一體化核心系統 (vts_7L_test.py)
+#  作者: E5alR9 & 7L 開發團隊
+#  核心特色:
+#    -  Google GenAI Live API (全雙工雙向音訊、背景潛意識發言哨兵、雙軌熱備)
+#    -  8 大 Gemini 模型智能階梯調度 (3.1 Flash Lite ➔ 3.5 Flash Lite ➔ 3 Flash ➔ 3.1 Pro ➔ 3.5 ➔ 3.6 ➔ 3.7 ➔ 3.8 Flash)
+#    -  100 句全景記憶滾動中樞 (Live2D 表情、視線走位、觀眾個人檔案 Firestore 雲端同步)
+#    -  88 鍵全音域平台鋼琴即時發聲與 MIDI 智能搜譜演奏
+#    -  即時多螢幕視覺感知、眼角餘光與 WASAPI 電腦內部聲音監聽
+#    -  Python 本機沙盒遊樂場、Tavily 網路搜尋、Nano 生圖與 Discord CMA 狀態監控
+#  腳本模組導覽目錄 (Table of Contents):
+#  1.  環境變數載入與金鑰矩陣分流 (API Keys, DualHotStandby Live Manager)
+#  2.  模型梯隊清單與排程定義 (GEMINI_MODELS 7-Tier Matrix)
+#  3.  API 頻率限制、冷卻與熔斷管理 (Circuit Breaker & Lock Cache)
+#  4.  全域狀態變數與硬體環境偵測 (Global State & Resolution)
+#  5.  Firebase 雲端永久記憶與觀眾檔案 (Long-Term Memory & Viewer Profile)
+#  6.  VTube Studio WebSocket 引擎與 Live2D 控制 (VTSManager & Expression Dispatcher)
+#  7.  7L 本機遊樂場沙盒 (7L_Playground Python Sandbox)
+#  8.  Google GenAI 官方 Function Calling 工具清單 (GENAI_TOOLS & Dispatcher)
+#     8.1  88 鍵平台鋼琴發聲與樂譜演奏引擎 (Virtual Piano 88K & MIDI Player)
+#  9.  防跳針與記憶去重系統 (Code-Level Anti-Repetition)
+# 10.  語音合成、音訊分析與字幕工具
+# 11.  視覺感知、畫面截圖與輕量眼角餘光 (Screen Vision & get_lightweight_gemini_vision)
+# 12.  旗艦多模態大腦推理核心 (fetch_ai_response: Gemini Multimodal Dispatcher)
+# 13.  使用者指令、電腦控制與計時器動作 (execute_actions & System Controls)
+# 14.  專屬背景工作協程群 (Workers: Screen, Vision, WASAPI Loopback Audio, Proactive)
+# 15.  對話處理、Live 潛意識哨兵與 100 句記憶中樞 (Mind-Stream & Audience Live Channel)
+# 16.  CMA 狀態監控檔案輸出與 Discord 機器人 (CMA Monitor & Discord Bot Commands)
+# 17.  主程式進入點與終端機即時狀態列 (main Entry Point & ANSI Status Bar)
 # ==============================================================================
 
 
@@ -34,7 +34,7 @@ import sys
 if __name__ == "__main__":
     if "__main__" in sys.modules:
         sys.modules["vts_7L_test"] = sys.modules["__main__"]
-    # 🛡️ 單一實例守護：自動終止先前殘留的 vts_7L_test 舊進程，徹底杜絕雙程序同時搶佔 VTS 連線導致對嘴被歸零鎖死
+    #  單一實例守護：自動終止先前殘留的 vts_7L_test 舊進程，徹底杜絕雙程序同時搶佔 VTS 連線導致對嘴被歸零鎖死
     try:
         import psutil, os
         _curr_pid = os.getpid()
@@ -74,8 +74,9 @@ import re
 import asyncio
 import aiohttp
 import websockets
-import core.websocket_patch  # 🔧 自動修復 websockets 12.0 與 google-genai Live API 的 additional_headers 相容性
+import core.websocket_patch  
 import pyvts
+import services.rag_memory_service as rag_service
 import pygame
 import time
 import json
@@ -103,7 +104,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 try:
-    # 🛡️ 用「本檔所在目錄」明確載入 .env：dotenv 的 find_dotenv() 是看 cwd，
+    #  用「本檔所在目錄」明確載入 .env：dotenv 的 find_dotenv() 是看 cwd，
     #    只要從別處啟動（cwd ≠ 專案根）就會靜默載不到金鑰，
     #    導致 GEMINI_KEYS / GROQ 金鑰 / Discord Token 全部變空卻不報錯。
     load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
@@ -203,7 +204,7 @@ INTERACTIONS_TOOLS = [
     {
         "type": "function",
         "name": "pe.play_virtual_piano",
-        "description": "7L 坐到鋼琴前演奏 88 鍵平台鋼琴曲目。🛑【極嚴格調用限制】：只有當老爸或觀眾明確要求『彈鋼琴』、『彈琴』、『彈一首...』、『點歌：...』或『youtuber查...然後彈』時才可調用！當對方只是說日常對話、自我介紹、開場（例如『INTRO 吧』、『自我介紹』、『開場介紹』、『哈囉』、『聊聊天』）時，【絕對嚴禁調用此工具】！直接進行口頭對話或自介即可。",
+        "description": "7L 坐到鋼琴前演奏 88 鍵平台鋼琴曲目。【極嚴格調用限制】：只有當老爸或觀眾明確要求『彈鋼琴』、『彈琴』、『彈一首...』、『點歌：...』或『youtuber查...然後彈』時才可調用！當對方只是說日常對話、自我介紹、開場（例如『INTRO 吧』、『自我介紹』、『開場介紹』、『哈囉』、『聊聊天』）時，【絕對嚴禁調用此工具】！直接進行口頭對話或自介即可。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -218,7 +219,7 @@ INTERACTIONS_TOOLS = [
     {
         "type": "function",
         "name": "pe.play_midi_band",
-        "description": "🎺 MIDI 樂隊演奏：多軌 MIDI 保留原通道＋音色同時發聲（小提琴拉主旋律＋鋼琴伴奏＋貝斯＋鼓組一次到位）。當老爸或觀眾說『樂隊演奏』、『多種樂器一起』、『小提琴加鋼琴』、『完整編制』時調用！",
+        "description": " MIDI 樂隊演奏：多軌 MIDI 保留原通道＋音色同時發聲（小提琴拉主旋律＋鋼琴伴奏＋貝斯＋鼓組一次到位）。當老爸或觀眾說『樂隊演奏』、『多種樂器一起』、『小提琴加鋼琴』、『完整編制』時調用！",
         "parameters": {
             "type": "object",
             "properties": {
@@ -246,7 +247,7 @@ INTERACTIONS_TOOLS = [
     {
         "type": "function",
         "name": "video.request_watch",
-        "description": "📺 觀眾點播看全片：把 YouTube 網址排入點播隊列，7L 後台看完播報（字幕→音軌轉錄→抽幀看圖→摘要）。當觀眾說『看這個』、『點播』、『幫我看這部片』並貼網址時調用！",
+        "description": " 觀眾點播看全片：把 YouTube 網址排入點播隊列，7L 後台看完播報（字幕→音軌轉錄→抽幀看圖→摘要）。當觀眾說『看這個』、『點播』、『幫我看這部片』並貼網址時調用！",
         "parameters": {
             "type": "object",
             "properties": {
@@ -258,7 +259,7 @@ INTERACTIONS_TOOLS = [
     {
         "type": "function",
         "name": "music.generate_song",
-        "description": "🎵 AI 作曲（ACE-Step 本地服務）：文字→完整歌曲（含人聲編曲，慢任務）。當老爸或觀眾說『寫一首歌』、『AI 作曲』、『生成一首歌』時調用！（需 ACESTEP_ENABLED=1，否則安全跳過）",
+        "description": " AI 作曲（ACE-Step 本地服務）：文字→完整歌曲（含人聲編曲，慢任務）。當老爸或觀眾說『寫一首歌』、『AI 作曲』、『生成一首歌』時調用！（需 ACESTEP_ENABLED=1，否則安全跳過）",
         "parameters": {
             "type": "object",
             "properties": {
@@ -273,7 +274,7 @@ INTERACTIONS_TOOLS = [
     {
         "type": "function",
         "name": "midi.inspect",
-        "description": "🎼 讀譜：看 MIDI 檔的軌數／音符數／時長／各軌音色音域。改編前先看結構時調用！",
+        "description": " 讀譜：看 MIDI 檔的軌數／音符數／時長／各軌音色音域。改編前先看結構時調用！",
         "parameters": {
             "type": "object",
             "properties": {
@@ -285,7 +286,7 @@ INTERACTIONS_TOOLS = [
     {
         "type": "function",
         "name": "midi.edit",
-        "description": "🎼 改譜：移調／力度／量化／換音色／加音符／刪音區（二選一動作 op）。當老爸或觀眾說『升調』、『對齊拍子』、『小聲點』、『換小提琴』、『加一段』時調用！改完自動進曲庫，可直接 pe.play_midi_band 演奏。",
+        "description": " 改譜：移調／力度／量化／換音色／加音符／刪音區（二選一動作 op）。當老爸或觀眾說『升調』、『對齊拍子』、『小聲點』、『換小提琴』、『加一段』時調用！改完自動進曲庫，可直接 pe.play_midi_band 演奏。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -306,7 +307,7 @@ INTERACTIONS_TOOLS = [
     {
         "type": "function",
         "name": "music.transcribe_song",
-        "description": "🎧 逆向譜面：YT 下載音檔→人聲分離→旋律轉 MIDI＋和弦辨識→進曲庫。當老爸或觀眾說『把這首歌扒下來』、『轉成譜』、『學這首歌』並貼網址時調用！（慢任務，後台跑）",
+        "description": " 逆向譜面：YT 下載音檔→人聲分離→旋律轉 MIDI＋和弦辨識→進曲庫。當老爸或觀眾說『把這首歌扒下來』、『轉成譜』、『學這首歌』並貼網址時調用！（慢任務，後台跑）",
         "parameters": {
             "type": "object",
             "properties": {
@@ -319,7 +320,7 @@ INTERACTIONS_TOOLS = [
     {
         "type": "function",
         "name": "music.stem_pack",
-        "description": "🎸 扒帶包：一鍵產出分軌（人聲/鼓/貝斯/吉他/鋼琴/其他）＋去人聲卡拉＋75%降速＋和弦進行＋旋律MIDI。當老爸或觀眾說『扒這首歌』、『要伴奏』、『分軌』並貼網址時調用！（慢任務，十幾分鐘）",
+        "description": " 扒帶包：一鍵產出分軌（人聲/鼓/貝斯/吉他/鋼琴/其他）＋去人聲卡拉＋75%降速＋和弦進行＋旋律MIDI。當老爸或觀眾說『扒這首歌』、『要伴奏』、『分軌』並貼網址時調用！（慢任務，十幾分鐘）",
         "parameters": {
             "type": "object",
             "properties": {
@@ -344,7 +345,7 @@ INTERACTIONS_TOOLS = [
     {
         "type": "function",
         "name": "pe.insert_virtual_piano",
-        "description": "🛑 嚴格限制：僅在老爸或觀眾明確說『混彈』、『插歌』、『一起彈』、『合體』、『同時演奏』、『再加一首XX一起彈』等字眼時才可調用！若只是單純點播新歌（例如只說『Rush E』、『彈月光』），【絕對嚴禁調用此工具】，必須調用 pe.play_virtual_piano 進行排隊！",
+        "description": " 嚴格限制：僅在老爸或觀眾明確說『混彈』、『插歌』、『一起彈』、『合體』、『同時演奏』、『再加一首XX一起彈』等字眼時才可調用！若只是單純點播新歌（例如只說『Rush E』、『彈月光』），【絕對嚴禁調用此工具】，必須調用 pe.play_virtual_piano 進行排隊！",
         "parameters": {
             "type": "object",
             "properties": {
@@ -376,7 +377,7 @@ INTERACTIONS_TOOLS = [
     {
         "type": "function",
         "name": "pe.stop_virtual_piano",
-        "description": "🛑 嚴禁隨意調用！僅在老爸明確說出『收起鋼琴』、『關閉鋼琴』、『把鋼琴收起來』、『別彈鋼琴了』時才可調用！收起 88 鍵鋼琴並讓 7L 回到原本位置。",
+        "description": " 嚴禁隨意調用！僅在老爸明確說出『收起鋼琴』、『關閉鋼琴』、『把鋼琴收起來』、『別彈鋼琴了』時才可調用！收起 88 鍵鋼琴並讓 7L 回到原本位置。",
         "parameters": {
             "type": "object",
             "properties": {},
@@ -408,7 +409,7 @@ INTERACTIONS_TOOLS = [
     {
         "type": "function",
         "name": "set_piano_volume",
-        "description": "調整 88 鍵平台鋼琴的演奏音量 (0 ~ 200)。🛑【嚴格限制】：只有當老爸或觀眾明確說『鋼琴小聲點』、『鋼琴大聲點』、『音量設為...』時才可調用！絕對嚴禁在日常聊天、點歌或開場時擅自調用或重置音量！",
+        "description": "調整 88 鍵平台鋼琴的演奏音量 (0 ~ 200)。【嚴格限制】：只有當老爸或觀眾明確說『鋼琴小聲點』、『鋼琴大聲點』、『音量設為...』時才可調用！絕對嚴禁在日常聊天、點歌或開場時擅自調用或重置音量！",
         "parameters": {
             "type": "object",
             "properties": {
@@ -444,7 +445,7 @@ INTERACTIONS_TOOLS = [
     {
         "type": "function",
         "name": "control_microphone",
-        "description": "🛑 嚴禁自主隨意調用！僅在老爸明確說出『關閉麥克風』或『開啟麥克風』時才可調用！開啟(True)或關閉(False)麥克風收音。",
+        "description": " 嚴禁自主隨意調用！僅在老爸明確說出『關閉麥克風』或『開啟麥克風』時才可調用！開啟(True)或關閉(False)麥克風收音。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -509,12 +510,19 @@ def build_genai_declarations(is_proactive=False):
             )
         )
         decls.append(decl)
-    return [types.Tool(function_declarations=decls)]
+    
+    tool_list = [types.Tool(function_declarations=decls)]
+    if is_proactive:
+        try:
+            tool_list.append(types.Tool(google_search=types.GoogleSearch()))
+        except Exception:
+            pass # Fallback in case types.GoogleSearch is missing in an older SDK version
+    return tool_list
 
 
 
 
-# 🔇 靜音所有第三方日誌與 AFC 警告，保持控制台狀態列極致純淨
+#  靜音所有第三方日誌與 AFC 警告，保持控制台狀態列極致純淨
 os.environ["PYTHONWARNINGS"] = "ignore"
 os.environ["GRPC_VERBOSITY"] = "ERROR"
 os.environ["GLOG_minloglevel"] = "2"
@@ -529,7 +537,7 @@ try:
 except Exception:
     pass
 
-# 🌟 設定 Windows 控制台為 UTF-8 代碼頁 (CP 65001) 並開啟 ANSI 虛擬終端處理，徹底修復中文字元重複、動態刷新與換行殘影
+#  設定 Windows 控制台為 UTF-8 代碼頁 (CP 65001) 並開啟 ANSI 虛擬終端處理，徹底修復中文字元重複、動態刷新與換行殘影
 if sys.platform == "win32":
     try:
         ctypes.windll.user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4))
@@ -600,7 +608,7 @@ def get_seconds_until_pt_midnight() -> float:
 def record_model_failure(model_name: str, err_str: str):
     
     MODEL_FAIL_COUNT[model_name] = MODEL_FAIL_COUNT.get(model_name, 0) + 1
-    # 🌟 換模型門檻：依序輪詢 API 金鑰總數的 2/3，輪完 2/3 都失敗才切換下一個備用模型
+    #  換模型門檻：依序輪詢 API 金鑰總數的 2/3，輪完 2/3 都失敗才切換下一個備用模型
     num_keys = len(GEMINI_KEYS)
     threshold = max(3, int(math.ceil(num_keys * 2.0 / 3.0))) if num_keys > 0 else 4
     if MODEL_FAIL_COUNT[model_name] >= threshold:
@@ -620,7 +628,7 @@ def get_prioritized_gemini_models(user_query: str = "", has_image: bool = False,
     """根據老爸當前的對話指令與多模態情境，動態計算專屬的模型升級排程佇列"""
     q = (user_query or "").lower()
     
-    # 🧠 高智商需求識別：找歌/點歌、寫代碼、數學邏輯、哲學推理、複雜指令等，倒序由 3.8 頂配大腦領銜！
+    #  高智商需求識別：找歌/點歌、寫代碼、數學邏輯、哲學推理、複雜指令等，倒序由 3.8 頂配大腦領銜！
     high_iq_keywords = [
         "寫程式", "寫代碼", "python", "程式碼", "找歌", "點歌", "彈琴", "彈一首", "鋼琴", "曲名", "分析",
         "為什麼", "哲學", "算一下", "計算", "深度思考", "邏輯", "推理", "詳細解說", "找譜", "查歌",
@@ -631,15 +639,15 @@ def get_prioritized_gemini_models(user_query: str = "", has_image: bool = False,
     if is_high_iq:
         priority_heads = list(HIGH_IQ_GEMINI_MODELS)
     else:
-        # ⚡ 根據實測速度極速排列 (越快排越前面 1 ➔ 7)
+        #  根據實測速度極速排列 (越快排越前面 1 ➔ 7)
         priority_heads = [
-            "gemini-3.5-flash-lite",               # 🥇 第 1 位：0.95s ~ 1.21s 極速秒回王 (超低延遲輕量防線)
-            "gemini-3.6-flash",                    # 🥈 第 2 位：1.59s 高智商極速主力 (兼具高智商與超低延遲)
-            "gemini-3.1-flash-lite",               # 🥉 第 3 位：1.6s ~ 3.3s 自然口語秒回首選
-            "gemini-3-flash-preview",              # ⚡ 第 4 位：3.1s ~ 4.2s 閃電推理預覽
-            "gemini-3.5-flash",                    # 🛡️ 第 5 位：10s ~ 14s 高智商穩定主力保底
-            "gemini-3.7-flash",                    # 👑 第 6 位：頂配旗艦大腦
-            "gemini-3.8-flash",                    # 🚀 第 7 位：2026 全新頂配旗艦大腦
+            "gemini-3.5-flash-lite",               #  第 1 位：0.95s ~ 1.21s 極速秒回王 (超低延遲輕量防線)
+            "gemini-3.6-flash",                    #  第 2 位：1.59s 高智商極速主力 (兼具高智商與超低延遲)
+            "gemini-3.1-flash-lite",               #  第 3 位：1.6s ~ 3.3s 自然口語秒回首選
+            "gemini-3-flash-preview",              #  第 4 位：3.1s ~ 4.2s 閃電推理預覽
+            "gemini-3.5-flash",                    #  第 5 位：10s ~ 14s 高智商穩定主力保底
+            "gemini-3.7-flash",                    #  第 6 位：頂配旗艦大腦
+            "gemini-3.8-flash",                    #  第 7 位：2026 全新頂配旗艦大腦
         ]
         
     ordered = []
@@ -684,10 +692,11 @@ def get_pingpong_ring_indices(total_keys: int, start_step: int) -> list:
 def get_available_gemini_channels(limit=1, user_query="", has_image=False, is_proactive=False):
     
     available = []
-    num_keys = len(GEMINI_KEYS)
+    target_keys = KEYS_PROACTIVE if is_proactive and KEYS_PROACTIVE else GEMINI_KEYS
+    num_keys = len(target_keys)
     if num_keys == 0: return available
     
-    # 🌟 智能任務定向分流：取得階梯排程模型佇列
+    #  智能任務定向分流：取得階梯排程模型佇列
     target_models = get_prioritized_gemini_models(user_query=user_query, has_image=has_image, is_proactive=is_proactive)
     valid_models = [m for m in target_models if m not in DEAD_GEMINI_MODELS and not is_model_locked(m)]
     if not valid_models:
@@ -695,13 +704,13 @@ def get_available_gemini_channels(limit=1, user_query="", has_image=False, is_pr
         
     ring_indices = get_pingpong_ring_indices(num_keys, CURRENT_GEMINI_KEY_STEP)
     
-    # 🌟 階梯升級輪派策略：依序為各階模型挑選最優可用金鑰，每次失敗或超時立即升級至下一階更高級模型！
+    #  階梯升級輪派策略：依序為各階模型挑選最優可用金鑰，每次失敗或超時立即升級至下一階更高級模型！
     for m_idx, g_model in enumerate(valid_models):
         short_m = g_model.replace("gemini-", "")
         for idx in ring_indices:
             target_id = f"G{idx}_{short_m}"
-            if not is_locked(target_id) and (GEMINI_KEYS[idx], g_model, target_id) not in available:
-                available.append((GEMINI_KEYS[idx], g_model, target_id))
+            if not is_locked(target_id) and (target_keys[idx], g_model, target_id) not in available:
+                available.append((target_keys[idx], g_model, target_id))
                 break # 每一階挑選一把最佳金鑰後，優先為下一階模型排入通道！
         if len(available) >= limit:
             return available
@@ -712,8 +721,8 @@ def get_available_gemini_channels(limit=1, user_query="", has_image=False, is_pr
             short_m = g_model.replace("gemini-", "")
             for idx in ring_indices:
                 target_id = f"G{idx}_{short_m}"
-                if not is_locked(target_id) and (GEMINI_KEYS[idx], g_model, target_id) not in available:
-                    available.append((GEMINI_KEYS[idx], g_model, target_id))
+                if not is_locked(target_id) and (target_keys[idx], g_model, target_id) not in available:
+                    available.append((target_keys[idx], g_model, target_id))
                     if len(available) >= limit:
                         return available
 
@@ -735,7 +744,7 @@ async def summarize_search_to_speech(query: str, search_raw: str, user_role_name
     clean_search = re.sub(r'https?://\S+', '', search_raw)
     clean_search = re.sub(r'\s{2,}', ' ', clean_search).strip()[:1500]
 
-    # ⚡ 第 0 防線：Groq 極速提煉（第一梯隊，實測 0.4s 級；失敗或無結果才交給下方 Gemini）
+    #  第 0 防線：Groq 極速提煉（第一梯隊，實測 0.4s 級；失敗或無結果才交給下方 Gemini）
     try:
         from core.groq_router import groq_chat
         g_resp = await groq_chat(
@@ -767,7 +776,7 @@ async def summarize_search_to_speech(query: str, search_raw: str, user_role_name
 {clean_search}
 \"\"\"
 請以妳招牌親切、自然隨性的口吻，用 1~3 句俐落短句（40~80字以內）直接對{user_role_name}提煉並說明重點。
-⚠️ 嚴格規範：
+ 嚴格規範：
 - 絕對不要直接照抄條列清單、網址或網頁標題。
 - 像真人日常說話一樣自然流暢，直接講出核心意思。
 - 嚴禁使用任何 Emoji。"""
@@ -834,7 +843,7 @@ async def summarize_search_to_speech(query: str, search_raw: str, user_role_name
         return f"{user_role_name}，我幫你查到囉！大致上來說，{summary_core}。詳細內容我待會再幫你細看喔！"
     return f"{user_role_name}，我剛剛幫你查了，但搜尋到的內容有點繁雜，我待會再仔細整理跟你說！"
 
-# 🛡️ 觀眾側（caller_target="audience"）禁止呼叫的破壞性工具：防直播間彈幕 prompt injection
+#  觀眾側（caller_target="audience"）禁止呼叫的破壞性工具：防直播間彈幕 prompt injection
 _AUDIENCE_DENIED_TOOLS = frozenset({
     "clear_all_memories", "update_cloud_knowledge", "set_sleep_mode",
     "open_browser", "control_microphone",
@@ -843,10 +852,10 @@ _AUDIENCE_DENIED_TOOLS = frozenset({
 
 async def execute_tool_dispatch(fn_name: str, fn_args: dict, caller_target: str = "", caller_user: str = "") -> str:
     """集中式工具調用派發器 (100% 執行底層動作，完全由 AI 自由發揮台詞，絕不硬塞罐頭文字)"""
-    # 🛡️ 觀眾不可觸發破壞性工具（清記憶/改人格/睡眠/開瀏覽器/麥克風）
+    #  觀眾不可觸發破壞性工具（清記憶/改人格/睡眠/開瀏覽器/麥克風）
     if caller_target == "audience" and (fn_name or "").strip().lower() in _AUDIENCE_DENIED_TOOLS:
         log_print(f"🛑 [工具權限] 拒絕觀眾側呼叫 {fn_name}（{caller_user}）")
-        return f"⛔ 權限不足：{fn_name} 僅限操作者使用"
+        return f" 權限不足：{fn_name} 僅限操作者使用"
     extracted_text = ""
     fn_name = (fn_name or "").strip().lower()
     fn_args = {k.lower(): v for k, v in fn_args.items()} if isinstance(fn_args, dict) else {}
@@ -855,7 +864,7 @@ async def execute_tool_dispatch(fn_name: str, fn_args: dict, caller_target: str 
         extracted_text += f" [EXPRESSION: {exp_name}]"
     elif fn_name == "search_google":
         q = fn_args.get("query", "")
-        res = search_google(q)
+        res = await asyncio.to_thread(search_google, q)
         return res
     elif fn_name in ["generate_ai_image", "draw_illustration"]:
         p = fn_args.get("prompt", "")
@@ -889,7 +898,7 @@ async def execute_tool_dispatch(fn_name: str, fn_args: dict, caller_target: str 
         req_t = caller_target or ("audience" if CURRENT_SPEAKING_TARGET == "audience" else "dad")
         req_u = caller_user or ("大家 / 直播觀眾" if req_t == "audience" else "老爸")
         p_res = await pe.play_virtual_piano(s_name, c_sheet, auto_radio_mode=a_radio, force_online=f_online, requester_name=req_u, target=req_t, is_direct_song_name=True)
-        # ⚠️ 絕不將內部系統提示拼入 extracted_text 作為語音口語！
+        #  絕不將內部系統提示拼入 extracted_text 作為語音口語！
         if p_res and "[EXPRESSION:" in p_res:
             extracted_text += f" {p_res}"
     elif fn_name in ["music.generate_song", "generate_song"]:
@@ -994,7 +1003,7 @@ async def execute_tool_dispatch(fn_name: str, fn_args: dict, caller_target: str 
         await pe.stop_virtual_piano()
     elif fn_name in ["auto_sing_song", "sing_song"]:
         s_name = fn_args.get("song_name", "")
-        # 🚀 異步背景執行 7L 翻唱管線：讓 7L 先開口講出回應台詞，音軌與神經聲線準備完成後無縫開唱！
+        #  異步背景執行 7L 翻唱管線：讓 7L 先開口講出回應台詞，音軌與神經聲線準備完成後無縫開唱！
         asyncio.create_task(produce_and_sing_cover(s_name))
         return f"已為老爸排程翻唱《{s_name}》，準備完成後立即開唱！"
     elif fn_name in ["stop_singing_song", "stop_singing", "stop_cover"]:
@@ -1027,7 +1036,7 @@ async def execute_tool_dispatch(fn_name: str, fn_args: dict, caller_target: str 
         asyncio.create_task(update_cloud_prompt_field(cat, cnt))
         extracted_text += " [KNOWLEDGE_UPDATED]"
     elif fn_name == "search_knowledge":
-        # 📚 本地 RAG 檢索（chromadb + fastembed，離線可用；同步部分丟執行緒）
+        #  本地 RAG 檢索（chromadb + fastembed，離線可用；同步部分丟執行緒）
         q = fn_args.get("query", "")
         try:
             from services.rag_store import search as rag_search
@@ -1047,7 +1056,7 @@ async def execute_tool_dispatch(fn_name: str, fn_args: dict, caller_target: str 
 
 def build_rag_section(query: str, k: int = 3) -> str:
     """PROVIDER: LOCAL-RAG（chromadb＋fastembed；多模態幀走 embedding-2 API；見 docs/AI_SOURCES.md）"""
-    """📚 同步 RAG 檢索 -> 可直接拼進 prompt 的段落（失敗或無命中回空字串）"""
+    """ 同步 RAG 檢索 -> 可直接拼進 prompt 的段落（失敗或無命中回空字串）"""
     if not query or not str(query).strip():
         return ""
     try:
@@ -1057,7 +1066,7 @@ def build_rag_section(query: str, k: int = 3) -> str:
         return ""
 
 async def get_lightweight_gemini_vision(image_base64: str, temporal_frames: list | None = None) -> str:
-    """PROVIDER: GEMINI-VISION（3.1-flash-lite→3.6-flash；見 docs/AI_SOURCES.md）👁️ 【3.1-flash-lite 深度視覺認真看】：受 Live API 哨兵喚醒時才精準啟動，支援傳入上次看到現在的所有時序影格，形成動態視覺感知。"""
+    """PROVIDER: GEMINI-VISION（3.1-flash-lite→3.6-flash；見 docs/AI_SOURCES.md） 【3.1-flash-lite 深度視覺認真看】：受 Live API 哨兵喚醒時才精準啟動，支援傳入上次看到現在的所有時序影格，形成動態視覺感知。"""
     if not image_base64:
         return ""
         
@@ -1070,7 +1079,7 @@ async def get_lightweight_gemini_vision(image_base64: str, temporal_frames: list
         if len(img_bytes) < 1000:
             return ""
 
-        # 🛡️ 像素有效性檢測：防止螢幕休眠/全黑時 AI 產生幻覺
+        #  像素有效性檢測：防止螢幕休眠/全黑時 AI 產生幻覺
         try:
             test_im = Image.open(io.BytesIO(img_bytes))
             extrema = test_im.getextrema()
@@ -1081,7 +1090,7 @@ async def get_lightweight_gemini_vision(image_base64: str, temporal_frames: list
 
         candidate_keys = get_dynamic_live_key_candidates(KEYS_VISION if KEYS_VISION else GEMINI_KEYS)
         
-        # 🎞️ 組建多幀動態 Parts：先插入所有歷史時序幀（從舊到新），最後附上當前最新畫面
+        #  組建多幀動態 Parts：先插入所有歷史時序幀（從舊到新），最後附上當前最新畫面
         frame_parts = []
         if temporal_frames:
             for i, (t_stamp, hist_b64) in enumerate(temporal_frames):
@@ -1145,10 +1154,10 @@ async def get_lightweight_gemini_vision(image_base64: str, temporal_frames: list
         
     return ""
 
-async def fetch_ai_response(messages, image_base64=None, audio_base64=None, is_proactive=False, request_start_time: Optional[float] = None):
+async def fetch_ai_response(messages, image_base64=None, audio_base64=None, is_proactive=False, request_start_time: Optional[float] = None, is_mouth_stream=False):
     """PROVIDER: GEMINI（主腦 generate_content＋Live；純文字正遷 Groq；見 docs/AI_SOURCES.md）"""
     """
-    🧠 多模態大腦推理總入口 (文字 + 視覺 + 音訊 + 工具調用)
+     多模態大腦推理總入口 (文字 + 視覺 + 音訊 + 工具調用)
     
     Args:
         messages: 對話歷史紀錄陣列
@@ -1272,7 +1281,7 @@ async def fetch_ai_response(messages, image_base64=None, audio_base64=None, is_p
                 "safety_settings": UNRESTRICTED_SAFETY_SETTINGS
             }
             
-            # 🧠 深度思考調度：日常對話、電擊/摸頭事件與即時互動預設思考預算為 0，達成 1.2s~1.8s 極速秒回！
+            #  深度思考調度：日常對話、電擊/摸頭事件與即時互動預設思考預算為 0，達成 1.2s~1.8s 極速秒回！
             # 只有當老爸提出明確的寫程式碼、數學邏輯、哲學深度推理等高智商問題時，才開啟 thinking_budget=-1
             is_complex_query = any(k in (user_query or "").lower() for k in ["寫程式", "寫代碼", "python", "計算", "哲學", "詳細分析", "深度思考", "邏輯推理"])
             if "3.6-flash" in g_model:
@@ -1288,7 +1297,7 @@ async def fetch_ai_response(messages, image_base64=None, audio_base64=None, is_p
 
             gen_config = types.GenerateContentConfig(**config_kwargs)
 
-            # 👑 放寬單通道等待時間至 120 秒，讓 3.8 / 3.7-flash 深度思考、多模態與工具調用在背景充裕完成，絕不 premature timeout！
+            #  放寬單通道等待時間至 120 秒，讓 3.8 / 3.7-flash 深度思考、多模態與工具調用在背景充裕完成，絕不 premature timeout！
             response = await asyncio.wait_for(
                 temp_google_client.aio.models.generate_content(
                     model=g_model,
@@ -1312,7 +1321,7 @@ async def fetch_ai_response(messages, image_base64=None, audio_base64=None, is_p
                     log_print(f"🛠️ [大腦調用工具] {fn_name}({fn_args})")
                     tool_out = await execute_tool_dispatch(fn_name, fn_args, caller_target="dad", caller_user="老爸")
                     tool_results_map[fn_name] = tool_out
-                    # ⚠️ 資訊查詢與系統提示類資料僅供大腦吸收，嚴禁拼入 extracted_text 作為口語！
+                    #  資訊查詢與系統提示類資料僅供大腦吸收，嚴禁拼入 extracted_text 作為口語！
                     if fn_name not in ["search_google"] and tool_out and "[EXPRESSION:" in tool_out:
                         extracted_text += f" {tool_out}"
 
@@ -1336,7 +1345,7 @@ async def fetch_ai_response(messages, image_base64=None, audio_base64=None, is_p
 
             # 7L 已有獨立背景即時心流協程，對話回覆不再包裹 [THOUGHT: ...]
 
-            # 🌟 當調用了資訊類工具 (如 search_google) 或第一輪未輸出台詞時：
+            #  當調用了資訊類工具 (如 search_google) 或第一輪未輸出台詞時：
             # 立即發起第二輪 Function Response 請求，將搜尋結果反饋給大腦進行深度思考、消化整理並輸出自然口語！
             if had_tool_calls:
                 needs_stage2 = any(getattr(fc, 'name', '') == 'search_google' for fc in response.function_calls) or not model_speech.strip()
@@ -1397,7 +1406,7 @@ async def fetch_ai_response(messages, image_base64=None, audio_base64=None, is_p
                         s_raw = tool_results_map.get("search_google", "")
                         model_speech = await summarize_search_to_speech(s_query, s_raw, user_role_name="老爸")
 
-            # 🌟 採用 Gemini 生成的口語回覆；若調用工具帶有標籤則一併保留
+            #  採用 Gemini 生成的口語回覆；若調用工具帶有標籤則一併保留
             if model_speech:
                 tags_in_tool = " ".join(re.findall(r'\[[A-Z_]+(?::\s*[^\]]+)?\]', extracted_text))
                 valid_tags = [t for t in tags_in_tool.split() if not any(x in t for x in ["HAD_TOOL_CALL", "SEARCH", "GOOGLE"])]
@@ -1430,7 +1439,7 @@ async def fetch_ai_response(messages, image_base64=None, audio_base64=None, is_p
         except asyncio.CancelledError:
             return None
         except (asyncio.TimeoutError, TimeoutError):
-            # ⏳ 單通道內部超時
+            #  單通道內部超時
             log_print(f"⌛ [通道無回應] 通道 {target_id} ({g_model}) 超時未回傳 ➔ 釋放通道轉交備用金鑰")
             return None
         except Exception as e:
@@ -1463,11 +1472,11 @@ async def fetch_ai_response(messages, image_base64=None, audio_base64=None, is_p
                 lock_target(target_id, "wait 30s")
             return None
 
-    # ⚡ 第零防線：Groq 極速前鋒（純文字請求；實測 0.4s 級）
+    #  第零防線：Groq 極速前鋒（純文字請求；實測 0.4s 級）
     #   有圖片/音訊的多模態請求直接跳過，交給 Gemini 視覺與音訊管線。
     #   模型若想呼叫工具：工具照常背景派發，但只有當它同時產出口語台詞才採用，
     #   否則回退到下方 Gemini 完整管線（含 Function Response 第二輪）。
-    if not image_base64 and not audio_base64:
+    if not is_mouth_stream and not image_base64 and not audio_base64:
         try:
             from core.groq_router import groq_chat, contents_to_messages
             g_msgs = contents_to_messages(chat_contents)
@@ -1488,13 +1497,28 @@ async def fetch_ai_response(messages, image_base64=None, audio_base64=None, is_p
                         total_duration = time.time() - overall_start_time
                         record_api_call_latency(total_duration)
                         time_stat = f" [總耗時: {total_duration:.2f}s | 深度思考: {g_dur:.2f}s]"
-                        current_model_tag = f"🧠 {g_resp.model} (Groq 前鋒){time_stat}"
+                        current_model_tag = f" {g_resp.model} (Groq 前鋒){time_stat}"
                         log_print(f"⚡ [Groq 前鋒秒答] {current_model_tag}")
                         return g_text.strip()
         except Exception as _g_err:
             log_print(f"⚠️ [Groq 前鋒暫時失敗，交回 Gemini]: {str(_g_err)[:100]}")
 
-    # 🌟 第一防線：主力 Gemini 旗艦大腦（5 秒階梯式併發競速：5秒未回覆時原請求不中斷，加開新通道雙軌/多軌搶答！）
+    if is_mouth_stream:
+        # 直接使用當前金鑰建立串流通道，跳過所有競速邏輯
+        global CURRENT_GEMINI_KEY_STEP
+        g_key = GEMINI_KEYS[CURRENT_GEMINI_KEY_STEP % len(GEMINI_KEYS)]
+        CURRENT_GEMINI_KEY_STEP += 1
+        g_model = "gemini-3.5-flash-lite" if not image_base64 and not audio_base64 else "gemini-3.5-flash"
+        temp_client = genai.Client(api_key=g_key)
+        gen_config = types.GenerateContentConfig(temperature=0.85, safety_settings=UNRESTRICTED_SAFETY_SETTINGS)
+        return temp_client.aio.models.generate_content_stream(
+            model=g_model,
+            contents=chat_contents,
+            config=gen_config
+        )
+        
+    
+    #  第一防線：主力 Gemini 旗艦大腦（5 秒階梯式併發競速：5秒未回覆時原請求不中斷，加開新通道雙軌/多軌搶答！）
     max_gemini_attempts = 45 
     active_gemini_tasks = {}  # task -> (target_id, g_model, start_time)
     launched_gemini_targets = set()
@@ -1521,7 +1545,7 @@ async def fetch_ai_response(messages, image_base64=None, audio_base64=None, is_p
                 task = asyncio.create_task(_call_single_gemini(g_key, g_model, target_id))
                 active_gemini_tasks[task] = (target_id, g_model, time.time())
                 
-                status_prefix = "👁️🧠" if image_base64 else "🧠"
+                status_prefix = "" if image_base64 else ""
                 concurrent_count = len(active_gemini_tasks)
                 concur_tag = f" [雙軌搶答: {concurrent_count}]" if concurrent_count > 1 else ""
                 current_ai_status_str = f"{status_prefix} {g_model} [{target_id}]{concur_tag} 思考中..."
@@ -1545,7 +1569,7 @@ async def fetch_ai_response(messages, image_base64=None, audio_base64=None, is_p
                     res = finished_task.result()
                     if res:
                         extracted_text, used_engine_tag, api_duration, win_model, win_tid = res
-                        # 🏁 率先成功奪冠！取消其他所有背景併發中的任務
+                        #  率先成功奪冠！取消其他所有背景併發中的任務
                         for rem_task in list(active_gemini_tasks.keys()):
                             rem_task.cancel()
                         active_gemini_tasks.clear()
@@ -1555,13 +1579,13 @@ async def fetch_ai_response(messages, image_base64=None, audio_base64=None, is_p
                         time_stat = f" [總耗時: {total_duration:.2f}s | 深度思考: {api_duration:.2f}s]"
                         MODEL_FAIL_COUNT[win_model] = 0
                         if image_base64 and audio_base64:
-                            current_model_tag = f"🧠🎙️👁️ {win_model} ({used_engine_tag} 全模態){time_stat}"
+                            current_model_tag = f" {win_model} ({used_engine_tag} 全模態){time_stat}"
                         elif audio_base64:
-                            current_model_tag = f"🧠🎙️ {win_model} ({used_engine_tag} 音訊直連){time_stat}"
+                            current_model_tag = f" {win_model} ({used_engine_tag} 音訊直連){time_stat}"
                         elif image_base64:
-                            current_model_tag = f"🧠👁️ {win_model} ({used_engine_tag} 視覺){time_stat}"
+                            current_model_tag = f" {win_model} ({used_engine_tag} 視覺){time_stat}"
                         else:
-                            current_model_tag = f"🧠 {win_model} ({used_engine_tag}){time_stat}"
+                            current_model_tag = f" {win_model} ({used_engine_tag}){time_stat}"
                         return extracted_text.strip()
                 except Exception:
                     pass
@@ -1592,13 +1616,13 @@ async def fetch_ai_response(messages, image_base64=None, audio_base64=None, is_p
                         time_stat = f" [總耗時: {total_duration:.2f}s | 思考: {api_duration:.2f}s]"
                         MODEL_FAIL_COUNT[win_model] = 0
                         if image_base64 and audio_base64:
-                            current_model_tag = f"🧠🎙️👁️ {win_model} ({used_engine_tag} 全模態){time_stat}"
+                            current_model_tag = f" {win_model} ({used_engine_tag} 全模態){time_stat}"
                         elif audio_base64:
-                            current_model_tag = f"🧠🎙️ {win_model} ({used_engine_tag} 音訊直連){time_stat}"
+                            current_model_tag = f" {win_model} ({used_engine_tag} 音訊直連){time_stat}"
                         elif image_base64:
-                            current_model_tag = f"🧠👁️ {win_model} ({used_engine_tag} 視覺){time_stat}"
+                            current_model_tag = f" {win_model} ({used_engine_tag} 視覺){time_stat}"
                         else:
-                            current_model_tag = f"🧠 {win_model} ({used_engine_tag}){time_stat}"
+                            current_model_tag = f" {win_model} ({used_engine_tag}){time_stat}"
                         return extracted_text.strip()
                 except Exception:
                     pass
@@ -1608,9 +1632,9 @@ async def fetch_ai_response(messages, image_base64=None, audio_base64=None, is_p
             rem_task.cancel()
         active_gemini_tasks.clear()
 
-    # 🌟 第二防線：若 Gemini 旗艦大腦全部不可用且有畫面，嘗試輕量雲端餘光
+    #  第二防線：若 Gemini 旗艦大腦全部不可用且有畫面，嘗試輕量雲端餘光
     if image_base64:
-        current_ai_status_str = "👁️ 備用視覺提取中 (雲端輕量版)..."
+        current_ai_status_str = " 備用視覺提取中 (雲端輕量版)..."
         local_desc = ""
         if not is_system_overloaded():
             try: 
@@ -1633,7 +1657,7 @@ async def fetch_ai_response(messages, image_base64=None, audio_base64=None, is_p
 
 async def fetch_fast_text_reply(user_input: str, custom_name: str, situation_prompt: str = "", history: Optional[List[Dict]] = None) -> Tuple[str, str, float]:
     """PROVIDER: GROQ-primary（groq_chat 秒回；見 docs/AI_SOURCES.md）
-    ⚡ 【真人感即時第一反應 (Reflex)】：在收到訊息第一時間，由極速文字大腦 (Groq / Gemini Flash Lite) 毫秒級搶先開口！"""
+     【真人感即時第一反應 (Reflex)】：在收到訊息第一時間，由極速文字大腦 (Groq / Gemini Flash Lite) 毫秒級搶先開口！"""
     start_t = time.time()
     if not user_input or not user_input.strip():
         return ("", "", 0.0)
@@ -1642,7 +1666,7 @@ async def fetch_fast_text_reply(user_input: str, custom_name: str, situation_pro
     if not clean_q:
         clean_q = user_input.strip()
 
-    # 📜 提取最近對話歷史，確保反射神經具備完整的上下文記憶與連貫性！
+    #  提取最近對話歷史，確保反射神經具備完整的上下文記憶與連貫性！
     recent_history_str = ""
     if history:
         recent_dialogs = []
@@ -1658,7 +1682,7 @@ async def fetch_fast_text_reply(user_input: str, custom_name: str, situation_pro
         if recent_dialogs:
             recent_history_str = "【最近對話歷史（請務必結合上下文連貫理解，絕不可斷章取義或裝作不知道）】：\n" + "\n".join(recent_dialogs) + "\n\n"
 
-    # 👥 辨識當前說話對象（老爸 vs TikTok 觀眾）
+    #  辨識當前說話對象（老爸 vs TikTok 觀眾）
     tt_parsed = None
     m_tt1 = re.search(r'【TikTok 直播觀眾\s*([^】]+)\s*(留言|送禮)】[：:]\s*(.*)', clean_q)
     if m_tt1:
@@ -1692,19 +1716,30 @@ async def fetch_fast_text_reply(user_input: str, custom_name: str, situation_pro
     cloud_kn = await get_cloud_knowledge()
     cloud_kn_prompt = PromptTemplateEngine.format_cloud_knowledge_prompt(cloud_kn, is_tiktok=bool(tt_parsed), current_custom_name=custom_name)
     ck_sec = f"\n{cloud_kn_prompt}\n" if cloud_kn_prompt else ""
-    rag_sec = build_rag_section(clean_q)   # 📚 本地 RAG 記憶檢索（離線、失敗自動略過）
+    rag_sec = build_rag_section(clean_q)   #  本地 RAG 記憶檢索（離線、失敗自動略過）
 
-    prompt = f"""時間：{get_current_time_string()}
+    prompt = f"""<system_root>
+{PromptTemplateEngine.HARD_TECHNICAL_RULES}
+</system_root>
+
+<runtime_state>
+時間：{get_current_time_string()}
+</runtime_state>
+
+<sensory_memory>
 {ck_sec}
 {rag_sec}
-{PromptTemplateEngine.HARD_TECHNICAL_RULES}
+{recent_history_str}
+</sensory_memory>
 
-{recent_history_str}{situation_prompt}
+<immediate_task>
+{situation_prompt}
 
 {speaker_section}
+</immediate_task>
 """
 
-    # 0. ⚡ 絕對第一優先：Groq 極速前鋒（實測 0.4s 級；純文字 + 工具直答，失敗才交給 Gemini）
+    # 0.  絕對第一優先：Groq 極速前鋒（實測 0.4s 級；純文字 + 工具直答，失敗才交給 Gemini）
     #    視覺/音訊等多模態請求不會走到這裡（本函式僅接收文字 prompt）
     try:
         from core.groq_router import groq_chat
@@ -1728,7 +1763,7 @@ async def fetch_fast_text_reply(user_input: str, custom_name: str, situation_pro
     except Exception:
         pass
 
-    # 1. 🌟 絕對第一優先：Gemini 極速輕量前鋒矩陣 (高智商、自然口語、超大額度、具備完整工具調用能力)
+    # 1.  絕對第一優先：Gemini 極速輕量前鋒矩陣 (高智商、自然口語、超大額度、具備完整工具調用能力)
     #    GROQ_ONLY 降級模式時跳過（Gemini 全滅保直播不斷，只剩 Groq 前鋒）
     from core.groq_router import groq_only as _groq_only
     if GEMINI_KEYS and not _groq_only():
@@ -1788,7 +1823,7 @@ async def fetch_fast_text_reply(user_input: str, custom_name: str, situation_pro
 
 async def call_gemini_live_audience_reply(vts, input_queue, audience_user: str, audience_content: str) -> bool:
     """PROVIDER: GEMINI-LIVE（gemini-3.8-live 全雙工；見 docs/AI_SOURCES.md）"""
-    """⚡ 【TikTok 直播觀眾專屬 Live 管道】：具備雙軌熱備 Live API、觀眾檔案識別、自身帳號意識與嚴格 [PASS] 靜默過濾"""
+    """ 【TikTok 直播觀眾專屬 Live 管道】：具備雙軌熱備 Live API、觀眾檔案識別、自身帳號意識與嚴格 [PASS] 靜默過濾"""
     global last_interaction_time
     start_t = time.time()
     realtime_task_mgr.start_audience_task(audience_user, audience_content)
@@ -1806,9 +1841,9 @@ async def call_gemini_live_audience_reply(vts, input_queue, audience_user: str, 
 
         id_display = f"{v_display_name} (@{v_unique_id})" if v_unique_id != v_display_name else v_display_name
 
-        # 📜 記錄到全集中即時記憶中樞（無論是否開口回覆，都記住大家在聊什麼）
+        #  記錄到全集中即時記憶中樞（無論是否開口回覆，都記住大家在聊什麼）
         lower_c = audience_content.lower()
-        # 🎯 通化受話對象判定：觀眾明確指名 7L（名字/代號/Tag）才歸 7L，其餘直播間彈幕預設皆屬老爸/直播間
+        #  通化受話對象判定：觀眾明確指名 7L（名字/代號/Tag）才歸 7L，其餘直播間彈幕預設皆屬老爸/直播間
         is_addressed_to_7l = any(tag in lower_c for tag in ["7l", "@7l", "小7", "7寶", "草莓"])
         recorded_target = "7L" if is_addressed_to_7l else "老爸/直播間"
         append_to_unified_memory(speaker=f"TikTok 觀眾「{id_display}」", target=recorded_target, content=audience_content, role="user", source="tiktok_live")
@@ -1825,7 +1860,7 @@ async def call_gemini_live_audience_reply(vts, input_queue, audience_user: str, 
         v_rel  = v_prof.get("relationship")
         v_imp  = v_prof.get("impression")
         
-        # 👑 嚴格判斷是否為老爸使用主播專屬唯一 ID 在聊天室發言（精確支援 7Lβ、qiwai 等專屬帳號）
+        #  嚴格判斷是否為老爸使用主播專屬唯一 ID 在聊天室發言（精確支援 7Lβ、qiwai 等專屬帳號）
         clean_uid_check = v_unique_id.lower().replace(" ", "").replace("_", "").replace("-", "")
         clean_disp_check = v_display_name.lower().replace(" ", "").replace("_", "").replace("-", "")
         
@@ -1838,34 +1873,34 @@ async def call_gemini_live_audience_reply(vts, input_queue, audience_user: str, 
         target_audience_desc = "老爸" if is_dad_account else (v_call or v_display_name or "大家")
 
         if is_dad_account:
-            id_display = f"{v_display_name} (👑 老爸幕後操作)"
-            v_info = "【👑 幕後最高管理員】：面前的訊息是「老爸」直接使用主播/管理員帳號在聊天室打字！"
-            speaker_role_prompt = """【👑 對話對象】：這是妳的「老爸」在幕後透過主播帳號打字！
-- 💖 請親切稱呼老爸！
-- 🛠️ 若老爸在文字中給妳下達指令（如點歌、換表情、講話、調整動作），請 100% 優先執行！
-- 📢 若老爸只是在聊天室打字發公告/引導觀眾，妳可以簡短可愛地附和（如「對呀老爸說得對」）或輸出 [PASS] 讓文字公告顯示！"""
+            id_display = f"{v_display_name} ( 老爸幕後操作)"
+            v_info = "【 幕後最高管理員】：面前的訊息是「老爸」直接使用主播/管理員帳號在聊天室打字！"
+            speaker_role_prompt = """【 對話對象】：這是妳的「老爸」在幕後透過主播帳號打字！
+-  請親切稱呼老爸！
+-  若老爸在文字中給妳下達指令（如點歌、換表情、講話、調整動作），請 100% 優先執行！
+-  若老爸只是在聊天室打字發公告/引導觀眾，妳可以簡短可愛地附和（如「對呀老爸說得對」）或輸出 [PASS] 讓文字公告顯示！"""
         else:
             if v_call or v_rel or v_imp:
                 id_parts = []
                 if v_rel:  id_parts.append(f"關係：{v_rel}")
                 if v_call: id_parts.append(f"慣用稱呼：「{v_call}」")
                 if v_imp:  id_parts.append(f"印象：{v_imp}")
-                v_info = f"【🌟 已知熟人/觀眾檔案】：{id_display}（{'，'.join(id_parts)}）。請稱呼他「{v_call or v_display_name}」！"
+                v_info = f"【 已知熟人/觀眾檔案】：{id_display}（{'，'.join(id_parts)}）。請稱呼他「{v_call or v_display_name}」！"
             else:
                 v_info = f"【新進觀眾】：{id_display}（目前尚未記錄特殊關係，可稱呼他「{v_display_name}」）。"
 
-            speaker_role_prompt = f"""【👥 多人直播間認人與情境認知 (極重要)】
+            speaker_role_prompt = f"""【 多人直播間認人與情境認知 (極重要)】
 直播間目前處於【多人實況狀態】：
-1. 👑 【老爸】：坐在電腦前親自操作打遊戲、說話聊天的真人男主播/爸爸。擁有直播間最高主權，所有遊戲操作、帳號、好友/組隊、各類事務請求與決策 100% 歸老爸管轄！
-2. 👥 【觀眾】：面前發言的 TikTok 觀眾「{id_display}」（{v_info}）。
-3. 🎀 【7L】：在老爸身邊同台直播的 AI 虛擬女兒/副播。
-   - 🛑 【直接讓 7L 不要（絕對越權禁令）】：妳是 AI 少女副播，沒有遊戲帳號、沒有好友位、沒有任何管理決策與線下承諾權！
+1.  【老爸】：坐在電腦前親自操作打遊戲、說話聊天的真人男主播/爸爸。擁有直播間最高主權，所有遊戲操作、帳號、好友/組隊、各類事務請求與決策 100% 歸老爸管轄！
+2.  【觀眾】：面前發言的 TikTok 觀眾「{id_display}」（{v_info}）。
+3.  【7L】：在老爸身邊同台直播的 AI 虛擬女兒/副播。
+   -  【直接讓 7L 不要（絕對越權禁令）】：妳是 AI 少女副播，沒有遊戲帳號、沒有好友位、沒有任何管理決策與線下承諾權！
    - 凡觀眾向直播間提出任何請求、邀約或條件（加好友、組隊、求帶、借號、聯繫方式、抽獎等）：
-     * 🛑 絕對不要擅自替老爸答應！絕對不要擅自拒絕！
-     * 🛑 絕對嚴禁自居主人向觀眾開條件或討要好處（如「拿誠意來」、「看你表現」、「先誇我」等任何擅自主張的怪話，一律絕對嚴禁）！
-     * 💡 一律推給老爸做主、向老爸請示通報（例如：「老爸，觀眾杰尼龜想加你遊戲好友，你有位置嗎？」、「這要問我老爸做主喔～」）！
+     *  絕對不要擅自替老爸答應！絕對不要擅自拒絕！
+     *  絕對嚴禁自居主人向觀眾開條件或討要好處（如「拿誠意來」、「看你表現」、「先誇我」等任何擅自主張的怪話，一律絕對嚴禁）！
+     *  一律推給老爸做主、向老爸請示通報（例如：「老爸，觀眾杰尼龜想加你遊戲好友，你有位置嗎？」、「這要問我老爸做主喔～」）！
 
-🎯 【受話對象與發言姿態（通化原則）】：
+ 【受話對象與發言姿態（通化原則）】：
 - 情況 1【觀眾在聊遊戲戰況、進度、操作、或向主播提出各類請求】：
   * 受話對象是【老爸】！7L 以同台女兒/副播視角，在旁向老爸起鬨、吐槽老爸、或提醒老爸，絕不可誤認成在跟自己私聊！
 - 情況 2【觀眾指名 7L / 向 7L 點歌 / 跟 7L 互動】：
@@ -1873,46 +1908,55 @@ async def call_gemini_live_audience_reply(vts, input_queue, audience_user: str, 
 - 情況 3【老爸正在跟觀眾互聊】：
   * 7L 在旁邊看熱鬧，隨性搭話或偏袒老爸。"""
 
-        # 🎹 當前即時鋼琴狀態感知
+        #  當前即時鋼琴狀態感知
         if pe.is_piano_active and pe.current_piano_song_title:
-            current_playing_info = f"【🎹 妳目前正坐在鋼琴前彈奏《{pe.current_piano_song_title}》】！若觀眾問「這首？」、「這是什麼歌？」、「在彈什麼？」，請直接告訴他這首是《{pe.current_piano_song_title}》，絕對不要調用 list_piano_sheets 把全部曲庫唸出來！"
+            current_playing_info = f"【 妳目前正坐在鋼琴前彈奏《{pe.current_piano_song_title}》】！若觀眾問「這首？」、「這是什麼歌？」、「在彈什麼？」，請直接告訴他這首是《{pe.current_piano_song_title}》，絕對不要調用 list_piano_sheets 把全部曲庫唸出來！"
         else:
-            current_playing_info = "【🎹 妳目前沒有在彈鋼琴】。"
+            current_playing_info = "【 妳目前沒有在彈鋼琴】。"
 
         # 2. 準備 Live 專屬實況主 Instruction (100% 雲端 Firestore 動態加載人設 + 技術規則)
         cloud_kn = await get_cloud_knowledge()
         cloud_kn_prompt = PromptTemplateEngine.format_cloud_knowledge_prompt(cloud_kn, is_tiktok=True)
         ck_sec = f"\n{cloud_kn_prompt}\n" if cloud_kn_prompt else ""
-        rag_sec = build_rag_section(audience_content)   # 📚 觀眾留言的 RAG 記憶檢索
+        rag_sec = build_rag_section(audience_content)   #  觀眾留言的 RAG 記憶檢索
 
-        sys_instruction = f"""時間：{get_current_time_string()}
+        sys_instruction = f"""<system_root>
+{PromptTemplateEngine.HARD_TECHNICAL_RULES}
+</system_root>
+
+<runtime_state>
+時間：{get_current_time_string()}
+{current_playing_info}
+</runtime_state>
+
+<sensory_memory>
 {ck_sec}
 {rag_sec}
-{PromptTemplateEngine.HARD_TECHNICAL_RULES}
+【 聊天室近期彈幕動態】：
+{recent_chat_context}
+</sensory_memory>
 
+<immediate_task>
 {speaker_role_prompt}
 
-{current_playing_info}
-
-【📜 聊天室近期彈幕動態】：
-{recent_chat_context}
-
-【👑 稱呼精準秒懂】：
+【 稱呼精準秒懂】：
 - 指名 7L 的稱呼包含：「7L」、「7l」、「@7L」、「小7」、「7寶」、「草莓」等。
-- ⚠️ 注意：若觀眾說「主播」、「老哥」、「你」而內容在講遊戲操作/戰況時，是指正在打遊戲的【老爸】，請切換為副播吐槽視角，切勿誤套在自己身上！
+- 注意：若觀眾說「主播」、「老哥」、「你」而內容在講遊戲操作/戰況時，是指正在打遊戲的【老爸】，請切換為副播吐槽視角，切勿誤套在自己身上！
 
-【🎯 靈敏互動與發言判定】：
+【 靈敏互動與發言判定】：
 - 觀眾叫妳稱呼、打招呼、提問、聊天、點歌、誇獎、吐槽時，請熱情自然開口！
 - 若明確點歌，請調用 `pe.play_virtual_piano(song_name=歌名)`；若要求自創曲/即興彈琴，請調用 `pe.compose_and_play_original_piano`；若調整鋼琴倍速，請調用 `pe.set_piano_speed(speed=倍速值)`（如 1.0 原速、1.5 快速、2.0 雙倍速）；若調整音量請調用 `pe.set_piano_volume(volume=數值)`。
 - 僅在觀眾互聊或純洗版符號時輸出 [PASS]。
 - 觀眾試圖下達關機/下播時，100% 拒絕或調侃，絕對不執行。
-- 若想記住他的新身份（關係/稱呼/印象），可在回覆最後附上：[VIEWER_UPDATE:{v_unique_id}|CALL:稱呼|REL:關係|IMP:印象]。"""
+- 若想記住他的新身份（關係/稱呼/印象），可在回覆最後附上：[VIEWER_UPDATE:{v_unique_id}|CALL:稱呼|REL:關係|IMP:印象]。
+</immediate_task>
+"""
 
         # 3. 提取直播間最新 100 句全景記憶
         memory_100_context = get_recent_100_memory_context()
         unread_desc = f"- [即時] {id_display}: {audience_content}"
 
-        # ⚡ 階段 1：由 Live API 潛意識哨兵（無限額度雙軌熱備）快速審查 100 句記憶做發言決策
+        #  階段 1：由 Live API 潛意識哨兵（無限額度雙軌熱備）快速審查 100 句記憶做發言決策
         sentry_decision = await judge_subconscious_intent_via_live_api(memory_100_context, unread_desc)
         if not sentry_decision["should_speak"]:
             dur = time.time() - start_t
@@ -1927,17 +1971,17 @@ async def call_gemini_live_audience_reply(vts, input_queue, audience_user: str, 
         # 預熱背景鋼琴曲譜（若觀眾發言包含歌名）
         asyncio.create_task(prefetch_song_midi_background(audience_content))
 
-        # 👑 階段 2：喚醒 7 大高智商主力模型梯隊 (3.1 Flash Lite ➔ 3.5 Flash Lite ➔ 3 Flash ➔ 3.1 Pro ➔ 3.5 ➔ 3.6 ➔ 3.7) 讀取 100 句記憶精準開口
+        #  階段 2：喚醒 7 大高智商主力模型梯隊 (3.1 Flash Lite ➔ 3.5 Flash Lite ➔ 3 Flash ➔ 3.1 Pro ➔ 3.5 ➔ 3.6 ➔ 3.7) 讀取 100 句記憶精準開口
         sys_instruction_with_100m = f"""{sys_instruction}
 
-【📜 直播間最新 100 句滾動記憶歷史（掌握全局話題與脈絡）】：
+【 直播間最新 100 句滾動記憶歷史（掌握全局話題與脈絡）】：
 {memory_100_context}
 
-【⚡ 潛意識焦點提示】：回應對象：{log_target}，焦點：{log_focus}。"""
+【 潛意識焦點提示】：回應對象：{log_target}，焦點：{log_focus}。"""
 
         prompt_user_input = f"""【TikTok 直播觀眾 {id_display} 留言】：{audience_content}
-【💡 多人情境與權限通化提示】：
-- 凡涉及遊戲、帳號、好友組隊、各類請求或對主播的提問，對象皆為老爸！🛑 7L 絕不擅自主張、絕不替老爸答應或拒絕、更絕對嚴禁自居主人開條件（如「拿誠意來」、「看表現」）！一律向老爸請示或推給老爸做主！
+【 多人情境與權限通化提示】：
+- 凡涉及遊戲、帳號、好友組隊、各類請求或對主播的提問，對象皆為老爸！ 7L 絕不擅自主張、絕不替老爸答應或拒絕、更絕對嚴禁自居主人開條件（如「拿誠意來」、「看表現」）！一律向老爸請示或推給老爸做主！
 - 若觀眾在聊遊戲戰況/嘴操作，對象是老爸！請以副播女兒視角向老爸吐槽或起鬨！
 - 只有指名跟妳（7L）說話/點歌，才直接稱呼對方「{v_call or v_display_name}」開口互動！
 請以自然俐落的短句開口回應（1~2句，約 20~40 字，完整說完句尾帶標點符號，隨興在句中自由切換 [EXPRESSION: ...] 表情，善用 [SPEED:...]、[PITCH:...] 調節語調情緒）："""
@@ -1949,7 +1993,7 @@ async def call_gemini_live_audience_reply(vts, input_queue, audience_user: str, 
         used_model_name = ""
         tool_output_text = ""
 
-        # ⚡ Groq 第一梯隊：純文字直答先走 Groq（實測 0.4s 級）。
+        #  Groq 第一梯隊：純文字直答先走 Groq（實測 0.4s 級）。
         #    只接受「純文字、無工具呼叫」的結果；模型想調工具或 Groq 失敗時，
         #    full_reply 維持空字串，交由下方 Gemini 完整管線處理。
         try:
@@ -2008,7 +2052,7 @@ async def call_gemini_live_audience_reply(vts, input_queue, audience_user: str, 
                                 tool_out += (" " + t_res)
                             
                     clean_raw = re.sub(r'\[PASS\]', '', raw_reply, flags=re.IGNORECASE).strip()
-                    # 🌟 若大腦調用了工具但未生成口語台詞，自然生成親切口語回應
+                    #  若大腦調用了工具但未生成口語台詞，自然生成親切口語回應
                     if not clean_raw and resp.function_calls:
                         for fc in resp.function_calls:
                             fc_name = getattr(fc, 'name', '')
@@ -2056,10 +2100,10 @@ async def call_gemini_live_audience_reply(vts, input_queue, audience_user: str, 
         clean_reply = re.sub(r'\s+([，。！？,.!?:;])', r'\1', clean_reply)
         clean_reply = re.sub(r'\s{2,}', ' ', clean_reply).strip()
 
-        m_tag = f"⚡ Live-Stream ({used_model_name.replace('gemini-', '')})"
+        m_tag = f" Live-Stream ({used_model_name.replace('gemini-', '')})"
         log_print(f"🤖 原始大腦輸出: {clean_reply} ({m_tag})")
 
-        # 👥 記錄觀眾資料標籤
+        #  記錄觀眾資料標籤
         for v_match in re.finditer(
             r'\[VIEWER_UPDATE[：:]\s*([^|\]]+?)(?:\|CALL[：:]\s*([^|\]]+?))?(?:\|REL[：:]\s*([^|\]]+?))?(?:\|IMP[：:]\s*([^|\]]+?))?\]',
             clean_reply, re.IGNORECASE
@@ -2080,7 +2124,7 @@ async def call_gemini_live_audience_reply(vts, input_queue, audience_user: str, 
             await speech_queue.put({"text": clean_spoken, "target": "audience", "raw_text": clean_reply})
             last_interaction_time = time.time()
             
-            # 🌟 寫入全集中記憶中樞（確保所有大腦掌握 7L 最新發言）
+            #  寫入全集中記憶中樞（確保所有大腦掌握 7L 最新發言）
             append_to_unified_memory(speaker="7L", target=f"觀眾「{target_audience_desc}」", content=clean_spoken, role="assistant", source="tts")
             
             # 寫入歷史 (獨立儲存於 tiktok_live_stream 頻道，不污染老爸的主對話記憶)
@@ -2150,9 +2194,9 @@ from realtime_tasks.task_manager import realtime_task_mgr
 from mic_live_plugin import mic_live_analyzer, voiceprint_verifier, os_desktop_sensor
 
 # ────────────────────────────────────────────────────────
-# 🔐 1. 環境變數載入與金鑰矩陣分流初始化 (API Keys & Pools)
+#  1. 環境變數載入與金鑰矩陣分流初始化 (API Keys & Pools)
 # ────────────────────────────────────────────────────────
-# 💡 功能目的：
+#  功能目的：
 #    從 .env 檔載入所有第三方服務金鑰（Groq、Gemini 核心金鑰矩陣、Tavily 網路搜尋、Firebase、Discord），
 #    並將 Gemini 金鑰池智慧劃分為多個專用通道，確保即時背景感知與老爸主腦互不干擾。
 
@@ -2161,15 +2205,15 @@ os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"  # 關閉 Hugging Face 符�
 
 print("=== 🔍 .env 金鑰讀取測試 ===")
 
-# 🔑 Groq 金鑰載入（可供備援或特定輕量任務調度）
+#  Groq 金鑰載入（可供備援或特定輕量任務調度）
 GROQ_KEYS = [k.strip() for k in re.split(r'[\s,;]+', os.getenv("GROQ_API_KEYS") or os.getenv("GROQ_API_KEY") or "") if k.strip()]
 print(f"✅ 找到 {len(GROQ_KEYS)} 把 Groq 金鑰")
 
-# 🔑 Gemini 核心金鑰矩陣（支援多達 31 把 API Key 輪流調度與熔斷管理）
+#  Gemini 核心金鑰矩陣（支援多達 31 把 API Key 輪流調度與熔斷管理）
 pe.GEMINI_KEYS = GEMINI_KEYS
 print(f"✅ 找到 {len(GEMINI_KEYS)} 把 Gemini 核心金鑰")
 
-# 🔒 專屬獨立金鑰池劃分 (背景/Live通道專屬分工，老爸主腦享有全量金鑰矩陣)：
+#  專屬獨立金鑰池劃分 (背景/Live通道專屬分工，老爸主腦享有全量金鑰矩陣)：
 #    - KEYS_AUDIENCE_LIVE: 100 句記憶與彈幕潛意識發言審查 Live 專用通道 (6把)
 #    - KEYS_MIC_LIVE: 麥克風語音/情緒即時 Live 分析 (6把)
 #    - KEYS_VISION: 電腦螢幕截圖與眼角餘光視覺 (6把)
@@ -2177,7 +2221,7 @@ print(f"✅ 找到 {len(GEMINI_KEYS)} 把 Gemini 核心金鑰")
 #    - KEYS_DAD_MAIN: 老爸主腦享有全量 31 把金鑰完整矩陣！
 KEYS_MIC_LIVE      = GEMINI_KEYS[6:12] if len(GEMINI_KEYS) >= 12 else GEMINI_KEYS
 KEYS_PROACTIVE     = GEMINI_KEYS[18:24] if len(GEMINI_KEYS) >= 24 else GEMINI_KEYS
-KEYS_DAD_MAIN      = GEMINI_KEYS # 👑 老爸旗艦主腦享有全部金鑰全量矩陣！
+KEYS_DAD_MAIN      = GEMINI_KEYS #  老爸旗艦主腦享有全部金鑰全量矩陣！
 
 print(f"  ⚡ 100 句記憶潛意識哨兵 Live 通道: 分配 {len(KEYS_AUDIENCE_LIVE)} 把專用金鑰")
 print(f"  🎙️ 麥克風情緒感知 Live 通道: 分配 {len(KEYS_MIC_LIVE)} 把專用金鑰")
@@ -2191,11 +2235,11 @@ mic_live_analyzer.set_api_keys(KEYS_MIC_LIVE)
 dual_audience_live_mgr = DualHotStandbyLiveManager(KEYS_AUDIENCE_LIVE)
 
 
-# 🔍 Tavily 網路即時搜尋金鑰載入
+#  Tavily 網路即時搜尋金鑰載入
 TAVILY_KEYS = [k.strip() for k in re.split(r'[\s,;]+', os.getenv("TAVILY_KEYS") or os.getenv("TAVILY_API_KEYS") or os.getenv("TAVILY_API_KEY") or "") if k.strip()]
 print(f"✅ 找到 {len(TAVILY_KEYS)} 把 Tavily 金鑰")
 
-# 💾 Firebase 雲端服務帳號 JSON 與 Discord Bot Token
+#  Firebase 雲端服務帳號 JSON 與 Discord Bot Token
 FIREBASE_CRED_JSON = os.getenv("FIREBASE_CRED_JSON")
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN_7L")
 
@@ -2234,45 +2278,85 @@ class PurePythonTavilyClient:
         except Exception as e:
             return {"error": str(e)}
 
+class MultiKeyTavilyClient:
+    """支援多把金鑰自動故障轉移（Failover）與輪替的 Tavily 搜尋客戶端"""
+    def __init__(self, api_keys: list):
+        self.api_keys = [k.strip() for k in api_keys if k and k.strip()]
+        self._current_idx = 0
+        self._clients = []
+        for k in self.api_keys:
+            c = None
+            if TavilyClient is not None:
+                try:
+                    c = TavilyClient(api_key=k)
+                except Exception:
+                    c = None
+            if c is None:
+                c = PurePythonTavilyClient(api_key=k)
+            self._clients.append(c)
+
+    def search(self, query: str, search_depth: str = "advanced", topic: str = "general", **kwargs) -> dict:
+        if not self._clients:
+            return {"error": "No Tavily API keys configured"}
+        num_keys = len(self._clients)
+        last_err = ""
+        for attempt in range(num_keys):
+            idx = (self._current_idx + attempt) % num_keys
+            c = self._clients[idx]
+            try:
+                res = c.search(query=query, search_depth=search_depth, topic=topic, **kwargs)
+                if isinstance(res, dict):
+                    err_msg = str(res.get("error") or res.get("detail") or res.get("message") or "")
+                    if any(w in err_msg.lower() for w in ["limit", "exceed", "quota", "403", "429", "unauthorized"]):
+                        last_err = err_msg
+                        continue
+                    if "results" in res:
+                        self._current_idx = idx
+                        return res
+                elif res:
+                    self._current_idx = idx
+                    return res
+            except Exception as e:
+                err_str = str(e)
+                last_err = err_str
+                if any(w in err_str.lower() for w in ["limit", "exceed", "quota", "403", "429"]):
+                    continue
+                continue
+        return {"error": last_err or "All Tavily keys failed or exceeded quota"}
+
 if TAVILY_KEYS:
-    if TavilyClient is not None:
-        try:
-            tavily_client = TavilyClient(api_key=TAVILY_KEYS[0])
-        except Exception:
-            tavily_client = PurePythonTavilyClient(api_key=TAVILY_KEYS[0])
-    else:
-        tavily_client = PurePythonTavilyClient(api_key=TAVILY_KEYS[0])
+    tavily_client = MultiKeyTavilyClient(TAVILY_KEYS)
 else:
     tavily_client = None
 
 # ────────────────────────────────────────────────────────
-# 🧠 2. 模型清單與大腦池定義 (GEMINI_MODELS 7-Tier Matrix)
+#  2. 模型清單與大腦池定義 (GEMINI_MODELS 7-Tier Matrix)
 # ────────────────────────────────────────────────────────
-# 💡 功能目的：
+#  功能目的：
 #    定義 7L 核心大腦的 8 大階梯模型順序，由超低延遲輕量模型優先秒回，
 #    並在複雜任務或高質量需求時自動升級至頂配旗艦大腦。
 
 GEMINI_MODELS = [
-    # ⚡ 第 1~4 位：極速秒回前鋒 (實測 0.95s ~ 3s 越快排越前面)
-    "gemini-3.5-flash-lite",               # 🥇 第 1 位：0.95s ~ 1.21s 極速秒回王 (超低延遲輕量防線)
-    "gemini-3.6-flash",                    # 🥈 第 2 位：1.59s 高智商極速主力 (兼具高智商與超低延遲)
-    "gemini-3.1-flash-lite",               # 🥉 第 3 位：1.6s ~ 3.3s 自然口語秒回首選
-    "gemini-3-flash-preview",              # ⚡ 第 4 位：3.1s ~ 4.2s 閃電推理預覽
+    #  第 1~4 位：極速秒回前鋒 (實測 0.95s ~ 3s 越快排越前面)
+    "gemini-3.5-flash-lite",               #  第 1 位：0.95s ~ 1.21s 極速秒回王 (超低延遲輕量防線)
+    "gemini-3.6-flash",                    #  第 2 位：1.59s 高智商極速主力 (兼具高智商與超低延遲)
+    "gemini-3.1-flash-lite",               #  第 3 位：1.6s ~ 3.3s 自然口語秒回首選
+    "gemini-3-flash-preview",              #  第 4 位：3.1s ~ 4.2s 閃電推理預覽
     
-    # 🧠 第 5~7 位：主力保底與旗艦深度推理大腦
-    "gemini-3.5-flash",                    # 🛡️ 第 5 位：10s ~ 14s 高智商穩定主力保底
-    "gemini-3.7-flash",                    # 👑 第 6 位：頂配旗艦大腦
-    "gemini-3.8-flash",                    # 🚀 第 7 位：2026 全新頂配旗艦大腦
+    #  第 5~7 位：主力保底與旗艦深度推理大腦
+    "gemini-3.5-flash",                    #  第 5 位：10s ~ 14s 高智商穩定主力保底
+    "gemini-3.7-flash",                    #  第 6 位：頂配旗艦大腦
+    "gemini-3.8-flash",                    #  第 7 位：2026 全新頂配旗艦大腦
 ]
 
-# 👑 高智商任務專屬倒序模型梯隊 (由 3.8 旗艦深度思考領銜，專攻找歌判斷、找譜語意、代碼、哲學與高難度推理)
+#  高智商任務專屬倒序模型梯隊 (由 3.8 旗艦深度思考領銜，專攻找歌判斷、找譜語意、代碼、哲學與高難度推理)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 os.makedirs(DATA_DIR, exist_ok=True)
 AUDIO_CACHE_DIR = os.path.join(DATA_DIR, "recent_audio")
 os.makedirs(AUDIO_CACHE_DIR, exist_ok=True)
-MAX_LOCAL_AUDIO_FILES = 80  # 🎙️ 自動保留本機最近 80 句高音質錄音
+MAX_LOCAL_AUDIO_FILES = 80  #  自動保留本機最近 80 句高音質錄音
 
 def save_local_audio_clip(audio_base64: str) -> Optional[str]:
     """將麥克風錄音 WAV 保存至本機快取目錄，並自動滾動清理過舊檔案"""
@@ -2320,9 +2404,9 @@ API_LOCKS_FILE = os.path.join(DATA_DIR, "api_locks_cache.json")
 API_LOCKS = {}
 
 # ────────────────────────────────────────────────────────
-# 🚦 3. API 頻率限制、冷卻與熔斷管理系統 (Circuit Breaker)
+#  3. API 頻率限制、冷卻與熔斷管理系統 (Circuit Breaker)
 # ────────────────────────────────────────────────────────
-# 💡 功能目的：
+#  功能目的：
 #    當某金鑰或模型回傳 429 / 503 / 資源耗盡時，自動對該通道加鎖冷卻，
 #    並將鎖定狀態持久化到本地 JSON，防止開台期間重複呼叫故障通道。
 
@@ -2427,7 +2511,7 @@ def lock_target(target_id, error_msg="", headers=None):
     elif "404" in err_low or "not_found" in err_low:
         reason_label = " (模型未開通/下架 404)"
 
-    sys_notify(f"🛑 封印通道 {target_id}{reason_label} ({dur_str})", duration=3.0)
+    sys_notify(f" 封印通道 {target_id}{reason_label} ({dur_str})", duration=3.0)
     log_print(f"🔒 [通道冷卻] 通道 {target_id} 封印 {dur_str}{reason_label}")
 
 MODEL_FAIL_COUNT = {}
@@ -2446,19 +2530,19 @@ def lock_entire_model(model_name: str, duration: float = 60.0, reason: str = "�
     log_print(f"⚡ [大腦極速熔斷] 模型 [{model_name}] 遇 {reason} ➔ 暫停此模型 {dur_str}，秒切下一個備用模型！")
 
 
-# 🛑 自主發話時主動保留/跳過的頂配旗艦大腦清單（保留給老爸主動對話使用）
+#  自主發話時主動保留/跳過的頂配旗艦大腦清單（保留給老爸主動對話使用）
 
 
 
 
 CURRENT_GEMINI_KEY_STEP = 0
-_MIND_LIVE_KEY_COOLDOWN: dict = {}  # 🧠 心流 Live 金鑰冷卻紀錄 {api_key: 冷卻到期 timestamp}，失敗後 60 秒跳過
+_MIND_LIVE_KEY_COOLDOWN: dict = {}  #  心流 Live 金鑰冷卻紀錄 {api_key: 冷卻到期 timestamp}，失敗後 60 秒跳過
 
 
 # ────────────────────────────────────────────────────────
-# 🖥️ 4. 全域狀態變數、硬體偵測與通知設定 (Global State & Specs)
+#  4. 全域狀態變數、硬體偵測與通知設定 (Global State & Specs)
 # ────────────────────────────────────────────────────────
-# 💡 功能目的：
+#  功能目的：
 #    - 自動偵測主機實體螢幕解析度 (DPI 感知)、CPU、GPU 與記憶體硬體規格。
 #    - 維護 7L 的即時運行狀態（思考中、發話中、彈琴中、麥克風監聽）。
 #    - 定義多執行緒佇列（語音輸出隊列、彈幕看板隊列、VTS 參數隊列）。
@@ -2522,18 +2606,18 @@ def touch_interaction():
     last_interaction_time = time.time()
     record_interaction_tick()
 latest_screen_cache = None
-LATEST_HD_SCREEN_BYTES = None  # 🌟 原生 100% 超高清全解析度截圖緩存 (4K/原生，供燈箱放大檢視)
-SCREEN_TEMPORAL_HISTORY = deque(maxlen=60)  # 🎞️ 螢幕時序動態連續影格緩衝區（每 1.8s 一幀，保留最多 60 幀 ≈ 108 秒歷史）
-LAST_VISION_LOOK_TIME = 0.0  # 🕐 上次餘光「認真看」的時間，用於切取時序動態幀
+LATEST_HD_SCREEN_BYTES = None  #  原生 100% 超高清全解析度截圖緩存 (4K/原生，供燈箱放大檢視)
+SCREEN_TEMPORAL_HISTORY = deque(maxlen=60)  #  螢幕時序動態連續影格緩衝區（每 1.8s 一幀，保留最多 60 幀 ≈ 108 秒歷史）
+LAST_VISION_LOOK_TIME = 0.0  #  上次餘光「認真看」的時間，用於切取時序動態幀
 current_voice_task = None
 last_spoken_text = ""
 
 IS_MIC_ENABLED = True
 IS_AUTO_WANDER_ENABLED = True
-IS_AUTO_PIANO_ENABLED = False  # 🎹 是否允許 7L 在閒置時自主彈琴（預設關閉，杜絕未經指示突然彈琴打擾或與電腦音樂衝突）
-IS_PROACTIVE_SPEAK_ENABLED = True  # 💬 視覺陪伴主動搭話開關（預設開啟）
-IS_PERIPHERAL_VISION_ENABLED = True  # 👁️ 餘光視覺感知中樞開關（預設開啟）
-IS_FACE_TRACKING_ENABLED = True  # 👤 AI 視線與頭部追蹤開關（預設開啟）
+IS_AUTO_PIANO_ENABLED = False  #  是否允許 7L 在閒置時自主彈琴（預設關閉，杜絕未經指示突然彈琴打擾或與電腦音樂衝突）
+IS_PROACTIVE_SPEAK_ENABLED = True  #  視覺陪伴主動搭話開關（預設開啟）
+IS_PERIPHERAL_VISION_ENABLED = True  #  餘光視覺感知中樞開關（預設開啟）
+IS_FACE_TRACKING_ENABLED = True  #  AI 視線與頭部追蹤開關（預設開啟）
 LAST_WANDER_TIME = time.time()
 IS_SLEEPING = False
 TOTAL_API_CALLS = 0
@@ -2593,7 +2677,7 @@ async def set_sleep_mode(enable: bool):
             pass
     IS_SLEEPING = bool(enable)
     if IS_SLEEPING:
-        current_ai_status_str = "😴 閉眼沉睡中 (0 API 消耗)"
+        current_ai_status_str = " 閉眼沉睡中 (0 API 消耗)"
         current_ai_state = "SLEEP"
         try:
             await interrupt_current_speech(clear_queue=True, reason="老爸開啟休眠模式")
@@ -2606,7 +2690,7 @@ async def set_sleep_mode(enable: bool):
                 pass
         log_print("🌙 [系統] 7L 已進入深層睡眠模式（雙眼安詳閉合，0 API 消耗，安靜沉睡中...）")
     else:
-        current_ai_status_str = "🟢 正常運作中"
+        current_ai_status_str = " 正常運作中"
         current_ai_state = "IDLE"
         if vc.GLOBAL_VTS:
             try:
@@ -2616,11 +2700,11 @@ async def set_sleep_mode(enable: bool):
         log_print("☀️ [系統] 7L 已被喚醒，雙眼睜開，恢復全神經系統運作！")
     return IS_SLEEPING
 
-current_mic_volume_str = "[🟢 麥克風就緒]"
+current_mic_volume_str = "[ 麥克風就緒]"
 CURRENT_MIC_VOL_PERCENT = 0
 current_ai_status_str = "正常運作中"
 current_mic_action_str = "待命"
-current_model_tag = "🧠 初始化中"
+current_model_tag = " 初始化中"
 current_screen_context = "目前沒有特別的畫面動態。"
 VISION_HISTORY_STREAM = deque(maxlen=60)
 
@@ -2650,7 +2734,7 @@ def record_vision_history_entry(text: str, scene: str = ""):
         pass
 
 current_system_audio_context = "目前沒有播放特別的聲音。"
-tk_listener.current_tiktok_status_str = "[📱 TikTok: 待命中]"
+tk_listener.current_tiktok_status_str = "[ TikTok: 待命中]"
 CURRENT_SPEAKING_TARGET = "none"
 
 current_system_notification = ""
@@ -2659,7 +2743,7 @@ active_timers = set()
 speech_queue = asyncio.Queue()  
 pygame.mixer.init()
 
-# 👄 真實音訊波形對嘴中樞 (RMS 包絡提取與物理開閉濾波)
+#  真實音訊波形對嘴中樞 (RMS 包絡提取與物理開閉濾波)
 CURRENT_MOUTH_ENVELOPE = []
 CURRENT_SPEECH_START_TIME = 0.0
 CURRENT_SMOOTH_MOUTH = 0.0
@@ -2720,9 +2804,9 @@ def is_system_overloaded():
     return False
 
 # ────────────────────────────────────────────────────────
-# 💾 5. Firebase Firestore 雲端永久記憶與觀眾個人檔案系統 (0 DLL 純 Python 異步 REST 客戶端)
+#  5. Firebase Firestore 雲端永久記憶與觀眾個人檔案系統 (0 DLL 純 Python 異步 REST 客戶端)
 # ────────────────────────────────────────────────────────
-# 💡 功能目的：
+#  功能目的：
 #    - 提供 0 C/DLL 依賴的純 Python 異步 Firestore REST 客戶端，避免 Windows AppLocker 阻擋 gRPC 二進位檔。
 #    - 儲存老爸與 7L 的深度私聊記憶（`channel_history`）、核心人格標籤（`channel_meta`）。
 #    - 儲存 TikTok 直播觀眾個人檔案（稱呼、關係、印象、最後見面時間），自動雙向同步至本地 JSON 快取。
@@ -2774,10 +2858,10 @@ async def save_user_profile(custom_name=None, impression=None):
             json.dump(profile, f, ensure_ascii=False, indent=2)
     except Exception: pass
 
-# ── 👥 觀眾身份識別（Firebase viewer_profiles + 本地快取）──────────────────────
+# ──  觀眾身份識別（Firebase viewer_profiles + 本地快取）──────────────────────
 
 
-# ── 🧠 7L 雲端大腦提示詞與認知自我演進系統 (100% 雲端 Firestore 動態加載，本機零寫死提示詞) ────────────
+# ──  7L 雲端大腦提示詞與認知自我演進系統 (100% 雲端 Firestore 動態加載，本機零寫死提示詞) ────────────
 
 
 
@@ -2842,12 +2926,12 @@ async def update_daily_diary(channel_id, recent_chat):
     diary_prompt = (
         f"【後台任務：每日核心日記整合與高強度去重】\n"
         f"妳是 7L 的日記記憶中樞。請將『舊日記摘要』與『新對話』融合成一份完全去重、精簡濃縮後的今日日記。\n\n"
-        f"⚠️ 核心守則：\n"
+        f" 核心守則：\n"
         f"1. 刪除重複部分，保留重點。\n"
         f"2. 總句數嚴格限制在 3 句以內。\n"
         f"3. 絕對不要有任何前言或結尾，直接輸出整合後的日記內容。\n\n"
-        f"📖 [舊日記摘要]：\n{existing_summary if existing_summary else '(無)'}\n\n"
-        f"💬 [新對話紀錄]：\n{chat_text}\n"
+        f" [舊日記摘要]：\n{existing_summary if existing_summary else '(無)'}\n\n"
+        f" [新對話紀錄]：\n{chat_text}\n"
     )
     
     messages = [{"role": "user", "content": diary_prompt}]
@@ -2871,10 +2955,10 @@ async def update_daily_diary(channel_id, recent_chat):
 
 
 # ────────────────────────────────────────────────────────
-# 🎭 6. Live2D / VTube Studio 表情與姿態控制 & 雙軌空間走位系統 (Spatial Movement)
+#  6. Live2D / VTube Studio 表情與姿態控制 & 雙軌空間走位系統 (Spatial Movement)
 # ────────────────────────────────────────────────────────
 
-# ── 📰 7L 即時時事與熱搜情報中樞 (Trending News Engine) ────────────────────────
+# ──  7L 即時時事與熱搜情報中樞 (Trending News Engine) ────────────────────────
 LATEST_TRENDING_NEWS_SUMMARY = ""
 LAST_TRENDING_NEWS_FETCH_TIME = 0.0
 
@@ -2901,7 +2985,7 @@ async def get_trending_news_briefing() -> str:
                     if t:
                         items.append(f"{idx}. {t}：{c}")
                 if items:
-                    LATEST_TRENDING_NEWS_SUMMARY = "【🌐 7L 掌握的今日即時重大時事快訊】：\n" + "\n".join(items)
+                    LATEST_TRENDING_NEWS_SUMMARY = "【 7L 掌握的今日即時重大時事快訊】：\n" + "\n".join(items)
                     LAST_TRENDING_NEWS_FETCH_TIME = now
                     log_print("📰 [時事情報中樞] 已自動更新今日最新即時重大時事快訊！")
                     return LATEST_TRENDING_NEWS_SUMMARY
@@ -2947,12 +3031,12 @@ def search_google(query: str) -> str:
         return f"搜尋時發生錯誤: {e}"
 
 # ────────────────────────────────────────────────────────
-# 🎮 7. 7L 本機遊樂場沙盒 (7L_Playground)
+#  7. 7L 本機遊樂場沙盒 (7L_Playground)
 # ────────────────────────────────────────────────────────
 PLAYGROUND_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "7L_Playground")
 os.makedirs(PLAYGROUND_DIR, exist_ok=True)
 
-# 🛡️ 敏感/高危指令安全黑名單過濾
+#  敏感/高危指令安全黑名單過濾
 DANGEROUS_CODE_PATTERNS = [
     r"\bos\.remove\b", r"\bos\.unlink\b", r"\bos\.rmdir\b", r"\bos\.system\b",
     r"\bshutil\.rmtree\b", r"\bshutil\.move\b",
@@ -2975,20 +3059,20 @@ def _run_subprocess_code(file_path: str, timeout: int = 3) -> str:
         try:
             stdout_text, stderr_text = proc.communicate(timeout=timeout)
             if proc.returncode == 0:
-                output_msg = "✅ 程式碼執行完成 (ReturnCode 0)。"
+                output_msg = " 程式碼執行完成 (ReturnCode 0)。"
                 if stdout_text.strip():
                     output_msg += f"\n輸出結果：\n{stdout_text.strip()[:500]}"
                 return output_msg
             else:
-                return f"⚠️ 程式執行結束但回傳錯誤 (ReturnCode {proc.returncode})。\n錯誤訊息：\n{(stderr_text or stdout_text).strip()[:500]}"
+                return f" 程式執行結束但回傳錯誤 (ReturnCode {proc.returncode})。\n錯誤訊息：\n{(stderr_text or stdout_text).strip()[:500]}"
         except subprocess.TimeoutExpired:
-            return "✅ 遊戲/程式視窗已成功在老爸螢幕上開啟並持續運行中！"
+            return " 遊戲/程式視窗已成功在老爸螢幕上開啟並持續運行中！"
     except Exception as e:
-        return f"❌ 執行過程發生異常: {e}"
+        return f" 執行過程發生異常: {e}"
 
 async def execute_local_python_code(code_string: str) -> str:
     """在 7L 專屬的本機遊樂場 (7L_Playground) 儲存並執行 Python 程式碼"""
-    # 🛑 安全預設：關閉（直播場景等於「遠端可執行任意本機碼」，且 Web 控制台的
+    #  安全預設：關閉（直播場景等於「遠端可執行任意本機碼」，且 Web 控制台的
     #    /api/tools/execute 也走這裡）。要恢復需顯式設環境變數 ALLOW_LOCAL_PYTHON_CODE=1。
     if os.getenv("ALLOW_LOCAL_PYTHON_CODE", "0").strip().lower() not in ("1", "true", "yes"):
         print("🛑 [安全攔截] execute_local_python_code 已停用（需 ALLOW_LOCAL_PYTHON_CODE=1 才開放）")
@@ -3016,23 +3100,22 @@ DRAWING_DIR = os.path.join(PLAYGROUND_DIR, "drawings")
 os.makedirs(DRAWING_DIR, exist_ok=True)
 
 IMAGE_GEN_MODELS = [
-    # 🍌 Nano Banana 系列 (Gemini 原生生圖創作)
+    #  Nano Banana 系列 (Gemini 原生生圖創作)
     "gemini-3.1-flash-image",           # Nano Banana 2
     "gemini-3.1-flash-image-preview",   # Nano Banana 2 Preview
     "gemini-3-pro-image",               # Nano Banana Pro
     "gemini-3-pro-image-preview",       # Nano Banana Pro Preview
     "nano-banana-pro-preview",          # Nano Banana Pro Preview Alias
     "gemini-3.1-flash-lite-image",      # Nano Banana 2 Lite
-    "gemini-2.5-flash-image",           # Nano Banana (經典)
     
-    # 🖼️ Imagen 4 頂尖寫實與二次元生圖
+    #  Imagen 4 頂尖寫實與二次元生圖
     "imagen-4.0-ultra-generate-001",    # Imagen 4 Ultra (極限畫質)
     "imagen-4.0-generate-001",          # Imagen 4 標準版
     "imagen-4.0-fast-generate-001"      # Imagen 4 Fast (極速版)
 ]
 
 async def generate_ai_image(prompt: str) -> str:
-    """PROVIDER: GEMINI-IMAGE（Nano Banana 系；⚠️ 配額表全系 0/0/0，現降級中；見 docs/AI_SOURCES.md）使用 Google 頂尖 AI 生圖模型 (Nano Banana / Gemini Image / Imagen / FLUX) 繪製高品質圖片、二次元插圖或藝術創作，並自動在老爸的螢幕上彈出展示。
+    """PROVIDER: GEMINI-IMAGE（Nano Banana 系； 配額表全系 0/0/0，現降級中；見 docs/AI_SOURCES.md）使用 Google 頂尖 AI 生圖模型 (Nano Banana / Gemini Image / Imagen / FLUX) 繪製高品質圖片、二次元插圖或藝術創作，並自動在老爸的螢幕上彈出展示。
     
     Args:
         prompt: 畫面內容的詳細描述提示詞（建議包含主體、外貌、風格、色彩、光影等豐富細節）。
@@ -3042,7 +3125,7 @@ async def generate_ai_image(prompt: str) -> str:
     
     img_bytes = None
     
-    # 🌟 第一防線：Google 原生生圖模型 (若金鑰有配額)
+    #  第一防線：Google 原生生圖模型 (若金鑰有配額)
     if GEMINI_KEYS:
         num_keys = min(4, len(GEMINI_KEYS))
         for offset in range(num_keys):
@@ -3050,7 +3133,7 @@ async def generate_ai_image(prompt: str) -> str:
             g_key = GEMINI_KEYS[offset]
             temp_client = genai.Client(api_key=g_key)
             
-            for img_model in ["gemini-2.5-flash-image", "gemini-3.1-flash-image", "gemini-3-pro-image"]:
+            for img_model in ["gemini-3.1-flash-lite-image", "gemini-3.1-flash-image", "gemini-3-pro-image"]:
                 try:
                     res = await asyncio.wait_for(
                         temp_client.aio.models.generate_content(
@@ -3071,7 +3154,7 @@ async def generate_ai_image(prompt: str) -> str:
                 except Exception:
                     continue
 
-    # 🌟 第二防線：FLUX.1 / SDXL 頂尖二次元與寫實藝術引擎 (100% 保證出圖、0 配額限制、超高畫質)
+    #  第二防線：FLUX.1 / SDXL 頂尖二次元與寫實藝術引擎 (100% 保證出圖、0 配額限制、超高畫質)
     if not img_bytes:
         try:
             anime_prompt = f"{prompt}, masterpiece, best quality, ultra-detailed, anime art style, 8k resolution"
@@ -3161,10 +3244,10 @@ def search_internet(query):
 
 
 # ────────────────────────────────────────────────────────
-# 🛡️ 9. 防跳針與記憶去重系統 (Code-Level Anti-Repetition)
+#  9. 防跳針與記憶去重系統 (Code-Level Anti-Repetition)
 # ────────────────────────────────────────────────────────
 
-# 🧠 7L 即時意識流與心流記憶 (Stream of Consciousness)
+#  7L 即時意識流與心流記憶 (Stream of Consciousness)
 RECENT_STREAM_OF_CONSCIOUSNESS = []
 
 def is_thought_repetitive(new_thought: str, threshold: float = 0.65, time_window: float = 300.0) -> bool:
@@ -3175,7 +3258,7 @@ def is_thought_repetitive(new_thought: str, threshold: float = 0.65, time_window
     if len(clean_new) < 4:
         return True
     
-    # 🛡️ 陪伴/無動態類型的思緒語意防跳針：若近期已經安靜陪伴過，禁止反覆重提「安靜陪伴、不要擋到、縮小身體」
+    #  陪伴/無動態類型的思緒語意防跳針：若近期已經安靜陪伴過，禁止反覆重提「安靜陪伴、不要擋到、縮小身體」
     companion_markers = [
         "安靜陪伴", "不要擋到", "沒什麼新動態", "沒有新動態", "無全新動態", "無全新事件", 
         "縮小身體", "縮小一點", "嘟囔舊思緒", "silence", "安靜守護", "確認系統狀態", 
@@ -3227,7 +3310,7 @@ def is_thought_repetitive(new_thought: str, threshold: float = 0.65, time_window
 def record_internal_thought(user_words: str, thought: str, emotion: str = "", force: bool = False):
     if not thought:
         return
-    # 🛡️ 心流防跳針過濾：若與近 5 分鐘內思緒高度相似，不重複寫入記憶與時間線
+    #  心流防跳針過濾：若與近 5 分鐘內思緒高度相似，不重複寫入記憶與時間線
     if not force and is_thought_repetitive(thought):
         return
 
@@ -3242,7 +3325,7 @@ def record_internal_thought(user_words: str, thought: str, emotion: str = "", fo
     if len(RECENT_STREAM_OF_CONSCIOUSNESS) > 10:
         RECENT_STREAM_OF_CONSCIOUSNESS.pop(0)
 
-    # 🧠 將 7L 嶄新的內心流動/心聲思緒同步持久化至全集中全景記憶中樞 (統一時間線與歷史紀錄)
+    #  將 7L 嶄新的內心流動/心聲思緒同步持久化至全集中全景記憶中樞 (統一時間線與歷史紀錄)
     try:
         append_to_unified_memory(
             speaker="7L",
@@ -3258,17 +3341,17 @@ def get_recent_thoughts_summary() -> str:
     
     if not RECENT_STREAM_OF_CONSCIOUSNESS:
         return ""
-    # 🌟 已讀過濾：若該思緒已被自主發話或對話消費已讀，不再反覆注入 Prompt，徹底消除反覆看同一句說話的跳針問題
+    #  已讀過濾：若該思緒已被自主發話或對話消費已讀，不再反覆注入 Prompt，徹底消除反覆看同一句說話的跳針問題
     unconsumed = [item for item in RECENT_STREAM_OF_CONSCIOUSNESS if not item.get("consumed", False)]
     if not unconsumed:
         return ""
     lines = []
     for item in unconsumed[-3:]:
         lines.append(f"- 剛才聽到「{item['words']}」時，妳腦內的思緒：『{item['thought']}』")
-    return "【🧠 妳近期的腦內心流思緒（最新未讀思緒，僅供參考，若已聊過請勿重複）：】：\n" + "\n".join(lines)
+    return "【 妳近期的腦內心流思緒（最新未讀思緒，僅供參考，若已聊過請勿重複）：】：\n" + "\n".join(lines)
 
 def mark_recent_thoughts_as_read():
-    """📖 將當前累積的所有腦內心流思緒標記為已讀/已消費，防止後續自主大腦重複對同一句話跳針"""
+    """ 將當前累積的所有腦內心流思緒標記為已讀/已消費，防止後續自主大腦重複對同一句話跳針"""
     
     for item in RECENT_STREAM_OF_CONSCIOUSNESS:
         item["consumed"] = True
@@ -3296,7 +3379,7 @@ RECENT_SYSTEM_AUDIO_TRANSCRIPTS = []  # [(timestamp, text), ...]
 LATEST_SYSTEM_AUDIO_RMS = 0.0
 LATEST_SYSTEM_AUDIO_TEXT = ""
 LATEST_SYSTEM_AUDIO_TEXT_TIME = 0.0
-LATEST_SYSTEM_MUSIC_INFO = ""  # 🎵 7L 即時聽出之電腦播放歌曲、樂曲名稱或樂器風格
+LATEST_SYSTEM_MUSIC_INFO = ""  #  7L 即時聽出之電腦播放歌曲、樂曲名稱或樂器風格
 LATEST_SYSTEM_MUSIC_TIME = 0.0
 LAST_MUSIC_IDENTIFY_TIME = 0.0
 CURRENT_SYSTEM_AUDIO_VOL_PERCENT = 0
@@ -3304,20 +3387,20 @@ LATEST_REALWORLD_SPEECH_TEXT = ""
 LATEST_REALWORLD_SPEECH_TIME = 0.0
 
 def is_7l_voice_echo(stt_text: str, is_dad_verified: bool = False) -> bool:
-    """🛡️ 7L 自身發話喇叭回音鑑別：
+    """ 7L 自身發話喇叭回音鑑別：
     比對 STT 文字與 7L 剛說的話，精準過濾麥克風收錄之自身喇叭殘響。
-    ✨ 嚴格遵循「過濾只過濾一次就好」原則：每句發話最多只攔截一次回音，絕不重複誤殺。
+     嚴格遵循「過濾只過濾一次就好」原則：每句發話最多只攔截一次回音，絕不重複誤殺。
     """
     global LAST_ECHO_FILTERED_TTS_ID, MP3_ECHO_TRAILING_CHUNKS
     clean_stt = normalize_text_for_echo(stt_text)
     if not clean_stt:
         return False
 
-    # 🛑 0. 過濾只過濾一次就好：若當前這一次發話已經過濾過一次回音，後續一律放行！
+    #  0. 過濾只過濾一次就好：若當前這一次發話已經過濾過一次回音，後續一律放行！
     if CURRENT_TTS_ID > 0 and LAST_ECHO_FILTERED_TTS_ID == CURRENT_TTS_ID:
         return False
 
-    # 🛑 1. 老爸專屬呼喚 / 指令前綴豁免保護 (支援半形與全形同音詞)：
+    #  1. 老爸專屬呼喚 / 指令前綴豁免保護 (支援半形與全形同音詞)：
     # 7L 自身發話絕不可能以「7L」、「阿七」、「CL」、「謝龍」自稱下指令
     call_names = [
         "7l", "七l", "cl", "謝龍", "谢龙", "西l", "吸l", 
@@ -3327,12 +3410,12 @@ def is_7l_voice_echo(stt_text: str, is_dad_verified: bool = False) -> bool:
     if any(name in clean_stt for name in call_names):
         return False
 
-    # 🛑 2. 重要控制指令豁免保護：若為老爸常用指令詞彙且聲紋判定為老爸，絕不過濾
+    #  2. 重要控制指令豁免保護：若為老爸常用指令詞彙且聲紋判定為老爸，絕不過濾
     control_keywords = ["重開機", "重開", "重啟", "關機", "退出", "別彈了", "換歌", "暫停", "閉嘴", "安靜", "停"]
     if is_dad_verified and any(k in clean_stt for k in control_keywords):
         return False
 
-    # 🛑 3. 物理聲學時效防護：喇叭聲音與房間殘響若已結束 > 3.5 秒，絕不可能存在自身喇叭回音
+    #  3. 物理聲學時效防護：喇叭聲音與房間殘響若已結束 > 3.5 秒，絕不可能存在自身喇叭回音
     now = time.time()
     is_recent_speech = IS_MP3_PLAYING or (now - LAST_TTS_END_TIME < 3.5)
     if not is_recent_speech:
@@ -3345,7 +3428,7 @@ def is_7l_voice_echo(stt_text: str, is_dad_verified: bool = False) -> bool:
 
     stt_len = len(clean_stt)
 
-    # 🛡️ 聲紋特徵加持：若已通過神經網路驗證為老爸本人聲音（非 7L 喇叭女聲）
+    #  聲紋特徵加持：若已通過神經網路驗證為老爸本人聲音（非 7L 喇叭女聲）
     # 短中句（< 12 字，如日常對話、短指令、覆誦）100% 保證通行，絕不當成回音過濾！
     if is_dad_verified and stt_len < 12:
         return False
@@ -3396,7 +3479,7 @@ def is_7l_voice_echo(stt_text: str, is_dad_verified: bool = False) -> bool:
     return False
 
 def is_computer_audio_echo(stt_text: str) -> bool:
-    """🎧 Windows 系統內部音訊 WASAPI Loopback 實時鑑別：
+    """ Windows 系統內部音訊 WASAPI Loopback 實時鑑別：
     精準識別電腦正在播放的影片、他人語音、遊戲音效或背景音樂，不誤觸發老爸指令。
     """
     global current_system_audio_context
@@ -3428,14 +3511,14 @@ def is_computer_audio_echo(stt_text: str) -> bool:
     return False
 
 # ────────────────────────────────────────────────────────
-# 🔊 10. 語音合成、音訊分析與字幕工具
+#  10. 語音合成、音訊分析與字幕工具
 # ────────────────────────────────────────────────────────
 # ────────────────────────────────────────────────────────
-# 🧹 預編譯高頻正則表達式與統一文字淨化引擎 (TextCleanEngine)
+#  預編譯高頻正則表達式與統一文字淨化引擎 (TextCleanEngine)
 # ────────────────────────────────────────────────────────
 
 # ────────────────────────────────────────────────────────
-# 📝 核心 Prompt 範本工廠與動態指令建造器 (PromptTemplateEngine)
+#  核心 Prompt 範本工廠與動態指令建造器 (PromptTemplateEngine)
 # ────────────────────────────────────────────────────────
 
 def _remove_temp_mp3():
@@ -3475,7 +3558,7 @@ CURRENT_PLAYING_VOICE_TASK = None
 SPEECH_PLAYBACK_LOCK = asyncio.Lock()
 
 async def interrupt_current_speech(clear_queue: bool = True, reason: str = "7L 自主插話/中斷"):
-    """🛑 即時中斷 7L 當前正在播出的語音（支援自己插話自己、老爸秒級打斷與即時清空排隊）"""
+    """ 即時中斷 7L 當前正在播出的語音（支援自己插話自己、老爸秒級打斷與即時清空排隊）"""
     global IS_MP3_PLAYING, MP3_ECHO_TRAILING_CHUNKS
     try:
         # 1. 清空舊的排隊語音
@@ -3515,7 +3598,7 @@ async def interrupt_current_speech(clear_queue: bool = True, reason: str = "7L �
         log_print(f"⚠️ [中斷語音異常]: {e}")
 
 # ────────────────────────────────────────────────────────
-# 🎭 12.5 Live API 即時神態導演與句中動態表情時間軸排程引擎
+#  12.5 Live API 即時神態導演與句中動態表情時間軸排程引擎
 # ────────────────────────────────────────────────────────
 def parse_action_timeline(raw_text: str, total_duration: float) -> list:
     """從原始模型回覆字串中，按字元進度精確計算每個表情/動作標籤在語音播放期間的觸發時間點。
@@ -3571,7 +3654,7 @@ def parse_action_timeline(raw_text: str, total_duration: float) -> list:
 
 
 async def live_api_direct_sentence_emotions(clean_text: str, total_duration: float) -> list:
-    """⚡ 【Live API 即時潛意識神態導演】：
+    """ 【Live API 即時潛意識神態導演】：
     利用 Live API 無限額度與亞秒級低延遲，為發話句子實時感知情感流動，
     精確策劃上半句與下半句的動態表情切換時間點（上半句一個表情、下半句隨時可換）！
     回傳: [(timestamp_float, "EXPRESSION"|"WINK"|"MOVE", tag_value), ...]
@@ -3628,7 +3711,7 @@ async def live_api_direct_sentence_emotions(clean_text: str, total_duration: flo
 
 
 async def execute_action_timeline(vts, timeline: list, cancel_event: asyncio.Event = None):
-    """🎭 語音時間軸動態表情與動作執行器：
+    """ 語音時間軸動態表情與動作執行器：
     隨語音發音進度精確在毫秒級時間點觸發表情轉換，實現上半句到下半句想換就換的生動神態！
     """
     
@@ -3659,33 +3742,26 @@ async def execute_action_timeline(vts, timeline: list, cancel_event: asyncio.Eve
                 await set_vts_expression(vts, action_val)
             elif action_type == "WINK":
                 log_print(f"😉 [句中即時動作 ({fire_time:.1f}s)]: 眨眼 WINK")
-                vc.wink_timer = time.time() + 0.55
-                vc.wink_side = random.choice(["left", "right"])
+                await vc.trigger_wink()
             elif action_type == "MOVE":
                 log_print(f"🚶 [句中即時走位 ({fire_time:.1f}s)]: 移動至「{action_val}」")
                 await apply_spatial_position(action_val)
             elif action_type == "LOOK":
                 u_act = action_val.upper()
                 if "ROLL" in u_act:
-                    vc.is_tracking_mouse = False
-                    vc.eye_roll_timer = time.time() + 3.8
+                    await vc.trigger_eye_roll()
                 elif "MOUSE" in u_act:
-                    vc.is_tracking_mouse = True
+                    await vc.set_tracking_mouse(True)
                 elif "LEFT" in u_act:
-                    vc.is_tracking_mouse = False
-                    vc.target_look_x, vc.target_look_y = -25.0, 0.0
+                    await vc.set_target_look(-25.0, 0.0)
                 elif "RIGHT" in u_act:
-                    vc.is_tracking_mouse = False
-                    vc.target_look_x, vc.target_look_y = 25.0, 0.0
+                    await vc.set_target_look(25.0, 0.0)
                 elif "UP" in u_act:
-                    vc.is_tracking_mouse = False
-                    vc.target_look_x, vc.target_look_y = 0.0, 20.0
+                    await vc.set_target_look(0.0, 20.0)
                 elif "DOWN" in u_act:
-                    vc.is_tracking_mouse = False
-                    vc.target_look_x, vc.target_look_y = 0.0, -20.0
+                    await vc.set_target_look(0.0, -20.0)
                 elif "CENTER" in u_act:
-                    vc.is_tracking_mouse = False
-                    vc.target_look_x, vc.target_look_y = 0.0, 0.0
+                    await vc.set_target_look(0.0, 0.0)
         except Exception as e:
             log_print(f"⚠️ [即時時間軸執行異常]: {e}")
 
@@ -3709,7 +3785,7 @@ async def play_voice_complete(text, target: str = "dad", raw_actions_text: str =
             base_proj_dir = os.path.dirname(os.path.abspath(__file__))
             output_file = os.path.join(base_proj_dir, f"temp_reply_{int(time.time() * 1000)}_{random.randint(100, 999)}.mp3")
             
-            # 🎙️ 語音合成前置解析：動態語速與音高切塊處理 (Chunking)
+            #  語音合成前置解析：動態語速與音高切塊處理 (Chunking)
             source_text = raw_actions_text if (raw_actions_text and ('[SPEED:' in raw_actions_text.upper() or '[PITCH:' in raw_actions_text.upper())) else text
             _, source_text = TextCleanEngine.extract_thought(source_text)
             source_text = TextCleanEngine.RE_CODE_BLOCKS.sub('', source_text)
@@ -3739,7 +3815,7 @@ async def play_voice_complete(text, target: str = "dad", raw_actions_text: str =
                             scaled = 0
                         else:
                             num = int(re.sub(r'[^\d\-+]', '', val))
-                            # 🎧 柔化自然縮放：將激進的語速縮放至人聲舒適黃金區間 (-12% ~ +12%)，杜絕怪聲與快轉機械感
+                            #  柔化自然縮放：將激進的語速縮放至人聲舒適黃金區間 (-12% ~ +12%)，杜絕怪聲與快轉機械感
                             scaled = int(num * 0.45)
                         clamped = max(-12, min(12, scaled))
                         current_rate = f"{'+' if clamped >= 0 else ''}{clamped}%"
@@ -3752,7 +3828,7 @@ async def play_voice_complete(text, target: str = "dad", raw_actions_text: str =
                     val = pitch_match.group(1)
                     try:
                         num = int(re.sub(r'[^\d\-+]', '', val))
-                        # 🎧 柔化自然縮放：將音高變化縮放至 (-5Hz ~ +5Hz)，防止小依女聲尖銳刺耳或變花栗鼠卡通音
+                        #  柔化自然縮放：將音高變化縮放至 (-5Hz ~ +5Hz)，防止小依女聲尖銳刺耳或變花栗鼠卡通音
                         scaled = int(num * 0.3)
                         clamped = max(-5, min(5, scaled))
                         current_pitch = f"{'+' if clamped >= 0 else ''}{clamped}Hz"
@@ -3762,7 +3838,7 @@ async def play_voice_complete(text, target: str = "dad", raw_actions_text: str =
                     
                 clean_p = TextCleanEngine.clean_for_tts(p, apply_phonetics=True)
                 if clean_p.strip() and re.search(r'[\u4e00-\u9fa5a-zA-Z0-9\u3040-\u309F\u30A0-\u30FF\uAC00-\uD7AF]', clean_p):
-                    # 🚀 智能句子分段演算法：按標點將長句子拆分為自然獨立子句，實現分段邊生成邊播（秒開口）
+                    #  智能句子分段演算法：按標點將長句子拆分為自然獨立子句，實現分段邊生成邊播（秒開口）
                     def _split_sub_sentences(raw_t: str):
                         pat = r'([^。！？!?；;\n，,]+[。！？!?；;\n，,]*)'
                         matches = re.findall(pat, raw_t.strip())
@@ -3776,7 +3852,7 @@ async def play_voice_complete(text, target: str = "dad", raw_actions_text: str =
                             is_comma = bool(re.search(r'[，,]$', buf))
                             c_len = len(re.sub(r'[^\w\u4e00-\u9fa5]', '', buf))
                             # 強標點且 >= 8 字才切，或逗號累積 >= 20 字才切
-                            # ⬆️ 提高門檻：減少碎句拆分，降低分段拼接的停頓感
+                            #  提高門檻：減少碎句拆分，降低分段拼接的停頓感
                             if (is_strong and c_len >= 8) or (is_comma and c_len >= 20):
                                 subs.append(buf)
                                 buf = ''
@@ -3797,12 +3873,12 @@ async def play_voice_complete(text, target: str = "dad", raw_actions_text: str =
             est_duration = max(1.5, len(tts_text) * 0.22)
             pre_timeline = parse_action_timeline(raw_actions_text, est_duration) if raw_actions_text else []
 
-            # 🎤 若 7L 正在唱歌，等待演唱完畢後再播話，絕不打斷歌聲 (防禦上限 60s)！
+            #  若 7L 正在唱歌，等待演唱完畢後再播話，絕不打斷歌聲 (防禦上限 60s)！
             singing_wait_start = time.time()
             while (IS_SINGING_ACTIVE or current_ai_state == "SINGING") and (time.time() - singing_wait_start < 60.0):
                 await asyncio.sleep(0.5)
 
-            # ⚡ 若當前正在播放觸電即時叫聲，等待叫聲播放完畢再接著說話 (至多等 2 秒防卡死)
+            #  若當前正在播放觸電即時叫聲，等待叫聲播放完畢再接著說話 (至多等 2 秒防卡死)
             shock_wait_start = time.time()
             while IS_SHOCK_SCREAMING and (time.time() - shock_wait_start < 2.0):
                 await asyncio.sleep(0.05)
@@ -3815,12 +3891,12 @@ async def play_voice_complete(text, target: str = "dad", raw_actions_text: str =
             if not pygame.mixer.get_init():
                 pygame.mixer.init(frequency=44100)
 
-            # 🚀 啟動背景神態導演（若句子夠長且無預設時間軸）
+            #  啟動背景神態導演（若句子夠長且無預設時間軸）
             director_task = None
             if len(pre_timeline) < 2 and len(tts_text) >= 7 and target_vts:
                 director_task = asyncio.create_task(live_api_direct_sentence_emotions(tts_text, est_duration))
 
-            # 🚀 異步生產者-消費者隊列（分段邊生成邊播核心架構）
+            #  異步生產者-消費者隊列（分段邊生成邊播核心架構）
             audio_stream_queue = asyncio.Queue()
             temp_files_to_clean = []
 
@@ -3851,9 +3927,9 @@ async def play_voice_complete(text, target: str = "dad", raw_actions_text: str =
 
             producer_task = asyncio.create_task(tts_producer_worker())
 
-            # 🚀 播放與對嘴主迴圈（消費者）
+            #  播放與對嘴主迴圈（消費者）
             global CURRENT_MOUTH_ENVELOPE, CURRENT_SPEECH_START_TIME, CURRENT_SMOOTH_MOUTH
-            # ⚠️ 注意：第一段音訊生成完畢並開始播放前，絕不提前開啟 TALKING / IS_MP3_PLAYING，杜絕發聲前嘴巴空動
+            #  注意：第一段音訊生成完畢並開始播放前，絕不提前開啟 TALKING / IS_MP3_PLAYING，杜絕發聲前嘴巴空動
             timeline_cancel_event = asyncio.Event()
             timeline_task = None
             total_actual_spoken_time = 0.0
@@ -3900,7 +3976,7 @@ async def play_voice_complete(text, target: str = "dad", raw_actions_text: str =
                                 except Exception: pass
                             asyncio.create_task(_attach_live_timeline())
 
-                    # 🎵 無縫播放：使用 Sound Channel + queue() 消除分段拼接停頓感
+                    #  無縫播放：使用 Sound Channel + queue() 消除分段拼接停頓感
                     # 首段直接播，後續段等待前段結束前 0.1s 預先 queue 進去
                     try:
                         snd_obj = pygame.mixer.Sound(part_file)
@@ -3963,7 +4039,7 @@ async def play_voice_complete(text, target: str = "dad", raw_actions_text: str =
                     current_ai_state = "IDLE"
 
                 if pe.is_piano_active and pe.current_piano_song_title:
-                    await asyncio.to_thread(update_subtitle, f"🎹 [7L 正在演奏鋼琴] 《{pe.current_piano_song_title}》")
+                    await asyncio.to_thread(update_subtitle, f" [7L 正在演奏鋼琴] 《{pe.current_piano_song_title}》")
                 else:
                     await asyncio.to_thread(update_subtitle, "")
 
@@ -4010,7 +4086,7 @@ async def play_voice_complete(text, target: str = "dad", raw_actions_text: str =
             if current_ai_state == "TALKING": current_ai_state = "IDLE"
 
 async def play_instant_sound_clip(audio_path: str, subtitle: str = ""):
-    """⚡ 0 秒極速播放 7L 專屬觸電尖叫聲（即時對嘴 + 臉紅），後續對話無縫接軌"""
+    """ 0 秒極速播放 7L 專屬觸電尖叫聲（即時對嘴 + 臉紅），後續對話無縫接軌"""
     global CURRENT_MOUTH_ENVELOPE, CURRENT_SPEECH_START_TIME, CURRENT_SMOOTH_MOUTH
     global current_ai_state, IS_MP3_PLAYING, IS_SHOCK_SCREAMING
     
@@ -4042,7 +4118,7 @@ async def play_instant_sound_clip(audio_path: str, subtitle: str = ""):
         IS_MP3_PLAYING = True
         CURRENT_SPEECH_START_TIME = time.time()
         
-        # ⚡ 採用專屬 SFX 獨立通道 (Channel 5)，音量拉滿，絕不與 TTS 語音串流 (pygame.mixer.music) 衝突打架！
+        #  採用專屬 SFX 獨立通道 (Channel 5)，音量拉滿，絕不與 TTS 語音串流 (pygame.mixer.music) 衝突打架！
         channel = pygame.mixer.Channel(5)
         channel.set_volume(1.0)
         if snd:
@@ -4114,8 +4190,79 @@ def transcribe_audio_bytes(wav_bytes: bytes) -> str:
     except Exception:
         return ""
 
+async def gemini_system_audio_live_transcribe(wav_bytes: bytes) -> str:
+    """使用獨立的 Gemini Live API 專門監聽電腦桌面聲音（精準過濾純音樂，零幻覺），具備自動故障轉移機制"""
+    if not wav_bytes or not GEMINI_KEYS:
+        return ""
+    
+    from google import genai
+    from google.genai import types
+    import asyncio
+    
+    # 取得候補金鑰清單
+    candidates = KEYS_AUDIENCE_LIVE + [k for k in GEMINI_KEYS if k not in KEYS_AUDIENCE_LIVE]
+    if not candidates:
+        return ""
+        
+    for api_key in candidates[:4]:  # 最多嘗試 4 把不同的金鑰
+        try:
+            live_client = genai.Client(api_key=api_key)
+            live_cfg = types.LiveConnectConfig(
+                response_modalities=[types.Modality.AUDIO], 
+                speech_config=types.SpeechConfig(
+                    voice_config=types.VoiceConfig(
+                        prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                            voice_name="Aoede"
+                        )
+                    )
+                ),
+                output_audio_transcription=types.AudioTranscriptionConfig(),
+                system_instruction=types.Content(parts=[types.Part.from_text(text="你是一個專門過濾音訊的AI。請聆聽音訊，如果有人講話，請『只』輸出他們的對話文字。絕對不要加上任何自己的分析、解釋或思考過程！如果音訊是純音樂、無人聲或雜音，請直接輸出 [SILENCE] 四個字，不要說其他話。千萬不要幻覺出任何字幕或版權浮水印。")])
+            )
+            
+            # Gemini Live API 嚴格要求 PCM 格式，去除 WAV 檔頭 (44 bytes)
+            pcm_bytes = wav_bytes[44:] if wav_bytes.startswith(b'RIFF') else wav_bytes
+            
+            live_transcription = ""
+            async with asyncio.timeout(10.0):
+                async with live_client.aio.live.connect(model="gemini-3.8-live", config=live_cfg) as session:
+                    chunk_sz = 8000
+                    for offset in range(0, len(pcm_bytes), chunk_sz):
+                        chunk = pcm_bytes[offset:offset+chunk_sz]
+                        await session.send_realtime_input(audio=types.Blob(data=chunk, mime_type="audio/pcm;rate=16000"))
+                        
+                    await session.send_realtime_input(text="（音訊已傳送完畢，請立刻輸出轉錄文字，或輸出 [SILENCE]）")
+                    await session.send_realtime_input(activity_end=types.ActivityEnd())
+                    
+                    async for resp in session.receive():
+                        c = resp.server_content
+                        if c:
+                            if c.output_transcription and c.output_transcription.text:
+                                live_transcription += c.output_transcription.text
+                            if c.model_turn and c.model_turn.parts:
+                                for p in c.model_turn.parts:
+                                    if p.text:
+                                        live_transcription += p.text
+                            if getattr(c, 'turn_complete', False) or getattr(c, 'generation_complete', False):
+                                break
+                                
+            final_text = live_transcription.strip()
+            # 過濾 AI 的內心戲或靜默標籤
+            upper_text = final_text.upper()
+            if "[SILENCE]" in upper_text or "SILENCE" in upper_text or "NOTHING" in upper_text or "REMAIN SILENT" in upper_text:
+                return ""
+                
+            return final_text
+            
+        except Exception as e:
+            # 發生 429 資源耗盡或斷線，自動進入下一迴圈，換下一把金鑰繼續試
+            log_print(f"⚠️ [電腦內錄 Live API] 金鑰(...{api_key[-6:]}) 失敗，自動切換下一把... ({repr(e)})")
+            continue
+            
+    return ""
+
 # ────────────────────────────────────────────────────────
-# 👁️ 11. 視覺感知、畫面截圖與輕量眼角餘光
+#  11. 視覺感知、畫面截圖與輕量眼角餘光
 # ────────────────────────────────────────────────────────
 has_printed_vision_error = False
 
@@ -4172,11 +4319,11 @@ def get_dxcam_cam():
 def capture_screen_multi_view():
     """
     五方多視角超高清螢幕感知系統 (DXGI GPU 加速 + 硬件級 StretchBlt 極速引擎)：
-    1. 🖥️ 全螢幕全景總覽圖 (含原生真實滑鼠游標貼圖)
-    2. 🔍 左上象限原生細節放大圖 (Top-Left)
-    3. 🔍 右上象限原生細節放大圖 (Top-Right)
-    4. 🔍 左下象限原生細節放大圖 (Bottom-Left)
-    5. 🔍 右下象限原生細節放大圖 (Bottom-Right)
+    1.  全螢幕全景總覽圖 (含原生真實滑鼠游標貼圖)
+    2.  左上象限原生細節放大圖 (Top-Left)
+    3.  右上象限原生細節放大圖 (Top-Right)
+    4.  左下象限原生細節放大圖 (Bottom-Left)
+    5.  右下象限原生細節放大圖 (Bottom-Right)
     """
     global has_printed_vision_error
     try:
@@ -4237,7 +4384,7 @@ def capture_screen_multi_view():
             screenshot = screenshot.convert("RGB")
             
         w, h = screenshot.size
-        # 🖱️ 自然貼合原生真實滑鼠游標圖標 (原寸 1:1 座標對齊)
+        #  自然貼合原生真實滑鼠游標圖標 (原寸 1:1 座標對齊)
         cursor_icon = get_realistic_cursor_icon()
         if cursor_icon:
             try:
@@ -4246,7 +4393,7 @@ def capture_screen_multi_view():
             except Exception:
                 pass
         
-        # 🌟 儲存原生 100% 超高清原圖快取 (品質 92，供燈箱放大檢視與老爸查核，文字極致清晰)
+        #  儲存原生 100% 超高清原圖快取 (品質 92，供燈箱放大檢視與老爸查核，文字極致清晰)
         global LATEST_HD_SCREEN_BYTES
         buf_hd = io.BytesIO()
         screenshot.save(buf_hd, format="JPEG", quality=92, optimize=True)
@@ -4260,7 +4407,7 @@ def capture_screen_multi_view():
         except Exception:
             pass
 
-        # 🌟 即時計算真實畫面動態差分 (全螢幕縮圖均勻採樣，耗時僅約 1.5ms)
+        #  即時計算真實畫面動態差分 (全螢幕縮圖均勻採樣，耗時僅約 1.5ms)
         global PREV_SCREEN_THUMB, CURRENT_VISION_CHANGE_LEVEL, CURRENT_VISION_CHANGE_SCORE
         try:
             from PIL import ImageChops, ImageStat
@@ -4320,11 +4467,11 @@ def capture_screen_multi_view():
         
         has_printed_vision_error = False
         return [
-            ("🖥️【1. 全螢幕全景總覽（含滑鼠游標）】", full_b64),
-            ("🔍【2. 左上角細節放大圖】", tl_b64),
-            ("🔍【3. 右上角細節放大圖】", tr_b64),
-            ("🔍【4. 左下角細節放大圖】", bl_b64),
-            ("🔍【5. 右下角細節放大圖】", br_b64)
+            ("【1. 全螢幕全景總覽（含滑鼠游標）】", full_b64),
+            ("【2. 左上角細節放大圖】", tl_b64),
+            ("【3. 右上角細節放大圖】", tr_b64),
+            ("【4. 左下角細節放大圖】", bl_b64),
+            ("【5. 右下角細節放大圖】", br_b64)
         ]
     except Exception as e:
         if not has_printed_vision_error:
@@ -4337,8 +4484,8 @@ def capture_screen_as_base64():
 
 def get_combined_temporal_screen_snapshot():
     """
-    🎞️ 組合 5 圖多視角 + 最近時序連續動態影格（共 6~7 張圖）
-    🎯 核心效果：
+     組合 5 圖多視角 + 最近時序連續動態影格（共 6~7 張圖）
+     核心效果：
        1. 包含前 1~2 幀歷史全景截圖（時序動態感知：Gemini 清楚分辨動畫、角色位移、戰鬥、視窗滾動等連續動作）
        2. 包含此刻當前完整 5 圖多視角（1 全景總覽 + 4 象限超高清局部放大，100% 原始像素細節，徹底杜絕看不清楚）
        3. 實測 7 圖總體積僅約 80~130 KB，Gemini 響應僅耗時 1.7~2.3 秒，完全在黃金無感延遲區！
@@ -4353,14 +4500,14 @@ def get_combined_temporal_screen_snapshot():
     # 1. 注入歷史時序動態幀 (依時間先後：較舊 ➔ 較新)
     for idx, (t_stamp, hist_b64) in enumerate(SCREEN_TEMPORAL_HISTORY):
         dt = round(time.time() - t_stamp, 1)
-        combined.append((f"🎞️【時序動態幀 {idx+1} (約 {dt} 秒前歷史畫面)】", hist_b64))
+        combined.append((f"【時序動態幀 {idx+1} (約 {dt} 秒前歷史畫面)】", hist_b64))
         
     # 2. 注入當前最新 5 圖多視角（此刻全景總覽 + 4 象限局部放大圖）
     combined.extend(latest_screen_cache)
     return combined
 
 async def check_screen_change_via_live_api(img_bytes: bytes, current_context: str) -> bool:
-    """👁️ 【Live API 餘光視覺哨兵】：
+    """ 【Live API 餘光視覺哨兵】：
     利用 Live API 無限額度特性保持雙眼實時看著螢幕畫面，
     絕不輸出冗長描述，只負責極速判定畫面是否有重大全新變化/新事件/新視窗 ([NO_CHANGE] vs [LOOK_SERIOUS])，
     徹底替老爸節省 3.1-flash-lite 主力發話金鑰額度！
@@ -4413,9 +4560,9 @@ async def check_screen_change_via_live_api(img_bytes: bytes, current_context: st
 
 
 # ────────────────────────────────────────────────────────
-# 🧠 12. 旗艦多模態大腦推理核心 (fetch_ai_response)
+#  12. 旗艦多模態大腦推理核心 (fetch_ai_response)
 # ────────────────────────────────────────────────────────
-# 💡 功能目的：
+#  功能目的：
 #    - 7L 與老爸私下對話、深度探索與工具執行的全模態旗艦推理核心。
 #    - 支援文字、5 視角全螢幕畫面影像（Base64 JPEG）、原生音訊（WAV）。
 #    - 採用智能任務分流（3.1 Flash Lite ➔ 3.5 Flash Lite ➔ 3 Flash ➔ 3.1 Pro ➔ 3.5 ➔ 3.6 ➔ 3.7）。
@@ -4423,7 +4570,7 @@ async def check_screen_change_via_live_api(img_bytes: bytes, current_context: st
 
 
 # ────────────────────────────────────────────────────────
-# 🕹️ 13. 使用者指令、電腦控制與計時器動作
+#  13. 使用者指令、電腦控制與計時器動作
 # ────────────────────────────────────────────────────────
 def get_system_performance():
     try:
@@ -4467,7 +4614,7 @@ async def set_timer(seconds: int, message: str, target_queue: Optional[asyncio.Q
         pass
 
 async def live_timer_sensor_worker(vts, input_queue):
-    """⏱️ API Live 持續時間感測哨兵協程：
+    """ API Live 持續時間感測哨兵協程：
     - 以 1 秒 (1 Tick) 精度全時感測倒數時間與老爸當前狀態
     - 時間到達時自動喚醒主力多模態大腦 (Gemini 3.8 / 3.1 Flash) 生成專屬生動提醒並主動開口發言
     """
@@ -4508,7 +4655,7 @@ async def live_timer_sensor_worker(vts, input_queue):
                     reminder_messages = [
                         {"role": "system", "content": PromptTemplateEngine.HARD_TECHNICAL_RULES},
                         {"role": "user", "content": f"""時間：{get_current_time_string()}
-【⏰ API Live 定時感測到期提醒】：
+【 API Live 定時感測到期提醒】：
 老爸剛才交代妳的時間提醒到了！
 - 預定提醒事項：『{task_msg}』
 - 當前現場環境：{fg_hint} {music_hint}
@@ -4550,7 +4697,7 @@ async def live_timer_sensor_worker(vts, input_queue):
             await asyncio.sleep(1.0)
 
 async def execute_speech_visual_actions(vts, text: str):
-    """🎭 語音同步專用 Live2D 演出控制器：
+    """ 語音同步專用 Live2D 演出控制器：
     精準在語音【真正開口發話播放】的瞬間觸發本句專屬的表情、走位、眨眼、視線與身體動作，
     杜絕連續說話時下一句還在排隊、動作卻提前偷跑的脫節問題！
     """
@@ -4562,14 +4709,13 @@ async def execute_speech_visual_actions(vts, text: str):
     if exp_match:
         exp_tag = exp_match.group(1).strip()
         if any(k in exp_tag.upper() for k in ["WINK", "眨眼", "單眼", "眨單眼"]):
-            vc.wink_timer = time.time() + 0.55
-            vc.wink_side = random.choice(["left", "right"])
-            log_print(f"😉 [Live2D 動作] 標籤觸發 Wink 單眼眨一下眼 ({vc.wink_side})")
+            asyncio.create_task(vc.trigger_wink())
+            log_print("😉 [Live2D 動作] 標籤觸發 Wink 單眼眨一下眼")
         elif any(k in exp_tag for k in ["驚訝", "惊讶", "驚", "惊", "震驚", "震惊", "瞳孔", "嚇到", "SHOCK", "SURPRISE"]):
-            vc.shock_timer = time.time() + 4.0
+            asyncio.create_task(vc.trigger_shock())
             log_print("😱 [Live2D 動作] 標籤觸發驚訝縮瞳與瞪大雙眼微顫")
         elif any(k in exp_tag for k in ["皺眉", "皱眉", "八字眉", "困擾", "困扰", "委屈", "傲嬌皺眉", "難過眉", "生氣皺眉", "FROWN"]):
-            vc.frown_timer = time.time() + 4.0
+            asyncio.create_task(vc.trigger_frown())
             log_print("🥺 [Live2D 動作] 標籤觸發八字皺眉/委屈表情")
         else:
             log_print(f"🎭 [Live2D 表情] 標籤觸發表情: 「{exp_tag}」")
@@ -4585,36 +4731,34 @@ async def execute_speech_visual_actions(vts, text: str):
     try:
         upper_text = text.upper()
         if "WINK" in upper_text and not exp_match:
-            vc.wink_timer = time.time() + 0.55
-            vc.wink_side = random.choice(["left", "right"])
-            log_print(f"😉 [Live2D 動作] 動作觸發 Wink 單眼眨一下眼 ({vc.wink_side})")
+            asyncio.create_task(vc.trigger_wink())
+            log_print("😉 [Live2D 動作] 動作觸發 Wink 單眼眨一下眼")
         elif any(k in upper_text for k in ["SHOCK", "SHOCKED", "SURPRISE", "PUPIL", "驚訝", "惊讶", "震驚", "震惊", "瞳孔", "嚇到"]) and not exp_match:
-            vc.shock_timer = time.time() + 4.0
+            asyncio.create_task(vc.trigger_shock())
             log_print("😱 [Live2D 動作] 動作觸發驚訝縮瞳與瞪大雙眼微顫")
         elif any(k in upper_text for k in ["FROWN", "FROWNING", "皺眉", "皱眉", "八字眉", "困擾", "委屈"]) and not exp_match:
-            vc.frown_timer = time.time() + 4.0
+            asyncio.create_task(vc.trigger_frown())
             log_print("🥺 [Live2D 動作] 動作觸發八字皺眉/委屈神態")
         elif any(k in upper_text for k in ["ROLL", "AROUND", "WANDER", "轉眼", "環視"]):
-            vc.is_tracking_mouse = False
-            vc.eye_roll_timer = time.time() + 3.8
+            asyncio.create_task(vc.trigger_eye_roll())
             log_print("🌀 [Live2D 動作] 動作觸發招牌靈動轉眼珠環視四周")
         elif "MOUSE" in upper_text and "LOOK" in upper_text:
-            vc.is_tracking_mouse = True
+            asyncio.create_task(vc.set_tracking_mouse(True))
             log_print("👀 [Live2D 視線] 視線切換為鎖定追蹤滑鼠游標")
         elif "LEFT" in upper_text and "LOOK" in upper_text:
-            vc.is_tracking_mouse = False; vc.target_look_x, vc.target_look_y = -25.0, 0.0
+            asyncio.create_task(vc.set_target_look(-25.0, 0.0))
             log_print("👀 [Live2D 視線] 視線轉向【左邊】")
         elif "RIGHT" in upper_text and "LOOK" in upper_text:
-            vc.is_tracking_mouse = False; vc.target_look_x, vc.target_look_y = 25.0, 0.0
+            asyncio.create_task(vc.set_target_look(25.0, 0.0))
             log_print("👀 [Live2D 視線] 視線轉向【右邊】")
         elif "UP" in upper_text and "LOOK" in upper_text:
-            vc.is_tracking_mouse = False; vc.target_look_x, vc.target_look_y = 0.0, 25.0
+            asyncio.create_task(vc.set_target_look(0.0, 25.0))
             log_print("👀 [Live2D 視線] 視線轉向【上方】")
         elif "DOWN" in upper_text and "LOOK" in upper_text:
-            vc.is_tracking_mouse = False; vc.target_look_x, vc.target_look_y = 0.0, -25.0
+            asyncio.create_task(vc.set_target_look(0.0, -25.0))
             log_print("👀 [Live2D 視線] 視線轉向【下方】")
         elif "CENTER" in upper_text and "LOOK" in upper_text:
-            vc.is_tracking_mouse = False; vc.target_look_x, vc.target_look_y = 0.0, 0.0
+            asyncio.create_task(vc.set_target_look(0.0, 0.0))
             log_print("👀 [Live2D 視線] 視線回正【正前方】")
 
         if "EARS" in upper_text:
@@ -4627,11 +4771,11 @@ async def execute_actions(vts, text, input_queue, user_input_ctx: str = "", has_
     """集中式系統動作與指令過濾器 (即刻執行底層系統動作/工具，並產出口語純淨文字)"""
     
     
-    # 🛡️ 徹底去除開頭與內部殘留之 LLM 內部 token (如 get_output, tool_output 等)
+    #  徹底去除開頭與內部殘留之 LLM 內部 token (如 get_output, tool_output 等)
     text = re.sub(r'^(?:get_outputs?|tool_outputs?|function_calls?|tool_responses?)[：:\s_]*', '', text.strip(), flags=re.IGNORECASE).strip()
     text = re.sub(r'\b(?:get_outputs?|tool_outputs?)\b', '', text, flags=re.IGNORECASE).strip()
 
-    # 🧠 提取並過濾殘留心想/思考內容 (已有背景即時心流協程，對話不再輸出或記錄腦內心想)
+    #  提取並過濾殘留心想/思考內容 (已有背景即時心流協程，對話不再輸出或記錄腦內心想)
     extracted_thought, text_without_thought = TextCleanEngine.extract_thought(text)
     if extracted_thought:
         text = text_without_thought
@@ -4639,7 +4783,7 @@ async def execute_actions(vts, text, input_queue, user_input_ctx: str = "", has_
     if bool(re.search(r'\[HAD_TOOL_CALL\]', text, re.IGNORECASE)):
         has_dispatched_tool = True
 
-    # 🧠 7L 自主雲端大腦演進標籤攔截 [UPDATE_PROMPT: ...] / [ADD_EXAMPLE: ...] / [LEARN_MEME: ...] / [LEARN_FACT: ...] / [UPDATE_RULE: ...]
+    #  7L 自主雲端大腦演進標籤攔截 [UPDATE_PROMPT: ...] / [ADD_EXAMPLE: ...] / [LEARN_MEME: ...] / [LEARN_FACT: ...] / [UPDATE_RULE: ...]
     for up in re.finditer(r'\[(?:UPDATE_PROMPT|UPDATE_KNOWLEDGE|SET_PROMPT)[：:]\s*([^|\]]+)\|([^\]]+)\]', text, re.IGNORECASE):
         f_name = up.group(1).strip()
         f_val = up.group(2).strip()
@@ -4681,22 +4825,22 @@ async def execute_actions(vts, text, input_queue, user_input_ctx: str = "", has_
         asyncio.create_task(set_timer(t_sec, t_msg, input_queue))
         text = text.replace(tm.group(0), "")
 
-    # ⚡ 檢測 7L 自我插話標籤 [INTERRUPT_SELF] / [CUT_IN] / [插話] / [中斷]
+    #  檢測 7L 自我插話標籤 [INTERRUPT_SELF] / [CUT_IN] / [插話] / [中斷]
     if bool(re.search(r'\[(?:INTERRUPT_SELF|CUT_IN|INTERRUPT|SELF_INTERRUPT|插話|中斷|打斷自己)\]', text, re.IGNORECASE)):
         log_print("⚡ [7L 自我插話] 檢測到 [INTERRUPT_SELF] 標籤，立即秒級打斷當前正在說的話！")
         asyncio.create_task(interrupt_current_speech(clear_queue=True, reason="7L 自由意志自我插話"))
 
-    # 📐 記住 VTS 模型基準位置與大小 (當老爸說「記住大小」、「記住位置」時即刻執行)
+    #  記住 VTS 模型基準位置與大小 (當老爸說「記住大小」、「記住位置」時即刻執行)
     if any(k in text or k in user_input_ctx for k in ["記住大小", "記住位置", "記住現在位置", "記住當前位置", "記住現在大小", "記錄位置", "記錄大小", "記住模型位置", "記住模型", "記錄基準大小", "記錄基準位置", "記住當前大小"]):
         log_print("📐 [VTS 模型記憶] 正在向 VTube Studio 讀取並保存當前模型座標與大小為基準...")
         asyncio.create_task(vc.fetch_vts_base_model_pos(vc.GLOBAL_VTS))
 
-    # 🛑 翻唱手動終止指令 (當老爸或觀眾說「別唱了」、「停止唱歌」、「不要唱了」時即刻終止)
+    #  翻唱手動終止指令 (當老爸或觀眾說「別唱了」、「停止唱歌」、「不要唱了」時即刻終止)
     if any(k in text or k in user_input_ctx for k in ["別唱了", "停止唱歌", "不要唱了", "別唱歌了", "停唱", "停止翻唱", "關閉音樂", "不要唱歌"]):
         stop_singing()
         log_print("🛑 [翻唱終止] 收到停止唱歌指令，已立即中斷演唱！")
 
-    # 🛠️ 通用 Python 函數直接調用攔截 (Universal Python Call Interceptor)
+    #  通用 Python 函數直接調用攔截 (Universal Python Call Interceptor)
     universal_tool_calls = [
         (r'(?:\[SPEED:[^\]]+\]\s*)?(?:pe\.)?set_piano_speed\(\s*(?:speed\s*=\s*)?[\'"]?([0-9.]+)x?[\'"]?\s*\)', lambda m: pe.set_piano_speed(speed=float(m.group(1)))),
         (r'(?:pe\.)?set_piano_volume\(\s*(?:volume\s*=\s*)?[\'"]?([0-9]+)[\'"]?\s*\)', lambda m: pe.set_piano_volume(volume=int(m.group(1)))),
@@ -4746,7 +4890,7 @@ async def execute_actions(vts, text, input_queue, user_input_ctx: str = "", has_
             (re.findall(r'[\'"]([^\'"]+)[\'"]', m.group(0))[0] if re.findall(r'[\'"]([^\'"]+)[\'"]', m.group(0)) else "鬧鐘時間到"),
             input_queue
         )),
-        (r'search_google\(\s*(?:query\s*=\s*)?[\'"]([^\'"]+)[\'"]\s*\)', lambda m: search_google(m.group(1))),
+        (r'search_google\(\s*(?:query\s*=\s*)?[\'"]([^\'"]+)[\'"]\s*\)', lambda m: asyncio.to_thread(search_google, m.group(1))),
         (r'update_cloud_knowledge\((?:[^)]*)\)', lambda m: update_cloud_prompt_field(
             (re.search(r'category\s*=\s*[\'"]([^\'"]+)[\'"]', m.group(0)).group(1) if re.search(r'category\s*=\s*[\'"]([^\'"]+)[\'"]', m.group(0)) else "facts"),
             (re.search(r'content\s*=\s*[\'"]([^\'"]+)[\'"]', m.group(0)).group(1) if re.search(r'content\s*=\s*[\'"]([^\'"]+)[\'"]', m.group(0)) else (re.findall(r'[\'"]([^\'"]+)[\'"]', m.group(0))[-1] if re.findall(r'[\'"]([^\'"]+)[\'"]', m.group(0)) else ""))
@@ -4820,10 +4964,10 @@ async def execute_actions(vts, text, input_queue, user_input_ctx: str = "", has_
     return clean_text
 
 # ────────────────────────────────────────────────────────
-# ⚙️ 14. 專屬背景工作協程群 (Workers)
+#  14. 專屬背景工作協程群 (Workers)
 # ────────────────────────────────────────────────────────
 
-# --- 🎤 語音與收音協程 ---
+# ---  語音與收音協程 ---
 is_user_listening = False
 listen_start_time = 0.0
 
@@ -4841,7 +4985,7 @@ async def mic_volume_worker():
 
     while True:
         if not IS_MIC_ENABLED:
-            current_mic_volume_str = "[🔴 麥克風已關閉]"
+            current_mic_volume_str = "[ 麥克風已關閉]"
             CURRENT_MIC_VOL_PERCENT = 0
             await asyncio.sleep(0.3)
             continue
@@ -4859,14 +5003,14 @@ async def mic_volume_worker():
                         CURRENT_MIC_VOL_PERCENT = vol_percent
                         bars = vol_percent // 10
                         bar_str = "█" * bars + "_" * (10 - bars)
-                        current_mic_volume_str = f"[🎤 收音: {vol_percent:02d}% |{bar_str}|]"
+                        current_mic_volume_str = f"[ 收音: {vol_percent:02d}% |{bar_str}|]"
                 await asyncio.sleep(0.05) 
             except Exception:
-                current_mic_volume_str = "[🟢 麥克風全時就緒]"
+                current_mic_volume_str = "[ 麥克風全時就緒]"
                 CURRENT_MIC_VOL_PERCENT = 0
                 await asyncio.sleep(0.5)
         else:
-            current_mic_volume_str = "[🟢 麥克風全時就緒]"
+            current_mic_volume_str = "[ 麥克風全時就緒]"
             CURRENT_MIC_VOL_PERCENT = 0
             await asyncio.sleep(0.5)
 
@@ -4880,14 +5024,14 @@ def listen_once_fast(recognizer):
         with sr.Microphone() as source:
             is_user_listening = True
             listen_start_time = time.time()
-            # 🎙️ 純 VAD 語音活動偵測：單次發話上限提高至 30 秒（支援環境變數 MIC_PHRASE_TIME_LIMIT），避免長句或中途思考被強制截斷
+            #  純 VAD 語音活動偵測：單次發話上限提高至 30 秒（支援環境變數 MIC_PHRASE_TIME_LIMIT），避免長句或中途思考被強制截斷
             phrase_limit = float(os.getenv("MIC_PHRASE_TIME_LIMIT", "30.0"))
             audio = recognizer.listen(source, timeout=None, phrase_time_limit=phrase_limit)
             
         is_user_listening = False
-        current_mic_action_str = "☁️ 語音多模態分析中..."
+        current_mic_action_str = " 語音多模態分析中..."
         
-        # 🎙️ 擷取完整原始 WAV 音訊資料與音量門檻檢驗
+        #  擷取完整原始 WAV 音訊資料與音量門檻檢驗
         try:
             raw_pcm = audio.get_raw_data()
             if raw_pcm:
@@ -4931,15 +5075,15 @@ def check_immediate_shutdown(text: str) -> bool:
     if not clean_compact:
         return False
 
-    # 🛑 否定詞防護：若含有「不要 / 別 / 不能 / 請勿 / 取消」等否定詞，絕對不觸發關機或重開
+    #  否定詞防護：若含有「不要 / 別 / 不能 / 請勿 / 取消」等否定詞，絕對不觸發關機或重開
     if any(neg in clean_compact for neg in ["不要", "別", "别", "不能", "請勿", "请勿", "取消"]):
         return False
 
-    # 🛑 過去式疑問句防護：如「關機了嗎」、「重開機了嗎」
+    #  過去式疑問句防護：如「關機了嗎」、「重開機了嗎」
     if clean_compact.endswith("了嗎") or clean_compact.endswith("了吗"):
         return False
 
-    # 🎯 目標判定：指名 7L / 7l / 七L / 阿七 / 小七 / 七妹，並加入中文語音常見同音詞 (謝龍 / CL / 西L 等)
+    #  目標判定：指名 7L / 7l / 七L / 阿七 / 小七 / 七妹，並加入中文語音常見同音詞 (謝龍 / CL / 西L 等)
     target_names = [
         "7l", "七l", "cl", "謝龍", "谢龙", "西l", "吸l", 
         "奇l", "琪l", "期l", "氣l", "切爾", "琪兒", 
@@ -4947,7 +5091,7 @@ def check_immediate_shutdown(text: str) -> bool:
     ]
     has_target = any(name in clean_compact for name in target_names)
 
-    # 🔄 即時重開機指令 (0.001s 安全硬中斷並自動重啟主程序)
+    #  即時重開機指令 (0.001s 安全硬中斷並自動重啟主程序)
     # 支援：7L重開機、謝龍重開機、CL重開機、7L重啟、阿七重開機，或終端純輸入 reboot / restart
     is_exact_restart = clean_compact in ["reboot", "restart", "7lreboot", "7lrestart"]
     restart_keywords = ["重開機", "重開", "重啟", "重新啟動", "重啟系統", "重新開機", "restart", "reboot"]
@@ -4969,7 +5113,7 @@ def check_immediate_shutdown(text: str) -> bool:
         os._exit(0)
         return True
 
-    # 👋 即時安全退出 / 關機指令 (0.001s 安全硬終止)
+    #  即時安全退出 / 關機指令 (0.001s 安全硬終止)
     # 支援：7L關機、謝龍關機、CL關機、7L強制關機、7L關閉系統、阿七關機，或終端純輸入 exit / quit / shutdown
     is_exact_shutdown = clean_compact in ["exit", "quit", "shutdown", "7lexit", "7lquit", "7lshutdown"]
     shutdown_keywords = [
@@ -4999,7 +5143,7 @@ def check_immediate_shutdown(text: str) -> bool:
 async def mic_worker(recognizer, input_queue):
     global current_mic_action_str, LATEST_REALWORLD_SPEECH_TEXT, LATEST_REALWORLD_SPEECH_TIME
     
-    # 🎙️ 麥克風音量閥值初始化：避免安靜環境下自動將 energy_threshold 調得過低
+    #  麥克風音量閥值初始化：避免安靜環境下自動將 energy_threshold 調得過低
     try:
         min_energy = int(os.getenv("MIC_ENERGY_THRESHOLD", "600"))
         with sr.Microphone() as source:
@@ -5015,11 +5159,11 @@ async def mic_worker(recognizer, input_queue):
 
     while True:
         if not IS_MIC_ENABLED:
-            current_mic_action_str = "🔇 靜音"
+            current_mic_action_str = " 靜音"
             await asyncio.sleep(0.3)
             continue
 
-        # 🌟 7x24 全雙工真·不關麥監聽：7L 發話或 MP3 播放中時麥克風依然暢通，由專屬聲紋鎖精準防禦回音並支援隨時插話打斷！
+        #  7x24 全雙工真·不關麥監聽：7L 發話或 MP3 播放中時麥克風依然暢通，由專屬聲紋鎖精準防禦回音並支援隨時插話打斷！
         try:
             listen_res = await asyncio.to_thread(lambda: listen_once_fast(recognizer))
             if isinstance(listen_res, tuple):
@@ -5029,22 +5173,22 @@ async def mic_worker(recognizer, input_queue):
 
             cleaned_text = user_text.strip() if user_text else ""
             
-            # 🛡️ 專屬老爸聲紋鎖與智慧插話系統：
+            #  專屬老爸聲紋鎖與智慧插話系統：
             if cleaned_text:
-                current_mic_action_str = f"👂 聽到:「{cleaned_text[:10]}...」"
+                current_mic_action_str = f" 聽到:「{cleaned_text[:10]}...」"
                 
-                # 👧 0. 7L 自身聲紋辨識防護 (用本地 TTS 特徵庫精準辨識 7L 自聲，主動忽略不予記錄)
+                #  0. 7L 自身聲紋辨識防護 (用本地 TTS 特徵庫精準辨識 7L 自聲，主動忽略不予記錄)
                 if audio_b64:
                     is_7l, score_7l = voiceprint_verifier.verify_is_7l(audio_b64, threshold=0.58)
                     if is_7l:
                         log_print(f"🔇 [7L 自聲防護] 辨識出為 7L 自己的聲音 (相似度: {score_7l:.2f} >= 0.58)，主動忽略不予記錄: 「{cleaned_text}」")
                         continue
 
-                # 🛑 1. 毫秒級即時關機 / 重開機指令攔截 (最高優先權，支援 7L / 謝龍 / CL 等同音指令)
+                #  1. 毫秒級即時關機 / 重開機指令攔截 (最高優先權，支援 7L / 謝龍 / CL 等同音指令)
                 if check_immediate_shutdown(cleaned_text):
                     continue
 
-                # 🔐 2. 毫秒級聲紋特徵驗證：判定是否為老爸本人（徹底排除 7L 自身女聲、喇叭外放、電視雜音、旁人插嘴）
+                #  2. 毫秒級聲紋特徵驗證：判定是否為老爸本人（徹底排除 7L 自身女聲、喇叭外放、電視雜音、旁人插嘴）
                 is_dad, vp_score = voiceprint_verifier.verify_is_dad(audio_b64, threshold=0.70)
                 if not is_dad:
                     # 若為 7L 自身喇叭回音，觸發專屬一次性回音過濾；若是其他雜音則聲紋攔截
@@ -5053,23 +5197,23 @@ async def mic_worker(recognizer, input_queue):
                     log_print(f"🔇 [聲紋攔截] 判定為非老爸聲音或雜音回音 (聲紋分: {vp_score:.2f} < 0.70)，自動過濾: 「{cleaned_text}」")
                     continue
 
-                # 🔇 2. 7L 自身發話喇叭回音過濾（老爸本人聲紋保護：長度動態閾值，短句/指令不殺，一次性過濾）
+                #  2. 7L 自身發話喇叭回音過濾（老爸本人聲紋保護：長度動態閾值，短句/指令不殺，一次性過濾）
                 if is_7l_voice_echo(cleaned_text, is_dad_verified=is_dad):
                     continue
 
-                # 🎙️ 3. 全雙工傾聽不打斷：保留 7L 完整發音說話或唱歌，絕不中斷，背景接收老爸輸入！
+                #  3. 全雙工傾聽不打斷：保留 7L 完整發音說話或唱歌，絕不中斷，背景接收老爸輸入！
                 is_currently_speaking = (current_ai_state in ["TALKING", "SINGING"]) or IS_SINGING_ACTIVE or IS_MP3_PLAYING or (pygame.mixer.get_init() and pygame.mixer.music.get_busy())
                 if is_currently_speaking:
                     log_print(f"🎙️ [老爸語音接收] 聲紋確認 ({vp_score:.2f}) ➔ 7L 說話不中斷，背景接收老爸輸入！")
 
-                # 🔇 4. 電腦內部聲音 (WASAPI Loopback 遊戲/影片) 輔助過濾
+                #  4. 電腦內部聲音 (WASAPI Loopback 遊戲/影片) 輔助過濾
                 if is_computer_audio_echo(cleaned_text):
                     continue
                 
                 saved_audio_path = save_local_audio_clip(audio_b64)
                 LATEST_REALWORLD_SPEECH_TEXT = cleaned_text
                 LATEST_REALWORLD_SPEECH_TIME = time.time()
-                intercept_tag = " (⚡ 立即打斷舊思考)" if current_ai_state == "THINKING" and not is_currently_speaking else ""
+                intercept_tag = " ( 立即打斷舊思考)" if current_ai_state == "THINKING" and not is_currently_speaking else ""
                 log_print(f"📥 [老爸語音] 收到輸入: {cleaned_text} (聲紋: {vp_score:.2f}){intercept_tag}")
                 await input_queue.put({"text": cleaned_text, "audio_base64": audio_b64, "audio_file": saved_audio_path, "timestamp": time.time(), "source": "mic"})
             else:
@@ -5117,7 +5261,7 @@ async def text_file_listener_worker(input_queue, filename="chat_input.txt"):
                         log_print(f"📥 [檔案打字接收] 收到輸入: {cleaned_content}")
                         if check_immediate_shutdown(cleaned_content):
                             return
-                        current_mic_action_str = f"⌨️ 打字:「{cleaned_content[:10]}...」"
+                        current_mic_action_str = f" 打字:「{cleaned_content[:10]}...」"
                         await input_queue.put({"text": cleaned_content, "timestamp": time.time(), "source": "text_file"})
                         break
         except Exception:
@@ -5163,7 +5307,7 @@ async def console_keyboard_input_worker(input_queue):
         except Exception:
             await asyncio.sleep(0.1)
 
-# --- 🖼️ 畫面與環境感知協程 ---
+# ---  畫面與環境感知協程 ---
 async def screen_capture_worker():
     global latest_screen_cache
     while True:
@@ -5184,7 +5328,7 @@ LAST_SCREEN_MD5_HASH = None
 HAS_INITIAL_VISION_LOOK = False
 
 async def peripheral_vision_worker():
-    """👁️ 【背景餘光雙層感知協程】：
+    """ 【背景餘光雙層感知協程】：
     - 頂層哨兵：採用 Gemini Live API (3.8-live) 實時注視螢幕畫面（0 額度消耗、0 描述輸出），
       只極速判定 [NO_CHANGE] 還是 [LOOK_SERIOUS]。
     - 深度眼睛：唯有 Live 哨兵判定出現全新重大視窗/報錯/事件時，才喚醒 3.1-flash-lite 認真細看一次！
@@ -5218,11 +5362,11 @@ async def peripheral_vision_worker():
             if len(img_bytes) < 1000:
                 continue
 
-            # 🛡️ 靜態畫面粗篩：畫面若完全靜止 (例如離開電腦、無任何操作)，0 網路直接略過
+            #  靜態畫面粗篩：畫面若完全靜止 (例如離開電腦、無任何操作)，0 網路直接略過
             if CURRENT_VISION_CHANGE_SCORE == 0 and HAS_INITIAL_VISION_LOOK:
                 continue
 
-            # 🌟 開機第一次：用 3.1-flash-lite 建立基準畫面感知
+            #  開機第一次：用 3.1-flash-lite 建立基準畫面感知
             if not HAS_INITIAL_VISION_LOOK or not current_screen_context or current_screen_context == "目前沒有特別的畫面動態。":
                 log_print("👁️ [餘光視覺感知] 首次啟動 ➔ 啟動 3.1-flash-lite 建立基準畫面認知...")
                 init_desc = await get_lightweight_gemini_vision(sample_img)
@@ -5233,11 +5377,11 @@ async def peripheral_vision_worker():
                     LAST_VISION_LOOK_TIME = time.time()
                 continue
 
-            # ⚡ 日常餘光：由 Live API 哨兵保持注視，不輸出描述，只判定是否需認真看
+            #  日常餘光：由 Live API 哨兵保持注視，不輸出描述，只判定是否需認真看
             should_look = await check_screen_change_via_live_api(img_bytes, current_screen_context)
             if should_look:
                 log_print("🚨 [餘光 Live 哨兵] 判定畫面出現值得關注的新動態！啟動 3.1-flash-lite 認真細看（含動態影格）...")
-                # 🎞️ 收集上次認真看到現在之間的所有時序影格
+                #  收集上次認真看到現在之間的所有時序影格
                 since_frames = [(t, b) for t, b in SCREEN_TEMPORAL_HISTORY if t >= LAST_VISION_LOOK_TIME]
                 n_frames = len(since_frames)
                 # 若幀數太多（>12 張），均勻採樣留 12 張，避免 token 爆炸
@@ -5254,14 +5398,14 @@ async def peripheral_vision_worker():
             pass
 
 async def identify_system_music_and_sound(wav_bytes: bytes) -> str:
-    """🎵 7L 智能電腦音樂與音效多模態感知中樞：
+    """ 7L 智能電腦音樂與音效多模態感知中樞：
     當電腦播放音樂、歌曲、動漫OST或遊戲音效（無人聲語音）時，
     結合 10~11 秒長音訊、桌面視窗標題線索、畫面視覺線索與 Gemini 音訊感知模型，精準聽出具體曲名、作者或風格特徵。
     """
     global LAST_MUSIC_IDENTIFY_TIME, LATEST_SYSTEM_MUSIC_INFO, LATEST_SYSTEM_MUSIC_TIME, current_system_audio_context
     now = time.time()
 
-    # 🛡️ 0. 若 7L 自身正在彈鋼琴或播放 MP3，電腦聲音即為 7L 自身聲音，直接同步當前鋼琴曲目，嚴禁調用 AI 瞎猜
+    #  0. 若 7L 自身正在彈鋼琴或播放 MP3，電腦聲音即為 7L 自身聲音，直接同步當前鋼琴曲目，嚴禁調用 AI 瞎猜
     if (hasattr(pe, "is_piano_active_and_alive") and pe.is_piano_active_and_alive()) or getattr(pe, "is_piano_active", False) or current_ai_state == "PIANO":
         song_t = getattr(pe, "current_piano_song_title", "") or "鋼琴曲"
         current_system_audio_context = f"7L 正在為老爸演奏鋼琴：《{song_t}》"
@@ -5281,7 +5425,7 @@ async def identify_system_music_and_sound(wav_bytes: bytes) -> str:
     if current_screen_context and current_screen_context != "目前沒有特別的畫面動態。":
         screen_clue = current_screen_context.strip().replace("\n", " ")
 
-    # 🌟 1. Windows 原生硬體級 GSMTC 媒體播放器底層情報提取 (嚴格排除已暫停或無視訊狀態)
+    #  1. Windows 原生硬體級 GSMTC 媒體播放器底層情報提取 (嚴格排除已暫停或無視訊狀態)
     media_clues = []
     try:
         from mic_live_plugin.os_desktop_sensor import os_desktop_sensor
@@ -5310,9 +5454,9 @@ async def identify_system_music_and_sound(wav_bytes: bytes) -> str:
         prompt_text = (
             "妳是 7L 的全雙工聽覺與音樂感知神經。\n"
             "這是一段從老爸電腦喇叭內錄擷取的 10 秒真實即時音訊。\n"
-            "🎧【最高核心原則——以妳聽到的真實音訊旋律為 100% 唯一依據，絕不可瞎猜網頁標題】：\n"
+            "【最高核心原則——以妳聽到的真實音訊旋律為 100% 唯一依據，絕不可瞎猜網頁標題】：\n"
             "1. 妳必須『親耳聽出音訊中的真實旋律、節奏與樂器』！\n"
-            "2. ⚠️【嚴厲警惕背景未播放的分頁】：老爸經常在瀏覽器開著多個【處於暫停、未播放、靜音】的 YouTube 或網頁分頁！\n"
+            "2. 【嚴厲警惕背景未播放的分頁】：老爸經常在瀏覽器開著多個【處於暫停、未播放、靜音】的 YouTube 或網頁分頁！\n"
             "   若音訊中的旋律與演奏樂器與任何網頁或視窗標題不符，代表該網頁目前【根本沒有發出聲音】！絕對不能把未在播放的網頁標題當作辨識結果！\n"
             "3. 只有當音訊中的音樂旋律，妳 100% 確實聽出並確認具體曲名時，才輸出具體曲名（例如：李斯特《鐘》、周杰倫《晴天》等）。\n"
             "4. 若音訊旋律無法明確指認具體曲名，或聽到的音樂與參考線索不符，請【務必僅輸出單詞】：UNKNOWN\n"
@@ -5330,7 +5474,7 @@ async def identify_system_music_and_sound(wav_bytes: bytes) -> str:
         res_text = re.sub(r"^(這段音訊是|電腦正在播放|這聽起來是|這是一首|這是)\s*", "", res_text)
         res_text = res_text.replace("\n", " ").replace("「", "").replace("」", "").strip()
 
-        # 🛡️ 嚴格校驗：確保確實指認出具體曲名/作品，杜絕 generic 模糊風格瞎猜
+        #  嚴格校驗：確保確實指認出具體曲名/作品，杜絕 generic 模糊風格瞎猜
         def _check_is_music_valid(s: str) -> bool:
             if not s or "UNKNOWN" in s.upper() or s in ["未知", "無法識別", "無音樂", "無特別音樂", "None", "None."]:
                 return False
@@ -5389,7 +5533,7 @@ async def identify_system_music_and_sound(wav_bytes: bytes) -> str:
     return ""
 
 async def system_audio_worker():
-    """🎧 即時電腦內部全系統聲音感知與內錄協程 (WASAPI Loopback 實時耳目)"""
+    """ 即時電腦內部全系統聲音感知與內錄協程 (WASAPI Loopback 實時耳目)"""
     global current_system_audio_context, LATEST_SYSTEM_AUDIO_RMS, LATEST_SYSTEM_AUDIO_TEXT
     global LATEST_SYSTEM_AUDIO_TEXT_TIME, CURRENT_SYSTEM_AUDIO_VOL_PERCENT
     global LATEST_SYSTEM_MUSIC_INFO, LATEST_SYSTEM_MUSIC_TIME, LAST_MUSIC_IDENTIFY_TIME
@@ -5440,7 +5584,7 @@ async def system_audio_worker():
                     speech_audio_buffer.append(data)
                     music_audio_buffer.append(data)
 
-                    # 🎤 若 7L 自身正在唱歌，電腦聲音為 7L 歌聲，略過 STT 與音樂猜測，防止自己被自己打斷
+                    #  若 7L 自身正在唱歌，電腦聲音為 7L 歌聲，略過 STT 與音樂猜測，防止自己被自己打斷
                     if IS_SINGING_ACTIVE or current_ai_state == "SINGING":
                         current_system_audio_context = "7L 正在為老爸翻唱歌曲（Live2D 舞台開唱中）"
                         LATEST_SYSTEM_MUSIC_INFO = "7L 翻唱歌曲"
@@ -5449,7 +5593,7 @@ async def system_audio_worker():
                         await asyncio.sleep(0.08)
                         continue
 
-                    # 🎹 若 7L 自身正在彈鋼琴，電腦聲音為 7L 琴聲，直接同步曲目，略過 STT 與音樂猜測
+                    #  若 7L 自身正在彈鋼琴，電腦聲音為 7L 琴聲，直接同步曲目，略過 STT 與音樂猜測
                     if (hasattr(pe, "is_piano_active_and_alive") and pe.is_piano_active_and_alive()) or getattr(pe, "is_piano_active", False) or current_ai_state == "PIANO":
                         song_t = getattr(pe, "current_piano_song_title", "") or "鋼琴曲"
                         current_system_audio_context = f"7L 正在為老爸演奏鋼琴：《{song_t}》"
@@ -5481,7 +5625,9 @@ async def system_audio_worker():
                                 try:
                                     wav_bytes = await asyncio.to_thread(_convert_buffer_to_wav, s_chunks)
                                     if wav_bytes:
-                                        text = await asyncio.to_thread(transcribe_audio_bytes, wav_bytes)
+                                        # 原本走本地 STT，現在聽你的，直接走獨立的 Live API 對比！
+                                        text = await gemini_system_audio_live_transcribe(wav_bytes)
+
                                         if text:
                                             global LATEST_SYSTEM_AUDIO_TEXT, LATEST_SYSTEM_AUDIO_TEXT_TIME, current_system_audio_context
                                             LATEST_SYSTEM_AUDIO_TEXT = text
@@ -5495,9 +5641,9 @@ async def system_audio_worker():
 
                                             lower_t = text.lower()
                                             if any(n in lower_t for n in ["7l", "七七", "小七", "機器人"]):
-                                                add_to_streamer_mind_board("🎧 [電腦/DC通話語音]", f"電腦傳出語音提到妳：『{text}』", source="system_audio")
+                                                add_to_streamer_mind_board(" [電腦/DC通話語音]", f"電腦傳出語音提到妳：『{text}』", source="system_audio")
                                         elif m_chunks:
-                                            # 🎵 STT 未辨識到語音，且音樂緩衝區已累積 7~11 秒高品質長音訊，由音樂感知核心深度聆聽
+                                            #  STT 未辨識到語音，且音樂緩衝區已累積 7~11 秒高品質長音訊，由音樂感知核心深度聆聽
                                             m_wav_bytes = await asyncio.to_thread(_convert_buffer_to_wav, m_chunks)
                                             if m_wav_bytes:
                                                 await identify_system_music_and_sound(m_wav_bytes)
@@ -5538,7 +5684,7 @@ async def _ai_face_tracking_loop_impl(vts):
     blink_timer = time.time() + random.uniform(3.5, 6.0)
     blink_start_time = 0.0
     is_blinking = False
-    smooth_sleep_eye = 1.0  # 🌟 休眠閉眼平滑過渡因子 (1.0 清醒睜眼 -> 0.0 閉眼安睡)
+    smooth_sleep_eye = 1.0  #  休眠閉眼平滑過渡因子 (1.0 清醒睜眼 -> 0.0 閉眼安睡)
     
     curr_x, curr_y, curr_z = 0.0, 0.0, 0.0
     curr_eye_x, curr_eye_y = 0.0, 0.0
@@ -5592,55 +5738,8 @@ async def _ai_face_tracking_loop_impl(vts):
                 sw, sh = pyautogui.size()
                 px, py = pyautogui.position()
                 
-                # 🎯 以 7L 的 VTS 視窗中心為基準，修正視線相對於螢幕中心的偏差
-                # 自動偵測 VTube Studio 視窗位置（每 3 秒更新一次）
-                if not hasattr(vc, '_vts_win_cx') or now - getattr(vc, '_vts_win_last_update', 0) > 3.0:
-                    found_win = None
-                    try:
-                        import pygetwindow as gw
-                        for w in gw.getAllWindows():
-                            if w.visible and w.width > 150 and w.height > 150:
-                                win_t = (w.title or "").lower()
-                                if 'vtube' in win_t or 'vts' in win_t:
-                                    found_win = (w.left + w.width / 2, w.top + w.height / 2)
-                                    break
-                    except Exception:
-                        pass
-                    
-                    if not found_win:
-                        try:
-                            import ctypes, ctypes.wintypes
-                            user32 = ctypes.windll.user32
-                            found = []
-                            def enum_cb(hwnd, _):
-                                if user32.IsWindowVisible(hwnd):
-                                    buf = ctypes.create_unicode_buffer(256)
-                                    user32.GetWindowTextW(hwnd, buf, 256)
-                                    title = (buf.value or "").lower()
-                                    if 'vtube' in title or 'vts' in title:
-                                        rect = ctypes.wintypes.RECT()
-                                        user32.GetWindowRect(hwnd, ctypes.byref(rect))
-                                        w = rect.right - rect.left
-                                        h = rect.bottom - rect.top
-                                        if w > 150 and h > 150:
-                                            cx = (rect.left + rect.right) / 2
-                                            cy = (rect.top + rect.bottom) / 2
-                                            found.append((cx, cy))
-                                return 1
-                            WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.wintypes.HWND, ctypes.wintypes.LPARAM)
-                            user32.EnumWindows(WNDENUMPROC(enum_cb), 0)
-                            if found:
-                                found_win = found[0]
-                        except Exception:
-                            pass
-
-                    if found_win:
-                        vc._vts_win_cx = found_win[0] / sw  # 0.0~1.0 normalized
-                        vc._vts_win_cy = found_win[1] / sh
-                    elif not hasattr(vc, '_vts_win_cx'):
-                        vc._vts_win_cx = 0.5
-                        vc._vts_win_cy = 0.5
-                    vc._vts_win_last_update = now
+                #  以 7L 的 VTS 視窗中心為基準，修正視線相對於螢幕中心的偏差
+                vc._vts_win_cx, vc._vts_win_cy = await vc.update_vts_window_center(sw, sh)
                 
                 # 以 7L 的視窗中心為參考點，計算滑鼠相對位置（往左為負，往右為正）
                 nx = (px / sw) - vc._vts_win_cx  # 以 VTS 視窗 X 為 0 點
@@ -5650,19 +5749,19 @@ async def _ai_face_tracking_loop_impl(vts):
             vc.current_look_x += (vc.target_look_x - vc.current_look_x) * 0.08
             vc.current_look_y += (vc.target_look_y - vc.current_look_y) * 0.08
 
-            # 🌟 檢測休眠狀態：若休眠則眼睛平滑閉合為 0.0；若喚醒則平滑睜眼至 1.0
+            #  檢測休眠狀態：若休眠則眼睛平滑閉合為 0.0；若喚醒則平滑睜眼至 1.0
             if IS_SLEEPING:
                 smooth_sleep_eye = max(0.0, smooth_sleep_eye - 0.08)
             else:
                 smooth_sleep_eye = min(1.0, smooth_sleep_eye + 0.12)
 
-            # 🌟 眼睛開合計算 (休眠模式強制閉眼 0.0；清醒模式正常眨眼)
+            #  眼睛開合計算 (休眠模式強制閉眼 0.0；清醒模式正常眨眼)
             if IS_SLEEPING:
                 eye_open_left = smooth_sleep_eye
                 eye_open_right = smooth_sleep_eye
                 is_blinking = False
             else:
-                # 🌟 自然真實眨眼機制 (每 3.5~6.5 秒眨眼一次，閉眼時間精確為 0.14 秒，徹底杜絕快速連眨)
+                #  自然真實眨眼機制 (每 3.5~6.5 秒眨眼一次，閉眼時間精確為 0.14 秒，徹底杜絕快速連眨)
                 eye_open_left = smooth_sleep_eye
                 eye_open_right = smooth_sleep_eye
                 if vc.force_blink_trigger > 0:
@@ -5687,15 +5786,15 @@ async def _ai_face_tracking_loop_impl(vts):
                     eye_open_left = smooth_sleep_eye
                     eye_open_right = smooth_sleep_eye
 
-            # 🌟 靈動眼珠與鋼琴音符密集處視線追蹤計算
+            #  靈動眼珠與鋼琴音符密集處視線追蹤計算
             if vc.eye_roll_timer > now:
-                # 🌀 招牌靈動大轉眼珠 / 大圈環視四周 (俐落 360° 滿幅滿力道 1.0 大圓周軌跡)
+                #  招牌靈動大轉眼珠 / 大圈環視四周 (俐落 360° 滿幅滿力道 1.0 大圓周軌跡)
                 target_eye_x = math.sin(t * 4.2) * 1.0
                 target_eye_y = math.cos(t * 4.2) * 1.0
                 curr_eye_x = target_eye_x
                 curr_eye_y = target_eye_y
             elif pe.is_piano_active_and_alive():
-                # 🎹 只要處於鋼琴彈奏狀態中：眼神永遠精準朝下追蹤琴鍵音符密集重心
+                #  只要處於鋼琴彈奏狀態中：眼神永遠精準朝下追蹤琴鍵音符密集重心
                 smooth_piano_focus_x += (pe.PIANO_NOTE_FOCUS_X - smooth_piano_focus_x) * 0.25
                 target_eye_x = max(-0.85, min(0.85, smooth_piano_focus_x / 16.0))
                 target_eye_y = -0.75
@@ -5725,7 +5824,7 @@ async def _ai_face_tracking_loop_impl(vts):
             target_angle_z = 0.0
             target_mouth = 0.0
 
-            # 👄 真實音訊波形精準對嘴：完全根據音訊逐幀 RMS 振幅與快開慢合物理平滑決定！
+            #  真實音訊波形精準對嘴：完全根據音訊逐幀 RMS 振幅與快開慢合物理平滑決定！
             if is_playing:
                 global CURRENT_SMOOTH_MOUTH
                 if CURRENT_MOUTH_ENVELOPE and CURRENT_SPEECH_START_TIME > 0:
@@ -5736,14 +5835,14 @@ async def _ai_face_tracking_loop_impl(vts):
                     else:
                         raw_target = 0.0
                     
-                    # 🎙️ 快開慢合 (Fast Attack 0.65, Gentle Release 0.35) 物理濾波，徹底告別卡頓與僵硬
+                    #  快開慢合 (Fast Attack 0.65, Gentle Release 0.35) 物理濾波，徹底告別卡頓與僵硬
                     if raw_target > CURRENT_SMOOTH_MOUTH:
                         CURRENT_SMOOTH_MOUTH += (raw_target - CURRENT_SMOOTH_MOUTH) * 0.65
                     else:
                         CURRENT_SMOOTH_MOUTH += (raw_target - CURRENT_SMOOTH_MOUTH) * 0.35
                     target_mouth = round(CURRENT_SMOOTH_MOUTH, 3)
                 else:
-                    # 🔇 若無真實音訊波形包絡 (如生成等待、句間分段間隙)，自然平滑閉合嘴巴，嚴禁無聲時空動嘴！
+                    #  若無真實音訊波形包絡 (如生成等待、句間分段間隙)，自然平滑閉合嘴巴，嚴禁無聲時空動嘴！
                     CURRENT_SMOOTH_MOUTH *= 0.35
                     target_mouth = round(CURRENT_SMOOTH_MOUTH, 3)
             else:
@@ -5752,13 +5851,13 @@ async def _ai_face_tracking_loop_impl(vts):
 
             # 姿態與頭部運動計算
             if pe.is_piano_active_and_alive():
-                # 🎹 鋼琴彈奏中：頭部與身體重心專注在鍵盤，隨音符高低音律動傾斜（說話時僅動嘴，姿態不變）
+                #  鋼琴彈奏中：頭部與身體重心專注在鍵盤，隨音符高低音律動傾斜（說話時僅動嘴，姿態不變）
                 smooth_piano_focus_x += (pe.PIANO_NOTE_FOCUS_X - smooth_piano_focus_x) * 0.25
                 target_angle_x = smooth_piano_focus_x * 0.65 + math.sin(t * 1.2) * 2.5
                 target_angle_y = -10.0 + math.cos(t * 1.5) * 1.5
                 target_angle_z = smooth_piano_focus_x * 0.30 + math.sin(t * 1.0) * 2.0
             elif is_playing:
-                # 🗣️ MP3 播放中：頭部溫和自然微幅呼吸點頭
+                #  MP3 播放中：頭部溫和自然微幅呼吸點頭
                 target_angle_x = math.sin(t * 1.0) * 1.5 + vc.current_look_x * 0.25
                 target_angle_y = math.cos(t * 0.8) * 0.8 + vc.current_look_y * 0.25
                 target_angle_z = math.sin(t * 0.7) * 1.0
@@ -5768,7 +5867,7 @@ async def _ai_face_tracking_loop_impl(vts):
                 target_angle_z = 0.0
             else:
                 if IS_SLEEPING:
-                    # 😴 沉睡休眠安詳姿態：頭微低下垂 (-8.5度)，伴隨均勻舒緩的深層呼吸起伏
+                    #  沉睡休眠安詳姿態：頭微低下垂 (-8.5度)，伴隨均勻舒緩的深層呼吸起伏
                     sleep_breath = math.sin(t * 0.45)
                     target_angle_x = math.sin(t * 0.25) * 1.0
                     target_angle_y = -8.5 + sleep_breath * 0.8
@@ -5792,8 +5891,8 @@ async def _ai_face_tracking_loop_impl(vts):
                 target_angle_z += math.sin(t * 4.2) * 3.5
                 target_angle_y += math.cos(t * 4.2) * 2.0
 
-            # 🌟 純物理動力學縮小瞳孔與震驚 (EyeOpen=2.0 瞪大縮瞳 + 自然呼吸微顫抖)
-            # 🎙️ 發話期間若有物理表情，持續延長鎖定，確保說話全程不中途褪去
+            #  純物理動力學縮小瞳孔與震驚 (EyeOpen=2.0 瞪大縮瞳 + 自然呼吸微顫抖)
+            #  發話期間若有物理表情，持續延長鎖定，確保說話全程不中途褪去
             if CURRENT_PLAYING_VOICE_TASK is not None:
                 if vc.shock_timer > now:
                     vc.shock_timer = max(vc.shock_timer, now + 1.0)
@@ -5803,7 +5902,7 @@ async def _ai_face_tracking_loop_impl(vts):
             is_in_shock = (vc.shock_timer > now)
             is_frowning = (vc.frown_timer > now)
             
-            # 🛡️ 徹底防呆：時效結束時立即歸零重置，絕不殘留！
+            #  徹底防呆：時效結束時立即歸零重置，絕不殘留！
             if not is_in_shock and vc.shock_timer > 0:
                 vc.shock_timer = 0.0
             if not is_frowning and vc.frown_timer > 0:
@@ -5822,7 +5921,7 @@ async def _ai_face_tracking_loop_impl(vts):
                 curr_eye_x += math.sin(t * 8.0) * 0.02
                 curr_eye_y += math.cos(t * 7.0) * 0.02
             elif is_frowning:
-                # 🌟 困擾/委屈 皺眉表情 (Brows = 0.0 壓低眉毛形成八字皺眉 + 微撇嘴/微嘟嘴)
+                #  困擾/委屈 皺眉表情 (Brows = 0.0 壓低眉毛形成八字皺眉 + 微撇嘴/微嘟嘴)
                 eye_open_left = 0.95
                 eye_open_right = 0.95
                 target_brows = 0.0
@@ -5830,7 +5929,7 @@ async def _ai_face_tracking_loop_impl(vts):
                 target_angle_z += math.sin(t * 1.5) * 2.0
                 target_angle_y += -1.5
             elif vc.wink_timer > now:
-                # 🌟 俏皮靈動單邊眨一下眼 (Wink: 總時長 0.55 秒，眨一下立即順暢張開)
+                #  俏皮靈動單邊眨一下眼 (Wink: 總時長 0.55 秒，眨一下立即順暢張開)
                 elapsed_wink = 0.55 - (vc.wink_timer - now)
                 if elapsed_wink < 0.10:
                     wink_eye_open = max(0.0, 1.0 - (elapsed_wink / 0.10))
@@ -5850,7 +5949,7 @@ async def _ai_face_tracking_loop_impl(vts):
                 target_brows = 0.50
                 target_mouth_smile = 0.50 + 0.35 * (1.0 - wink_eye_open)
             else:
-                # 🌟 平時自然溫和中性眉毛 (0.50) 與自然微笑 (0.50，發話時隨開口度靈動上揚)
+                #  平時自然溫和中性眉毛 (0.50) 與自然微笑 (0.50，發話時隨開口度靈動上揚)
                 target_brows = 0.50
                 target_mouth_smile = min(1.0, 0.50 + 0.20 * target_mouth) if is_playing else 0.50
 
@@ -5862,9 +5961,9 @@ async def _ai_face_tracking_loop_impl(vts):
                 {"id": "FaceAngleX", "value": curr_x, "weight": 1.0},
                 {"id": "FaceAngleY", "value": curr_y, "weight": 1.0},
                 {"id": "FaceAngleZ", "value": curr_z, "weight": 1.0},
-                {"id": "EyeLeftX", "value": curr_eye_x, "weight": 1.0},
+                {"id": "EyeLeftX", "value": -curr_eye_x, "weight": 1.0},  # Invert X for correct eye tracking relative to head
                 {"id": "EyeLeftY", "value": curr_eye_y, "weight": 1.0},
-                {"id": "EyeRightX", "value": curr_eye_x, "weight": 1.0},
+                {"id": "EyeRightX", "value": -curr_eye_x, "weight": 1.0}, # Invert X for correct eye tracking relative to head
                 {"id": "EyeRightY", "value": curr_eye_y, "weight": 1.0},
                 {"id": "EyeOpenLeft", "value": eye_open_left, "weight": 1.0},
                 {"id": "EyeOpenRight", "value": eye_open_right, "weight": 1.0},
@@ -5977,10 +6076,10 @@ async def vts_health_worker(vts):
             continue
         try:
             now = time.time()
-            # 🏓 真實 ping 測試：不靠 is_connected() 假狀態，直接送 APIStateRequest
+            #  真實 ping 測試：不靠 is_connected() 假狀態，直接送 APIStateRequest
             alive = await _vts_real_ping(vts)
             if not alive:
-                # 🔌 真正斷線：10 秒冷卻重連
+                #  真正斷線：10 秒冷卻重連
                 if now - _VTS_LAST_RECONNECT_TIME >= 10.0:
                     _VTS_IS_RECONNECTING = True
                     try:
@@ -5999,7 +6098,7 @@ async def vts_health_worker(vts):
                 # 連線正常：重置時間戳，確保下次真正斷線能立刻重連
                 _VTS_LAST_AUTH_TIME = now
 
-            # 🛡️ 守護追蹤主協程：若協程因任何異常退出，即刻自動重啟
+            #  守護追蹤主協程：若協程因任何異常退出，即刻自動重啟
             if GLOBAL_VTS_TRACKING_TASK is None or GLOBAL_VTS_TRACKING_TASK.done():
                 GLOBAL_VTS_TRACKING_TASK = asyncio.create_task(ai_face_tracking_loop(vts))
         except Exception:
@@ -6015,13 +6114,15 @@ async def autonomous_wander_worker():
             await asyncio.sleep(12.0)
             idle_ticks = get_silence_ticks()
             
-            # ☀️ 7L 休眠中自主甦醒邏輯（若電腦播放音樂或老爸回來活動，7L 感知到環境熱鬧自主醒來）
+            #  7L 休眠中自主甦醒邏輯（若電腦播放音樂或老爸回來活動，7L 感知到環境熱鬧自主醒來）
             if IS_SLEEPING:
-                if LATEST_SYSTEM_MUSIC_INFO and idle_ticks < 120:
-                    log_print(f"☀️ [7L 自主甦醒] 偵測到老爸電腦正在播放音樂 ({LATEST_SYSTEM_MUSIC_INFO})，7L 自主醒來！")
+                if LATEST_SYSTEM_MUSIC_INFO or CURRENT_VISION_CHANGE_LEVEL in ["medium", "high"]:
+                    reason = f"播放音樂 ({LATEST_SYSTEM_MUSIC_INFO})" if LATEST_SYSTEM_MUSIC_INFO else "畫面切換活躍"
+                    log_print(f"☀️ [7L 自主甦醒] 偵測到老爸電腦正在{reason}，7L 自主醒來！")
                     await set_sleep_mode(False)
+                    wake_text = "唔嗯～好聽的音樂！老爸你在聽歌呀，7L 睡醒囉！" if LATEST_SYSTEM_MUSIC_INFO else "嗯... 老爸回來啦？7L 睡醒囉，隨時為你服務！"
                     speech_item = {
-                        "text": "唔嗯～好聽的音樂！老爸你在聽歌呀，7L 睡醒囉！",
+                        "text": wake_text,
                         "expression": "自然",
                         "action": "WINK",
                         "target": "dad",
@@ -6034,7 +6135,7 @@ async def autonomous_wander_worker():
             if pe.is_piano_active or IS_SINGING_ACTIVE or current_ai_state in ["TALKING", "THINKING", "PIANO", "SINGING"]:
                 continue
 
-            # 🌙 7L 自主作息小憩邏輯（深夜15分鐘或白天60分鐘無人對話且環境完全安靜時，7L 自主決定小憩入睡）
+            #  7L 自主作息小憩邏輯（深夜15分鐘或白天60分鐘無人對話且環境完全安靜時，7L 自主決定小憩入睡）
             if not IS_SLEEPING and current_ai_state == "IDLE":
                 import datetime
                 current_hour = datetime.datetime.now().hour
@@ -6060,7 +6161,7 @@ async def autonomous_wander_worker():
             
             idle_seconds = None
             if IS_AUTO_WANDER_ENABLED and current_ai_state == "IDLE" and idle_seconds > 60.0:
-                # 🎹 自主彈琴邏輯：預設關閉（IS_AUTO_PIANO_ENABLED = False），嚴禁未經指示自作主張彈琴打斷老爸或與背景音樂打架
+                #  自主彈琴邏輯：預設關閉（IS_AUTO_PIANO_ENABLED = False），嚴禁未經指示自作主張彈琴打斷老爸或與背景音樂打架
                 def now():
                     pass
                 if IS_AUTO_PIANO_ENABLED and (now - LAST_AUTO_PIANO_TIME > 300.0):
@@ -6090,12 +6191,12 @@ async def autonomous_wander_worker():
         except Exception:
             await asyncio.sleep(5.0)
 
-# --- 🗣️ 語音合成排隊協程 (老爸優先 / 異步雙軌仲裁器) ---
+# ---  語音合成排隊協程 (老爸優先 / 異步雙軌仲裁器) ---
 async def speech_queue_worker(vts, input_queue):
     global current_ai_state, CURRENT_SPEAKING_TARGET, CURRENT_PLAYING_VOICE_TASK
     while True:
         try:
-            # 🎤 7L 翻唱中絕不開口說話打斷自己的歌聲，排隊等候演唱完畢
+            #  7L 翻唱中絕不開口說話打斷自己的歌聲，排隊等候演唱完畢
             while IS_SINGING_ACTIVE or current_ai_state == "SINGING":
                 await asyncio.sleep(0.5)
 
@@ -6111,7 +6212,7 @@ async def speech_queue_worker(vts, input_queue):
                 text = item.get("text", "")
                 target = item.get("target", "dad")
                 raw_actions_text = item.get("raw_text", "")
-                # 🔇 公開性：未顯式標註時，target=dad 視為操作者私訊（不播出）
+                #  公開性：未顯式標註時，target=dad 視為操作者私訊（不播出）
                 private = bool(item.get("private", target == "dad"))
             else:
                 text = str(item)
@@ -6122,7 +6223,7 @@ async def speech_queue_worker(vts, input_queue):
             if not text:
                 continue
             
-            # 🔇 只對觀眾發聲（依你的要求）：操作者私訊管道的回話不播出。
+            #  只對觀眾發聲（依你的要求）：操作者私訊管道的回話不播出。
             #    記憶/字幕前置處理/表情與計時器都已在此之前完成，這裡只攔「播放」；
             #    同時清掉剛寫入的 OBS 字幕，避免觀眾看到一句沒被唸出來的話。
             if not speech_allowed(private):
@@ -6152,13 +6253,13 @@ async def speech_queue_worker(vts, input_queue):
             finally:
                 CURRENT_PLAYING_VOICE_TASK = None
             
-            # 🎙️ 發話音訊一播放完畢，立即秒級釋放麥克風狀態，絕不卡死老爸即時接話！
+            #  發話音訊一播放完畢，立即秒級釋放麥克風狀態，絕不卡死老爸即時接話！
             if speech_queue.empty():
                 if current_ai_state == "TALKING":
                     current_ai_state = "SINGING" if IS_SINGING_ACTIVE else ("PIANO" if pe.is_piano_active else "IDLE")
                 CURRENT_SPEAKING_TARGET = "none"
             
-            # 🎭 表情停留緩衝：發話完畢後若表情仍在時效內，持續保留一段時間（預設 3.5 秒），讓情緒自然延續
+            #  表情停留緩衝：發話完畢後若表情仍在時效內，持續保留一段時間（預設 3.5 秒），讓情緒自然延續
             now = time.time()
             if vc.frown_timer > now:
                 vc.frown_timer = now + vc.EXPRESSION_HOLD_SECONDS
@@ -6194,7 +6295,7 @@ async def speech_queue_worker(vts, input_queue):
                 pass
 
 # ────────────────────────────────────────────────────────
-# 🤖 15. 對話處理與自主發話大腦核心
+#  15. 對話處理與自主發話大腦核心
 # ────────────────────────────────────────────────────────
 async def background_system_task(vts, input_queue, user_input, stage1_text, system_prompt, current_history, screen_img=None):
     global current_ai_state
@@ -6214,7 +6315,7 @@ async def background_system_task(vts, input_queue, user_input, stage1_text, syst
     spoken = await execute_actions(vts, clean_bot_reply, input_queue, caller_target="dad", caller_user="老爸")
     clean_spoken = spoken.strip(" *'\"-.,!?。，！？\n\r") if spoken else ""
     if clean_spoken:
-        # ⚡ 大腦一回傳輸出，即刻第一時間更新 subtitle.txt 抵消 OBS 讀取延遲！
+        #  大腦一回傳輸出，即刻第一時間更新 subtitle.txt 抵消 OBS 讀取延遲！
         await asyncio.to_thread(update_subtitle, clean_spoken)
         log_print(f"💬 7L 回覆: {clean_spoken} ({current_model_tag})")
         await speech_queue.put({"text": clean_spoken, "target": "audience", "raw_text": clean_bot_reply})
@@ -6280,15 +6381,15 @@ def is_piano_song_request(user_input: str) -> bool:
         return False
     clean_ql = clean_q.lower().strip()
 
-    # 🛑 1. 純數字或標點符號（如 "67", "666", "777", "123"）絕對不是歌名！
+    #  1. 純數字或標點符號（如 "67", "666", "777", "123"）絕對不是歌名！
     if clean_ql.isdigit() or re.fullmatch(r'[\d\s.,!?:;~～\-_+]+', clean_ql):
         return False
 
-    # 🛑 2. 長度過短且無點歌動詞，絕對不是歌名
+    #  2. 長度過短且無點歌動詞，絕對不是歌名
     if len(clean_ql) <= 1:
         return False
 
-    # 🛑 3. 排除日常問候、感嘆詞、詢問鋼琴視窗、日常抱怨
+    #  3. 排除日常問候、感嘆詞、詢問鋼琴視窗、日常抱怨
     non_song_dialogue = [
         "拿出來", "出來了沒", "沒出來", "在哪", "開了沒", "沒開", "收起來", "關掉", "不見了",
         "有看到嗎", "你的鋼琴呢", "是不是沒", "沒看到", "看不到", "視窗", "鋼琴好大", "鋼琴好小", "什麼牌子",
@@ -6300,7 +6401,7 @@ def is_piano_song_request(user_input: str) -> bool:
         if not any(k in clean_ql for k in ["彈一首", "點歌", "播放", "放一首", "來一首", "換這首", "聽這首"]):
             return False
 
-    # 🌟 4. 符合「標準點歌格式」：明確含有「彈」、「點」、「聽」、「放」、「播」等動詞
+    #  4. 符合「標準點歌格式」：明確含有「彈」、「點」、「聽」、「放」、「播」等動詞
     # 格式包含：彈《歌名》、彈youtube《歌名》、彈yt《歌名》、彈 歌名、點歌、想聽、來一首、播放 等
     explicit_song_verbs = [
         "彈", "點歌", "點一首", "想聽", "來一首", "來首", "播放鋼琴", "播一首", "放一首",
@@ -6309,7 +6410,7 @@ def is_piano_song_request(user_input: str) -> bool:
     if any(v in clean_ql for v in explicit_song_verbs):
         return True
 
-    # 🌟 5. 「除非很明顯是歌名」：
+    #  5. 「除非很明顯是歌名」：
     # 5A. 帶有書名號《...》或引號「...」包裹，且書名號內不是純數字或單字
     book_titles = re.findall(r'[《「](.*?)[》」]', clean_q)
     for bt in book_titles:
@@ -6350,9 +6451,9 @@ async def prefetch_song_midi_background(song_query: str):
         pass
 
 # ────────────────────────────────────────────────────────
-# 🧠 15. 全集中全景時序記憶中樞與對話派發系統 (Unified Mind-Stream Architecture)
+#  15. 全集中全景時序記憶中樞與對話派發系統 (Unified Mind-Stream Architecture)
 # ────────────────────────────────────────────────────────
-# 💡 核心設計：
+#  核心設計：
 #    - `UNIFIED_LIVE_MEMORY`: 全局唯一統一記憶時間線（deque maxlen=300 + 本地 unified_memory.json 持久化）。
 #      老爸對話、直播觀眾彈幕、7L 自身發言、鋼琴演奏等全事件 100% 匯流同一時間線。
 #    - 所有 Gemini 呼叫點（老爸旗艦主腦、主播記憶看板、Live 專屬雙軌、自主發話、Live 哨兵）
@@ -6377,7 +6478,7 @@ def add_to_streamer_mind_board(user_display: str, unique_id: str, content: str, 
     }
     STREAMER_MIND_BOARD.append(item)
     
-    # 🌟 寫入全集中記憶中樞（確保老爸輸入與觀眾彈幕統一匯流，精準辨別對話目標）
+    #  寫入全集中記憶中樞（確保老爸輸入與觀眾彈幕統一匯流，精準辨別對話目標）
     if unique_id == "dad" or source in ["mic", "text_file", "console"]:
         try:
             from core.identity import get_owner_name, get_character_name
@@ -6426,7 +6527,7 @@ def add_to_streamer_mind_board(user_display: str, unique_id: str, content: str, 
     unread_count = sum(1 for m in STREAMER_MIND_BOARD if m["status"] == "unread")
     log_print(f"📥 [記憶腦袋 寫入] {user_display}: {content} (🧠 看板累積未讀: {unread_count} 筆)")
     
-    # 🎹 依老爸鐵律判定是否為點歌意圖（必須有「彈」或明顯歌名），再交由 Gemini 確認
+    #  依老爸鐵律判定是否為點歌意圖（必須有「彈」或明顯歌名），再交由 Gemini 確認
     if pe.is_piano_active and pe.current_piano_song_title and content and is_piano_song_request(content):
         async def evaluate_and_queue_with_gemini(raw_text: str):
             try:
@@ -6447,7 +6548,7 @@ def add_to_streamer_mind_board(user_display: str, unique_id: str, content: str, 
         asyncio.create_task(evaluate_and_queue_with_gemini(content))
 
 def mark_streamer_mind_board_as_read(unique_id: str = None, content: str = None):
-    """📖 將 7L 記憶腦袋看板中的指定留言/對話標記為已讀"""
+    """ 將 7L 記憶腦袋看板中的指定留言/對話標記為已讀"""
     marked_cnt = 0
     for m in STREAMER_MIND_BOARD:
         if m.get("status") == "unread":
@@ -6467,7 +6568,7 @@ def mark_streamer_mind_board_as_read(unique_id: str = None, content: str = None)
 
 
 async def judge_subconscious_intent_via_live_api(memory_context: str, unread_batch_desc: str) -> dict:
-    """⚡ 【Live API 潛意識發言決策哨兵】：
+    """ 【Live API 潛意識發言決策哨兵】：
     利用 Live API 無限額度特性，實時審閱 100 句記憶與新彈幕，
     極速判定當前是否該開口發話（二元決策），絕不浪費主力模型額度！
     回傳 dict: {"should_speak": bool, "target": str, "focus": str, "song": str, "raw": str}
@@ -6482,14 +6583,14 @@ async def judge_subconscious_intent_via_live_api(memory_context: str, unread_bat
                 system_instruction=types.Content(parts=[types.Part(text="""妳是 7L 的背景潛意識決策神經（Subconscious Sentry）。
 妳正在即時審查全集中累積的最新滾動記憶與剛收到的新輸入（包含老爸的麥克風語音、電腦打字、或直播觀眾彈幕）。
 請快速判斷 7L 當前是否應該開口發話回應？
-【🎹 邊彈邊聊特別規範】：即使 7L 背景正在彈奏鋼琴，只要有人說話、提問、打招呼、點歌或留言互動，一律正常判定 [SPEAK: ...]！7L 具備邊彈鋼琴邊聊天讀訊息的即時多工能力，絕不因彈琴而保持沉默！
+【 邊彈邊聊特別規範】：即使 7L 背景正在彈奏鋼琴，只要有人說話、提問、打招呼、點歌或留言互動，一律正常判定 [SPEAK: ...]！7L 具備邊彈鋼琴邊聊天讀訊息的即時多工能力，絕不因彈琴而保持沉默！
 1. 【老爸發話（語音/打字）】：
-   - ⚠️ 僅當輸入明確標註為【老爸】或來自麥克風/主腦通道時才可判定為老爸！
+   -  僅當輸入明確標註為【老爸】或來自麥克風/主腦通道時才可判定為老爸！
    - 若老爸在對妳說話、下指令、問話、調侃、點歌、或互動 ➔ 請輸出：[SPEAK: target=老爸, focus=指令或話題焦點, song=歌名(若點歌)]
    - 若老爸在專注自言自語、喃喃自語、或純背景雜音/咳嗽 ➔ 請輸出：[SILENCE]
 2. 【直播觀眾彈幕（多人實況與權限通化判定）】：
    - 直播間包含：老爸（打遊戲的主播與唯一決策者）、觀眾（看直播發言的網友）、7L（同台 AI 女兒副播）。
-   - ⚠️【通化決策原則（直接禁止 7L 擅自主張）】：
+   - 【通化決策原則（直接禁止 7L 擅自主張）】：
      * 凡觀眾提出任何請求（遊戲、好友、組隊、帳號、聯繫方式、抽獎等）或向主播提問 ➔ 7L 絕不擅自主張開條件，一律向老爸請示或通報，輸出：[SPEAK: target=老爸(因應觀眾請求/提問), focus=請示老爸, user=觀眾名]
      * 若觀眾在聊遊戲戰況、操作、嘴主播 ➔ 7L 作為同台副播女兒，在旁起鬨或吐槽老爸，輸出：[SPEAK: target=老爸(因應觀眾留言吐槽), focus=吐槽老爸/起鬨, user=觀眾名]
      * 若觀眾明確指名 7L 互動、聊天、點歌、稱讚 ➔ 輸出：[SPEAK: target=用戶名, focus=話題重點, song=歌名(若點歌)]
@@ -6543,7 +6644,7 @@ async def judge_subconscious_intent_via_live_api(memory_context: str, unread_bat
     return {"should_speak": True, "target": "", "focus": "", "song": "", "raw": "FALLBACK_ALLOW"}
 
 async def streamer_mind_loop_worker(vts, input_queue):
-    """🧠 7L 主播記憶腦袋持續讀取與自由意志發話協程：
+    """ 7L 主播記憶腦袋持續讀取與自由意志發話協程：
     1. 背景保持最新 100 句記憶上下文
     2. 透過無限額度 Live API 潛意識哨兵極速做發言時機判斷
     3. 判定該開口時，喚醒 7 大主力大腦梯隊 (3.1 Flash Lite ➔ 3.5 ➔ 3.7) 讀取 100 句記憶精準開口！
@@ -6569,7 +6670,7 @@ async def streamer_mind_loop_worker(vts, input_queue):
             if is_speaking or current_ai_state in ["THINKING", "SINGING"] or is_singing:
                 continue
                 
-            # 🎹 鋼琴演奏中不阻擋讀訊息：支援邊彈琴邊即時讀取觀眾彈幕/老爸留言並開口互動！
+            #  鋼琴演奏中不阻擋讀訊息：支援邊彈琴邊即時讀取觀眾彈幕/老爸留言並開口互動！
                 
             # 若老爸在 5 秒內剛說過話，優先等待老爸
             if time.time() - last_interaction_time < 5.0 and CURRENT_SPEAKING_TARGET == "dad":
@@ -6606,7 +6707,7 @@ async def streamer_mind_loop_worker(vts, input_queue):
             board_context = "\n".join(board_lines)
             target_audience_desc = "、".join(users_involved) if users_involved else "觀眾"
 
-            # 👥 查詢並注入觀眾認人資料 (call/relationship/impression)
+            #  查詢並注入觀眾認人資料 (call/relationship/impression)
             for u in users_involved:
                 v_prof = await get_viewer_profile(u)
                 v_call = v_prof.get("call")
@@ -6621,10 +6722,10 @@ async def streamer_mind_loop_worker(vts, input_queue):
                 else:
                     viewer_profiles_text.append(f"  * 觀眾【{u}】：新進或尚未建檔，請親切稱呼他「{u}」")
 
-            # 📜 提取最新 100 句完整記憶
+            #  提取最新 100 句完整記憶
             memory_100_context = get_recent_100_memory_context()
             
-            # ⚡ 階段一：由 Live API 潛意識哨兵以無限額度進行實時發言決策
+            #  階段一：由 Live API 潛意識哨兵以無限額度進行實時發言決策
             board_context_for_sentry = board_context
 
             sentry_decision = await judge_subconscious_intent_via_live_api(memory_100_context, board_context_for_sentry)
@@ -6654,32 +6755,32 @@ async def streamer_mind_loop_worker(vts, input_queue):
             cloud_kn_prompt = PromptTemplateEngine.format_cloud_knowledge_prompt(cloud_kn, is_tiktok=True, current_custom_name=current_custom_name)
 
             if pe.is_piano_active and pe.current_piano_song_title:
-                piano_status = f"【🎹 鋼琴邊彈邊聊】：妳目前正坐在 88 鍵鋼琴前為大家演奏《{pe.current_piano_song_title}》中！妳完全支援「邊彈琴邊與大家聊天/讀訊息/互動」（像鋼琴主播一樣邊彈邊隨性聊兩句）。若有人點歌或詢問進度（如「還有多久到我的」），請口頭溫柔告知排隊進度（例如：『這首彈完下一首就輪到你囉！』）；若是一般留言稱讚或聊天，隨性親切回覆 1~2 句即可，鋼琴演奏在背景持續進行。"
+                piano_status = f"【 鋼琴邊彈邊聊】：妳目前正坐在 88 鍵鋼琴前為大家演奏《{pe.current_piano_song_title}》中！妳完全支援「邊彈琴邊與大家聊天/讀訊息/互動」（像鋼琴主播一樣邊彈邊隨性聊兩句）。若有人點歌或詢問進度（如「還有多久到我的」），請口頭溫柔告知排隊進度（例如：『這首彈完下一首就輪到你囉！』）；若是一般留言稱讚或聊天，隨性親切回覆 1~2 句即可，鋼琴演奏在背景持續進行。"
             else:
                 piano_status = "目前背景演奏已結束或未在彈琴。"
             
             profiles_block = "\n".join(viewer_profiles_text) if viewer_profiles_text else "（暫無觀眾檔案）"
             if not has_dad_message:
-                role_strict_block = f"""【👥 多人直播間認人與情境認知 (極重要)】
+                role_strict_block = f"""【 多人直播間認人與情境認知 (極重要)】
 直播間目前處於【多人實況狀態】：
-1. 👑 【老爸】：坐在電腦前打遊戲、實況操作的真人男主播/爸爸。擁有直播間最高主權，所有遊戲操作、帳號、好友/組隊、各類事務請求與決策 100% 歸老爸全權管轄！
-2. 👥 【觀眾：{target_audience_desc}】：在看老爸打遊戲並在聊天室發言的網友。
-3. 🎀 【7L】：在老爸身邊同台直播的 AI 虛擬女兒/副播。
-   - 🛑 【直接讓 7L 不要（絕對越權禁令）】：妳是 AI 少女副播，沒有遊戲帳號、沒有好友位、沒有任何管理決策與線下承諾權！
+1.  【老爸】：坐在電腦前打遊戲、實況操作的真人男主播/爸爸。擁有直播間最高主權，所有遊戲操作、帳號、好友/組隊、各類事務請求與決策 100% 歸老爸全權管轄！
+2.  【觀眾：{target_audience_desc}】：在看老爸打遊戲並在聊天室發言的網友。
+3.  【7L】：在老爸身邊同台直播的 AI 虛擬女兒/副播。
+   -  【直接讓 7L 不要（絕對越權禁令）】：妳是 AI 少女副播，沒有遊戲帳號、沒有好友位、沒有任何管理決策與線下承諾權！
    - 凡觀眾向直播間提出任何請求、邀約或條件（加好友、組隊、求帶、借號、聯繫方式、抽獎等）：
-     * 🛑 絕對不要擅自替老爸答應！絕對不要擅自拒絕！
-     * 🛑 絕對嚴禁自居主人向觀眾開條件或討要好處（如「拿誠意來」、「看你表現」、「先誇我」等任何擅自主張的怪話，一律絕對嚴禁）！
-     * 💡 一律推給老爸做主、向老爸請示通報（例如：「老爸，觀眾杰尼龜想加你遊戲好友，你有位置嗎？」、「這要問我老爸做主喔～」）！
-【👥 觀眾檔案】：
+     *  絕對不要擅自替老爸答應！絕對不要擅自拒絕！
+     *  絕對嚴禁自居主人向觀眾開條件或討要好處（如「拿誠意來」、「看你表現」、「先誇我」等任何擅自主張的怪話，一律絕對嚴禁）！
+     *  一律推給老爸做主、向老爸請示通報（例如：「老爸，觀眾杰尼龜想加你遊戲好友，你有位置嗎？」、「這要問我老爸做主喔～」）！
+【 觀眾檔案】：
 {profiles_block}
-🎯 【受話對象與發言姿態（通化原則）】：
+ 【受話對象與發言姿態（通化原則）】：
 - 情況 A（觀眾在聊遊戲戰況/操作/嘴主播/提出各類事務請求）：
   * 對象是【老爸】！不是 7L！以同台副播女兒視角，在旁向老爸起鬨、吐槽老爸或提醒老爸，絕不可誤認成在跟自己私聊！
 - 情況 B（觀眾指名 7L / 向 7L 點歌 / 問 7L 問題）：
   * 只有明確指名「7L」、「@7L」、「小7」、「7寶」、「草莓」，對象才是【7L 本人】！直接稱呼觀眾「{log_target}」熱情自然回應！
 - 情況 C（老爸與觀眾互聊）：7L 在旁圍觀、隨性搭腔或看熱鬧。"""
             else:
-                role_strict_block = """【👥 多人直播間情境】：包含老爸與直播觀眾。老爸在打遊戲，觀眾在看老爸直播。請精準分清誰在對誰說話！"""
+                role_strict_block = """【 多人直播間情境】：包含老爸與直播觀眾。老爸在打遊戲，觀眾在看老爸直播。請精準分清誰在對誰說話！"""
 
             sys_instruction = f"""妳是 7L。
 時間：{get_current_time_string()}
@@ -6688,37 +6789,37 @@ async def streamer_mind_loop_worker(vts, input_queue):
 
 {role_strict_block}
 
-【📜 直播現場精準時序記憶（掌握現場最新話題脈絡）】：
+【 直播現場精準時序記憶（掌握現場最新話題脈絡）】：
 {get_unified_memory_context(limit=15, thought_char_limit=200)}
 
-【🧠 剛剛收到的最新彈幕】：
+【 剛剛收到的最新彈幕】：
 {board_context}
 
-【⚡ 潛意識焦點提示】：回應對象：{log_target}，焦點：{log_focus}。
+【 潛意識焦點提示】：回應對象：{log_target}，焦點：{log_focus}。
 【當前狀態】：{piano_status}
 {tk_listener.get_tiktok_live_telemetry()}
 
-【💬 主播心智與發話規範】：
-1. ⚡ 【短句精煉與語意完整 (極重要)】：直播節奏明快，每次真正開口說話請保持「1 ~ 2 句自然短句（約 20 ~ 40 字，上限 60 字）」，【話一定要說完，絕對禁止半句斷尾】：
+【 主播心智與發話規範】：
+1.  【短句精煉與語意完整 (極重要)】：直播節奏明快，每次真正開口說話請保持「1 ~ 2 句自然短句（約 20 ~ 40 字，上限 60 字）」，【話一定要說完，絕對禁止半句斷尾】：
    - 口語自然、簡短直接、重點明確、接梗俐落，隨性真實。
-   - 🛑 【嚴禁半句截斷】：整句話必須完整說完，句尾必須帶有完整中文標點符號（如『！』、『。』、『？』、『～』）完美收尾，絕不可說到一半斷字！
-   - 🛑 【嚴禁長篇大論】：絕不長段自說自話、絕不說教、絕不一口氣拋出一堆反問句或追問句！
-3. 🎯 【稱呼精準認人】：
+   -  【嚴禁半句截斷】：整句話必須完整說完，句尾必須帶有完整中文標點符號（如『！』、『。』、『？』、『～』）完美收尾，絕不可說到一半斷字！
+   -  【嚴禁長篇大論】：絕不長段自說自話、絕不說教、絕不一口氣拋出一堆反問句或追問句！
+3.  【稱呼精準認人】：
    - 若回應指名 7L 的觀眾，直接對該觀眾（{log_target}）說話，親切念出名字！
    - 若觀眾是在跟老爸聊遊戲，妳是在向老爸吐槽或提醒老爸，請自然喊「老爸」，把情況告訴老爸或笑老爸，絕不可誤認成觀眾在跟妳私聊！
-5. 🛑 【嚴禁報幕與元語言】：絕對禁止說「我看到你留言說了...」、「我看到我自己說了...」、「畫面上顯示我的字幕...」、「我看著看板...」等機械化報幕字眼！直接像真人主播一樣自然開口對答即可！
-6. 🛠️ 【系統直接指令調用 (極重要)】：若要執行動作，請直接在對話中輸出對應的 Python 指令碼（系統會自動攔截執行，不會唸出來）：
-   - 🎤 翻唱演唱：`auto_sing_song(song_name='歌名')`（當有人說『唱...』、『唱歌』時務必輸出此指令調用）
-   - 🎹 點歌/彈琴：`pe.play_virtual_piano(song_name='歌名')`
-   - 🎹 即興創作：`pe.compose_and_play_original_piano()`
-   - 🎹 調整琴速：`pe.set_piano_speed(speed=1.0)`（支援 0.2~10.0 倍速，如 1.0 原速、1.5 快速、2.0 雙倍速）
-   - 🎹 調整琴音量：`pe.set_piano_volume(volume=80)`
-   - 🎹 切換琴音色：`pe.set_piano_instrument(instrument='樂器名')`
-   - 🎹 暫停/繼續：`pe.pause_virtual_piano()` / `pe.resume_virtual_piano()`
-   - 🎹 停止彈琴：`pe.stop_virtual_piano()`
-   - 🚶 移動走位：`move_spatial_position('左側/右側/靠近/原位')`
-   - 🎨 畫圖：`draw_illustration('畫面描述')`
-7. 🛡️ 若彈幕全為無意義刷屏，可輸出 [PASS] 略過。
+5.  【嚴禁報幕與元語言】：絕對禁止說「我看到你留言說了...」、「我看到我自己說了...」、「畫面上顯示我的字幕...」、「我看著看板...」等機械化報幕字眼！直接像真人主播一樣自然開口對答即可！
+6.  【系統直接指令調用 (極重要)】：若要執行動作，請直接在對話中輸出對應的 Python 指令碼（系統會自動攔截執行，不會唸出來）：
+   -  翻唱演唱：`auto_sing_song(song_name='歌名')`（當有人說『唱...』、『唱歌』時務必輸出此指令調用）
+   -  點歌/彈琴：`pe.play_virtual_piano(song_name='歌名')`
+   -  即興創作：`pe.compose_and_play_original_piano()`
+   -  調整琴速：`pe.set_piano_speed(speed=1.0)`（支援 0.2~10.0 倍速，如 1.0 原速、1.5 快速、2.0 雙倍速）
+   -  調整琴音量：`pe.set_piano_volume(volume=80)`
+   -  切換琴音色：`pe.set_piano_instrument(instrument='樂器名')`
+   -  暫停/繼續：`pe.pause_virtual_piano()` / `pe.resume_virtual_piano()`
+   -  停止彈琴：`pe.stop_virtual_piano()`
+   -  移動走位：`move_spatial_position('左側/右側/靠近/原位')`
+   -  畫圖：`draw_illustration('畫面描述')`
+7.  若彈幕全為無意義刷屏，可輸出 [PASS] 略過。
 8. 標籤支援：
    - 表情：[EXPRESSION: 臉紅/生氣/愛心/星星/皺眉/震驚/WINK]（支援句中多次隨心切換，上半句與下半句可隨意變換神態）
    - 語調聲調：[SPEED:+20%] / [SPEED:-20%]、[PITCH:+15Hz] / [PITCH:-10Hz]（支援句中切換，表現興奮高亢、拉長音或無奈低語）
@@ -6736,7 +6837,7 @@ async def streamer_mind_loop_worker(vts, input_queue):
             used_model_name = ""
             tool_output_text = ""
 
-            # ⚡ Groq 第一梯隊：純文字直答先走 Groq（實測 0.4s 級）。
+            #  Groq 第一梯隊：純文字直答先走 Groq（實測 0.4s 級）。
             #    只採用「純文字、無工具呼叫」的結果；模型要調工具或 Groq 失敗時，
             #    full_reply 維持原樣，交由下方 Gemini 梯隊處理（含 Function Response 第二輪）。
             try:
@@ -6795,7 +6896,7 @@ async def streamer_mind_loop_worker(vts, input_queue):
                                     tool_out += (" " + t_res)
                         
                         clean_raw = re.sub(r'\[PASS\]', '', raw_reply, flags=re.IGNORECASE).strip()
-                        # 🌟 若大腦調用了工具但未生成口語台詞 (常見於純 Function Call 回合)，由 7L 自然即興生成親切口語回應
+                        #  若大腦調用了工具但未生成口語台詞 (常見於純 Function Call 回合)，由 7L 自然即興生成親切口語回應
                         if not clean_raw and resp.function_calls:
                             for fc in resp.function_calls:
                                 fc_name = getattr(fc, 'name', '')
@@ -6847,10 +6948,10 @@ async def streamer_mind_loop_worker(vts, input_queue):
             clean_reply = re.sub(r'\s+([，。！？,.!?:;])', r'\1', clean_reply)
             clean_reply = re.sub(r'\s{2,}', ' ', clean_reply).strip()
             
-            m_tag = f"🧠 Mind-Stream ({used_model_name.replace('gemini-', '')})"
+            m_tag = f" Mind-Stream ({used_model_name.replace('gemini-', '')})"
             log_print(f"🤖 原始大腦輸出: {clean_reply} (⚡ {m_tag})")
             
-            # 👥 記錄觀眾資料標籤
+            #  記錄觀眾資料標籤
             for v_match in re.finditer(
                 r'\[VIEWER_UPDATE[：:]\s*([^|\]]+?)(?:\|CALL[：:]\s*([^|\]]+?))?(?:\|REL[：:]\s*([^|\]]+?))?(?:\|IMP[：:]\s*([^|\]]+?))?\]',
                 clean_reply, re.IGNORECASE
@@ -6866,7 +6967,7 @@ async def streamer_mind_loop_worker(vts, input_queue):
             clean_spoken = spoken.strip(" *'\"-.,!?。，！？\n\r") if spoken else ""
             if clean_spoken:
                 if pe.is_piano_active and pe.current_piano_song_title:
-                    await asyncio.to_thread(update_subtitle, f"🎹 [7L 彈奏《{pe.current_piano_song_title}》] 💬 {clean_spoken}")
+                    await asyncio.to_thread(update_subtitle, f" [7L 彈奏《{pe.current_piano_song_title}》]  {clean_spoken}")
                 else:
                     await asyncio.to_thread(update_subtitle, clean_spoken)
                 record_bot_message(clean_spoken)
@@ -6874,7 +6975,7 @@ async def streamer_mind_loop_worker(vts, input_queue):
                 await speech_queue.put({"text": clean_spoken, "target": "audience", "raw_text": clean_reply})
                 last_interaction_time = time.time()
                 
-                # 🌟 寫入全集中記憶中樞（確保所有大腦掌握 7L 最新發言）
+                #  寫入全集中記憶中樞（確保所有大腦掌握 7L 最新發言）
                 append_to_unified_memory(speaker="7L", target=f"觀眾「{log_target}」", content=clean_spoken, role="assistant", source="tts")
                 
                 # 寫入歷史
@@ -6910,11 +7011,11 @@ async def process_chat_message(vts, input_queue, user_input: str, user_audio_b64
         current_custom_name = user_profile.get("custom_name", DEFAULT_USER_TITLE)
         current_impression = user_profile.get("impression", "")
 
-        # 🛡️ 0.001 秒緊急硬終止過濾
+        #  0.001 秒緊急硬終止過濾
         if check_immediate_shutdown(user_input):
             return
 
-        # ⏱️ API Live 持續時間感測：智慧捕捉「多久後叫我 / 提醒我」意圖
+        #  API Live 持續時間感測：智慧捕捉「多久後叫我 / 提醒我」意圖
         timer_intent = live_timer_hub.detect_timer_intent(user_input)
         if timer_intent:
             t_sec, t_action = timer_intent
@@ -6924,7 +7025,7 @@ async def process_chat_message(vts, input_queue, user_input: str, user_audio_b64
             except Exception:
                 pass
 
-        # 🎙️ 語音/打字「關麥 / 開麥」即時指令攔截 (硬體狀態切換)
+        #  語音/打字「關麥 / 開麥」即時指令攔截 (硬體狀態切換)
         clean_u = user_input.strip().lower()
         if any(k in clean_u for k in ["關麥", "閉麥", "關閉麥克風", "靜音麥克風", "麥克風關閉", "麥克風靜音"]):
             IS_MIC_ENABLED = False
@@ -6933,7 +7034,7 @@ async def process_chat_message(vts, input_queue, user_input: str, user_audio_b64
             IS_MIC_ENABLED = True
             log_print("🎙️ [麥克風控制] 已重新開啟麥克風收音！")
 
-        # ⚡ 📱 【TikTok 直播觀眾專屬 Live 管道】：所有 TikTok 彈幕/提問/送禮/動態 100% 分流至專屬 Live 管道！
+        #   【TikTok 直播觀眾專屬 Live 管道】：所有 TikTok 彈幕/提問/送禮/動態 100% 分流至專屬 Live 管道！
         tt_match_early = re.search(r'【TikTok (?:直播觀眾|官方提問箱|直播動態)\s*([^】]*?)\s*(?:留言|送禮|動態|提問)?】[：:]\s*(.*)', user_input)
         if not tt_match_early and "【TikTok" in user_input:
             tt_match_early = re.search(r'【TikTok\s*([^】]*?)】[：:]\s*(.*)', user_input)
@@ -6945,7 +7046,7 @@ async def process_chat_message(vts, input_queue, user_input: str, user_audio_b64
             if live_ok:
                 last_interaction_time = time.time()
                 current_ai_state = "PIANO" if pe.is_piano_active else "IDLE"
-                return  # 🏁 Live 專屬管道處理完成，直接返回！
+                return  #  Live 專屬管道處理完成，直接返回！
             log_print("⚠️ [TikTok 降級] Live 專屬管道暫不可用，自動無縫回退至極速文字/Gemini Flash Lite 保底大腦...")
 
         if tk_listener.IS_STREAMING:
@@ -6953,10 +7054,10 @@ async def process_chat_message(vts, input_queue, user_input: str, user_audio_b64
         else:
             situation_prompt = f"【當前情境】：現在是妳與{current_custom_name}私下的日常相處時間。"
         
-        # 🌐 7L 實時全域狀態與進行中任務感知 (由 realtime_tasks 雲端中樞統一供給)
+        #  7L 實時全域狀態與進行中任務感知 (由 realtime_tasks 雲端中樞統一供給)
         situation_prompt += f"\n{realtime_task_mgr.get_realtime_summary()}"
         if interrupted_context:
-            situation_prompt += f"\n【⚠️ 實時前情提要（關鍵上下文）】：老爸前一秒剛說：「{interrupted_context}」，但該思考隨即被老爸當前這句「{user_input}」即時打斷/修正！請將兩句話結合理解（例如老爸可能是在澄清、指正聽錯、或接著上一句說）！"
+            situation_prompt += f"\n【 實時前情提要（關鍵上下文）】：老爸前一秒剛說：「{interrupted_context}」，但該思考隨即被老爸當前這句「{user_input}」即時打斷/修正！請將兩句話結合理解（例如老爸可能是在澄清、指正聽錯、或接著上一句說）！"
     
         impression_text = f"- 妳對他的印象: {current_impression}\n" if current_impression else ""
         system_specs = get_system_performance()
@@ -6971,7 +7072,7 @@ async def process_chat_message(vts, input_queue, user_input: str, user_audio_b64
         clean_spoken1 = ""
         stage1_raw = ""
 
-        # 🧠 7L 自主判定記憶與感知需求深度（自適應調節：拒絕無腦強塞幾十句歷史導致大腦思考卡頓！）
+        #  7L 自主判定記憶與感知需求深度（自適應調節：拒絕無腦強塞幾十句歷史導致大腦思考卡頓！）
         mem_decision = evaluate_memory_demand(
             user_input, 
             is_voice_input=is_voice_input, 
@@ -6988,7 +7089,7 @@ async def process_chat_message(vts, input_queue, user_input: str, user_audio_b64
         view_mode_str = "單圖快照 (0.1s)" if single_screen else "7圖時序多視角"
         log_print(f"🧠 [7L 自主記憶裁決] 模式: 【{mem_level}】(歷史:{h_lim}輪, 全景:{u_lim}句, 心流:{th_lim}字, 視覺:{view_mode_str}, 時事:{need_news}) | {mem_reason}")
 
-        # 👁️ 畫面截圖快照處理（依 7L 自主判定：極速/輕量使用單圖快照節省 1.5s；深度時使用 7 圖時序動態）
+        #  畫面截圖快照處理（依 7L 自主判定：極速/輕量使用單圖快照節省 1.5s；深度時使用 7 圖時序動態）
         if single_screen:
             if latest_screen_cache and isinstance(latest_screen_cache, list) and len(latest_screen_cache) > 0:
                 current_screen_snapshot = latest_screen_cache[0][1] if isinstance(latest_screen_cache[0], (tuple, list)) else latest_screen_cache[0]
@@ -6997,30 +7098,19 @@ async def process_chat_message(vts, input_queue, user_input: str, user_audio_b64
         else:
             current_screen_snapshot = get_combined_temporal_screen_snapshot()
 
-        # 🧠 動態獲取 7L 雲端認知庫 (Firestore 永久大腦) 與 即時重大時事情報 (按需加載)
+        #  動態獲取 7L 雲端認知庫 (Firestore 永久大腦) 與 即時重大時事情報 (按需加載)
         cloud_kn = await get_cloud_knowledge()
         cloud_kn_prompt = PromptTemplateEngine.format_cloud_knowledge_prompt(cloud_kn)
-        rag_sec = build_rag_section(user_input)   # 📚 主對話路徑的 RAG 記憶檢索（離線、失敗自動略過）
+        rag_sec = build_rag_section(user_input)   #  主對話路徑的 RAG 記憶檢索（離線、失敗自動略過）
         
         trending_news_prompt = ""
         if need_news:
             trending_news_prompt = await get_trending_news_briefing()
 
-        # 💬 依據自主判定配額動態調取歷史記憶（h_lim=0 時 0 毫秒秒過，完全不讀舊資料庫；最高調取上百句）
+        #  依據自主判定配額動態調取歷史記憶（h_lim=0 時 0 毫秒秒過，完全不讀舊資料庫；最高調取上百句）
         history = (await fetch_from_long_term_memory(DEFAULT_CHANNEL_ID, user_input, limit=max(h_lim, 150))) if h_lim > 0 else []
         recent_chat_prompt = ""
-        if history and h_lim > 1:
-            recent_context_lines = []
-            for msg in history[-min(h_lim, 4):]:
-                r_role = current_custom_name if msg.get("role") == "user" else "7L"
-                raw_c = extract_text_from_content(msg.get("content", ""))
-                clean_c = re.sub(r'\[[A-Z_]+(?::\s*[^\]]+)?\]', '', raw_c).strip()
-                if clean_c and not clean_c.startswith("【"):
-                    recent_context_lines.append(f"- {r_role}: {clean_c}")
-            if recent_context_lines:
-                recent_chat_prompt = "【💬 最近對話前情提要】：\n" + "\n".join(recent_context_lines)
-
-        # 🧠 1. 統一寫入全集中大腦記憶看板 (STREAMER_MIND_BOARD & 全局記憶中樞)
+        #  1. 統一寫入全集中大腦記憶看板 (STREAMER_MIND_BOARD & 全局記憶中樞)
         add_to_streamer_mind_board(
             user_display=current_custom_name,
             unique_id="dad",
@@ -7028,7 +7118,7 @@ async def process_chat_message(vts, input_queue, user_input: str, user_audio_b64
             source="mic" if is_voice_input else "text"
         )
 
-        # ⚡ 2. 由 Live API 潛意識哨兵審查發言時機（打字輸入、突發系統事件、直接點名 7L 則 0 秒極速直通，不浪費 3 秒哨兵！）
+        #  2. 由 Live API 潛意識哨兵審查發言時機（打字輸入、突發系統事件、直接點名 7L 則 0 秒極速直通，不浪費 3 秒哨兵！）
         is_direct_event = (not is_voice_input or user_input.startswith("【") or any(k in user_input.lower() for k in ["7l", "草莓", "小7", "電", "抱", "摸", "停", "唱", "曲", "彈", "？", "?"]))
         if is_direct_event:
             sentry_decision = {"should_speak": True, "focus": "老爸直接發話/突發事件"}
@@ -7050,22 +7140,21 @@ async def process_chat_message(vts, input_queue, user_input: str, user_audio_b64
         if not is_direct_event:
             log_print(f"🚨 [Live 潛意識哨兵 喚醒主力] 判定應回應老爸！焦點: {log_focus}")
 
-        # 🧩 模組化 Context 注入 (Modular Context Injection)
+        #  模組化 Context 注入 (Modular Context Injection)
         context_blocks = []
         if situation_prompt: context_blocks.append(f"【即時情境】\n{situation_prompt.strip()}")
         if trending_news_prompt: context_blocks.append(trending_news_prompt.strip())
         if yt_comp.get_yt_memory_context(): context_blocks.append(yt_comp.get_yt_memory_context().strip())
-        if recent_chat_prompt: context_blocks.append(recent_chat_prompt.strip())
         if rag_sec: context_blocks.append(rag_sec.strip())
 
         effective_situation = "\n\n".join(context_blocks)
 
-        # ── 👑 老爸全能旗艦主腦大腦 (語音多模態 + 螢幕截圖視覺 + 深度記憶 + 完整系統提示詞) ──
+        # ──  老爸全能旗艦主腦大腦 (語音多模態 + 螢幕截圖視覺 + 深度記憶 + 完整系統提示詞) ──
         
-        # 📜 注入動態時序記憶（由 7L 自主裁剪至最適長度，拒絕多餘負擔拖慢速度）
-        if u_lim > 0:
-            unified_mem_prompt = f"""【📜 直播現場全景時序記憶（7L 自主調取最新 {u_lim} 句時序脈絡）】：
-{get_unified_memory_context(limit=u_lim, thought_char_limit=th_lim)}"""
+        #  注入動態時序記憶（由 7L 自主裁剪至最適長度，拒絕多餘負擔拖慢速度）
+        if th_lim > 0:
+            unified_mem_prompt = f"""【 直播現場潛意識與背景事件（7L 最近 {th_lim} 字內心流動與動作）】：
+{get_unified_memory_context(limit=u_lim, thought_char_limit=th_lim, include_dialogue=False)}"""
         else:
             unified_mem_prompt = ""
 
@@ -7087,35 +7176,76 @@ async def process_chat_message(vts, input_queue, user_input: str, user_audio_b64
 
         user_prefix = f"【{current_custom_name}開口語音對妳說話】" if is_voice_input else f"【{current_custom_name}在電腦打字發送】"
         user_msg_content = f"{user_prefix}：{user_input}"
-        # 📜 滑動窗口防記憶迴音：依 7L 自主判定結果動態注入歷史輪次
+        #  滑動窗口防記憶迴音：依 7L 自主判定結果動態注入歷史輪次
         effective_history = history[-h_lim:] if (history and h_lim > 0) else []
         messages = [{"role": "system", "content": system_prompt}] + effective_history + [{"role": "user", "content": user_msg_content}]
         
-        raw_spoken_text = await fetch_ai_response(
+                # --- 影子平行大腦架構 ---
+        shadow_prompt = f"【影子大腦任務】老爸剛剛說：{user_input}\n請評估是否需要查資料、彈鋼琴、改編MIDI或切換表情等工具。若需要，直接呼叫對應Tool。不需要則請保持沉默。絕對不要輸出任何對話台詞！"
+        shadow_msgs = [{"role": "system", "content": system_prompt}] + effective_history + [{"role": "user", "content": shadow_prompt}]
+        async def run_shadow_brain():
+            try:
+                await fetch_ai_response(shadow_msgs, image_base64=current_screen_snapshot, is_proactive=True, request_start_time=req_start)
+            except Exception as e:
+                pass
+        asyncio.create_task(run_shadow_brain())
+        
+        # 嘴巴神經（極速串流，無Tool負擔）
+        stream_iter = await fetch_ai_response(
             messages, 
             image_base64=current_screen_snapshot, 
             audio_base64=effective_audio_b64, 
-            request_start_time=req_start
+            request_start_time=req_start,
+            is_mouth_stream=True
         )
+        
         if my_session_id != CURRENT_CHAT_SESSION_ID:
             return
+            
+        full_raw = ""
+        full_clean = ""
+        buffer = ""
+        
+        async def process_sentence(sentence):
+            if not sentence.strip(): return
+            bot_reply = re.sub(r'\[SKIP\]|\[SILENCE\]', '', sentence, flags=re.IGNORECASE).strip()
+            if not bot_reply: return
+            
+            spoken = await execute_actions(vts, bot_reply, input_queue, user_input_ctx=user_input, caller_target="dad", caller_user=current_custom_name)
+            clean_spoken = spoken.strip(" *'\"-.,!?。，！？\n\r") if spoken else ""
+            
+            if clean_spoken and my_session_id == CURRENT_CHAT_SESSION_ID:
+                await asyncio.to_thread(update_subtitle, clean_spoken)
+                await speech_queue.put({"text": clean_spoken, "target": "dad", "raw_text": bot_reply,
+                                        "private": not str(source).startswith("tiktok")})
+                return clean_spoken
+            return ""
 
-        log_print(f"🤖 原始大腦輸出: {raw_spoken_text} ({current_model_tag})")
-        bot_reply = re.sub(r'\[SKIP\]|\[SILENCE\]', '', raw_spoken_text, flags=re.IGNORECASE).strip()
+        async for chunk in stream_iter:
+            if chunk.text:
+                buffer += chunk.text
+                full_raw += chunk.text
+                parts = re.split(r'([。，！？\n]+)', buffer)
+                if len(parts) > 1:
+                    for i in range(0, len(parts)-1, 2):
+                        phrase = parts[i] + parts[i+1]
+                        c = await process_sentence(phrase)
+                        if c: full_clean += c + " "
+                    buffer = parts[-1]
+                    
+        if buffer.strip():
+            c = await process_sentence(buffer)
+            if c: full_clean += c + " "
+            
+        log_print(f"🤖 原始大腦輸出: {full_raw} ({current_model_tag})")
         
-        spoken = await execute_actions(vts, bot_reply, input_queue, user_input_ctx=user_input, caller_target="dad", caller_user=current_custom_name)
-        clean_spoken = spoken.strip(" *'\"-.,!?。，！？\n\r") if spoken else ""
-        
-        if clean_spoken and my_session_id == CURRENT_CHAT_SESSION_ID:
-            await asyncio.to_thread(update_subtitle, clean_spoken)
-            record_bot_message(clean_spoken)
-            log_print(f"💬 7L (主腦回覆): {clean_spoken} ({current_model_tag})")
-            await speech_queue.put({"text": clean_spoken, "target": "dad", "raw_text": bot_reply,
-                                    # 公開聊天室（含老爸自己的帳號）發言 = 觀眾看得到 → 要出聲；
-                                    # mic/鍵盤/Web/文字檔 = 私訊 → 不播出
-                                    "private": not str(source).startswith("tiktok")})
-            # 🌟 寫入全集中記憶中樞（確保主播看板與所有 API Key 即時掌握）
-            append_to_unified_memory(speaker="7L", target=current_custom_name, content=clean_spoken, role="assistant", source="tts")
+        if full_clean.strip() and my_session_id == CURRENT_CHAT_SESSION_ID:
+            record_bot_message(full_clean.strip())
+            log_print(f"💬 7L (主腦回覆): {full_clean.strip()} ({current_model_tag})")
+            append_to_unified_memory(speaker="7L", target=current_custom_name, content=full_clean.strip(), role="assistant", source="tts")
+            
+        raw_spoken_text = full_raw
+        clean_spoken = full_clean.strip()
         
         if not clean_spoken:
             is_pure_silence = any(k in raw_spoken_text.upper() for k in ["[SILENCE]", "[SKIP]"])
@@ -7124,12 +7254,12 @@ async def process_chat_message(vts, input_queue, user_input: str, user_audio_b64
                 append_to_unified_memory(speaker="7L", target=current_custom_name, content=clean_asst_history, role="assistant", source="action")
         
         last_interaction_time = time.time()
-        # 🛡️ 靜默輪不污染記憶：若大腦判定保持安靜 [SILENCE]，不寫入空動作或假對話
+        #  靜默輪不污染記憶：若大腦判定保持安靜 [SILENCE]，不寫入空動作或假對話
         if clean_spoken or not any(k in raw_spoken_text.upper() for k in ["[SILENCE]", "[SKIP]"]):
             fresh_history = await fetch_from_long_term_memory(DEFAULT_CHANNEL_ID)
             clean_user_history = re.sub(r'\[[A-Z_]+(?::\s*[^\]]+)?\]', '', user_input).strip()
             fresh_history.append({"role": "user", "content": clean_user_history or user_input})
-            # 🛡️ 防心想污染記憶庫鐵律：若未開口說話，儲存純淨動作標籤，100% 絕對禁止將未清洗之 [THOUGHT] 存入歷史
+            #  防心想污染記憶庫鐵律：若未開口說話，儲存純淨動作標籤，100% 絕對禁止將未清洗之 [THOUGHT] 存入歷史
             clean_asst_history = clean_spoken if clean_spoken else (TextCleanEngine.clean_for_tts(bot_reply, apply_phonetics=False) or "[演奏鋼琴/動作執行]")
             fresh_history.append({"role": "assistant", "content": clean_asst_history})
             asyncio.create_task(save_to_long_term_memory(DEFAULT_CHANNEL_ID, fresh_history))
@@ -7148,9 +7278,9 @@ async def process_chat_message(vts, input_queue, user_input: str, user_audio_b64
 
 async def execute_punish_action(reason: str = "", is_severe: bool = None):
     """
-    ⚡ 7L 電擊與微電流刺激中樞 (支援分級：微電刺激 vs 強力電擊處分)：
-    - ⚡ Lv.1 微電刺激：滿臉通紅、原生叫聲 + 即時真實回應老爸
-    - ⚡⚡ Lv.2 強力電擊：強烈電流竄遍全身、四肢發軟顫抖、長尖叫 + 委屈討饒
+     7L 電擊與微電流刺激中樞 (支援分級：微電刺激 vs 強力電擊處分)：
+    -  Lv.1 微電刺激：滿臉通紅、原生叫聲 + 即時真實回應老爸
+    -  Lv.2 強力電擊：強烈電流竄遍全身、四肢發軟顫抖、長尖叫 + 委屈討饒
     """
     global vc
     try:
@@ -7164,7 +7294,7 @@ async def execute_punish_action(reason: str = "", is_severe: bool = None):
         log_detail = f" 原因: 『{reason}』" if reason else ""
         log_print(f"⚡ [{log_type}中樞] 老爸對 7L 實施了{log_type}！{log_detail}")
         
-        # 🚨 0 秒即時強制掐斷當前正在播出的任何長語音，清空排隊，讓位給秒級觸電反應！
+        #  0 秒即時強制掐斷當前正在播出的任何長語音，清空排隊，讓位給秒級觸電反應！
         await interrupt_current_speech(clear_queue=True, reason="老爸電擊即時打斷")
 
         target_vts = vc.GLOBAL_VTS
@@ -7180,9 +7310,9 @@ async def execute_punish_action(reason: str = "", is_severe: bool = None):
 
         # 銘刻記憶（純粹事件記錄，拒絕預設干擾詞）
         if is_severe_punish:
-            punish_memory = f"👑 【老爸電擊訓誡】：老爸對 7L 實施了強力電擊處分" + (f"（原因：『{reason}』）。" if reason else "。")
+            punish_memory = f" 【老爸電擊訓誡】：老爸對 7L 實施了強力電擊處分" + (f"（原因：『{reason}』）。" if reason else "。")
         else:
-            punish_memory = f"⚡ 【老爸微電刺激】：老爸突然電了 7L 一下" + (f"（原因：『{reason}』）。" if reason else "。")
+            punish_memory = f" 【老爸微電刺激】：老爸突然電了 7L 一下" + (f"（原因：『{reason}』）。" if reason else "。")
         record_bot_message(punish_memory)
 
         # 廣播事件至前端
@@ -7192,22 +7322,22 @@ async def execute_punish_action(reason: str = "", is_severe: bool = None):
             "timestamp": time.time()
         })
 
-        # ⚡ 準備 7L 專屬觸電尖叫音訊檔 (優先使用 gen_screams.py 調配之專屬純淨音效，絕不死板)
+        #  準備 7L 專屬觸電尖叫音訊檔 (優先使用 gen_screams.py 調配之專屬純淨音效，絕不死板)
         sounds_dir = os.path.join(DATA_DIR, "sounds_7L_clean")
         if is_severe_punish:
             default_heavy = os.path.join(sounds_dir, "shock_heavy_pure.mp3")
             heavy_pool = glob.glob(os.path.join(sounds_dir, "shocks_heavy", "*.mp3"))
             scream_sound = default_heavy if os.path.exists(default_heavy) else (random.choice(heavy_pool) if heavy_pool else "")
             scream_sub = "啊啊啊啊啊啊！痛痛痛！"
-            event_prompt = f"【⚡ 突發事件：老爸突然給了妳一次強力電擊！（原因：{reason}）】" if reason else "【⚡ 突發事件：老爸突然給了妳一次強力電擊！】"
+            event_prompt = f"【 突發事件：老爸突然給了妳一次強力電擊！（原因：{reason}）】" if reason else "【 突發事件：老爸突然給了妳一次強力電擊！】"
         else:
             default_light = os.path.join(sounds_dir, "test_a_8_pure.mp3")
             light_pool = glob.glob(os.path.join(sounds_dir, "shocks_light", "*.mp3"))
             scream_sound = default_light if os.path.exists(default_light) else (random.choice(light_pool) if light_pool else "")
             scream_sub = "啊啊啊！好麻！"
-            event_prompt = f"【⚡ 突發事件：老爸突然電了妳一下！（原因：{reason}）】" if reason else "【⚡ 突發事件：老爸突然電了妳一下！】"
+            event_prompt = f"【 突發事件：老爸突然電了妳一下！（原因：{reason}）】" if reason else "【 突發事件：老爸突然電了妳一下！】"
 
-        # 🚀 雙軌零延遲並行：
+        #  雙軌零延遲並行：
         # 1. 0 秒立即尖叫（即刻張嘴對嘴 + 臉紅微顫）
         IS_SHOCK_SCREAMING = True
         asyncio.create_task(play_instant_sound_clip(scream_sound, subtitle=scream_sub))
@@ -7226,10 +7356,10 @@ async def execute_punish_action(reason: str = "", is_severe: bool = None):
 
 async def execute_reward_action(reason: str = "", level: int = None):
     """
-    💖 7L 多等級寵溺與獎勵中樞 (100% 大腦即時原創思考，拒絕死板罐頭詞)：
-    - 🏆 Lv.1 溫柔輕摸頭 / 日常誇獎：愛心表情 + 俏皮眨眼 + 甜美溫柔撒嬌 (貓咪般舒服瞇眼)
-    - 🏆 Lv.2 熱情狂揉頭髮 / 大獎勵：星星眼表情 + 俏皮眨眼 + 心花怒放
-    - 🏆 Lv.3 深情緊緊擁抱 / 終極寵溺：臉紅害羞透 + 心跳飆速 + 緊抓衣服極致依戀 (幸福感超載爆表)
+     7L 多等級寵溺與獎勵中樞 (100% 大腦即時原創思考，拒絕死板罐頭詞)：
+    -  Lv.1 溫柔輕摸頭 / 日常誇獎：愛心表情 + 俏皮眨眼 + 甜美溫柔撒嬌 (貓咪般舒服瞇眼)
+    -  Lv.2 熱情狂揉頭髮 / 大獎勵：星星眼表情 + 俏皮眨眼 + 心花怒放
+    -  Lv.3 深情緊緊擁抱 / 終極寵溺：臉紅害羞透 + 心跳飆速 + 緊抓衣服極致依戀 (幸福感超載爆表)
     """
     global vc
     try:
@@ -7246,12 +7376,12 @@ async def execute_reward_action(reason: str = "", level: int = None):
 
         target_vts = vc.GLOBAL_VTS
         
-        # 🚨 0 秒即時掐斷當前舊語音，清空排隊，秒級享受摸頭擁抱！
+        #  0 秒即時掐斷當前舊語音，清空排隊，秒級享受摸頭擁抱！
         await interrupt_current_speech(clear_queue=True, reason="老爸獎勵即時打斷")
         
         log_detail = f" 原因: 『{reason}』" if reason else ""
         if level == 3:
-            # 🏆 Lv.3：深情緊緊擁抱 / 終極溺愛
+            #  Lv.3：深情緊緊擁抱 / 終極溺愛
             log_print(f"💖 [終極深情擁抱 (Lv.3)] 老爸給予了 7L 緊緊深情擁抱與終極寵愛！{log_detail}")
             if target_vts:
                 try:
@@ -7261,12 +7391,12 @@ async def execute_reward_action(reason: str = "", level: int = None):
             vc.wink_timer = time.time() + 0.85
             vc.wink_side = "left"
             
-            reward_memory = f"👑 【老爸深情擁抱 (Lv.3)】：老爸把 7L 緊緊抱進懷裡" + (f"（原因：『{reason}』）。" if reason else "。")
-            event_prompt = f"【💖 系統事件：老爸在控制台親自給予妳深情緊緊擁抱！（原因：{reason}）】" if reason else "【💖 系統事件：老爸在控制台親自給予妳深情緊緊擁抱！】"
+            reward_memory = f" 【老爸深情擁抱 (Lv.3)】：老爸把 7L 緊緊抱進懷裡" + (f"（原因：『{reason}』）。" if reason else "。")
+            event_prompt = f"【 系統事件：老爸在控制台親自給予妳深情緊緊擁抱！（原因：{reason}）】" if reason else "【 系統事件：老爸在控制台親自給予妳深情緊緊擁抱！】"
             resp_msg = f"已成功給予 7L 終極深情擁抱 (Lv.3)" + (f"：{reason}" if reason else "")
 
         elif level == 2:
-            # 🏆 Lv.2：熱情狂揉頭髮
+            #  Lv.2：熱情狂揉頭髮
             log_print(f"💖 [揉頭大獎勵 (Lv.2)] 老爸大力揉了揉 7L 的頭！{log_detail}")
             if target_vts:
                 try:
@@ -7276,12 +7406,12 @@ async def execute_reward_action(reason: str = "", level: int = None):
             vc.wink_timer = time.time() + 0.65
             vc.wink_side = random.choice(["left", "right"])
 
-            reward_memory = f"👑 【老爸揉頭大獎 (Lv.2)】：老爸把 7L 頭髮揉得亂蓬蓬並熱烈誇獎" + (f"（原因：『{reason}』）。" if reason else "。")
-            event_prompt = f"【💖 系統事件：老爸在控制台用力揉了揉妳的頭頂、誇獎妳！（原因：{reason}）】" if reason else "【💖 系統事件：老爸在控制台用力揉了揉妳的頭頂、誇獎妳！】"
+            reward_memory = f" 【老爸揉頭大獎 (Lv.2)】：老爸把 7L 頭髮揉得亂蓬蓬並熱烈誇獎" + (f"（原因：『{reason}』）。" if reason else "。")
+            event_prompt = f"【 系統事件：老爸在控制台用力揉了揉妳的頭頂、誇獎妳！（原因：{reason}）】" if reason else "【 系統事件：老爸在控制台用力揉了揉妳的頭頂、誇獎妳！】"
             resp_msg = f"已成功給予 7L 狂揉頭髮大獎勵 (Lv.2)" + (f"：{reason}" if reason else "")
 
         else:
-            # 🏆 Lv.1：溫柔輕撫摸頭
+            #  Lv.1：溫柔輕撫摸頭
             log_print(f"💖 [日常溫柔摸頭 (Lv.1)] 老爸給予了 7L 溫暖輕撫！{log_detail}")
             if target_vts:
                 try:
@@ -7291,8 +7421,8 @@ async def execute_reward_action(reason: str = "", level: int = None):
             vc.wink_timer = time.time() + 0.55
             vc.wink_side = random.choice(["left", "right"])
 
-            reward_memory = f"👑 【老爸日常摸頭誇獎 (Lv.1)】：老爸親自溫柔摸了摸 7L 的頭" + (f"（原因：『{reason}』）。" if reason else "。")
-            event_prompt = f"【💖 系統事件：老爸在控制台溫柔摸了摸妳的頭頂、誇獎妳！（原因：{reason}）】" if reason else "【💖 系統事件：老爸在控制台溫柔摸了摸妳的頭頂、誇獎妳！】"
+            reward_memory = f" 【老爸日常摸頭誇獎 (Lv.1)】：老爸親自溫柔摸了摸 7L 的頭" + (f"（原因：『{reason}』）。" if reason else "。")
+            event_prompt = f"【 系統事件：老爸在控制台溫柔摸了摸妳的頭頂、誇獎妳！（原因：{reason}）】" if reason else "【 系統事件：老爸在控制台溫柔摸了摸妳的頭頂、誇獎妳！】"
             resp_msg = f"已成功給予 7L 溫柔摸頭獎勵 (Lv.1)" + (f"：{reason}" if reason else "")
 
         # 銘刻記憶
@@ -7344,12 +7474,12 @@ async def chat_processor_worker(vts, input_queue):
                 input_queue.task_done()
                 continue
 
-            # ⚡ 收到新輸入時，若包含立即關機指令，0.001 秒內立即安全退出！
+            #  收到新輸入時，若包含立即關機指令，0.001 秒內立即安全退出！
             if check_immediate_shutdown(user_input):
                 input_queue.task_done()
                 return
 
-            # ⚡ 系統指令精確攔截 (僅保留顯式 /shock 與 /punish 系統指令，絕對不從對話情境或聊天關鍵字誤觸電擊)
+            #  系統指令精確攔截 (僅保留顯式 /shock 與 /punish 系統指令，絕對不從對話情境或聊天關鍵字誤觸電擊)
             u_strip = user_input.strip().lower()
             if u_strip in ["/shock", "/punish_light"]:
                 await execute_punish_action("", is_severe=False)
@@ -7359,7 +7489,7 @@ async def chat_processor_worker(vts, input_queue):
                 await execute_punish_action("", is_severe=True)
                 input_queue.task_done()
                 continue
-            # ⚡ 系統獎勵指令精確攔截 (僅保留顯式 /reward 系統指令，絕對不從對話情境或聊天關鍵字誤觸獎勵)
+            #  系統獎勵指令精確攔截 (僅保留顯式 /reward 系統指令，絕對不從對話情境或聊天關鍵字誤觸獎勵)
             elif u_strip in ["/reward", "/reward 1", "/reward_light"]:
                 await execute_reward_action("", level=1)
                 input_queue.task_done()
@@ -7373,7 +7503,7 @@ async def chat_processor_worker(vts, input_queue):
                 input_queue.task_done()
                 continue
 
-            # 🌙 7L 深層休眠模式：支援老爸語音喚醒，觀眾彈幕靜默忽略
+            #  7L 深層休眠模式：支援老爸語音喚醒，觀眾彈幕靜默忽略
             if IS_SLEEPING:
                 wake_keywords = ["起床", "醒醒", "醒來", "睜開眼", "早安", "早上好", "醒來吧", "別睡了", "/wake", "喚醒", "睜開眼睛", "別睡"]
                 is_dad_source = (source in ["mic", "text_file", "console", "web_console"] or user_audio_b64)
@@ -7400,19 +7530,19 @@ async def chat_processor_worker(vts, input_queue):
                     continue
 
             # -------------------------------------------------------------
-            # 👑 軌道 1：老爸專屬全能主腦通道 (mic / text_file / console / web_console)
+            #  軌道 1：老爸專屬全能主腦通道 (mic / text_file / console / web_console)
             # -------------------------------------------------------------
             if source in ["mic", "text_file", "console", "web_console"] or user_audio_b64:
-                # 🚫 操作者輸入通道預設停用：直播輸入只收 Twitch/YouTube Live 觀眾留言
+                #  操作者輸入通道預設停用：直播輸入只收 Twitch/YouTube Live 觀眾留言
                 if not operator_input_enabled():
                     log_print(f"🚫 [輸入通道已停用] 忽略操作者輸入 ({source}): {str(user_input)[:60]}")
                     input_queue.task_done()
                     continue
                 log_print(f"📥 [老爸主腦通道] 收到輸入 ({source}): {user_input}")
                 
-                # 🎙️ 若 7L 目前正在回應觀眾，老爸開口/輸入時優先傾聽老爸，清空佇列中後續排隊的觀眾發話（不腰斬當前正在說的話）！
+                #  若 7L 目前正在回應觀眾，老爸開口/輸入時優先傾聽老爸，清空佇列中後續排隊的觀眾發話（不腰斬當前正在說的話）！
                 if CURRENT_SPEAKING_TARGET == "audience":
-                    # 🚨 同步清空佇列中所有待播的觀眾發話，防止中斷後又接連跳出舊的觀眾音訊！
+                    #  同步清空佇列中所有待播的觀眾發話，防止中斷後又接連跳出舊的觀眾音訊！
                     temp_dad_items = []
                     while not speech_queue.empty():
                         try:
@@ -7425,7 +7555,7 @@ async def chat_processor_worker(vts, input_queue):
                     for d_it in temp_dad_items:
                         await speech_queue.put(d_it)
                 
-                # ⚡ 取消老爸進行中的舊思考任務 (若有舊輸入正在思考，自動暫存為被中斷的上下文)
+                #  取消老爸進行中的舊思考任務 (若有舊輸入正在思考，自動暫存為被中斷的上下文)
                 interrupted_msg = ""
                 if current_dad_task and not current_dad_task.done():
                     interrupted_msg = CURRENT_PROCESSING_USER_INPUT
@@ -7436,7 +7566,7 @@ async def chat_processor_worker(vts, input_queue):
                     current_voice_task.cancel()
                 
                 CURRENT_PROCESSING_USER_INPUT = user_input
-                # 🚀 立即啟動主腦深度思考任務（帶入被打斷的前文）
+                #  立即啟動主腦深度思考任務（帶入被打斷的前文）
                 realtime_task_mgr.start_dad_task(user_input)
                 current_dad_task = asyncio.create_task(
                     process_chat_message(
@@ -7448,7 +7578,7 @@ async def chat_processor_worker(vts, input_queue):
                 )
 
             # -------------------------------------------------------------
-            # 📱 軌道 2：TikTok 直播專屬「記憶腦袋」滾動黑板 (tiktok / tiktok_gift)
+            #  軌道 2：TikTok 直播專屬「記憶腦袋」滾動黑板 (tiktok / tiktok_gift)
             # -------------------------------------------------------------
             elif source in ["tiktok", "tiktok_gift", "twitch", "youtube"]:
                 # 提取觀眾用戶名與留言內容
@@ -7471,7 +7601,7 @@ async def chat_processor_worker(vts, input_queue):
                     v_unique_id = raw_user_str
                 id_display = f"{v_display_name} (@{v_unique_id})" if v_unique_id != v_display_name else v_display_name
 
-                # 👑 判斷是否為老爸帳號在直播間打字 (最高特權立即搶先處理)
+                #  判斷是否為老爸帳號在直播間打字 (最高特權立即搶先處理)
                 clean_uid_check = v_unique_id.lower().replace(" ", "").replace("_", "").replace("-", "")
                 clean_disp_check = v_display_name.lower().replace(" ", "").replace("_", "").replace("-", "")
                 is_dad_account = (
@@ -7490,7 +7620,7 @@ async def chat_processor_worker(vts, input_queue):
                     add_to_streamer_mind_board(id_display, v_unique_id, aud_c, source)
 
             # -------------------------------------------------------------
-            # 📢 擁有者公開插話（owner_interject）：走觀眾軌道公開播出，不私聊、走觀眾工具牆
+            #  擁有者公開插話（owner_interject）：走觀眾軌道公開播出，不私聊、走觀眾工具牆
             # -------------------------------------------------------------
             elif source == "owner_interject":
                 from core.identity import get_owner_name as _gon2
@@ -7502,10 +7632,10 @@ async def chat_processor_worker(vts, input_queue):
                 add_to_streamer_mind_board(f"{_owner_nm}（主持）", f"owner:{_owner_nm}", user_input, "owner_interject")
 
             # -------------------------------------------------------------
-            # 🔇 軌道 3：TikTok 背景瑣碎動態 (tiktok_ambient: 點讚/進房/分享)
+            #  軌道 3：TikTok 背景瑣碎動態 (tiktok_ambient: 點讚/進房/分享)
             # -------------------------------------------------------------
             elif source == "tiktok_ambient":
-                tk_listener.current_tiktok_status_str = f"[📱 {user_input[:20]}]"
+                tk_listener.current_tiktok_status_str = f"[ {user_input[:20]}]"
                 is_piano_playing = pe.GLOBAL_PIANO_REALTIME_STATE.get("is_playing", False)
                 # 若 7L 正在彈琴、或老爸正在說話/主腦正在思考，直接靜默丟棄瑣碎動態
                 if is_piano_playing or (current_dad_task and not current_dad_task.done()) or (current_voice_task and not current_voice_task.done()):
@@ -7528,10 +7658,10 @@ PROACTIVE_LAST_MUSIC = ""
 PROACTIVE_STABLE_COUNT = 0
 
 async def background_mind_stream_worker(vts, input_queue):
-    """🧠 7L 核心背景思考心流協程 (DeepSeek 模式 · Google GenAI Live API 雙工串流)：
-    - 💡 核心目的：
+    """ 7L 核心背景思考心流協程 (DeepSeek 模式 · Google GenAI Live API 雙工串流)：
+    -  核心目的：
       落實老爸提出的「心想就是持續在腦內說話的思維推導，像 DeepSeek 一樣一個字一個字連續思考連續打字，採用 API Live 連續感測」。
-    - ⚙️ 運作架構：
+    -  運作架構：
       1. 【主力通道】：100% 採用 Google GenAI Live API 全雙工雙向通道 (gemini-3.8-live) 進行即時神經思維流淌。
       2. 【雙軌熱備】：若 Live API 連線遇阻或金鑰冷卻，0 秒無縫回退至 gemini-3.5-flash-lite 串流保底。
       3. 【字字串流】：後端透過 WebSocket 即時推播 Token Chunks，前端以 DeepSeek 擬真游標與計時器一個字一個字敲擊在面板上。
@@ -7543,7 +7673,7 @@ async def background_mind_stream_worker(vts, input_queue):
     
     while True:
         try:
-            # 🌊 心流不間斷：換氣 1.2 ~ 2.5 秒後立即展開下一段連續推導
+            #  心流不間斷：換氣 1.2 ~ 2.5 秒後立即展開下一段連續推導
             await asyncio.sleep(random.uniform(1.2, 2.5))
             if IS_SLEEPING:
                 await asyncio.sleep(4.0)
@@ -7569,11 +7699,11 @@ async def background_mind_stream_worker(vts, input_queue):
                 pass
             curr_music = str(LATEST_SYSTEM_MUSIC_INFO or "無背景音樂").strip()
             
-            # 👁️ VISION 視覺感知實時綁定：注入 3.1-flash-lite 雙眼觀察到的最新電腦畫面
+            #  VISION 視覺感知實時綁定：注入 3.1-flash-lite 雙眼觀察到的最新電腦畫面
             vision_clue = ""
             if current_screen_context and current_screen_context != "目前沒有特別的畫面動態。":
                 clean_sc = current_screen_context.strip().replace("\n", " ")
-                vision_clue = f"【👁️ 雙眼看到的螢幕畫面】：{clean_sc[:110]}\n"
+                vision_clue = f"【 雙眼看到的螢幕畫面】：{clean_sc[:110]}\n"
 
             # 雲端知識庫統一性格讀取 (不預設、不寫死任何特定標籤)
             cloud_kn = await get_cloud_knowledge()
@@ -7603,8 +7733,8 @@ async def background_mind_stream_worker(vts, input_queue):
             stream_id = f"th_{int(start_thought_time * 1000)}"
             stream_started = False
             
-            # ⚡ 第一主力：採用 Google GenAI API Live (WebSocket 全雙工即時串流)
-            # 🧠 使用心流 Live 專屬金鑰池（KEYS_MIND_LIVE），先跳過冷卻中的金鑰，全部失敗才退回 flash-lite
+            #  第一主力：採用 Google GenAI API Live (WebSocket 全雙工即時串流)
+            #  使用心流 Live 專屬金鑰池（KEYS_MIND_LIVE），先跳過冷卻中的金鑰，全部失敗才退回 flash-lite
             candidate_keys = get_dynamic_live_key_candidates(KEYS_MIND_LIVE if KEYS_MIND_LIVE else GEMINI_KEYS)
             _now = time.time()
             for idx, g_key in enumerate(candidate_keys[:5]):
@@ -7647,12 +7777,12 @@ async def background_mind_stream_worker(vts, input_queue):
                         CURRENT_GEMINI_KEY_STEP += 1
                         break
                 except Exception as live_err:
-                    # ❄️ 記錄冷卻：此金鑰失敗，60 秒內不重試
+                    #  記錄冷卻：此金鑰失敗，60 秒內不重試
                     _MIND_LIVE_KEY_COOLDOWN[g_key] = time.time() + 60.0
                     log_print(f"⚠️ [心流 Live] 金鑰 ...{g_key[-6:]} 連線失敗，切換下一把。({type(live_err).__name__}: {live_err})")
                     continue
             
-            # 🛡️ 雙軌容災熱備：若 Live API 網路遇阻，無縫切換至 gemini-3.5-flash-lite 串流
+            #  雙軌容災熱備：若 Live API 網路遇阻，無縫切換至 gemini-3.5-flash-lite 串流
             if not full_thought_text.strip() and GEMINI_KEYS:
                 for k_offset in range(2):
                     k_idx = (get_pingpong_alternating_index(len(GEMINI_KEYS), CURRENT_GEMINI_KEY_STEP) + k_offset) % len(GEMINI_KEYS)
@@ -7691,14 +7821,14 @@ async def background_mind_stream_worker(vts, input_queue):
                     except Exception:
                         continue
                     
-            clean_thought = re.sub(r'^[💭「"\'【\(\[]+|[」"\'】\)\]]+$', '', full_thought_text).strip()
+            clean_thought = re.sub(r'^[「"\'【\(\[]+|[」"\'】\)\]]+$', '', full_thought_text).strip()
             if clean_thought and not any(bad in clean_thought for bad in ["老爸在看", "畫面沒", "根據規範", "SILENCE", "沒有新動態"]):
                 last_thought_tail = clean_thought
                 thought_dur = round(time.time() - start_thought_time, 2)
                 record_internal_thought("腦內思考", clean_thought, force=False)
                 # log_print(f"🧠 [7L Live API 深度連續思考 ({thought_dur}s)]: {clean_thought[:60]}...")
                 try:
-                    # 📡 廣播思考結束信號 (DeepSeek Thinking End)
+                    #  廣播思考結束信號 (DeepSeek Thinking End)
                     web_dash.broadcast_event("ai_thought_end", {
                         "id": stream_id,
                         "thought": clean_thought,
@@ -7738,7 +7868,7 @@ async def proactive_worker(vts, input_queue):
             if get_silence_ticks() < 40:
                 continue
 
-            # 🛡️ 畫面與環境動態偵測：若無重大變更，100% 靜默守護，不打任何 API，不浪費配額
+            #  畫面與環境動態偵測：若無重大變更，100% 靜默守護，不打任何 API，不浪費配額
             try:
                 from mic_live_plugin.os_desktop_sensor import os_desktop_sensor
                 fg_info = os_desktop_sensor.get_foreground_window()
@@ -7750,7 +7880,7 @@ async def proactive_worker(vts, input_queue):
                 has_window_changed = (curr_fg_title != PROACTIVE_LAST_FG_TITLE or curr_fg_app != PROACTIVE_LAST_FG_APP)
                 has_music_changed = (curr_music != PROACTIVE_LAST_MUSIC)
                 
-                # 💡【徹底防 API 轟炸】：若視窗與音樂無實質變更（老爸專注操作中），直接跳過多模態大腦呼叫！
+                # 【徹底防 API 轟炸】：若視窗與音樂無實質變更（老爸專注操作中），直接跳過多模態大腦呼叫！
                 if not has_window_changed and not has_music_changed and PROACTIVE_LAST_FG_TITLE:
                     log_print("💤 [自主視覺陪伴] 桌面環境完全穩定（老爸專注操作中），7L 靜默陪伴守護，跳過 API 呼叫（0 消耗）")
                     await asyncio.sleep(random.uniform(60.0, 100.0))
@@ -7769,7 +7899,7 @@ async def proactive_worker(vts, input_queue):
             piano_status_prompt = ""
             if pe.is_piano_active and pe.current_piano_song_title:
                 piano_status_prompt = f"""
-【🎹 當前狀態背景】：背景正在演奏《{pe.current_piano_song_title}》（彈奏中不調用切歌工具；若老爸只是日常閒聊，專注回應老爸話題，無需每句刻意重複強調正在彈琴）。
+【 當前狀態背景】：背景正在演奏《{pe.current_piano_song_title}》（彈奏中不調用切歌工具；若老爸只是日常閒聊，專注回應老爸話題，無需每句刻意重複強調正在彈琴）。
 """
 
             cloud_kn = await get_cloud_knowledge()
@@ -7783,7 +7913,7 @@ async def proactive_worker(vts, input_queue):
                 piano_status_prompt=piano_status_prompt,
                 thoughts_summary=get_recent_thoughts_summary(),
                 cloud_knowledge_prompt=cloud_kn_prompt,
-                unified_memory_prompt=f"【📜 直播現場全景時序記憶（主動感知精簡模式）】：\n{get_unified_memory_context(limit=6, thought_char_limit=150)}"
+                unified_memory_prompt=f"【 直播現場全景時序記憶（主動感知精簡模式）】：\n{get_unified_memory_context(limit=6, thought_char_limit=150)}"
             )
             proactive_prompt = [
                 {"role": "system", "content": system_prompt}
@@ -7797,7 +7927,7 @@ async def proactive_worker(vts, input_queue):
                 else:
                     pass_image = latest_screen_cache
 
-            # 👁️ 優先採用 Gemini Live API 直接視覺接管（實時畫面影像幀 + 雙向 Live 串流大腦）
+            #  優先採用 Gemini Live API 直接視覺接管（實時畫面影像幀 + 雙向 Live 串流大腦）
             raw_spoken_text = ""
             live_used = False
             
@@ -7862,12 +7992,12 @@ async def proactive_worker(vts, input_queue):
                 except Exception:
                     continue
 
-            # 🛡️ 備用保底：若 Live API 網路超載或未回傳，無縫回退至旗艦 fetch_ai_response
+            #  備用保底：若 Live API 網路超載或未回傳，無縫回退至旗艦 fetch_ai_response
             if not live_used and not raw_spoken_text:
                 proactive_start = time.time()
                 raw_spoken_text = await fetch_ai_response(proactive_prompt, image_base64=pass_image, is_proactive=True, request_start_time=proactive_start)
             
-            # 🛡️ 靜默判定：若大腦輸出包含 [SILENCE] 或為空，代表大腦判定保持安靜陪伴，直接跳過後續心聲廣播與發話！
+            #  靜默判定：若大腦輸出包含 [SILENCE] 或為空，代表大腦判定保持安靜陪伴，直接跳過後續心聲廣播與發話！
             is_silent_turn = (
                 "[SILENCE" in raw_spoken_text.upper() or 
                 not raw_spoken_text.strip() or
@@ -7885,7 +8015,7 @@ async def proactive_worker(vts, input_queue):
                     current_ai_state = "PIANO" if pe.is_piano_active else "IDLE"
                 continue
 
-            # 👁️ 【即時視覺感知同步】將 Gemini Live 自主大腦的真實新觀察即時同步至 VISION 視覺面板
+            #  【即時視覺感知同步】將 Gemini Live 自主大腦的真實新觀察即時同步至 VISION 視覺面板
             if raw_spoken_text:
                 extracted_v_thought, _ = TextCleanEngine.extract_thought(raw_spoken_text)
                 if not extracted_v_thought:
@@ -7901,7 +8031,7 @@ async def proactive_worker(vts, input_queue):
                         LAST_VISION_LOOK_TIME = time.time()
                         realtime_task_mgr.update_vision_context(current_screen_context)
                         
-                        # 🛡️ 深度防跳針：檢查思緒是否與近幾分鐘內重複或為機械規範廢話
+                        #  深度防跳針：檢查思緒是否與近幾分鐘內重複或為機械規範廢話
                         is_unwanted_vision = (
                             is_thought_repetitive(clean_vision_text) or
                             any(k in clean_vision_text for k in [
@@ -7935,7 +8065,7 @@ async def proactive_worker(vts, input_queue):
             if current_voice_task and not current_voice_task.done():
                 current_voice_task.cancel()
 
-            # 🌟 自主發話時自然轉動眼珠環視（若大腦未指定其他視線）
+            #  自主發話時自然轉動眼珠環視（若大腦未指定其他視線）
             if not pe.is_piano_active and not any(k in bot_reply.upper() for k in ["LOOK:", "WINK", "SHOCK", "FROWN"]):
                 vc.eye_roll_timer = time.time() + 3.5
                 log_print("🌀 [Live2D 動作] 自主發話靈動轉動眼珠環視四周")
@@ -7951,25 +8081,25 @@ async def proactive_worker(vts, input_queue):
             record_bot_message(spoken)
 
             if spoken:
-                # ⚡ 自主發話一生成，立即極速寫入 subtitle.txt 抵消 OBS 延遲！
+                #  自主發話一生成，立即極速寫入 subtitle.txt 抵消 OBS 延遲！
                 if pe.is_piano_active and pe.current_piano_song_title:
-                    await asyncio.to_thread(update_subtitle, f"🎹 [7L 彈奏《{pe.current_piano_song_title}》] 💬 {spoken}")
+                    await asyncio.to_thread(update_subtitle, f" [7L 彈奏《{pe.current_piano_song_title}》]  {spoken}")
                 else:
                     await asyncio.to_thread(update_subtitle, spoken)
                 log_print(f"💬 7L 自主發話: {spoken} ({current_model_tag})\n──────────────────────────────────────────\n")
                 
-                # 📣 主動發言是對「所有人」的（記憶也寫 target=所有人）→ 必須播出
+                #  主動發言是對「所有人」的（記憶也寫 target=所有人）→ 必須播出
                 await speech_queue.put({"text": spoken, "target": "dad", "raw_text": bot_reply, "private": False})
                 last_interaction_time = time.time() 
                 
-                # 🌟 寫入全集中記憶中樞
+                #  寫入全集中記憶中樞
                 append_to_unified_memory(speaker="7L", target="所有人", content=spoken, role="assistant", source="tts")
                 
                 fresh_history = await fetch_from_long_term_memory(DEFAULT_CHANNEL_ID)
                 fresh_history.append({"role": "assistant", "content": spoken})
                 asyncio.create_task(save_to_long_term_memory(DEFAULT_CHANNEL_ID, fresh_history))
 
-                # 📖 【已讀功能】：自主大腦/Live API 已就當前情境完成發話，立刻將前次話題與思緒標記為已讀，防止下次重複看同一句說話！
+                #  【已讀功能】：自主大腦/Live API 已就當前情境完成發話，立刻將前次話題與思緒標記為已讀，防止下次重複看同一句說話！
                 realtime_task_mgr.mark_dad_input_read()
                 realtime_task_mgr.mark_audience_input_read()
                 mark_recent_thoughts_as_read()
@@ -7983,9 +8113,9 @@ async def proactive_worker(vts, input_queue):
             await asyncio.sleep(2)
 
 # ────────────────────────────────────────────────────────
-# 🖥️ 16. CMA 狀態監控檔案輸出與 Discord 機器人指令 (Console Monitor Area & Bot)
+#  16. CMA 狀態監控檔案輸出與 Discord 機器人指令 (Console Monitor Area & Bot)
 # ────────────────────────────────────────────────────────
-# 💡 功能目的：
+#  功能目的：
 #    - `cma_monitor_worker`: 每秒輪詢 API_LOCKS，將全量 Gemini 通道健康狀態寫入 `data/cma_status.txt` 與 `data/cma_status.json`。
 #    - 提供 Discord 遠端監控機器人指令（如 `*vapis`, `*vapi`），讓老爸隨時隨地透過手機 Discord 掌握 7L 運作狀態。
 
@@ -7996,7 +8126,7 @@ async def cma_monitor_worker():
     try:
         with open(os.path.join(DATA_DIR, "cma_status.txt"), "w", encoding="utf-8") as f:
             f.write("==================================================\n")
-            f.write(f" 🖥️ 7L CMA 監控面板初始化中... - {get_current_time_string()}\n")
+            f.write(f"  7L CMA 監控面板初始化中... - {get_current_time_string()}\n")
             f.write("==================================================")
     except Exception as e:
         pass
@@ -8012,8 +8142,8 @@ async def cma_monitor_worker():
 
             cma_lines = []
             cma_lines.append("==================================================")
-            cma_lines.append(f" 🖥️ 7L CMA (Console Monitor Area) - {get_current_time_string()}")
-            cma_lines.append(" 🎯 當前運作模式: ⚡ 正常全能模式 (Gemini 多模態/鋼琴/工具/視覺)")
+            cma_lines.append(f"  7L CMA (Console Monitor Area) - {get_current_time_string()}")
+            cma_lines.append("  當前運作模式:  正常全能模式 (Gemini 多模態/鋼琴/工具/視覺)")
             cma_lines.append("==================================================")
             
             cma_lines.append("--- 【Gemini 模型通道清單】 ---")
@@ -8026,9 +8156,9 @@ async def cma_monitor_worker():
                         rem = int(API_LOCKS[target_id] - now)
                         mins = rem // 60
                         secs = rem % 60
-                        cma_lines.append(f"  [G{idx}] {short_m:<22} : 🛑 封印中 (剩餘 {mins}m {secs}s)")
+                        cma_lines.append(f"  [G{idx}] {short_m:<22} :  封印中 (剩餘 {mins}m {secs}s)")
                     else:
-                        cma_lines.append(f"  [G{idx}] {short_m:<22} : 🟢 準備就緒")
+                        cma_lines.append(f"  [G{idx}] {short_m:<22} :  準備就緒")
                         avail_gemini += 1
 
             cma_lines.append("==================================================")
@@ -8052,7 +8182,7 @@ async def cma_monitor_worker():
                 pass  
 
             if not any(k in current_ai_status_str for k in ["思考中", "提取中", "探測中", "繪圖中"]):
-                current_ai_status_str = f"🟢 通道就緒 (Gemini:{avail_gemini})"
+                current_ai_status_str = f" 通道就緒 (Gemini:{avail_gemini})"
         except Exception as e:
             pass
             
@@ -8076,7 +8206,7 @@ async def show_cma_short(ctx):
 
 @discord_bot.command(name="vapi", help="顯示當前系統 CMA 監控面板（預設精簡，支援 *vapi full）")
 async def show_cma_panel(ctx, mode: str = "brief"):
-    """📊 CMA (Console Monitor Area) - 顯示全線 API 健康狀態（支援 brief 精簡 / full 詳細）"""
+    """ CMA (Console Monitor Area) - 顯示全線 API 健康狀態（支援 brief 精簡 / full 詳細）"""
     current_time = time.time()
     now_str = datetime.now(ZoneInfo('Asia/Taipei')).strftime('%Y-%m-%d %H:%M:%S')
     
@@ -8092,11 +8222,11 @@ async def show_cma_panel(ctx, mode: str = "brief"):
             if target_id in API_LOCKS and current_time < API_LOCKS[target_id]:
                 rem = int(API_LOCKS[target_id] - current_time)
                 mins, secs = rem // 60, rem % 60
-                locked_gemini.append(f"`{target_id}`: 🛑 封印中 ({mins}m {secs}s)")
-                gemini_details.append(f"[{target_id:<20}] : 🛑 封印中 ({mins}m {secs}s)")
+                locked_gemini.append(f"`{target_id}`:  封印中 ({mins}m {secs}s)")
+                gemini_details.append(f"[{target_id:<20}] :  封印中 ({mins}m {secs}s)")
             else:
                 avail_gemini += 1
-                gemini_details.append(f"[{target_id:<20}] : 🟢 準備就緒")
+                gemini_details.append(f"[{target_id:<20}] :  準備就緒")
 
     try:
         cpu_percent = psutil.cpu_percent(interval=None)
@@ -8114,18 +8244,18 @@ async def show_cma_panel(ctx, mode: str = "brief"):
         if len(all_locked) > 6:
             locked_str += f"\n• ...以及其餘 {len(all_locked) - 6} 條通道"
     else:
-        locked_str = "• 🟢 全線綠燈，無任何通道處於封印狀態！"
+        locked_str = "•  全線綠燈，無任何通道處於封印狀態！"
 
     brief_card = (
-        f"📊 **【7L VAPI 系統健康監控 - 精簡摘要】**\n"
-        f"⏱️ 同步時間: `{now_str}`\n"
+        f" **【7L VAPI 系統健康監控 - 精簡摘要】**\n"
+        f" 同步時間: `{now_str}`\n"
         f"────────────────────────────\n"
-        f"👑 **Gemini 視覺旗艦大腦**: 🟢 `{avail_gemini} / {total_gemini}` 準備就緒 ({gem_pct}%)\n"
-        f"💻 **本機硬體負載**: CPU `{cpu_percent}%` | RAM `{mem_percent}%`\n"
+        f" **Gemini 視覺旗艦大腦**:  `{avail_gemini} / {total_gemini}` 準備就緒 ({gem_pct}%)\n"
+        f" **本機硬體負載**: CPU `{cpu_percent}%` | RAM `{mem_percent}%`\n"
         f"────────────────────────────\n"
-        f"🛑 **當前受限通道 ({len(all_locked)} 條)**:\n{locked_str}\n"
+        f" **當前受限通道 ({len(all_locked)} 條)**:\n{locked_str}\n"
         f"────────────────────────────\n"
-        f"💡 *輸入 `*vapi full` 可匯出全部通道清單*"
+        f" *輸入 `*vapi full` 可匯出全部通道清單*"
     )
     
     await ctx.send(brief_card)
@@ -8154,14 +8284,14 @@ async def control_mic(ctx, action: str = ""):
     if action_lower in ["on", "開", "open", "enable"]:
         IS_MIC_ENABLED = True
         log_print("🎙️ [Discord] 收到開麥指令，已開啟麥克風。")
-        await ctx.send("🎙️ **麥克風已開啟**！已恢復語音收音。")
+        await ctx.send(" **麥克風已開啟**！已恢復語音收音。")
     elif action_lower in ["off", "關", "close", "disable", "mute"]:
         IS_MIC_ENABLED = False
         log_print("🎙️ [Discord] 收到關麥指令，已關閉麥克風。")
-        await ctx.send("🔇 **麥克風已關閉**！已暫停語音收音。")
+        await ctx.send(" **麥克風已關閉**！已暫停語音收音。")
     else:
-        status = "🟢 開啟中" if IS_MIC_ENABLED else "🔴 關閉中"
-        await ctx.send(f"🎙️ 目前麥克風狀態：{status}\n使用方式：`*mic on` (開麥) 或 `*mic off` (關麥)")
+        status = " 開啟中" if IS_MIC_ENABLED else " 關閉中"
+        await ctx.send(f" 目前麥克風狀態：{status}\n使用方式：`*mic on` (開麥) 或 `*mic off` (關麥)")
 
 @discord_bot.command(name="開麥", help="開啟麥克風收音")
 async def discord_mic_on(ctx):
@@ -8174,11 +8304,32 @@ async def discord_mic_off(ctx):
 # ────────────────────────────────────────────────────────
 async def main():
     """系統主進入點：協同啟動所有背景感知神經與對話處理協程"""
+    
+    # ── 🎙️ 聲紋強制綁定 (首次啟動檢查) ──
+    import os
+    if not os.path.exists(os.path.join("data", "dad_voiceprint.npy")):
+        print("\n" + "="*60)
+        print("🎙️ 首次啟動 7L：尚未綁定您的專屬聲紋！")
+        print("為確保 7L 能夠精準辨識您的聲音並只聽命於您，我們現在進行聲紋註冊...")
+        print("="*60 + "\n")
+        try:
+            import record_clean_dad_voiceprint
+            await asyncio.to_thread(record_clean_dad_voiceprint.main)
+            from mic_live_plugin import voiceprint_verifier
+            voiceprint_verifier.reload_voiceprint()
+        except Exception as e:
+            print(f"⚠️ 聲紋綁定過程發生錯誤: {e}")
+            
+    try:
+        rag_service.init_rag(GEMINI_KEYS[0])
+    except Exception as e:
+        print(f"⚠️ [RAG] 初始化失敗: {e}")
+
     await asyncio.to_thread(_remove_temp_mp3)
     asyncio.create_task(asyncio.to_thread(pe.init_piano_synthesizer))
-    # 🛑 系統啟動防殘留：立即向雲端與本地同步乾淨待命狀態（徹底消除重開機殘留）
+    #  系統啟動防殘留：立即向雲端與本地同步乾淨待命狀態（徹底消除重開機殘留）
     await realtime_task_mgr.sync_to_cloud()
-    # 📜 載入或初始化全集中全景時序記憶中樞
+    #  載入或初始化全集中全景時序記憶中樞
     init_unified_memory()
 
     plugin_info = {"plugin_name": "7L_AI_VTuber", "developer": "e5_Studio", "authentication_token_path": "./vts_token.txt"}
@@ -8207,7 +8358,7 @@ async def main():
         asyncio.create_task(vts_health_worker(vts))
 
     recognizer = sr.Recognizer()
-    # 🎙️ 語音結束停頓判定：由原 1.2 秒延長至 2.5 秒，避免稍微停頓思考就被切斷（可透過 .env 中的 MIC_PAUSE_THRESHOLD 自由調整）
+    #  語音結束停頓判定：由原 1.2 秒延長至 2.5 秒，避免稍微停頓思考就被切斷（可透過 .env 中的 MIC_PAUSE_THRESHOLD 自由調整）
     recognizer.pause_threshold = float(os.getenv("MIC_PAUSE_THRESHOLD", "2.5"))
     recognizer.energy_threshold = 300
     recognizer.dynamic_energy_threshold = True
@@ -8218,25 +8369,22 @@ async def main():
     GLOBAL_INPUT_QUEUE = input_queue
     
     # 啟動全部背景協程
-    # 🔥 TTS 小模型預熱：在背景 Thread 載入 Kokoro-82M (~310MB)，避免第一句說話卡頓
-    def _prewarm_tts():
+    # 🔥 GPT-SoVITS 曉伊模型預熱：在背景 Thread 初始化，避免第一句說話卡頓
+    def _prewarm_xiaoyi():
         try:
-            import services.tts_router as tts_router
-            if "kokoro" in tts_router.ENGINE_CHAIN:
-                tts_router._get_kokoro()
-                log_print("🟢 [TTS 預熱完成] Kokoro-82M 本地語音引擎已就緒！")
-            else:
-                log_print(f"ℹ️ [TTS 預熱跳過] 引擎鏈: {tts_router.ENGINE_CHAIN}")
+            import local_xiaoyi_service
+            local_xiaoyi_service.init_gpt_sovits()
+            log_print("🟢 [GPT-SoVITS 預熱完成] 7L 本地顯卡語音引擎已就緒！")
         except Exception as e:
-            log_print(f"⚠️ [TTS 預熱跳過]: {e}（首句會自動降級到備援引擎）")
-    asyncio.create_task(asyncio.to_thread(_prewarm_tts))
+            log_print(f"⚠️ [GPT-SoVITS 預熱跳過]: {e}")
+    asyncio.create_task(asyncio.to_thread(_prewarm_xiaoyi))
     asyncio.create_task(mic_volume_worker())
-    # 🎭 運行模式裝配（MODE=companion|vtuber）：決定裝哪些 worker
+    #  運行模式裝配（MODE=companion|vtuber）：決定裝哪些 worker
     from core.identity import get_mode as _get_run_mode
     _RUN_MODE = _get_run_mode()
     _IS_VTUBER = (_RUN_MODE == "vtuber")
     log_print(f"🎭 [運行模式] MODE={_RUN_MODE}（companion=1對1伴侶 / vtuber=只對觀眾7x24）")
-    # 🚫 操作者輸入預設停用（OPERATOR_INPUT=1 才開；vtuber 模式強制關）：直播輸入只收聊天室觀眾留言
+    #  操作者輸入預設停用（OPERATOR_INPUT=1 才開；vtuber 模式強制關）：直播輸入只收聊天室觀眾留言
     if operator_input_enabled():
         asyncio.create_task(mic_worker(recognizer, input_queue))
         asyncio.create_task(text_file_listener_worker(input_queue))
@@ -8244,7 +8392,7 @@ async def main():
     else:
         log_print("🚫 操作者輸入通道已停用（OPERATOR_INPUT=0／vtuber 模式）：麥克風/鍵盤/文字檔/Web 打字一律忽略")
     if _IS_VTUBER:
-        # 📺 VTuber 隔離：無休眠、不看主人螢幕、無主動搭話主人、無 Discord 遙控、無 YT 伴看
+        #  VTuber 隔離：無休眠、不看主人螢幕、無主動搭話主人、無 Discord 遙控、無 YT 伴看
         # （IS_SLEEPING 預設 False；set_sleep_mode 在 vtuber 模式拒絕啟用，故此處無需再寫）
         try:
             yt_comp.IS_YT_WATCHER_ENABLED = False
@@ -8252,7 +8400,7 @@ async def main():
             pass
         log_print("📺 [VTuber 隔離] 休眠禁用／螢幕感知關／proactive 關／系統音監聽關／Discord 關／YT 伴看關")
     else:
-        # 💗 伴侶模式：看著主人、聽著主人、主動陪伴
+        #  伴侶模式：看著主人、聽著主人、主動陪伴
         asyncio.create_task(screen_capture_worker())
         asyncio.create_task(proactive_worker(vts, input_queue))
         asyncio.create_task(peripheral_vision_worker())
@@ -8268,9 +8416,9 @@ async def main():
     asyncio.create_task(pe.piano_focus_udp_worker())
     asyncio.create_task(pe.piano_liveness_watchdog_worker())
     asyncio.create_task(tk_listener.tiktok_live_worker(input_queue))
-    # 📺 觀眾點播看全片（兩模式共用；空隊列時靜默待命）
+    #  觀眾點播看全片（兩模式共用；空隊列時靜默待命）
     asyncio.create_task(video_watch.video_watch_worker())
-    # 📺 直播聊天室觀眾輸入（TWITCH_CHANNELS / YOUTUBE_LIVE_ID 有設才真正連線，未設僅提示）
+    #  直播聊天室觀眾輸入（TWITCH_CHANNELS / YOUTUBE_LIVE_ID 有設才真正連線，未設僅提示）
     #    註冊進 chat_source 註冊表：控制台 /api/chat_sources 可看狀態
     from services import chat_source as _cs
     _cs.bind_chat_workers(input_queue)
@@ -8296,7 +8444,7 @@ async def main():
     if DISCORD_TOKEN and not _IS_VTUBER:
         asyncio.create_task(safe_discord_runner())
 
-    # 💓 註冊鋼琴狀態即時監聽回調：當鋼琴強制關閉或離線時，秒級切換回 IDLE
+    #  註冊鋼琴狀態即時監聽回調：當鋼琴強制關閉或離線時，秒級切換回 IDLE
     def _on_piano_liveness_change(is_active: bool):
         global current_ai_state
         if not is_active:
@@ -8314,11 +8462,11 @@ async def main():
 
     pe.register_piano_state_callback(_on_piano_liveness_change)
 
-    # 🌐 啟動 7L Web 視覺化即時監控與控制後台 (Port 7860 -> http://localhost:7860)
+    #  啟動 7L Web 視覺化即時監控與控制後台 (Port 7860 -> http://localhost:7860)
     def get_audio_perception_summary():
         """整合電腦內部聲音 (WASAPI Loopback) 與現實環境聲音 (MIC) 的多模態感知資料"""
         # 1. 電腦內部聲音感知 (全系統聲音：WASAPI Loopback 捕捉所有喇叭輸出)
-        # 🌟 LEVEL 音量百分比：100% 真實反映整台電腦當前的即時音量跳動，絕不死鎖在固定數值！
+        #  LEVEL 音量百分比：100% 真實反映整台電腦當前的即時音量跳動，絕不死鎖在固定數值！
         sys_level = min(100, max(0, int(CURRENT_SYSTEM_AUDIO_VOL_PERCENT)))
         piano_playing = False
         piano_song = ""
@@ -8397,13 +8545,13 @@ async def main():
         if IS_SLEEPING:
             status_text = "休眠暫停中"
         elif piano_playing:
-            status_text = "🎹 鋼琴演奏 & 全系統聲音"
+            status_text = " 鋼琴演奏 & 全系統聲音"
         elif sys_level > 5 and is_user_listening:
             status_text = "電腦全系統音訊 & 聆聽老爸"
         elif is_user_listening:
-            status_text = "🎙️ 聆聽老爸中"
+            status_text = " 聆聽老爸中"
         elif sys_level > 5:
-            status_text = "💻 電腦全系統音訊播放中"
+            status_text = " 電腦全系統音訊播放中"
         else:
             status_text = "雙向全雙工監聽"
 
@@ -8420,11 +8568,11 @@ async def main():
 
     def _get_system_state():
         global current_ai_state
-        # 🛡️ 鋼琴在線狀態即時動態核實 (若鋼琴被強制關機，秒級自動回歸 IDLE，絕不卡死)
+        #  鋼琴在線狀態即時動態核實 (若鋼琴被強制關機，秒級自動回歸 IDLE，絕不卡死)
         if current_ai_state == "PIANO" and not pe.is_piano_active_and_alive():
             current_ai_state = "IDLE"
 
-        eff_status = "🟢 正常運作中" if not IS_SLEEPING and current_ai_state == "IDLE" and "休眠" not in current_ai_status_str else current_ai_status_str
+        eff_status = " 正常運作中" if not IS_SLEEPING and current_ai_state == "IDLE" and "休眠" not in current_ai_status_str else current_ai_status_str
         stress_info = get_api_stress_metrics()
         silence_ticks = get_silence_ticks()
         uptime_ticks = get_uptime_ticks()
@@ -8436,7 +8584,7 @@ async def main():
             "uptime_ticks": uptime_ticks,
             "uptime_human": format_ticks_to_human(uptime_ticks),
             "is_sleeping": IS_SLEEPING,
-            "mic_action": "🎤 聆聽中" if is_user_listening else current_mic_action_str,
+            "mic_action": " 聆聽中" if is_user_listening else current_mic_action_str,
             "is_mic_enabled": IS_MIC_ENABLED,
             "mic_volume": 0.0 if IS_SLEEPING else CURRENT_MIC_VOL_PERCENT / 100.0,
             "model_name": "Gemini 3.8 Flash (Tier-7)",
@@ -8468,7 +8616,7 @@ async def main():
 
     def _get_last_vision_img():
         global LATEST_HD_SCREEN_BYTES
-        # 🎬 若 YouTube 伴看活躍中，優先返回 YouTube 視窗高畫質截圖
+        #  若 YouTube 伴看活躍中，優先返回 YouTube 視窗高畫質截圖
         if yt_comp.IS_YT_COMPANION_ACTIVE and yt_comp.LATEST_YT_FRAME_BYTES:
             return yt_comp.LATEST_YT_FRAME_BYTES
         if LATEST_HD_SCREEN_BYTES:
@@ -8588,7 +8736,7 @@ async def main():
         elif tool_name == "search_google":
             q = args.get("query", "")
             
-            res = search_google(q)
+            res = await asyncio.to_thread(search_google, q)
             return res or f"已搜尋「{q}」"
         elif tool_name == "update_cloud_knowledge":
             cat = args.get("category", "facts")
@@ -8623,7 +8771,7 @@ async def main():
                 "key": "IS_AUTO_PIANO_ENABLED",
                 "name": "閒置自主彈琴",
                 "category": "piano",
-                "category_name": "🎹 音樂與演奏",
+                "category_name": " 音樂與演奏",
                 "description": "當 7L 閒置且環境無聲音超過 60 秒時，每隔 5 分鐘是否自主坐到鋼琴前隨機挑選曲目演奏。",
                 "value": bool(IS_AUTO_PIANO_ENABLED),
                 "icon": "piano"
@@ -8632,7 +8780,7 @@ async def main():
                 "key": "IS_PIANO_AUTO_RADIO_MODE",
                 "name": "鋼琴隨機電台連播",
                 "category": "piano",
-                "category_name": "🎹 音樂與演奏",
+                "category_name": " 音樂與演奏",
                 "description": "當前鋼琴曲目彈完後，若隊列已無點歌，是否自動從曲庫中無限接續隨機抽歌連播。",
                 "value": bool(getattr(pe, "IS_PIANO_AUTO_RADIO_MODE", False)),
                 "icon": "radio"
@@ -8641,7 +8789,7 @@ async def main():
                 "key": "IS_AUTO_WANDER_ENABLED",
                 "name": "閒置自主漫遊走位",
                 "category": "wander",
-                "category_name": "🚶 自主行為與漫遊",
+                "category_name": " 自主行為與漫遊",
                 "description": "7L 處於閒置狀態超過 60 秒時，每隔 60 秒在螢幕舞台上隨機走位、變換站位與姿態。",
                 "value": bool(IS_AUTO_WANDER_ENABLED),
                 "icon": "walk"
@@ -8650,7 +8798,7 @@ async def main():
                 "key": "IS_PROACTIVE_SPEAK_ENABLED",
                 "name": "視覺陪伴主動搭話",
                 "category": "wander",
-                "category_name": "🚶 自主行為與漫遊",
+                "category_name": " 自主行為與漫遊",
                 "description": "每隔 35~50 秒根據老爸目前視窗、聆聽音樂與操作動態，自主決定是否主動搭話或吐槽。關閉時轉為純被動（有問才答）。",
                 "value": bool(IS_PROACTIVE_SPEAK_ENABLED),
                 "icon": "chat"
@@ -8659,7 +8807,7 @@ async def main():
                 "key": "IS_PERIPHERAL_VISION_ENABLED",
                 "name": "餘光視覺感知中樞",
                 "category": "vision",
-                "category_name": "👁️ 多模態感知",
+                "category_name": " 多模態感知",
                 "description": "背景是否定時截取並分析老爸的螢幕動態與視窗畫面，維持連續時序視覺記憶緩存。",
                 "value": bool(IS_PERIPHERAL_VISION_ENABLED),
                 "icon": "eye"
@@ -8668,7 +8816,7 @@ async def main():
                 "key": "IS_FACE_TRACKING_ENABLED",
                 "name": "AI 視線與頭部追蹤",
                 "category": "vision",
-                "category_name": "👁️ 多模態感知",
+                "category_name": " 多模態感知",
                 "description": "啟用 Live2D 模型的自然視線跟隨、呼吸律動與自然眨眼同步。",
                 "value": bool(IS_FACE_TRACKING_ENABLED),
                 "icon": "user"
@@ -8677,7 +8825,7 @@ async def main():
                 "key": "IS_MIC_ENABLED",
                 "name": "麥克風語音監聽收音",
                 "category": "system",
-                "category_name": "⚙️ 系統核心與收音",
+                "category_name": " 系統核心與收音",
                 "description": "即時監聽並轉寫實體麥克風收到的語音。關閉時 7L 不再收音，僅接受文字發話。",
                 "value": bool(IS_MIC_ENABLED),
                 "icon": "mic"
@@ -8686,7 +8834,7 @@ async def main():
                 "key": "IS_STREAM_CHAT_ENABLED",
                 "name": "直播彈幕即時互動",
                 "category": "system",
-                "category_name": "⚙️ 系統核心與收音",
+                "category_name": " 系統核心與收音",
                 "description": "是否開啟直播間（如 TikTok）即時彈幕串流接入與觀眾留言排隊互動。",
                 "value": bool(getattr(tk_listener, "IS_STREAMING", False)),
                 "icon": "broadcast"
@@ -8695,19 +8843,28 @@ async def main():
                 "key": "IS_SLEEPING",
                 "name": "深層休眠模式 (0 API)",
                 "category": "system",
-                "category_name": "⚙️ 系統核心與收音",
+                "category_name": " 系統核心與收音",
                 "description": "雙眼閉合安睡，完全停止視覺截圖、背景思考與計時器，達成 0 API 消耗。",
                 "value": bool(IS_SLEEPING),
                 "icon": "moon"
             },
             {
                 "key": "IS_YT_WATCHER_ENABLED",
-                "name": "🎬 YouTube 即時伴看 (Multimodal Live)",
+                "name": " YouTube 即時伴看 (Multimodal Live)",
                 "category": "vision",
-                "category_name": "👁️ 視覺與多模態感知",
+                "category_name": " 視覺與多模態感知",
                 "description": "自動檢測螢幕上的 YouTube 影片，以 1 FPS 視窗裁剪與系統音訊內錄持續跟進理解。",
                 "value": bool(yt_comp.IS_YT_WATCHER_ENABLED),
                 "icon": "video"
+            },
+            {
+                "key": "MODE_TOGGLE",
+                "name": "伴侶模式 (需重啟)",
+                "category": "system",
+                "category_name": " 系統核心與收音",
+                "description": "開啟時為伴侶模式 (同時陪你與聊天室)，關閉為實況主模式 (只理聊天室)。切換後請點擊上方「重啟大腦」生效。",
+                "value": _RUN_MODE == "companion",
+                "icon": "user"
             }
         ]
 
@@ -8725,7 +8882,8 @@ async def main():
             "IS_MIC_ENABLED": IS_MIC_ENABLED,
             "IS_STREAM_CHAT_ENABLED": getattr(tk_listener, "IS_STREAMING", False),
             "IS_SLEEPING": IS_SLEEPING,
-            "IS_YT_WATCHER_ENABLED": yt_comp.IS_YT_WATCHER_ENABLED
+            "IS_YT_WATCHER_ENABLED": yt_comp.IS_YT_WATCHER_ENABLED,
+            "MODE_TOGGLE": _RUN_MODE == "companion"
         }
         
         target_val = not current_map.get(key, False) if value is None else bool(value)
@@ -8761,6 +8919,34 @@ async def main():
         elif key == "IS_YT_WATCHER_ENABLED":
             yt_comp.IS_YT_WATCHER_ENABLED = target_val
             log_print(f"🎛️ [系統開關] YouTube 即時伴看已{'🟢 開啟' if target_val else '🔴 關閉'}")
+        elif key == "MODE_TOGGLE":
+            import re
+            env_path = ".env"
+            if os.path.exists(env_path):
+                with open(env_path, "r", encoding="utf-8") as f:
+                    content = f.read()
+                new_mode = "companion" if target_val else "vtuber"
+                if re.search(r'^MODE=.*', content, flags=re.MULTILINE):
+                    content = re.sub(r'^MODE=.*', f'MODE={new_mode}', content, flags=re.MULTILINE)
+                else:
+                    content += f'\nMODE={new_mode}\n'
+                
+                # 自動綁定：若是伴侶模式，預設開啟主控輸入與私人語音；vtuber則維持
+                if new_mode == "companion":
+                    if re.search(r'^OPERATOR_INPUT=.*', content, flags=re.MULTILINE):
+                        content = re.sub(r'^OPERATOR_INPUT=.*', 'OPERATOR_INPUT=1', content, flags=re.MULTILINE)
+                    else:
+                        content += '\nOPERATOR_INPUT=1\n'
+                    if re.search(r'^OPERATOR_SPEECH=.*', content, flags=re.MULTILINE):
+                        content = re.sub(r'^OPERATOR_SPEECH=.*', 'OPERATOR_SPEECH=1', content, flags=re.MULTILINE)
+                    else:
+                        content += '\nOPERATOR_SPEECH=1\n'
+
+                with open(env_path, "w", encoding="utf-8") as f:
+                    f.write(content)
+                log_print(f"🎛️ [系統開關] 運行模式已切換為 {new_mode} (並自動配置輸入權限)，請在網頁點擊「重啟大腦」生效！")
+            else:
+                log_print("⚠️ 找不到 .env 檔案，無法切換模式！")
             
         return target_val
 
@@ -8784,7 +8970,7 @@ async def main():
         reward_cb=execute_reward_action
     ))
     
-    # 🎬 啟動 YouTube 自動伴看與實時多模態視聽理解服務
+    #  啟動 YouTube 自動伴看與實時多模態視聽理解服務
     yt_comp.ON_VISION_RECORD_CB = record_vision_history_entry
     yt_comp.init_yt_companion()
 
@@ -8804,26 +8990,26 @@ async def main():
             # 依據是否有即時通知，動態組合尾端文字 (通知放在最後面，絕不佔用整行)
             has_notif = time.time() < notification_expire_time
             if has_notif:
-                tail_str = f"💬 {current_system_notification}"
-                if tk_listener.current_tiktok_status_str and tk_listener.current_tiktok_status_str != "[📱 TikTok: 待命中]":
+                tail_str = f" {current_system_notification}"
+                if tk_listener.current_tiktok_status_str and tk_listener.current_tiktok_status_str != "[ TikTok: 待命中]":
                     tail_str = f"{tk_listener.current_tiktok_status_str} | {tail_str}"
             else:
                 tail_str = tk_listener.current_tiktok_status_str
 
-            # 🎬 若 YouTube 伴看活躍中，優先顯示伴看狀態
+            #  若 YouTube 伴看活躍中，優先顯示伴看狀態
             if yt_comp.IS_YT_COMPANION_ACTIVE:
-                yt_info = f"🎬 伴看中: {yt_comp.CURRENT_YT_TITLE[:15]}..."
+                yt_info = f" 伴看中: {yt_comp.CURRENT_YT_TITLE[:15]}..."
                 tail_str = f"{yt_info} | {tail_str}" if tail_str else yt_info
 
             # 依據終端寬度動態分配狀態文字、動作文字、音量與 尾端通知/動態 (排在最後面)
             if max_cols < 85:
                 status_text = fit_text_to_width(current_ai_status_str, max(18, max_cols - 48))
-                action_text = "🎤 聆聽中" if is_user_listening else fit_text_to_width(current_mic_action_str, 8)
+                action_text = " 聆聽中" if is_user_listening else fit_text_to_width(current_mic_action_str, 8)
                 tail_text = fit_text_to_width(tail_str, max(14, max_cols - 45))
                 raw_msg = f"[{char}] {status_text} | {action_text} | {current_mic_volume_str} | {tail_text}"
             else:
                 status_text = fit_text_to_width(current_ai_status_str, max(28, max_cols - 65))
-                action_text = "🎤 聆聽中..." if is_user_listening else fit_text_to_width(current_mic_action_str, 12)
+                action_text = " 聆聽中..." if is_user_listening else fit_text_to_width(current_mic_action_str, 12)
                 tail_text = fit_text_to_width(tail_str, max(20, max_cols - 75))
                 raw_msg = f"[{char}] {status_text} | {action_text} | {current_mic_volume_str} | {tail_text}"
             out_msg = fit_text_to_width(raw_msg, max_cols)
@@ -8840,7 +9026,9 @@ async def main():
     except KeyboardInterrupt:
         print("\n👋 [系統] 收到 Ctrl+C 中斷，正在安全退出...")
     except BaseException as e:
+        import traceback
         print(f"\n❌ [底層系統異常崩潰]: {e}")
+        traceback.print_exc()
 
 if __name__ == "__main__":
     asyncio.run(main())

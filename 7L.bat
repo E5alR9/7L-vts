@@ -1,12 +1,12 @@
 @echo off
 chcp 65001 >nul
+set PYTHONIOENCODING=utf-8
 title 7L Discord Bot 啟動中...
 cd /d "%~dp0"
 
 if not exist 7L.py (
     echo [錯誤] 找不到本機 7L.py，請確認檔案存在。
-    echo         （已拔除自動從 GitHub 下載覆寫的行為，避免本機修改被蓋掉）
-    pause
+    echo             pause
     exit /b 1
 )
 
@@ -29,8 +29,8 @@ python 7L.py
 
 if %ERRORLEVEL% NEQ 0 (
     echo.
-    echo 【提示】機器人連線中斷或 Discord 官方伺服器暫時異常 (500/503)！
-    echo 【自動重試】將在 10 秒後自動嘗試重新連線... (若要退出請按 Ctrl + C)
+    echo 【提示】機器人連線中斷或 Discord 官方伺服器暫時異常 [500/503]！
+    echo 【自動重試】將在 10 秒後自動嘗試重新連線... [若要退出請按 Ctrl + C]
     timeout /t 10
     goto run_loop
 )

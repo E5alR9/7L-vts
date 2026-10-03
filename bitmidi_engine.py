@@ -61,7 +61,7 @@ def search_bitmidi(query: str, max_results: int = 10) -> List[Dict[str, str]]:
             if not clean_title:
                 clean_title = href.strip('/').replace('-mid', '').replace('-', ' ').title()
                 
-            # 🛑 關鍵字關聯性過濾：拒絕不相干結果
+            #  關鍵字關聯性過濾：拒絕不相干結果
             if not _is_relevant_match(query, clean_title, href):
                 continue
                 

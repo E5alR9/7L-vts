@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-🎹 高精度鋼琴音訊轉 MIDI 轉錄器 (Advanced Harmonic-Filtered Piano Transcriber)
+ 高精度鋼琴音訊轉 MIDI 轉錄器 (Advanced Harmonic-Filtered Piano Transcriber)
 特點：
 1. 諧波泛音消除 (Harmonic Overtone Cancellation)：自動消除 2x, 3x, 4x, 5x 泛音能量，徹底解決鬼音/雜音與混亂高八度問題。
 2. 複音合理性過濾 (Max Polyphony Constraint)：符合人類 10 指彈奏生理限制，過濾背景底噪。

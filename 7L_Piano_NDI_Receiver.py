@@ -1,15 +1,15 @@
 # -*- coding: utf-8 -*-
 """
 ==============================================================================
- 🎹 7L 專屬超高清「鋼琴」NDI 透明懸浮接收器 (7L Piano Transparent NDI Viewer)
- 👑 專為 Virtual Piano / Synthesia / SeeMusic / 虛擬機琴鍵設計
- 🌟 核心特色：
-   1. 🪟 完美橫向琴鍵寬條比例 (預設 980x260，支援滾輪等比縮放 & 自由拉伸)
-   2. 🪄 內建 NumPy 即時智慧去背 (支援去黑底 / 去綠幕 / 去藍幕 / 去白底)
-   3. ✂️ 即時上下左右邊界裁切 (輕鬆裁除 VM 視窗邊框與工作列，只留琴鍵)
-   4. 👻 支援 Windows 滑鼠點擊穿透 (Click-Through) + 永遠置頂 (Always-on-Top)
-   5. 📡 支援 Hyper-V / VMware 跨網段直連與局域網 NDI 來源自動搜尋配對
-   6. ⚡ 60 FPS 硬件級超低延遲渲染，極致順暢
+  7L 專屬超高清「鋼琴」NDI 透明懸浮接收器 (7L Piano Transparent NDI Viewer)
+  專為 Virtual Piano / Synthesia / SeeMusic / 虛擬機琴鍵設計
+  核心特色：
+   1.  完美橫向琴鍵寬條比例 (預設 980x260，支援滾輪等比縮放 & 自由拉伸)
+   2.  內建 NumPy 即時智慧去背 (支援去黑底 / 去綠幕 / 去藍幕 / 去白底)
+   3.  即時上下左右邊界裁切 (輕鬆裁除 VM 視窗邊框與工作列，只留琴鍵)
+   4.  支援 Windows 滑鼠點擊穿透 (Click-Through) + 永遠置頂 (Always-on-Top)
+   5.  支援 Hyper-V / VMware 跨網段直連與局域網 NDI 來源自動搜尋配對
+   6.  60 FPS 硬件級超低延遲渲染，極致順暢
 ==============================================================================
 """
 
@@ -48,7 +48,7 @@ KEY_WHITE = "WHITE"        # 去白底 (Luma Key White)
 
 
 class PianoNDIWorkerThread(QThread):
-    """🎹 NDI 串流背景接收協程 (極致 60 FPS + 即時去背 & 裁切)"""
+    """ NDI 串流背景接收協程 (極致 60 FPS + 即時去背 & 裁切)"""
     frame_received = pyqtSignal(QImage)
     source_list_updated = pyqtSignal(list)
     status_message = pyqtSignal(str)
@@ -74,7 +74,7 @@ class PianoNDIWorkerThread(QThread):
 
     def run(self):
         if not ndi.initialize():
-            self.status_message.emit("❌ NDI 初始化失敗！")
+            self.status_message.emit(" NDI 初始化失敗！")
             return
 
         # 建立 NDI 來源探索器 (配置本機與局域網探索)
@@ -83,10 +83,10 @@ class PianoNDIWorkerThread(QThread):
         find_settings.extra_ips = "127.0.0.1,localhost,172.31.116.232,172.22.212.232,172.22.208.1,172.31.112.1,192.168.1.104,192.168.1.0/24"
         self.find_handle = ndi.find_create_v2(find_settings)
         if not self.find_handle:
-            self.status_message.emit("❌ 無法建立 NDI 尋找器")
+            self.status_message.emit(" 無法建立 NDI 尋找器")
             return
 
-        self.status_message.emit("🔍 正在搜尋本機 / 局域網鋼琴 NDI 來源...")
+        self.status_message.emit(" 正在搜尋本機 / 局域網鋼琴 NDI 來源...")
 
         last_search_time = 0
         discovered_names = []
@@ -204,7 +204,7 @@ class PianoNDIWorkerThread(QThread):
         """連接到指定 NDI 來源"""
         self.disconnect_source()
         self.current_source_name = source_name
-        self.status_message.emit(f"🔗 連接鋼琴來源: {source_name}")
+        self.status_message.emit(f" 連接鋼琴來源: {source_name}")
 
         sources = ndi.find_get_current_sources(self.find_handle)
         target_source = None
@@ -220,12 +220,12 @@ class PianoNDIWorkerThread(QThread):
             recv_create.bandwidth = ndi.RECV_BANDWIDTH_HIGHEST
             self.recv_handle = ndi.recv_create_v3(recv_create)
             if self.recv_handle:
-                self.status_message.emit(f"✅ 鋼琴畫面已連接: {source_name}")
+                self.status_message.emit(f" 鋼琴畫面已連接: {source_name}")
             else:
-                self.status_message.emit(f"❌ 連接失敗: {source_name}")
+                self.status_message.emit(f" 連接失敗: {source_name}")
                 self.current_source_name = ""
         else:
-            self.status_message.emit(f"⚠️ 找不到來源: {source_name}")
+            self.status_message.emit(f" 找不到來源: {source_name}")
             self.current_source_name = ""
 
     def disconnect_source(self):
@@ -239,10 +239,10 @@ class PianoNDIWorkerThread(QThread):
 
 
 class CropSettingsDialog(QDialog):
-    """✂️ 邊界裁切設定對話框"""
+    """ 邊界裁切設定對話框"""
     def __init__(self, parent=None, top=0, bottom=0, left=0, right=0):
         super().__init__(parent)
-        self.setWindowTitle("✂️ 鋼琴畫面裁切設定 (只保留琴鍵/瀑布流)")
+        self.setWindowTitle(" 鋼琴畫面裁切設定 (只保留琴鍵/瀑布流)")
         self.resize(360, 220)
         self.setStyleSheet("""
             QDialog {
@@ -321,11 +321,11 @@ class CropSettingsDialog(QDialog):
 
 
 class PianoNDIViewerWindow(QWidget):
-    """🎹 7L 專屬鋼琴 NDI 透明懸浮接收器"""
+    """ 7L 專屬鋼琴 NDI 透明懸浮接收器"""
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("🎹 7L 鋼琴 NDI 透明接收器")
+        self.setWindowTitle(" 7L 鋼琴 NDI 透明接收器")
         
         # 鋼琴專屬寬橫條長寬比 (預設 980 x 260)
         self.setMinimumSize(320, 100)
@@ -422,42 +422,42 @@ class PianoNDIViewerWindow(QWidget):
         ctrl_layout.setSpacing(6)
 
         # 標題圖示
-        self.lbl_title = QLabel("🎹 7L 鋼琴 NDI", self.ctrl_bar)
+        self.lbl_title = QLabel(" 7L 鋼琴 NDI", self.ctrl_bar)
         self.lbl_title.setStyleSheet("color: #ff77aa; font-weight: bold; font-size: 13px;")
         ctrl_layout.addWidget(self.lbl_title)
 
         # 來源下拉選單
         self.combo_sources = QComboBox(self.ctrl_bar)
-        self.combo_sources.addItem("🔍 搜尋虛擬機/鋼琴來源...")
+        self.combo_sources.addItem(" 搜尋虛擬機/鋼琴來源...")
         self.combo_sources.currentTextChanged.connect(self.on_source_selected)
         ctrl_layout.addWidget(self.combo_sources, 1)
 
         # 重新搜尋按鈕
-        self.btn_refresh = QPushButton("🔄", self.ctrl_bar)
+        self.btn_refresh = QPushButton("", self.ctrl_bar)
         self.btn_refresh.setToolTip("重新掃描 NDI 來源 (Refresh Sources)")
         self.btn_refresh.clicked.connect(self.refresh_sources)
         ctrl_layout.addWidget(self.btn_refresh)
 
-        # 🪄 去背模式切換按鈕
-        self.btn_key = QPushButton("🪄 去黑底", self.ctrl_bar)
+        #  去背模式切換按鈕
+        self.btn_key = QPushButton(" 去黑底", self.ctrl_bar)
         self.btn_key.setToolTip("切換即時去背模式 (去黑底 / 去綠幕 / 去白底 / 原圖)")
         self.btn_key.clicked.connect(self.cycle_key_mode)
         ctrl_layout.addWidget(self.btn_key)
 
-        # ✂️ 邊界裁切按鈕
-        self.btn_crop = QPushButton("✂️ 裁切", self.ctrl_bar)
+        #  邊界裁切按鈕
+        self.btn_crop = QPushButton(" 裁切", self.ctrl_bar)
         self.btn_crop.setToolTip("裁切視窗邊框與工作列，只留琴鍵")
         self.btn_crop.clicked.connect(self.open_crop_dialog)
         ctrl_layout.addWidget(self.btn_crop)
 
-        # 📌 置頂切換按鈕
-        self.btn_pin = QPushButton("📌", self.ctrl_bar)
+        #  置頂切換按鈕
+        self.btn_pin = QPushButton("", self.ctrl_bar)
         self.btn_pin.setToolTip("切換是否永遠置頂 (Always on Top)")
         self.btn_pin.clicked.connect(self.toggle_always_on_top)
         ctrl_layout.addWidget(self.btn_pin)
 
-        # 👻 穿透按鈕
-        self.btn_ghost = QPushButton("👻 穿透", self.ctrl_bar)
+        #  穿透按鈕
+        self.btn_ghost = QPushButton(" 穿透", self.ctrl_bar)
         self.btn_ghost.setToolTip("開啟滑鼠穿透 (開啟後點擊穿透至後面，按 H 或快速鍵 K 恢復)")
         self.btn_ghost.clicked.connect(self.toggle_click_through)
         ctrl_layout.addWidget(self.btn_ghost)
@@ -507,7 +507,7 @@ class PianoNDIViewerWindow(QWidget):
         self.combo_sources.blockSignals(True)
         self.combo_sources.clear()
         if not sources:
-            self.combo_sources.addItem("🔍 搜尋中 (未發現來源)...")
+            self.combo_sources.addItem(" 搜尋中 (未發現來源)...")
         else:
             for s in sources:
                 self.combo_sources.addItem(s)
@@ -534,10 +534,10 @@ class PianoNDIViewerWindow(QWidget):
         """循環切換去背模式"""
         modes = [KEY_BLACK, KEY_GREEN, KEY_WHITE, KEY_NONE]
         mode_names = {
-            KEY_BLACK: "🪄 去黑底",
-            KEY_GREEN: "🟩 去綠幕",
-            KEY_WHITE: "⚪ 去白底",
-            KEY_NONE: "🖼️ 原圖模式"
+            KEY_BLACK: " 去黑底",
+            KEY_GREEN: " 去綠幕",
+            KEY_WHITE: " 去白底",
+            KEY_NONE: " 原圖模式"
         }
         curr_idx = modes.index(self.ndi_thread.key_mode) if self.ndi_thread.key_mode in modes else 0
         next_mode = modes[(curr_idx + 1) % len(modes)]
@@ -565,7 +565,7 @@ class PianoNDIViewerWindow(QWidget):
             self.save_config()
 
     # ────────────────────────────────────────────────────────
-    # 🎨 繪製事件 (支援透明背景與鋼琴寬條等比平滑縮放)
+    #  繪製事件 (支援透明背景與鋼琴寬條等比平滑縮放)
     # ────────────────────────────────────────────────────────
     def paintEvent(self, event: QPaintEvent):
         painter = QPainter(self)
@@ -592,7 +592,7 @@ class PianoNDIViewerWindow(QWidget):
             painter.drawPixmap(x, y, scaled)
 
     # ────────────────────────────────────────────────────────
-    # 🖱️ 滑鼠拖曳、滾輪縮放與操作
+    #  滑鼠拖曳、滾輪縮放與操作
     # ────────────────────────────────────────────────────────
     def mousePressEvent(self, event: QMouseEvent):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -624,7 +624,7 @@ class PianoNDIViewerWindow(QWidget):
         """切換視窗置頂"""
         self.is_always_on_top = not self.is_always_on_top
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, self.is_always_on_top)
-        self.btn_pin.setText("📌" if self.is_always_on_top else "📍")
+        self.btn_pin.setText("" if self.is_always_on_top else "")
         self.btn_pin.setToolTip("已開啟置頂" if self.is_always_on_top else "已關閉置頂")
         self.show()
         self.save_config()
@@ -646,11 +646,11 @@ class PianoNDIViewerWindow(QWidget):
         
         if self.is_click_through:
             ctypes.windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style | WS_EX_TRANSPARENT | WS_EX_LAYERED)
-            self.btn_ghost.setText("👻 穿透中")
+            self.btn_ghost.setText(" 穿透中")
             self.btn_ghost.setStyleSheet("background: rgba(0, 230, 118, 0.4); border-color: #00e676;")
         else:
             ctypes.windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style & ~WS_EX_TRANSPARENT)
-            self.btn_ghost.setText("👻 穿透")
+            self.btn_ghost.setText(" 穿透")
             self.btn_ghost.setStyleSheet("")
 
     def toggle_color_swap(self):
@@ -689,7 +689,7 @@ class PianoNDIViewerWindow(QWidget):
 
                 self.is_always_on_top = cfg.get("is_always_on_top", True)
                 self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, self.is_always_on_top)
-                self.btn_pin.setText("📌" if self.is_always_on_top else "📍")
+                self.btn_pin.setText("" if self.is_always_on_top else "")
 
                 self.show_control_bar = cfg.get("show_control_bar", True)
                 if not self.show_control_bar:
@@ -701,12 +701,12 @@ class PianoNDIViewerWindow(QWidget):
                 key_mode = cfg.get("key_mode", KEY_BLACK)
                 self.ndi_thread.key_mode = key_mode
                 mode_names = {
-                    KEY_BLACK: "🪄 去黑底",
-                    KEY_GREEN: "🟩 去綠幕",
-                    KEY_WHITE: "⚪ 去白底",
-                    KEY_NONE: "🖼️ 原圖模式"
+                    KEY_BLACK: " 去黑底",
+                    KEY_GREEN: " 去綠幕",
+                    KEY_WHITE: " 去白底",
+                    KEY_NONE: " 原圖模式"
                 }
-                self.btn_key.setText(mode_names.get(key_mode, "🪄 去黑底"))
+                self.btn_key.setText(mode_names.get(key_mode, " 去黑底"))
 
                 self.ndi_thread.crop_top = cfg.get("crop_top", 0.0)
                 self.ndi_thread.crop_bottom = cfg.get("crop_bottom", 0.0)
@@ -777,39 +777,39 @@ class PianoNDIViewerWindow(QWidget):
             }
         """)
 
-        act_ctrl = menu.addAction("👁️ 顯示/隱藏頂部工具列 (H)")
+        act_ctrl = menu.addAction(" 顯示/隱藏頂部工具列 (H)")
         act_ctrl.triggered.connect(self.toggle_control_bar)
 
-        act_pin = menu.addAction("📌 切換永遠置頂 (T)")
+        act_pin = menu.addAction(" 切換永遠置頂 (T)")
         act_pin.setCheckable(True)
         act_pin.setChecked(self.is_always_on_top)
         act_pin.triggered.connect(self.toggle_always_on_top)
 
-        act_ghost = menu.addAction("👻 滑鼠穿透模式 (K)")
+        act_ghost = menu.addAction(" 滑鼠穿透模式 (K)")
         act_ghost.setCheckable(True)
         act_ghost.setChecked(self.is_click_through)
         act_ghost.triggered.connect(self.toggle_click_through)
 
-        act_crop = menu.addAction("✂️ 邊界裁切設定 (Crop)")
+        act_crop = menu.addAction(" 邊界裁切設定 (Crop)")
         act_crop.triggered.connect(self.open_crop_dialog)
 
         menu.addSeparator()
 
         # 去背模式子選單
-        key_menu = menu.addMenu("🪄 即時去背模式 (Chroma Key)")
+        key_menu = menu.addMenu(" 即時去背模式 (Chroma Key)")
         for km, label in [
-            (KEY_BLACK, "🪄 去黑底 (Black Key - 推薦)"),
-            (KEY_GREEN, "🟩 去綠幕 (Green Key)"),
-            (KEY_BLUE, "🟦 去藍幕 (Blue Key)"),
-            (KEY_WHITE, "⚪ 去白底 (White Key)"),
-            (KEY_NONE, "🖼️ 原圖模式 (No Key)")
+            (KEY_BLACK, " 去黑底 (Black Key - 推薦)"),
+            (KEY_GREEN, " 去綠幕 (Green Key)"),
+            (KEY_BLUE, " 去藍幕 (Blue Key)"),
+            (KEY_WHITE, " 去白底 (White Key)"),
+            (KEY_NONE, " 原圖模式 (No Key)")
         ]:
             act = key_menu.addAction(label)
             act.setCheckable(True)
             act.setChecked(self.ndi_thread.key_mode == km)
             act.triggered.connect(lambda checked, m=km: (setattr(self.ndi_thread, 'key_mode', m), self.save_config()))
 
-        act_color = menu.addAction("🎨 色彩通道反轉 RGB/BGR (C)")
+        act_color = menu.addAction(" 色彩通道反轉 RGB/BGR (C)")
         act_color.setCheckable(True)
         act_color.setChecked(self.ndi_thread.color_swap)
         act_color.triggered.connect(self.toggle_color_swap)
@@ -817,7 +817,7 @@ class PianoNDIViewerWindow(QWidget):
         menu.addSeparator()
 
         # 鋼琴預設解析度
-        size_menu = menu.addMenu("📐 鋼琴專屬預設比例")
+        size_menu = menu.addMenu(" 鋼琴專屬預設比例")
         size_menu.addAction("標準橫條 (980 x 260)").triggered.connect(lambda: self.resize(980, 260))
         size_menu.addAction("超寬琴鍵 (1280 x 320)").triggered.connect(lambda: self.resize(1280, 320))
         size_menu.addAction("精巧琴鍵 (720 x 200)").triggered.connect(lambda: self.resize(720, 200))
@@ -825,13 +825,13 @@ class PianoNDIViewerWindow(QWidget):
         size_menu.addAction("全寬橫幅 (1600 x 380)").triggered.connect(lambda: self.resize(1600, 380))
 
         # 背景模式
-        bg_menu = menu.addMenu("🎨 背景襯底顏色")
-        bg_menu.addAction("✨ 完全透明 (Transparent)").triggered.connect(lambda: self.set_background_mode("TRANSPARENT"))
-        bg_menu.addAction("🟩 綠幕背景 (Green Screen)").triggered.connect(lambda: self.set_background_mode("GREEN"))
-        bg_menu.addAction("🖤 深色磨砂 (Dark Glass)").triggered.connect(lambda: self.set_background_mode("DARK_GLASS"))
+        bg_menu = menu.addMenu(" 背景襯底顏色")
+        bg_menu.addAction(" 完全透明 (Transparent)").triggered.connect(lambda: self.set_background_mode("TRANSPARENT"))
+        bg_menu.addAction(" 綠幕背景 (Green Screen)").triggered.connect(lambda: self.set_background_mode("GREEN"))
+        bg_menu.addAction(" 深色磨砂 (Dark Glass)").triggered.connect(lambda: self.set_background_mode("DARK_GLASS"))
 
         menu.addSeparator()
-        act_exit = menu.addAction("❌ 關閉鋼琴接收器")
+        act_exit = menu.addAction(" 關閉鋼琴接收器")
         act_exit.triggered.connect(self.close)
 
         menu.exec(pos)

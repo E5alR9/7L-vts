@@ -115,14 +115,28 @@ class MicLiveAudioAnalyzer:
                     live_client = genai.Client(api_key=g_key)
                     live_cfg = types.LiveConnectConfig(
                         response_modalities=[types.Modality.AUDIO],
+                        speech_config=types.SpeechConfig(
+                            voice_config=types.VoiceConfig(
+                                prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Aoede")
+                            )
+                        ),
                         output_audio_transcription=types.AudioTranscriptionConfig(),
-                        system_instruction=types.Content(parts=[types.Part(text=system_instruction)])
+                        system_instruction=types.Content(parts=[types.Part.from_text(text=system_instruction)])
                     )
                     async with asyncio.timeout(8.0):
                         async with live_client.aio.live.connect(model="gemini-3.8-live", config=live_cfg) as session:
-                            await session.send_realtime_input(audio={"data": raw_bytes, "mime_type": "audio/wav"})
+                            pcm_bytes = raw_bytes[44:] if raw_bytes.startswith(b'RIFF') else raw_bytes
+                            chunk_sz = 8000
+                            for offset in range(0, len(pcm_bytes), chunk_sz):
+                                chunk = pcm_bytes[offset:offset+chunk_sz]
+                                await session.send_realtime_input(audio=types.Blob(data=chunk, mime_type="audio/pcm;rate=16000"))
+                                
                             if stt_draft:
                                 await session.send_realtime_input(text=f"（老爸開口說話，STT 快速參考：『{stt_draft}』。請依據老爸真實發音與語調情緒自主思考，輸出純 JSON 格式）")
+                            else:
+                                await session.send_realtime_input(text="（老爸說完話了，請依據音訊內容自主思考，輸出純 JSON 格式）")
+                            
+                            await session.send_realtime_input(activity_end=types.ActivityEnd())
                             
                             live_transcription = ""
                             tool_call_dict = None

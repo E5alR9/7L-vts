@@ -11,7 +11,7 @@ import torch
 import faiss
 from transformers import HubertModel
 
-# 🧭 統一路徑解析（不再寫死原作者電腦）
+#  統一路徑解析（不再寫死原作者電腦）
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from core.paths import GPT_SOVITS_DIR, REF_VOICE_ZH, legacy_or_home
 

@@ -1,9 +1,9 @@
 """
-🎹 7L 虛擬鋼琴 - 88 鍵真實古典平台鋼琴 (A0~C8 / 古典取樣 + 粉白黑深粉自由配色)
+ 7L 虛擬鋼琴 - 88 鍵真實古典平台鋼琴 (A0~C8 / 古典取樣 + 粉白黑深粉自由配色)
 ========================================================================
-✨ 特色核心：
+ 特色核心：
 1. 緊湊無死角介面：徹底刪除鋼琴下方多餘空白區，琴鍵底部完美貼合
-2. 🎨 客製粉白黑深粉配色體系 (User Color Aesthetic)：
+2.  客製粉白黑深粉配色體系 (User Color Aesthetic)：
    - 白鍵長條：粉、白自由搭配 (柔櫻粉、珍珠白、淺櫻粉、霜白相間)
    - 黑鍵長條：黑、深粉自由搭配 (霧炭黑、暗夜黑、莓果深粉、玫瑰深粉相間)
    - 擊鍵光刃與時間軸：櫻花粉與深粉光芒
@@ -11,7 +11,7 @@
 4. 零延遲無縫中途切歌 (Smooth Song Switching - 下拉即切、即刻清空殘響與方塊)
 5. 頂部可拖動互動時間軸 (Draggable Timeline - 任意點選/拖動快進倒退)
 6. Synthesia 正統瀑布流下落長條方形視覺化 (前置預落下落，碰線擊鍵瞬間精準發聲)
-7. 🌐 BitMidi (https://bitmidi.com) 雲端百萬 MIDI 樂譜即時搜尋與一鍵下載演奏
+7.  BitMidi (https://bitmidi.com) 雲端百萬 MIDI 樂譜即時搜尋與一鍵下載演奏
 """
 
 import os
@@ -57,8 +57,8 @@ if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
         pass
 
 class PianoNDIBroadcaster:
-    """🎹 鋼琴 NDI 影像廣播引擎 (極致 60 FPS 超低延遲串流，支援跨網段推流至主電腦)"""
-    def __init__(self, get_bbox_callback, stream_name="🎹 7L Virtual Piano"):
+    """ 鋼琴 NDI 影像廣播引擎 (極致 60 FPS 超低延遲串流，支援跨網段推流至主電腦)"""
+    def __init__(self, get_bbox_callback, stream_name=" 7L Virtual Piano"):
         self.get_bbox = get_bbox_callback
         self.stream_name = stream_name
         self.running = False
@@ -171,9 +171,9 @@ MIDI_SHEETS_DIR = "midi_sheets"
 os.makedirs(MIDI_SHEETS_DIR, exist_ok=True)
 
 # ────────────────────────────────────────────────────────
-# 🌸 1. 使用者專屬指定配色庫 (粉白黑深粉 4 色全隨機 + 左右手專屬分色)
+#  1. 使用者專屬指定配色庫 (粉白黑深粉 4 色全隨機 + 左右手專屬分色)
 # ────────────────────────────────────────────────────────
-# 🎲 預設全隨機混搭庫 (當 MIDI 未明確寫出左右手時使用，完全隨機自由搭配)
+#  預設全隨機混搭庫 (當 MIDI 未明確寫出左右手時使用，完全隨機自由搭配)
 WHITE_NOTE_PALETTE = [
     ("#ffc5d3", "#ffffff"), # 柔櫻粉 + 白框
     ("#ffffff", "#fbcfe8"), # 珍珠白 + 粉框
@@ -192,7 +192,7 @@ BLACK_NOTE_PALETTE = [
     ("#362f38", "#fda4af"), # 暖炭黑 + 櫻花框
 ]
 
-# 🌸 左手專屬指定配色 (當 MIDI 軌道有明確標註 Left / Bass / 左手 時使用)
+#  左手專屬指定配色 (當 MIDI 軌道有明確標註 Left / Bass / 左手 時使用)
 LH_WHITE_PALETTE = [
     ("#ffc5d3", "#ffffff"), # 柔櫻粉 + 白框
     ("#fbcfe8", "#ffffff"), # 櫻花淡粉 + 白框
@@ -204,7 +204,7 @@ LH_BLACK_PALETTE = [
     ("#a8325a", "#fdf2f8"), # 玫瑰深粉 + 霜白框
 ]
 
-# 🤍 右手專屬指定配色 (當 MIDI 軌道有明確標註 Right / Treble / 右手 時使用)
+#  右手專屬指定配色 (當 MIDI 軌道有明確標註 Right / Treble / 右手 時使用)
 RH_WHITE_PALETTE = [
     ("#ffffff", "#fda4af"), # 純珍珠白 + 淺粉框
     ("#fdf2f8", "#fbcfe8"), # 霜白色 + 櫻花淡粉框
@@ -218,7 +218,7 @@ RH_BLACK_PALETTE = [
 
 
 # ────────────────────────────────────────────────────────
-# 🎹 2. 88 鍵全音域物理鍵盤定義 (MIDI 21 ~ 108)
+#  2. 88 鍵全音域物理鍵盤定義 (MIDI 21 ~ 108)
 # ────────────────────────────────────────────────────────
 WHITE_KEYS = [
     ('A0', 21, 'A0', '1'),
@@ -265,7 +265,7 @@ for oct in range(1, 8):
 # 最高音 C8 (108)
 WHITE_KEYS.append(('C8', 108, 'C8', ''))
 
-# 🎹 雙排全無縫不重疊鍵盤鍵位定義 (Continuous Dual-Row Layout, 0% Overlap):
+#  雙排全無縫不重疊鍵盤鍵位定義 (Continuous Dual-Row Layout, 0% Overlap):
 # 下排 (Lower Tier): 白鍵 zxcvbnm,./ | 黑鍵 asdfghjkl;' (覆蓋 C 到 E，10 個白鍵 + 7 個黑鍵)
 # 上排 (Upper Tier): 白鍵 qwertyuiop[]\ | 黑鍵 1234567890-= (接續 F 到 D，13 個白鍵 + 9 個黑鍵)
 LOWER_TIER_NOTES = [
@@ -324,11 +324,11 @@ EXTRA_KEY_HELPERS = [
 ]
 
 PITCH_PRESETS = [
-    {"name": "🎼 超低音 (C1~D4)", "base_c": 24, "desc": "超低音檔 (C1 ~ D4)"},
-    {"name": "🎼 中低音 (C2~D5)", "base_c": 36, "desc": "中低音檔 (C2 ~ D5)"},
-    {"name": "🎼 標準中音 (C3~D6)", "base_c": 48, "desc": "標準中音檔 (C3 ~ D6，預設)"},
-    {"name": "🎼 中高音 (C4~D7)", "base_c": 60, "desc": "中高音檔 (C4 ~ D7)"},
-    {"name": "🎼 極高音 (C5~C8)", "base_c": 70, "desc": "極高音檔 (C5 ~ C8，覆蓋至最右側高音 C8)"},
+    {"name": " 超低音 (C1~D4)", "base_c": 24, "desc": "超低音檔 (C1 ~ D4)"},
+    {"name": " 中低音 (C2~D5)", "base_c": 36, "desc": "中低音檔 (C2 ~ D5)"},
+    {"name": " 標準中音 (C3~D6)", "base_c": 48, "desc": "標準中音檔 (C3 ~ D6，預設)"},
+    {"name": " 中高音 (C4~D7)", "base_c": 60, "desc": "中高音檔 (C4 ~ D7)"},
+    {"name": " 極高音 (C5~C8)", "base_c": 70, "desc": "極高音檔 (C5 ~ C8，覆蓋至最右側高音 C8)"},
 ]
 
 VP_MAP = {}
@@ -377,42 +377,42 @@ def compute_pitch_mappings(base_c: int = 48):
 compute_pitch_mappings(48)
 
 # ────────────────────────────────────────────────────────
-# 🎻 3. General MIDI 精選音色庫與聲音引擎 (Acoustic Grand Piano & GM Sound Engine)
+#  3. General MIDI 精選音色庫與聲音引擎 (Acoustic Grand Piano & GM Sound Engine)
 # ────────────────────────────────────────────────────────
 MIDI_INSTRUMENTS = {
-    "🎹 古典平台鋼琴 (Grand Piano)": 0,
-    "✨ 晶亮平台鋼琴 (Bright Piano)": 1,
-    "⚡ 經典電鋼琴 (Rhodes EP)": 4,
-    "🌌 FM 數位電鋼琴 (DX7 EP)": 5,
-    "🎼 古典大鍵琴 (Harpsichord)": 6,
-    "🔔 夢幻鋼片琴 (Celesta)": 8,
-    "🎵 溫暖木琴 (Marimba)": 12,
-    "⛪ 教堂管風琴 (Church Organ)": 19,
-    "🪗 浪漫手風琴 (Accordion)": 21,
-    "🎸 古典尼龍吉他 (Nylon Guitar)": 24,
-    "🎸 民謠鋼弦吉他 (Steel Guitar)": 25,
-    "🎸 清音電吉他 (Clean Guitar)": 27,
-    "⚡ 破音電吉他 (Overdrive)": 29,
-    "⚡ 重金屬吉他 (Distortion)": 30,
-    "🎸 指彈電貝斯 (Electric Bass)": 33,
-    "🎻 獨奏小提琴 (Violin)": 40,
-    "🎻 抒情大提琴 (Cello)": 42,
-    "🪕 天使豎琴 (Harp)": 46,
-    "🎻 華麗交響弦樂 (String Ensemble)": 48,
-    "👼 空靈人聲合唱 (Choir Aahs)": 52,
-    "🎺 爵士小號 (Trumpet)": 56,
-    "🎷 浪漫薩克斯風 (Alto Sax)": 65,
-    "🪈 清新長笛 (Flute)": 73,
-    "🎹 復古合成器 (Saw Lead)": 81,
-    "🌸 夢幻合成音墊 (Warm Pad)": 89,
-    "🪕 日本古箏 (Koto)": 107,
-    "🪵 非洲拇指琴 (Kalimba)": 108
+    " 古典平台鋼琴 (Grand Piano)": 0,
+    " 晶亮平台鋼琴 (Bright Piano)": 1,
+    " 經典電鋼琴 (Rhodes EP)": 4,
+    " FM 數位電鋼琴 (DX7 EP)": 5,
+    " 古典大鍵琴 (Harpsichord)": 6,
+    " 夢幻鋼片琴 (Celesta)": 8,
+    " 溫暖木琴 (Marimba)": 12,
+    " 教堂管風琴 (Church Organ)": 19,
+    " 浪漫手風琴 (Accordion)": 21,
+    " 古典尼龍吉他 (Nylon Guitar)": 24,
+    " 民謠鋼弦吉他 (Steel Guitar)": 25,
+    " 清音電吉他 (Clean Guitar)": 27,
+    " 破音電吉他 (Overdrive)": 29,
+    " 重金屬吉他 (Distortion)": 30,
+    " 指彈電貝斯 (Electric Bass)": 33,
+    " 獨奏小提琴 (Violin)": 40,
+    " 抒情大提琴 (Cello)": 42,
+    " 天使豎琴 (Harp)": 46,
+    " 華麗交響弦樂 (String Ensemble)": 48,
+    " 空靈人聲合唱 (Choir Aahs)": 52,
+    " 爵士小號 (Trumpet)": 56,
+    " 浪漫薩克斯風 (Alto Sax)": 65,
+    " 清新長笛 (Flute)": 73,
+    " 復古合成器 (Saw Lead)": 81,
+    " 夢幻合成音墊 (Warm Pad)": 89,
+    " 日本古箏 (Koto)": 107,
+    " 非洲拇指琴 (Kalimba)": 108
 }
 
 import collections
 
 class ClassicalPianoSoundEngine:
-    """🌟 88 鍵高復音數無削波 MIDI 聲音引擎 (支援 Rush E / 黑樂譜高密度連彈，0 消音 0 掐音)"""
+    """ 88 鍵高復音數無削波 MIDI 聲音引擎 (支援 Rush E / 黑樂譜高密度連彈，0 消音 0 掐音)"""
     def __init__(self, volume: int = 100, instrument: int = 0):
         self.midi_out = None
         self.volume = max(0, min(200, int(volume)))
@@ -581,7 +581,7 @@ def format_speed_str(speed: float) -> str:
 def parse_speed_str(speed_str: str) -> float:
     """解析倍速字串為浮點數 (支援 0.05 ~ 50.0)"""
     try:
-        clean = str(speed_str).lower().replace('x', '').replace('倍', '').replace('速', '').replace('✏️', '').replace('自訂', '').replace('...', '').strip()
+        clean = str(speed_str).lower().replace('x', '').replace('倍', '').replace('速', '').replace('', '').replace('自訂', '').replace('...', '').strip()
         return max(0.05, min(50.0, round(float(clean), 2)))
     except Exception:
         return 1.0
@@ -620,12 +620,12 @@ def save_piano_settings(data_dict):
         pass
 
 # ────────────────────────────────────────────────────────
-# 🖥️ 4. 88 鍵虛擬鋼琴 GUI (自適應大視窗 + 解除大小鎖定 + 可拖動時間軸)
+#  4. 88 鍵虛擬鋼琴 GUI (自適應大視窗 + 解除大小鎖定 + 可拖動時間軸)
 # ────────────────────────────────────────────────────────
 class VirtualPianoGUI:
     def __init__(self, root, auto_midi_path: str = "", auto_title: str = "", auto_close: bool = False, is_loop: bool = False, is_random: bool = False, initial_volume: int = 100, initial_speed: float = 1.0):
         self.root = root
-        self.root.title("🎹 7L 88 鍵古典平台鋼琴 - Synthesia 瀑布流 & BitMidi 雲端曲庫")
+        self.root.title(" 7L 88 鍵古典平台鋼琴 - Synthesia 瀑布流 & BitMidi 雲端曲庫")
         
         # 讀取已保存的視窗幾何尺寸與位置，若無則依螢幕解析度設定寬敞舒適的大視窗
         settings = load_piano_settings()
@@ -652,7 +652,7 @@ class VirtualPianoGUI:
             self.root.geometry(f"{init_w}x{init_h}+{init_x}+{init_y}")
 
         self.root.minsize(960, 380)
-        self.root.resizable(True, True)  # 🔓 徹底解鎖視窗自由縮放與最大化！
+        self.root.resizable(True, True)  #  徹底解鎖視窗自由縮放與最大化！
         self.root.configure(bg="#0f1015")
         
         self.auto_midi_path = auto_midi_path
@@ -662,21 +662,21 @@ class VirtualPianoGUI:
         # 播放模式：循環播放 / 隨機連播 / 可手彈模式開關
         self.is_loop = is_loop
         self.is_random = is_random
-        self.is_manual_play = False  # 🎹 鋼琴手動預設關 (預設為純自動演奏狀態，不顯示快捷字母鍵)
-        self.current_base_c = 48     # 🎼 基準 C 音符 (預設 48 = C3 標準中音檔)
+        self.is_manual_play = False  #  鋼琴手動預設關 (預設為純自動演奏狀態，不顯示快捷字母鍵)
+        self.current_base_c = 48     #  基準 C 音符 (預設 48 = C3 標準中音檔)
         self.pitch_var = tk.StringVar(value=PITCH_PRESETS[2]["name"])
         
-        # 🔊 音量控制 (0 ~ 200)
+        #  音量控制 (0 ~ 200)
         self.current_volume = max(0, min(200, int(initial_volume)))
         self.prev_volume = self.current_volume if self.current_volume > 0 else 100
         if SOUND_ENGINE:
             SOUND_ENGINE.set_volume(self.current_volume)
             
-        # ⚡ 播放倍速控制 (0.05x ~ 50.0x，預設 1.0x)
+        #  播放倍速控制 (0.05x ~ 50.0x，預設 1.0x)
         self.playback_speed = max(0.05, min(50.0, round(float(initial_speed), 2)))
         self.SPEED_OPTIONS = [
             "0.25x", "0.5x", "0.75x", "1.0x", "1.25x", "1.5x", "1.75x", 
-            "2.0x", "2.5x", "3.0x", "4.0x", "5.0x", "10.0x", "✏️ 自訂倍速..."
+            "2.0x", "2.5x", "3.0x", "4.0x", "5.0x", "10.0x", " 自訂倍速..."
         ]
         self.last_perf_time = None
         
@@ -719,14 +719,14 @@ class VirtualPianoGUI:
         # 時間軸拖動狀態
         self.is_dragging_timeline = False
         self.drag_seek_time = 0.0
-        self.current_instrument_name = "🎹 古典平台鋼琴 (Grand Piano)"
+        self.current_instrument_name = " 古典平台鋼琴 (Grand Piano)"
         self._last_status_broadcast_time = 0.0
         self._resize_save_timer = None
         
         self.search_results_cache = []
         self.local_midi_files = {}
 
-        # 📡 NDI 廣播與背景模式
+        #  NDI 廣播與背景模式
         self.is_frameless = False
         self._current_bg_mode = "DARK"
         self.ndi_broadcaster = PianoNDIBroadcaster(self.get_window_bbox)
@@ -773,7 +773,7 @@ class VirtualPianoGUI:
             if not inst_name and hasattr(self, 'inst_var'):
                 inst_name = self.inst_var.get()
             if not inst_name:
-                inst_name = "🎹 古典平台鋼琴 (Grand Piano)"
+                inst_name = " 古典平台鋼琴 (Grand Piano)"
 
             is_actually_playing = bool(self.is_playing) and (event not in ["closed", "piano_shutdown", "stopped"])
             is_window_alive = (event not in ["closed", "piano_shutdown"])
@@ -847,7 +847,7 @@ class VirtualPianoGUI:
                                 self.start_midi_playback(t, p)
                             self.root.after(0, do_play)
                     elif cmd in ["play_simultaneous", "play_multi", "mashup"]:
-                        # 🌟 多曲同時並發演奏 (無數量限制！)
+                        #  多曲同時並發演奏 (無數量限制！)
                         tracks = cmd_obj.get("tracks", [])
                         vol = cmd_obj.get("volume")
                         spd = cmd_obj.get("speed")
@@ -926,7 +926,7 @@ class VirtualPianoGUI:
                             threading.Timer(0.1, lambda: os._exit(0)).start()
                         self.root.after(0, do_close)
                     elif cmd == "ping":
-                        # 💓 收到主系統在線檢測 Ping，立即回覆 pong 狀態包
+                        #  收到主系統在線檢測 Ping，立即回覆 pong 狀態包
                         self.root.after(0, lambda: self.broadcast_piano_status("pong"))
                 except Exception:
                     pass
@@ -973,27 +973,27 @@ class VirtualPianoGUI:
         
         if hasattr(self, 'btn_mute'):
             if vol == 0:
-                self.btn_mute.config(text="🔇", fg="#e06c75")
+                self.btn_mute.config(text="", fg="#e06c75")
             elif vol < 50:
-                self.btn_mute.config(text="🔉", fg="#f472b6")
+                self.btn_mute.config(text="", fg="#f472b6")
             else:
-                self.btn_mute.config(text="🔊", fg="#f472b6")
+                self.btn_mute.config(text="", fg="#f472b6")
         self.broadcast_piano_status("volume_changed")
 
     def toggle_mute(self):
         """點擊音量圖示切換靜音 / 恢復音量"""
         if self.current_volume > 0:
             self.set_piano_volume(0)
-            self.set_status_text("🔇 鋼琴已靜音")
+            self.set_status_text(" 鋼琴已靜音")
         else:
             restore_vol = self.prev_volume if self.prev_volume > 0 else 80
             self.set_piano_volume(restore_vol)
-            self.set_status_text(f"🔊 鋼琴音量已恢復至 {restore_vol}%")
+            self.set_status_text(f" 鋼琴音量已恢復至 {restore_vol}%")
 
     def on_speed_selected(self, event=None):
         """當在下拉選單選取倍速時即時切換 (支援自訂倍速)"""
         val_str = self.speed_var.get().strip()
-        if "自訂" in val_str or "custom" in val_str.lower() or val_str.startswith("✏️"):
+        if "自訂" in val_str or "custom" in val_str.lower() or val_str.startswith(""):
             # 彈出自訂倍速輸入框
             custom_val = simpledialog.askstring(
                 "自訂倍速", 
@@ -1032,7 +1032,7 @@ class VirtualPianoGUI:
         if hasattr(self, 'speed_var'):
             self.speed_var.set(spd_str)
             
-        self.set_status_text(f"⚡ 播放倍速已設定為: {spd_str}")
+        self.set_status_text(f" 播放倍速已設定為: {spd_str}")
         self.broadcast_piano_status("speed_changed")
 
     def on_instrument_selected(self, event=None):
@@ -1057,7 +1057,7 @@ class VirtualPianoGUI:
         self.current_instrument_name = name
         if hasattr(self, 'inst_var'):
             self.inst_var.set(name)
-        self.set_status_text(f"🎻 音色已切換為: {name}")
+        self.set_status_text(f" 音色已切換為: {name}")
         self.broadcast_piano_status("instrument_changed")
 
     def _on_window_destroy(self, e):
@@ -1101,23 +1101,23 @@ class VirtualPianoGUI:
         if self.ndi_broadcaster.running:
             self.ndi_broadcaster.stop()
             if hasattr(self, 'btn_ndi'):
-                self.btn_ndi.config(text="📡 NDI:關", bg="#2d3139", fg="#abb2bf")
-            self.set_status_text("📡 NDI 串流廣播已關閉")
+                self.btn_ndi.config(text=" NDI:關", bg="#2d3139", fg="#abb2bf")
+            self.set_status_text(" NDI 串流廣播已關閉")
         else:
             success = self.ndi_broadcaster.start()
             if success:
                 if hasattr(self, 'btn_ndi'):
-                    self.btn_ndi.config(text="📡 NDI:開", bg="#059669", fg="#ffffff")
-                self.set_status_text("📡 NDI 串流廣播已啟動 (名稱: 🎹 7L Virtual Piano)")
+                    self.btn_ndi.config(text=" NDI:開", bg="#059669", fg="#ffffff")
+                self.set_status_text(" NDI 串流廣播已啟動 (名稱:  7L Virtual Piano)")
             else:
-                self.set_status_text("⚠️ 無法啟動 NDI 廣播，請確認已安裝 ndi-python 套件")
+                self.set_status_text(" 無法啟動 NDI 廣播，請確認已安裝 ndi-python 套件")
 
     def cycle_bg_mode(self):
         """循環切換背景顏色 (深黑 / 綠幕 / 純黑，可透過 F10 切換)"""
         modes = [
-            ("DARK", "#0a0a0e", "#14161f", "#0f1015", "🎨 深黑"),
-            ("GREEN", "#00ff00", "#00ff00", "#00ff00", "🟩 綠幕"),
-            ("BLACK", "#000000", "#000000", "#000000", "🖤 純黑")
+            ("DARK", "#0a0a0e", "#14161f", "#0f1015", " 深黑"),
+            ("GREEN", "#00ff00", "#00ff00", "#00ff00", " 綠幕"),
+            ("BLACK", "#000000", "#000000", "#000000", " 純黑")
         ]
         curr = getattr(self, '_current_bg_mode', 'DARK')
         next_idx = 0
@@ -1133,7 +1133,7 @@ class VirtualPianoGUI:
             if hasattr(self, 'canvas'): self.canvas.configure(bg=c_bg)
             if hasattr(self, 'tl_canvas'): self.tl_canvas.configure(bg=tl_bg)
             if hasattr(self, 'btn_bg_mode'): self.btn_bg_mode.config(text=label)
-            self.set_status_text(f"🎨 背景已切換為: {label}")
+            self.set_status_text(f" 背景已切換為: {label}")
         except Exception:
             pass
 
@@ -1145,19 +1145,19 @@ class VirtualPianoGUI:
             self.root.configure(bg="#00ff00")
             if hasattr(self, 'canvas'): self.canvas.configure(bg="#00ff00")
             if hasattr(self, 'tl_canvas'): self.tl_canvas.configure(bg="#00ff00")
-            if hasattr(self, 'btn_bg_mode'): self.btn_bg_mode.config(text="🟩 綠幕")
+            if hasattr(self, 'btn_bg_mode'): self.btn_bg_mode.config(text=" 綠幕")
         elif mode_name == "BLACK":
             self._current_bg_mode = "BLACK"
             self.root.configure(bg="#000000")
             if hasattr(self, 'canvas'): self.canvas.configure(bg="#000000")
             if hasattr(self, 'tl_canvas'): self.tl_canvas.configure(bg="#000000")
-            if hasattr(self, 'btn_bg_mode'): self.btn_bg_mode.config(text="🖤 純黑")
+            if hasattr(self, 'btn_bg_mode'): self.btn_bg_mode.config(text=" 純黑")
         else:
             self._current_bg_mode = "DARK"
             self.root.configure(bg="#0f1015")
             if hasattr(self, 'canvas'): self.canvas.configure(bg="#0a0a0e")
             if hasattr(self, 'tl_canvas'): self.tl_canvas.configure(bg="#14161f")
-            if hasattr(self, 'btn_bg_mode'): self.btn_bg_mode.config(text="🎨 深黑")
+            if hasattr(self, 'btn_bg_mode'): self.btn_bg_mode.config(text=" 深黑")
 
     def toggle_frameless_stage(self, event=None):
         """切換無邊框舞台模式 (按 F11 快捷鍵)"""
@@ -1166,11 +1166,11 @@ class VirtualPianoGUI:
             self.root.overrideredirect(self.is_frameless)
             if hasattr(self, 'btn_stage'):
                 self.btn_stage.config(
-                    text="🪟 舞台:開" if self.is_frameless else "🪟 舞台:關",
+                    text=" 舞台:開" if self.is_frameless else " 舞台:關",
                     bg="#7c3aed" if self.is_frameless else "#2d3139",
                     fg="#ffffff" if self.is_frameless else "#abb2bf"
                 )
-            self.set_status_text("🪟 已切換至無邊框舞台模式 (按 F11 退出)" if self.is_frameless else "🪟 已恢復標準視窗模式")
+            self.set_status_text(" 已切換至無邊框舞台模式 (按 F11 退出)" if self.is_frameless else " 已恢復標準視窗模式")
         except Exception:
             pass
 
@@ -1180,58 +1180,58 @@ class VirtualPianoGUI:
         ctrl_bar.pack(fill=tk.X)
         
         # 本機曲庫選單
-        tk.Label(ctrl_bar, text="🎼", font=("Segoe UI", 9, "bold"), fg="#f472b6", bg="#161822").pack(side=tk.LEFT, padx=(0, 2))
+        tk.Label(ctrl_bar, text="", font=("Segoe UI", 9, "bold"), fg="#f472b6", bg="#161822").pack(side=tk.LEFT, padx=(0, 2))
         self.local_midi_var = tk.StringVar()
         self.local_menu = ttk.Combobox(ctrl_bar, textvariable=self.local_midi_var, width=17, state="readonly")
         self.local_menu.pack(side=tk.LEFT, padx=2)
         self.local_menu.bind("<<ComboboxSelected>>", self.on_local_song_selected)
         
-        self.btn_play = tk.Button(ctrl_bar, text="▶", font=("Segoe UI", 9, "bold"), bg="#f472b6", fg="#ffffff", padx=6, pady=1, relief=tk.FLAT, command=self.toggle_play_current)
+        self.btn_play = tk.Button(ctrl_bar, text="", font=("Segoe UI", 9, "bold"), bg="#f472b6", fg="#ffffff", padx=6, pady=1, relief=tk.FLAT, command=self.toggle_play_current)
         self.btn_play.pack(side=tk.LEFT, padx=2)
         
-        self.btn_stop = tk.Button(ctrl_bar, text="⏹", font=("Segoe UI", 9), bg="#2d3139", fg="#abb2bf", padx=5, pady=1, relief=tk.FLAT, command=self.stop_playback)
+        self.btn_stop = tk.Button(ctrl_bar, text="", font=("Segoe UI", 9), bg="#2d3139", fg="#abb2bf", padx=5, pady=1, relief=tk.FLAT, command=self.stop_playback)
         self.btn_stop.pack(side=tk.LEFT, padx=2)
 
-        # 🔁 循環播放按鈕
+        #  循環播放按鈕
         loop_bg = "#be185d" if self.is_loop else "#2d3139"
         loop_fg = "#ffffff" if self.is_loop else "#abb2bf"
-        loop_txt = "🔁 循環:開" if self.is_loop else "🔁 循環"
+        loop_txt = " 循環:開" if self.is_loop else " 循環"
         self.btn_loop = tk.Button(ctrl_bar, text=loop_txt, font=("Segoe UI", 8, "bold" if self.is_loop else "normal"), bg=loop_bg, fg=loop_fg, padx=3, pady=1, relief=tk.FLAT, command=self.toggle_loop_mode)
         self.btn_loop.pack(side=tk.LEFT, padx=2)
 
-        # 🔀 隨機一直播放按鈕
+        #  隨機一直播放按鈕
         rand_bg = "#7c3aed" if self.is_random else "#2d3139"
         rand_fg = "#ffffff" if self.is_random else "#abb2bf"
-        rand_txt = "🔀 隨機:開" if self.is_random else "🔀 隨機"
+        rand_txt = " 隨機:開" if self.is_random else " 隨機"
         self.btn_random = tk.Button(ctrl_bar, text=rand_txt, font=("Segoe UI", 8, "bold" if self.is_random else "normal"), bg=rand_bg, fg=rand_fg, padx=3, pady=1, relief=tk.FLAT, command=self.toggle_random_mode)
         self.btn_random.pack(side=tk.LEFT, padx=2)
         
-        # 🎹 可手彈按鈕開關 (手動鍵盤滑鼠演奏開關)
+        #  可手彈按鈕開關 (手動鍵盤滑鼠演奏開關)
         man_bg = "#059669" if self.is_manual_play else "#2d3139"
         man_fg = "#ffffff" if self.is_manual_play else "#abb2bf"
-        man_txt = "🎹 手彈:開" if self.is_manual_play else "🎹 手彈:關"
+        man_txt = " 手彈:開" if self.is_manual_play else " 手彈:關"
         self.btn_manual = tk.Button(ctrl_bar, text=man_txt, font=("Segoe UI", 8, "bold" if self.is_manual_play else "normal"), bg=man_bg, fg=man_fg, padx=3, pady=1, relief=tk.FLAT, command=self.toggle_manual_play_mode, cursor="hand2")
         self.btn_manual.pack(side=tk.LEFT, padx=2)
         
-        # 🎼 音高調節控制區 (降音 🔽 / 選單 / 升音 🔼)
-        self.btn_pitch_down = tk.Button(ctrl_bar, text="🔽", font=("Segoe UI", 8, "bold"), bg="#2d3139", fg="#ffc5d3", padx=3, pady=1, relief=tk.FLAT, command=self.step_pitch_down, cursor="hand2")
+        #  音高調節控制區 (降音  / 選單 / 升音 )
+        self.btn_pitch_down = tk.Button(ctrl_bar, text="", font=("Segoe UI", 8, "bold"), bg="#2d3139", fg="#ffc5d3", padx=3, pady=1, relief=tk.FLAT, command=self.step_pitch_down, cursor="hand2")
         self.btn_pitch_down.pack(side=tk.LEFT, padx=(1, 0))
         
         self.pitch_menu = ttk.Combobox(ctrl_bar, textvariable=self.pitch_var, values=[p["name"] for p in PITCH_PRESETS], width=13, state="readonly")
         self.pitch_menu.pack(side=tk.LEFT, padx=1)
         self.pitch_menu.bind("<<ComboboxSelected>>", self.on_pitch_selected)
         
-        self.btn_pitch_up = tk.Button(ctrl_bar, text="🔼", font=("Segoe UI", 8, "bold"), bg="#2d3139", fg="#ffc5d3", padx=3, pady=1, relief=tk.FLAT, command=self.step_pitch_up, cursor="hand2")
+        self.btn_pitch_up = tk.Button(ctrl_bar, text="", font=("Segoe UI", 8, "bold"), bg="#2d3139", fg="#ffc5d3", padx=3, pady=1, relief=tk.FLAT, command=self.step_pitch_up, cursor="hand2")
         self.btn_pitch_up.pack(side=tk.LEFT, padx=(0, 2))
         
-        btn_open = tk.Button(ctrl_bar, text="📂", font=("Segoe UI", 9), bg="#2d3139", fg="#abb2bf", padx=5, pady=1, relief=tk.FLAT, command=self.load_custom_file)
+        btn_open = tk.Button(ctrl_bar, text="", font=("Segoe UI", 9), bg="#2d3139", fg="#abb2bf", padx=5, pady=1, relief=tk.FLAT, command=self.load_custom_file)
         btn_open.pack(side=tk.LEFT, padx=(2, 3))
 
         # 分隔線
         tk.Label(ctrl_bar, text="|", font=("Segoe UI", 9), fg="#3e4451", bg="#161822").pack(side=tk.LEFT, padx=2)
 
-        # ⚡ 倍速調節選單 (支援 0.25x ~ 10.0x / 自訂倍速，支援鍵盤輸入與滾輪微調)
-        tk.Label(ctrl_bar, text="⚡", font=("Segoe UI", 9, "bold"), fg="#f472b6", bg="#161822").pack(side=tk.LEFT, padx=(2, 0))
+        #  倍速調節選單 (支援 0.25x ~ 10.0x / 自訂倍速，支援鍵盤輸入與滾輪微調)
+        tk.Label(ctrl_bar, text="", font=("Segoe UI", 9, "bold"), fg="#f472b6", bg="#161822").pack(side=tk.LEFT, padx=(2, 0))
         self.speed_var = tk.StringVar(value=format_speed_str(self.playback_speed))
         self.speed_menu = ttk.Combobox(
             ctrl_bar, 
@@ -1248,8 +1248,8 @@ class VirtualPianoGUI:
         # 分隔線
         tk.Label(ctrl_bar, text="|", font=("Segoe UI", 9), fg="#3e4451", bg="#161822").pack(side=tk.LEFT, padx=2)
 
-        # 🔊 音量調節控制區 (喇叭圖標 + 滑動桿 + 百分比)
-        self.btn_mute = tk.Button(ctrl_bar, text="🔊", font=("Segoe UI", 9, "bold"), bg="#161822", fg="#f472b6", padx=2, pady=1, relief=tk.FLAT, command=self.toggle_mute, cursor="hand2")
+        #  音量調節控制區 (喇叭圖標 + 滑動桿 + 百分比)
+        self.btn_mute = tk.Button(ctrl_bar, text="", font=("Segoe UI", 9, "bold"), bg="#161822", fg="#f472b6", padx=2, pady=1, relief=tk.FLAT, command=self.toggle_mute, cursor="hand2")
         self.btn_mute.pack(side=tk.LEFT, padx=(2, 0))
         
         self.volume_var = tk.IntVar(value=self.current_volume)
@@ -1285,9 +1285,9 @@ class VirtualPianoGUI:
         # 分隔線
         tk.Label(ctrl_bar, text="|", font=("Segoe UI", 9), fg="#3e4451", bg="#161822").pack(side=tk.LEFT, padx=2)
 
-        # 🎻 音色選擇下拉選單
-        tk.Label(ctrl_bar, text="🎻", font=("Segoe UI", 9, "bold"), fg="#f472b6", bg="#161822").pack(side=tk.LEFT, padx=(2, 1))
-        self.inst_var = tk.StringVar(value="🎹 古典平台鋼琴 (Grand Piano)")
+        #  音色選擇下拉選單
+        tk.Label(ctrl_bar, text="", font=("Segoe UI", 9, "bold"), fg="#f472b6", bg="#161822").pack(side=tk.LEFT, padx=(2, 1))
+        self.inst_var = tk.StringVar(value=" 古典平台鋼琴 (Grand Piano)")
         self.inst_menu = ttk.Combobox(ctrl_bar, textvariable=self.inst_var, values=list(MIDI_INSTRUMENTS.keys()), width=15, state="readonly")
         self.inst_menu.pack(side=tk.LEFT, padx=2)
         self.inst_menu.bind("<<ComboboxSelected>>", self.on_instrument_selected)
@@ -1296,38 +1296,38 @@ class VirtualPianoGUI:
         tk.Label(ctrl_bar, text="|", font=("Segoe UI", 9), fg="#3e4451", bg="#161822").pack(side=tk.LEFT, padx=2)
 
         # 雲端搜尋
-        tk.Label(ctrl_bar, text="🌐 BitMidi:", font=("Segoe UI", 9, "bold"), fg="#ffc5d3", bg="#161822").pack(side=tk.LEFT, padx=(3, 2))
+        tk.Label(ctrl_bar, text=" BitMidi:", font=("Segoe UI", 9, "bold"), fg="#ffc5d3", bg="#161822").pack(side=tk.LEFT, padx=(3, 2))
         
         self.entry_search = tk.Entry(ctrl_bar, font=("Segoe UI", 9), bg="#0f1015", fg="#ffffff", insertbackground="white", width=12, relief=tk.SOLID, bd=1)
         self.entry_search.pack(side=tk.LEFT, padx=2)
         self.entry_search.insert(0, "Chopin")
         self.entry_search.bind("<Return>", lambda e: self.do_search_bitmidi())
         
-        btn_search = tk.Button(ctrl_bar, text="🔍", font=("Segoe UI", 9, "bold"), bg="#ffc5d3", fg="#121318", padx=5, pady=1, relief=tk.FLAT, command=self.do_search_bitmidi)
+        btn_search = tk.Button(ctrl_bar, text="", font=("Segoe UI", 9, "bold"), bg="#ffc5d3", fg="#121318", padx=5, pady=1, relief=tk.FLAT, command=self.do_search_bitmidi)
         btn_search.pack(side=tk.LEFT, padx=2)
         
         self.search_result_var = tk.StringVar(value="輸入曲名搜尋")
         self.search_menu = ttk.Combobox(ctrl_bar, textvariable=self.search_result_var, width=16, state="readonly")
         self.search_menu.pack(side=tk.LEFT, padx=2)
         
-        self.btn_download_play = tk.Button(ctrl_bar, text="⬇ 下載演奏", font=("Segoe UI", 8, "bold"), bg="#be185d", fg="#ffffff", padx=5, pady=1, relief=tk.FLAT, command=self.download_and_play_search_result)
+        self.btn_download_play = tk.Button(ctrl_bar, text=" 下載演奏", font=("Segoe UI", 8, "bold"), bg="#be185d", fg="#ffffff", padx=5, pady=1, relief=tk.FLAT, command=self.download_and_play_search_result)
         self.btn_download_play.pack(side=tk.LEFT, padx=2)
 
         # 分隔線
         tk.Label(ctrl_bar, text="|", font=("Segoe UI", 9), fg="#3e4451", bg="#161822").pack(side=tk.LEFT, padx=2)
 
-        # 📡 NDI 廣播與背景模式
-        self.btn_ndi = tk.Button(ctrl_bar, text="📡 NDI:關", font=("Segoe UI", 8, "bold"), bg="#2d3139", fg="#abb2bf", padx=4, pady=1, relief=tk.FLAT, command=self.toggle_ndi_broadcast, cursor="hand2")
+        #  NDI 廣播與背景模式
+        self.btn_ndi = tk.Button(ctrl_bar, text=" NDI:關", font=("Segoe UI", 8, "bold"), bg="#2d3139", fg="#abb2bf", padx=4, pady=1, relief=tk.FLAT, command=self.toggle_ndi_broadcast, cursor="hand2")
         self.btn_ndi.pack(side=tk.LEFT, padx=2)
 
-        self.btn_bg_mode = tk.Button(ctrl_bar, text="🎨 深黑", font=("Segoe UI", 8), bg="#2d3139", fg="#abb2bf", padx=4, pady=1, relief=tk.FLAT, command=self.cycle_bg_mode, cursor="hand2")
+        self.btn_bg_mode = tk.Button(ctrl_bar, text=" 深黑", font=("Segoe UI", 8), bg="#2d3139", fg="#abb2bf", padx=4, pady=1, relief=tk.FLAT, command=self.cycle_bg_mode, cursor="hand2")
         self.btn_bg_mode.pack(side=tk.LEFT, padx=2)
 
-        self.btn_stage = tk.Button(ctrl_bar, text="🪟 舞台", font=("Segoe UI", 8), bg="#2d3139", fg="#abb2bf", padx=4, pady=1, relief=tk.FLAT, command=self.toggle_frameless_stage, cursor="hand2")
+        self.btn_stage = tk.Button(ctrl_bar, text=" 舞台", font=("Segoe UI", 8), bg="#2d3139", fg="#abb2bf", padx=4, pady=1, relief=tk.FLAT, command=self.toggle_frameless_stage, cursor="hand2")
         self.btn_stage.pack(side=tk.LEFT, padx=2)
 
         # ────────────────────────────────────────────────────────
-        # ⏱️ 2. 下落動畫框頂部：可拖動時間軸 (Interactive Timeline)
+        #  2. 下落動畫框頂部：可拖動時間軸 (Interactive Timeline)
         # ────────────────────────────────────────────────────────
         self.tl_width = self.canvas_width
         self.tl_height = 26
@@ -1372,7 +1372,7 @@ class VirtualPianoGUI:
         # 歌曲名稱顯示
         self.tl_title_txt = self.tl_canvas.create_text(
             self.tl_track_x1 + 8, self.tl_track_y - 8, 
-            text="🎵 就緒 (真實古典平台鋼琴音色 | 粉白黑深粉主題)", font=("Segoe UI", 8, "bold"), fill="#ffc5d3", anchor="w"
+            text=" 就緒 (真實古典平台鋼琴音色 | 粉白黑深粉主題)", font=("Segoe UI", 8, "bold"), fill="#ffc5d3", anchor="w"
         )
         
         # 時間文字標籤
@@ -1387,7 +1387,7 @@ class VirtualPianoGUI:
         self.tl_canvas.bind("<ButtonRelease-1>", self.on_timeline_release)
 
         # ────────────────────────────────────────────────────────
-        # 🌊 3. 88 鍵瀑布流 + 鋼琴畫布 Canvas (自適應高寬度)
+        #  3. 88 鍵瀑布流 + 鋼琴畫布 Canvas (自適應高寬度)
         # ────────────────────────────────────────────────────────
         self.canvas = tk.Canvas(
             self.root, 
@@ -1540,7 +1540,7 @@ class VirtualPianoGUI:
             self.canvas.tag_bind(lbl, "<Button-1>", lambda e, m=midi, k=key_id: self.play_midi_interactive(m, k))
 
     # ────────────────────────────────────────────────────────
-    # ⏱️ 時間軸拖動與跳轉 (Draggable Timeline Seeking Logic)
+    #  時間軸拖動與跳轉 (Draggable Timeline Seeking Logic)
     # ────────────────────────────────────────────────────────
     def get_time_from_x(self, x: float) -> float:
         track_w = self.tl_track_x2 - self.tl_track_x1
@@ -1625,54 +1625,54 @@ class VirtualPianoGUI:
         self.release_all_keys()
         
         self.is_playing = True
-        self.btn_play.config(text="⏸ 暫停", bg="#be185d", fg="#ffffff")
+        self.btn_play.config(text=" 暫停", bg="#be185d", fg="#ffffff")
         spd_tag = f" [{format_speed_str(self.playback_speed)}]" if self.playback_speed != 1.0 else ""
-        self.set_status_text(f"⏩ 跳轉至 {format_time_str(seek_sec)}{spd_tag} | 《{self.current_song_title}》")
+        self.set_status_text(f" 跳轉至 {format_time_str(seek_sec)}{spd_tag} | 《{self.current_song_title}》")
         self.broadcast_piano_status("seek")
 
     def toggle_loop_mode(self):
-        """切換單曲循環播放模式 (🔁 循環播放)"""
+        """切換單曲循環播放模式 ( 循環播放)"""
         self.is_loop = not self.is_loop
         if self.is_loop:
             self.is_random = False
-            self.btn_loop.config(text="🔁 循環: 開", bg="#be185d", fg="#ffffff", font=("Segoe UI", 9, "bold"))
-            self.btn_random.config(text="🔀 隨機連播", bg="#2d3139", fg="#abb2bf", font=("Segoe UI", 9, "normal"))
-            self.set_status_text(f"🔁 已開啟「循環播放」模式（曲目播畢後將自動重新演奏）")
+            self.btn_loop.config(text=" 循環: 開", bg="#be185d", fg="#ffffff", font=("Segoe UI", 9, "bold"))
+            self.btn_random.config(text=" 隨機連播", bg="#2d3139", fg="#abb2bf", font=("Segoe UI", 9, "normal"))
+            self.set_status_text(f" 已開啟「循環播放」模式（曲目播畢後將自動重新演奏）")
             # 若尚未載入任何曲目且未在播放，才啟動選定曲目
             if not self.is_playing and not self.playback_events:
                 self.play_selected_local()
         else:
-            self.btn_loop.config(text="🔁 循環播放", bg="#2d3139", fg="#abb2bf", font=("Segoe UI", 9, "normal"))
-            self.set_status_text("⏹ 已關閉「循環播放」模式")
+            self.btn_loop.config(text=" 循環播放", bg="#2d3139", fg="#abb2bf", font=("Segoe UI", 9, "normal"))
+            self.set_status_text(" 已關閉「循環播放」模式")
         self.broadcast_piano_status("mode_changed")
 
     def toggle_random_mode(self):
-        """切換隨機一直播放模式 (🔀 隨機連播：按下按鈕並在背景自動查音樂放入曲庫)"""
+        """切換隨機一直播放模式 ( 隨機連播：按下按鈕並在背景自動查音樂放入曲庫)"""
         self.is_random = not self.is_random
         if self.is_random:
             self.is_loop = False
-            self.btn_random.config(text="🔀 隨機: 開", bg="#7c3aed", fg="#ffffff", font=("Segoe UI", 9, "bold"))
-            self.btn_loop.config(text="🔁 循環播放", bg="#2d3139", fg="#abb2bf", font=("Segoe UI", 9, "normal"))
-            self.set_status_text(f"🔀 已按下「隨機連播」按鈕！7L 正在背景搜尋新曲目放入曲庫...")
+            self.btn_random.config(text=" 隨機: 開", bg="#7c3aed", fg="#ffffff", font=("Segoe UI", 9, "bold"))
+            self.btn_loop.config(text=" 循環播放", bg="#2d3139", fg="#abb2bf", font=("Segoe UI", 9, "normal"))
+            self.set_status_text(f" 已按下「隨機連播」按鈕！7L 正在背景搜尋新曲目放入曲庫...")
             # 若尚未載入任何曲目且未在播放，立即在背景查曲並開始演奏！
             if not self.is_playing and not self.playback_events:
                 self.play_random_song(exclude_current=False)
         else:
-            self.btn_random.config(text="🔀 隨機連播", bg="#2d3139", fg="#abb2bf", font=("Segoe UI", 9, "normal"))
-            self.set_status_text("⏹ 已關閉「隨機連播」模式")
+            self.btn_random.config(text=" 隨機連播", bg="#2d3139", fg="#abb2bf", font=("Segoe UI", 9, "normal"))
+            self.set_status_text(" 已關閉「隨機連播」模式")
         self.broadcast_piano_status("mode_changed")
 
     def toggle_manual_play_mode(self):
-        """切換鍵盤與滑鼠手彈模式開關 (🎹 手彈:開 / 關)"""
+        """切換鍵盤與滑鼠手彈模式開關 ( 手彈:開 / 關)"""
         self.is_manual_play = not self.is_manual_play
         man_bg = "#059669" if self.is_manual_play else "#2d3139"
         man_fg = "#ffffff" if self.is_manual_play else "#abb2bf"
-        man_txt = "🎹 手彈:開" if self.is_manual_play else "🎹 手彈:關"
+        man_txt = " 手彈:開" if self.is_manual_play else " 手彈:關"
         self.btn_manual.config(text=man_txt, bg=man_bg, fg=man_fg, font=("Segoe UI", 8, "bold" if self.is_manual_play else "normal"))
         if self.is_manual_play:
-            self.set_status_text("🎹 已開啟「手彈模式」：可直接使用電腦鍵盤 (1~0, Q~P, A~L, Z~M) 或滑鼠點擊 88 琴鍵演奏！")
+            self.set_status_text(" 已開啟「手彈模式」：可直接使用電腦鍵盤 (1~0, Q~P, A~L, Z~M) 或滑鼠點擊 88 琴鍵演奏！")
         else:
-            self.set_status_text("🎹 已關閉「手彈模式」：手動琴鍵彈奏已鎖定（純自動演奏模式）。")
+            self.set_status_text(" 已關閉「手彈模式」：手動琴鍵彈奏已鎖定（純自動演奏模式）。")
         self.update_key_labels_visibility()
         self.broadcast_piano_status("manual_mode_changed")
 
@@ -1682,7 +1682,7 @@ class VirtualPianoGUI:
             self.is_manual_play = enabled
             man_bg = "#059669" if self.is_manual_play else "#2d3139"
             man_fg = "#ffffff" if self.is_manual_play else "#abb2bf"
-            man_txt = "🎹 手彈:開" if self.is_manual_play else "🎹 手彈:關"
+            man_txt = " 手彈:開" if self.is_manual_play else " 手彈:關"
             if hasattr(self, 'btn_manual'):
                 self.btn_manual.config(text=man_txt, bg=man_bg, fg=man_fg, font=("Segoe UI", 8, "bold" if self.is_manual_play else "normal"))
             self.update_key_labels_visibility()
@@ -1734,14 +1734,14 @@ class VirtualPianoGUI:
                     desc = p["desc"]
                     break
             if not preset_name:
-                preset_name = f"🎼 基準 C: #{self.current_base_c}"
+                preset_name = f" 基準 C: #{self.current_base_c}"
                 desc = f"自訂基準 C #{self.current_base_c}"
                 
         if hasattr(self, 'pitch_var'):
             self.pitch_var.set(preset_name)
             
         self.update_key_labels_visibility()
-        self.set_status_text(f"🎼 琴鍵音高已切換為：【{desc}】")
+        self.set_status_text(f" 琴鍵音高已切換為：【{desc}】")
         self.broadcast_piano_status("pitch_changed")
 
     def update_key_labels_visibility(self):
@@ -1796,11 +1796,11 @@ class VirtualPianoGUI:
             self.local_midi_var.set(chosen_item)
             self.start_midi_playback(chosen_item, chosen_path)
             spd_tag = f" [{format_speed_str(self.playback_speed)}]" if self.playback_speed != 1.0 else ""
-            self.set_status_text(f"🔀 隨機連播{spd_tag}：正在演奏 《{chosen_item}》")
+            self.set_status_text(f" 隨機連播{spd_tag}：正在演奏 《{chosen_item}》")
             return
             
         # 3. 若為雲端種子曲目（本機尚未收錄）：在背景自動向 BitMidi 搜尋並下載放入曲庫！
-        self.set_status_text(f"🌐 [背景查歌] 7L 正在向 BitMidi 雲端搜尋《{chosen_item}》並放入曲庫...")
+        self.set_status_text(f" [背景查歌] 7L 正在向 BitMidi 雲端搜尋《{chosen_item}》並放入曲庫...")
         
         def background_fetch_and_play():
             try:
@@ -1808,11 +1808,11 @@ class VirtualPianoGUI:
                 if dl_path and os.path.exists(dl_path):
                     def on_ready():
                         self.refresh_local_library()
-                        new_title = f"🎵 {os.path.basename(dl_path).replace('.mid', '').replace('.MID', '')}"
+                        new_title = f" {os.path.basename(dl_path).replace('.mid', '').replace('.MID', '')}"
                         self.local_midi_var.set(new_title)
                         self.start_midi_playback(new_title, dl_path)
                         spd_tag = f" [{format_speed_str(self.playback_speed)}]" if self.playback_speed != 1.0 else ""
-                        self.set_status_text(f"🔀 隨機連播{spd_tag}：已從雲端收錄並開始演奏 《{new_title}》！")
+                        self.set_status_text(f" 隨機連播{spd_tag}：已從雲端收錄並開始演奏 《{new_title}》！")
                     self.root.after(0, on_ready)
                 else:
                     def on_fallback():
@@ -1823,7 +1823,7 @@ class VirtualPianoGUI:
                                 self.local_midi_var.set(fb_song)
                                 self.start_midi_playback(fb_song, fb_p)
                                 spd_tag = f" [{format_speed_str(self.playback_speed)}]" if self.playback_speed != 1.0 else ""
-                                self.set_status_text(f"🔀 隨機連播{spd_tag}：正在演奏本機精選 《{fb_song}》")
+                                self.set_status_text(f" 隨機連播{spd_tag}：正在演奏本機精選 《{fb_song}》")
                     self.root.after(0, on_fallback)
             except Exception:
                 pass
@@ -1831,7 +1831,7 @@ class VirtualPianoGUI:
         threading.Thread(target=background_fetch_and_play, daemon=True).start()
 
     # ────────────────────────────────────────────────────────
-    # 🔄 曲目選取與無縫中途切歌 (Smooth Song Switching)
+    #  曲目選取與無縫中途切歌 (Smooth Song Switching)
     # ────────────────────────────────────────────────────────
     def on_local_song_selected(self, event=None):
         """當使用者從下拉選單選取新歌曲時，立即平滑中途切歌"""
@@ -1852,26 +1852,26 @@ class VirtualPianoGUI:
         self.local_midi_files.clear()
         
         friendly_names = {
-            "campanella.mid": "🔔 鐘 (Liszt - La Campanella)",
-            "moonlight_3rd.mid": "⚡ 月光奏鳴曲 第三樂章 (Beethoven - Moonlight 3rd)",
-            "liebestraum.mid": "❤️ 愛之夢 第三號 (Liszt - Liebestraum No. 3)",
-            "Liebestraum-1.mid": "❤️ 愛之夢 (版本二 / Liebestraum Var. 1)",
-            "winter_wind.mid": "❄️ 冬風練習曲 (Chopin - Winter Wind Op. 25 No. 11)",
-            "maidens_prayer.mid": "🙏 少女的祈禱 (Badarzewska - A Maiden's Prayer)",
-            "fantaisie_impromptu.mid": "💫 幻想即興曲 (Chopin - Fantaisie-Impromptu Op. 66)",
-            "canon_in_d.mid": "🎻 卡農 (Pachelbel - Canon in D)",
-            "Bagatella Fur Elise.mid": "🌸 給愛麗絲 (Beethoven - Für Elise)",
-            "Spirited Away - Boiler Mushi.mid": "🏮 神隱少女 (久石讓 - Spirited Away)",
-            "alla-turca.mid": "🎼 土耳其進行曲 (Mozart - Alla Turca)",
-            "Clair-De-Lune-Opus-46-Nr-1.mid": "🌙 月光 (Debussy - Clair de Lune)",
-            "Jasper Folks - River Flows in You.mid": "💧 你的心河 (River Flows in You)",
-            "frederic-chopin-nocturne-no20.mid": "🌃 蕭邦 第20號夜曲 (Nocturne No. 20)",
+            "campanella.mid": " 鐘 (Liszt - La Campanella)",
+            "moonlight_3rd.mid": " 月光奏鳴曲 第三樂章 (Beethoven - Moonlight 3rd)",
+            "liebestraum.mid": " 愛之夢 第三號 (Liszt - Liebestraum No. 3)",
+            "Liebestraum-1.mid": " 愛之夢 (版本二 / Liebestraum Var. 1)",
+            "winter_wind.mid": " 冬風練習曲 (Chopin - Winter Wind Op. 25 No. 11)",
+            "maidens_prayer.mid": " 少女的祈禱 (Badarzewska - A Maiden's Prayer)",
+            "fantaisie_impromptu.mid": " 幻想即興曲 (Chopin - Fantaisie-Impromptu Op. 66)",
+            "canon_in_d.mid": " 卡農 (Pachelbel - Canon in D)",
+            "Bagatella Fur Elise.mid": " 給愛麗絲 (Beethoven - Für Elise)",
+            "Spirited Away - Boiler Mushi.mid": " 神隱少女 (久石讓 - Spirited Away)",
+            "alla-turca.mid": " 土耳其進行曲 (Mozart - Alla Turca)",
+            "Clair-De-Lune-Opus-46-Nr-1.mid": " 月光 (Debussy - Clair de Lune)",
+            "Jasper Folks - River Flows in You.mid": " 你的心河 (River Flows in You)",
+            "frederic-chopin-nocturne-no20.mid": " 蕭邦 第20號夜曲 (Nocturne No. 20)",
         }
         
         if os.path.exists(MIDI_SHEETS_DIR):
             for fname in sorted(os.listdir(MIDI_SHEETS_DIR)):
                 if fname.lower().endswith('.mid') or fname.lower().endswith('.midi'):
-                    display_name = friendly_names.get(fname, f"🎵 {fname}")
+                    display_name = friendly_names.get(fname, f" {fname}")
                     full_p = os.path.join(MIDI_SHEETS_DIR, fname)
                     self.local_midi_files[display_name] = full_p
                     
@@ -1888,7 +1888,7 @@ class VirtualPianoGUI:
             messagebox.showwarning("提示", "請先輸入想搜尋的歌曲名稱或作曲家！")
             return
             
-        self.set_status_text(f"🔍 正在連線 BitMidi 搜尋《{q}》...")
+        self.set_status_text(f" 正在連線 BitMidi 搜尋《{q}》...")
         
         def worker():
             res = bitmidi_engine.search_bitmidi(q)
@@ -1899,15 +1899,15 @@ class VirtualPianoGUI:
     def on_search_finished(self, query: str, results: List[Dict[str, str]]):
         self.search_results_cache = results
         if not results:
-            self.search_result_var.set("❌ 未找到相關歌曲")
+            self.search_result_var.set(" 未找到相關歌曲")
             self.search_menu['values'] = []
-            self.set_status_text(f"⚠️ 未找到與《{query}》相關的曲目。")
+            self.set_status_text(f" 未找到與《{query}》相關的曲目。")
             return
             
         titles = [r['title'] for r in results]
         self.search_menu['values'] = titles
         self.search_result_var.set(titles[0])
-        self.set_status_text(f"✅ 找到 {len(results)} 首《{query}》曲目！點選「⬇ 下載演奏」即可播放！")
+        self.set_status_text(f" 找到 {len(results)} 首《{query}》曲目！點選「 下載演奏」即可播放！")
 
     def download_and_play_search_result(self):
         """下載選取的搜尋結果並即刻開始演奏"""
@@ -1917,7 +1917,7 @@ class VirtualPianoGUI:
             return
             
         target_song = self.search_results_cache[idx]
-        self.set_status_text(f"⬇ 正在下載《{target_song['title']}》...")
+        self.set_status_text(f" 正在下載《{target_song['title']}》...")
         
         def worker():
             saved_path = bitmidi_engine.download_bitmidi_song(target_song, save_dir=MIDI_SHEETS_DIR)
@@ -1930,7 +1930,7 @@ class VirtualPianoGUI:
 
     def on_download_complete_play(self, title: str, saved_path: str):
         self.refresh_local_library()
-        self.local_midi_var.set(f"🎵 {os.path.basename(saved_path)}")
+        self.local_midi_var.set(f" {os.path.basename(saved_path)}")
         self.start_midi_playback(title, saved_path)
 
     def toggle_play_current(self):
@@ -1955,8 +1955,8 @@ class VirtualPianoGUI:
             # 釋放琴鍵發光狀態，避免暫停時琴鍵卡在深色
             self.release_all_keys()
             
-            self.btn_play.config(text="▶ 繼續", bg="#f472b6", fg="#ffffff")
-            self.set_status_text(f"⏸ 已暫停 | 《{self.current_song_title}》 (進度: {format_time_str(max(0.0, self.paused_song_time))} / {format_time_str(self.total_song_duration)})")
+            self.btn_play.config(text=" 繼續", bg="#f472b6", fg="#ffffff")
+            self.set_status_text(f" 已暫停 | 《{self.current_song_title}》 (進度: {format_time_str(max(0.0, self.paused_song_time))} / {format_time_str(self.total_song_duration)})")
         else:
             # 繼續播放 或 播放新歌
             has_remaining = any(t['event_idx'] < len(t['events']) for t in self.active_tracks) if self.active_tracks else (self.playback_events and self.playback_event_idx < len(self.playback_events))
@@ -1974,10 +1974,10 @@ class VirtualPianoGUI:
                         if SOUND_ENGINE:
                             bar['channel'] = SOUND_ENGINE.note_on(m, velocity=bar.get('vel', 105))
                             
-                self.btn_play.config(text="⏸ 暫停", bg="#be185d", fg="#ffffff")
-                mode_tag = " [🔁 循環]" if self.is_loop else (" [🔀 隨機]" if self.is_random else "")
+                self.btn_play.config(text=" 暫停", bg="#be185d", fg="#ffffff")
+                mode_tag = " [ 循環]" if self.is_loop else (" [ 隨機]" if self.is_random else "")
                 spd_tag = f" [{format_speed_str(self.playback_speed)}]" if self.playback_speed != 1.0 else ""
-                self.set_status_text(f"▶ [正在演奏{mode_tag}{spd_tag}] 《{self.current_song_title}》 | 進度: {format_time_str(max(0.0, self.paused_song_time))} / {format_time_str(self.total_song_duration)}")
+                self.set_status_text(f" [正在演奏{mode_tag}{spd_tag}] 《{self.current_song_title}》 | 進度: {format_time_str(max(0.0, self.paused_song_time))} / {format_time_str(self.total_song_duration)}")
             else:
                 # 播放選取的本機曲目
                 self.play_selected_local()
@@ -1994,7 +1994,7 @@ class VirtualPianoGUI:
         file_p = filedialog.askopenfilename(filetypes=[("MIDI Files", "*.mid;*.midi")])
         if file_p:
             fname = os.path.basename(file_p)
-            self.start_midi_playback(f"📂 {fname}", file_p)
+            self.start_midi_playback(f" {fname}", file_p)
 
     def extract_midi_timeline(self, midi_path: str) -> List[Tuple[float, int, float, int, Optional[bool]]]:
         """
@@ -2077,7 +2077,7 @@ class VirtualPianoGUI:
         try:
             events = self.extract_midi_timeline(midi_path)
             if not events:
-                self.set_status_text(f"⚠️ 《{title}》 MIDI 檔案無有效音符！")
+                self.set_status_text(f" 《{title}》 MIDI 檔案無有效音符！")
                 return
                 
             self._track_counter += 1
@@ -2109,13 +2109,13 @@ class VirtualPianoGUI:
             
             # 更新時間軸與狀態
             self.update_timeline_ui(0.0)
-            mode_tag = " [🔁 循環]" if self.is_loop else (" [🔀 隨機]" if self.is_random else "")
+            mode_tag = " [ 循環]" if self.is_loop else (" [ 隨機]" if self.is_random else "")
             spd_tag = f" [{format_speed_str(self.playback_speed)}]" if self.playback_speed != 1.0 else ""
-            self.set_status_text(f"▶ [正在演奏{mode_tag}{spd_tag}] 《{title}》 | 音符數: {len(events)} | 全長: {format_time_str(self.total_song_duration)}")
-            self.btn_play.config(text="⏸ 暫停", bg="#be185d", fg="#ffffff")
+            self.set_status_text(f" [正在演奏{mode_tag}{spd_tag}] 《{title}》 | 音符數: {len(events)} | 全長: {format_time_str(self.total_song_duration)}")
+            self.btn_play.config(text=" 暫停", bg="#be185d", fg="#ffffff")
             self.broadcast_piano_status("play_start")
         except Exception as e:
-            self.set_status_text(f"⚠️ 解析 MIDI 失敗: {e}")
+            self.set_status_text(f" 解析 MIDI 失敗: {e}")
 
     def start_multi_midi_playback(self, tracks_info: list):
         """同時啟動多首 MIDI 即時多軌並發演奏 (無數量限制，經典粉白黑深粉 4 色瀑布流)"""
@@ -2158,7 +2158,7 @@ class VirtualPianoGUI:
                     })
 
         if not valid_tracks:
-            self.set_status_text("⚠️ 無有效的多軌 MIDI 檔案！")
+            self.set_status_text(" 無有效的多軌 MIDI 檔案！")
             return
 
         self.active_tracks = valid_tracks
@@ -2175,9 +2175,9 @@ class VirtualPianoGUI:
         self.current_song_title = titles_str
         self.current_midi_path = self.active_tracks[0]['midi_path']
         self.update_timeline_ui(0.0)
-        self.btn_play.config(text="⏸ 暫停", bg="#be185d", fg="#ffffff")
+        self.btn_play.config(text=" 暫停", bg="#be185d", fg="#ffffff")
         spd_tag = f" [{format_speed_str(self.playback_speed)}]" if self.playback_speed != 1.0 else ""
-        self.set_status_text(f"🔥 [神仙打架 {len(self.active_tracks)}首同時演奏{spd_tag}] {titles_str}")
+        self.set_status_text(f" [神仙打架 {len(self.active_tracks)}首同時演奏{spd_tag}] {titles_str}")
         self.broadcast_piano_status("play_start_multi")
 
     def add_concurrent_track(self, title: str, midi_path: str):
@@ -2204,9 +2204,9 @@ class VirtualPianoGUI:
         self.is_playing = True
         titles_str = " ✕ ".join([f"《{t['title']}》" for t in self.active_tracks])
         self.current_song_title = titles_str
-        self.btn_play.config(text="⏸ 暫停", bg="#be185d", fg="#ffffff")
+        self.btn_play.config(text=" 暫停", bg="#be185d", fg="#ffffff")
         spd_tag = f" [{format_speed_str(self.playback_speed)}]" if self.playback_speed != 1.0 else ""
-        self.set_status_text(f"🔥 [神仙打架 {len(self.active_tracks)}首同時演奏{spd_tag}] {titles_str}")
+        self.set_status_text(f" [神仙打架 {len(self.active_tracks)}首同時演奏{spd_tag}] {titles_str}")
         self.broadcast_piano_status("track_added")
 
     def stop_playback(self):
@@ -2228,8 +2228,8 @@ class VirtualPianoGUI:
         # 立即復原所有琴鍵顏色
         self.release_all_keys()
             
-        self.btn_play.config(text="▶ 播放", bg="#f472b6", fg="#ffffff")
-        self.set_status_text("✨ 狀態：已停止。")
+        self.btn_play.config(text=" 播放", bg="#f472b6", fg="#ffffff")
+        self.set_status_text(" 狀態：已停止。")
         self.update_timeline_ui(0.0)
         self.broadcast_piano_status("stopped")
 
@@ -2245,7 +2245,7 @@ class VirtualPianoGUI:
             delta_song_time = dt_perf * self.playback_speed
             tracks_by_id = {t['id']: t for t in self.active_tracks}
             
-            # 1. 驅動各軌道時間進度並預生成即將下落的方塊 (🌸 粉白 / 黑深粉 自由搭配)
+            # 1. 驅動各軌道時間進度並預生成即將下落的方塊 ( 粉白 / 黑深粉 自由搭配)
             if self.active_tracks:
                 for track in self.active_tracks:
                     track['current_song_time'] += delta_song_time
@@ -2262,7 +2262,7 @@ class VirtualPianoGUI:
                                 x1, x2, is_black = coords
                                 bar_len = max(18, int(dur * self.SPEED_PX_PER_SEC))
                                 
-                                # 🌸 配色選取：有寫清楚左右手才套用分色，沒寫則跟之前一樣 4 色全隨機
+                                #  配色選取：有寫清楚左右手才套用分色，沒寫則跟之前一樣 4 色全隨機
                                 if is_lh is True:
                                     fill_col, border_col = random.choice(LH_BLACK_PALETTE if is_black else LH_WHITE_PALETTE)
                                 elif is_lh is False:
@@ -2350,7 +2350,7 @@ class VirtualPianoGUI:
                 y_bottom = self.waterfall_height - (time_to_hit * self.SPEED_PX_PER_SEC)
                 y_top = y_bottom - bar['len']
                 
-                # 🎯 碰線瞬間：古典鋼琴發聲 + 琴鍵按下變深色（持續保持到長條結束！）
+                #  碰線瞬間：古典鋼琴發聲 + 琴鍵按下變深色（持續保持到長條結束！）
                 now_perf = time.perf_counter()
                 if y_bottom >= self.waterfall_height and not bar['played']:
                     bar['played'] = True
@@ -2362,8 +2362,8 @@ class VirtualPianoGUI:
                         bar['channel'] = SOUND_ENGINE.note_on(m, velocity=bar.get('vel', 105))
                     self.set_key_pressed(m, True)
                     
-                # 🎵 離線瞬間：長條頂部完全通過擊鍵線（長條結束）➔ Note Off + 琴鍵彈起恢復原色
-                # 🛡️ 守護音符飽滿度：音符至少需發聲 150ms，嚴防高密度音符在同一影格剛 Note On 就立即 Note Off 造成消音！
+                #  離線瞬間：長條頂部完全通過擊鍵線（長條結束）➔ Note Off + 琴鍵彈起恢復原色
+                #  守護音符飽滿度：音符至少需發聲 150ms，嚴防高密度音符在同一影格剛 Note On 就立即 Note Off 造成消音！
                 if y_top >= self.waterfall_height:
                     hit_t = bar.get('hit_perf_time')
                     if hit_t and (now_perf - hit_t < 0.15):
@@ -2402,16 +2402,16 @@ class VirtualPianoGUI:
                         t_info = [(t['title'], t['midi_path']) for t in self.active_tracks]
                         self.start_multi_midi_playback(t_info)
                     elif self.current_midi_path and os.path.exists(self.current_midi_path):
-                        self.set_status_text(f"🔁 循環播放：重新開始演奏 《{self.current_song_title}》...")
+                        self.set_status_text(f" 循環播放：重新開始演奏 《{self.current_song_title}》...")
                         self.start_midi_playback(self.current_song_title, self.current_midi_path)
                     else:
                         self.stop_playback()
                 elif self.is_random:
-                    self.set_status_text("🔀 隨機連播：準備播放下一首...")
+                    self.set_status_text(" 隨機連播：準備播放下一首...")
                     self.play_random_song(exclude_current=True)
                 else:
                     self.stop_playback()
-                    self.set_status_text(f"🎉 《{self.current_song_title}》演奏完畢！")
+                    self.set_status_text(f" 《{self.current_song_title}》演奏完畢！")
                     self.broadcast_piano_status("song_finished")
                     if self.auto_close:
                         self.root.after(1200, self.root.destroy)
@@ -2432,7 +2432,7 @@ class VirtualPianoGUI:
         if event.widget == self.entry_search:
             return
             
-        # 鍵盤快速調節音高檔位 (PageUp / F2 🔼 升音高 | PageDown / F1 🔽 降音高)
+        # 鍵盤快速調節音高檔位 (PageUp / F2  升音高 | PageDown / F1  降音高)
         if event.keysym in ['Prior', 'Page_Up', 'F2']:
             self.step_pitch_up()
             return
@@ -2440,16 +2440,16 @@ class VirtualPianoGUI:
             self.step_pitch_down()
             return
 
-        # 🎹 當開啟手彈模式時：所有按鍵（包括 1~0, -, =, q~p, [, ], \, a~l, ;, ', z~m, ,, ., /）100% 專注於琴鍵彈奏，完全關閉 +- 音量與倍速快捷鍵！
+        #  當開啟手彈模式時：所有按鍵（包括 1~0, -, =, q~p, [, ], \, a~l, ;, ', z~m, ,, ., /）100% 專注於琴鍵彈奏，完全關閉 +- 音量與倍速快捷鍵！
         if not self.is_manual_play:
             # 僅在手彈模式關閉時（純自動播放狀態），才開放鍵盤 +- 調整音量與快捷調節倍速
             if event.keysym in ['minus', 'underscore'] or event.char == '-':
                 self.set_piano_volume(max(0, self.current_volume - 5))
-                self.set_status_text(f"🔉 鋼琴音量調低至 {self.current_volume}%")
+                self.set_status_text(f" 鋼琴音量調低至 {self.current_volume}%")
                 return
             elif event.keysym in ['equal', 'plus'] or event.char in ['+', '=']:
                 self.set_piano_volume(min(200, self.current_volume + 5))
-                self.set_status_text(f"🔊 鋼琴音量調高至 {self.current_volume}%")
+                self.set_status_text(f" 鋼琴音量調高至 {self.current_volume}%")
                 return
             elif event.keysym in ['bracketleft', 'less', 'comma'] or event.char in ['[', '<', ',']:
                 self.step_speed(-1)
@@ -2478,7 +2478,7 @@ class VirtualPianoGUI:
     def play_midi_interactive(self, midi_num: int, key_id: str):
         """滑鼠點擊任意 88 鍵：即時發聲 + 琴鍵發光"""
         if not self.is_manual_play:
-            self.set_status_text("💡 提示：目前手彈開關為【關閉】，點擊上方「🎹 手彈」按鈕即可開啟自由彈奏！")
+            self.set_status_text(" 提示：目前手彈開關為【關閉】，點擊上方「 手彈」按鈕即可開啟自由彈奏！")
             return
         broadcast_piano_focus([midi_num])
         if SOUND_ENGINE:
@@ -2493,9 +2493,9 @@ class VirtualPianoGUI:
         
         k_type = self.key_type.get(key_identifier, 'white')
         if is_left_hand is True:
-            active_color = "#f472b6" if k_type == 'white' else "#be185d" # 🌸 左手：櫻花亮粉 / 莓果深粉
+            active_color = "#f472b6" if k_type == 'white' else "#be185d" #  左手：櫻花亮粉 / 莓果深粉
         elif is_left_hand is False:
-            active_color = "#fdf2f8" if k_type == 'white' else "#2b262d" # 🤍 右手：純白霜白 / 霧炭黑
+            active_color = "#fdf2f8" if k_type == 'white' else "#2b262d" #  右手：純白霜白 / 霧炭黑
         else:
             active_color = "#f472b6" if k_type == 'white' else "#be185d" # 預設自然亮粉
             
@@ -2545,7 +2545,7 @@ class VirtualPianoGUI:
         self._key_highlight_timers[key_identifier] = self.root.after(duration_ms, reset_color)
 
 # ────────────────────────────────────────────────────────
-# 🚀 5. 主程式進入點 (支援 CLI 參數自動演奏與關閉)
+#  5. 主程式進入點 (支援 CLI 參數自動演奏與關閉)
 # ────────────────────────────────────────────────────────
 if __name__ == "__main__":
     import argparse
