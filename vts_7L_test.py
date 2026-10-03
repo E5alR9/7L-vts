@@ -7245,6 +7245,7 @@ async def process_chat_message(vts, input_queue, user_input: str, user_audio_b64
             append_to_unified_memory(speaker="7L", target=current_custom_name, content=full_clean.strip(), role="assistant", source="tts")
             
         raw_spoken_text = full_raw
+        bot_reply = re.sub(r'\[SKIP\]|\[SILENCE\]', '', raw_spoken_text, flags=re.IGNORECASE).strip()
         clean_spoken = full_clean.strip()
         
         if not clean_spoken:
