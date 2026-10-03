@@ -5625,8 +5625,8 @@ async def system_audio_worker():
                                 try:
                                     wav_bytes = await asyncio.to_thread(_convert_buffer_to_wav, s_chunks)
                                     if wav_bytes:
-                                        # 原本走本地 STT，現在聽你的，直接走獨立的 Live API 對比！
-                                        text = await gemini_system_audio_live_transcribe(wav_bytes)
+                                        # 捨棄容易超時的 Live API，改回純電腦內音頻與 Mic 音頻對比 (Local STT)
+                                        text = await asyncio.to_thread(transcribe_audio_bytes, wav_bytes)
 
                                         if text:
                                             global LATEST_SYSTEM_AUDIO_TEXT, LATEST_SYSTEM_AUDIO_TEXT_TIME, current_system_audio_context
