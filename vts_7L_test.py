@@ -1505,8 +1505,8 @@ async def fetch_ai_response(messages, image_base64=None, audio_base64=None, is_p
 
     if is_mouth_stream:
         # 直接使用當前金鑰建立串流通道，跳過所有競速邏輯
-        global CURRENT_GEMINI_KEY_STEP
-        g_key = GEMINI_KEYS[CURRENT_GEMINI_KEY_STEP % len(GEMINI_KEYS)]
+        k_idx = get_pingpong_alternating_index(len(GEMINI_KEYS), CURRENT_GEMINI_KEY_STEP)
+        g_key = GEMINI_KEYS[k_idx]
         CURRENT_GEMINI_KEY_STEP += 1
         g_model = "gemini-3.5-flash-lite" if not image_base64 and not audio_base64 else "gemini-3.5-flash"
         temp_client = genai.Client(api_key=g_key)
