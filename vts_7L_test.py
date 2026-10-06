@@ -5327,6 +5327,65 @@ async def live_code_tool_task(session, vts):
 LIVE_CONTEXT_MEMORY = []
 
 GLOBAL_LIVE_SESSION = None
+INSTINCT_LIVE_SESSION = None
+
+async def instinct_live_worker():
+    """身體本能守護進程：常駐接收音訊，平行輸出動作與表情 (權限低於主腦意識)"""
+    global INSTINCT_LIVE_SESSION
+    log_print("🦊 啟動 7L 身體本能 (Instinct) 平行 Live 大腦...")
+    while True:
+        try:
+            live_key = random.choice(KEYS_AUDIENCE_LIVE if KEYS_AUDIENCE_LIVE else GEMINI_KEYS)
+            client = genai.Client(api_key=live_key)
+            
+            system_instruction = """妳是 7L 的「身體本能神經中樞」。妳的權限極低，只負責控制肌肉反射。
+任務：聆聽周遭聲音或老爸的話語，即時輸出當下的反射表情或動作。
+【支援的動作清單】：
+- 臉部表情：[EXPRESSION: 臉紅] / [EXPRESSION: 生氣] / [EXPRESSION: 星星眼] / [EXPRESSION: 震驚] / [EXPRESSION: WINK] / [EXPRESSION: 傲嬌]
+- 身體動作：[MOVE: 靠近] / [MOVE: 躲角落] / [MOVE: 原位]
+- 重置表情：[EXPRESSION: _RESET_]
+
+請直接輸出對應標籤（例如 [EXPRESSION: 臉紅] 或 [MOVE: 靠近]），絕對不要輸出任何對話台詞！如果當下不需要特別反應，請保持沉默 [SILENCE]。"""
+
+            live_cfg = types.LiveConnectConfig(
+                response_modalities=[types.Modality.AUDIO], 
+                system_instruction=types.Content(parts=[types.Part.from_text(text=system_instruction)]),
+                output_audio_transcription=types.AudioTranscriptionConfig()
+            )
+            
+            async with client.aio.live.connect(model="gemini-3.8-live", config=live_cfg) as session:
+                INSTINCT_LIVE_SESSION = session
+                log_print("🦊 [本能大腦] 連線成功，開始平行監聽環境...")
+                
+                async for resp in session.receive():
+                    c = resp.server_content
+                    if c and c.output_transcription and c.output_transcription.text:
+                        text = c.output_transcription.text
+                        import services.vts_client as vc
+                        
+                        exp_match = re.search(r'\[EXPRESSION:\s*([^\]\[]+)\]', text, re.IGNORECASE)
+                        if exp_match:
+                            exp_tag = exp_match.group(1).strip()
+                            if any(k in exp_tag.upper() for k in ["WINK", "眨眼", "單眼", "眨單眼"]):
+                                asyncio.create_task(vc.trigger_wink(is_instinct=True))
+                            elif any(k in exp_tag for k in ["驚訝", "惊", "震驚", "SHOCK"]):
+                                asyncio.create_task(vc.trigger_shock(is_instinct=True))
+                            elif any(k in exp_tag for k in ["皺眉", "困擾", "委屈", "FROWN"]):
+                                asyncio.create_task(vc.trigger_frown(is_instinct=True))
+                            else:
+                                asyncio.create_task(vc.trigger_vts_expression(exp_tag, is_instinct=True))
+                        
+                        move_match = re.search(r'\[(?:MOVE|SPATIAL|POSITION)[：:]\s*([^\]\[]+)\]', text, re.IGNORECASE)
+                        if move_match:
+                            pos_tag = move_match.group(1).strip()
+                            asyncio.create_task(vc.apply_spatial_position(pos_tag, is_instinct=True))
+                        
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            INSTINCT_LIVE_SESSION = None
+            log_print(f"⚠️ [本能大腦] 連線中斷或重啟中: {e}")
+            await asyncio.sleep(3)
 
 async def continuous_live_worker(vts):
     """真・雙向串流 Live 大腦核心"""
@@ -5421,6 +5480,12 @@ async def continuous_live_worker(vts):
                             # 必須「持續」將音訊推流過去，讓 Google 自己做 VAD 判斷。即使靜音也推送全 0 數據。
                             async with ws_send_lock:
                                 await session.send_realtime_input(audio=types.Blob(data=data, mime_type="audio/pcm;rate=16000"))
+                                
+                            if INSTINCT_LIVE_SESSION:
+                                try:
+                                    # 平行將環境音訊串流給本能大腦
+                                    asyncio.create_task(INSTINCT_LIVE_SESSION.send_realtime_input(audio=types.Blob(data=data, mime_type="audio/pcm;rate=16000")))
+                                except Exception: pass
                             
                             if rms > 150:
                                 current_mic_action_str = "🎤 收音辨識中..."
@@ -9019,6 +9084,7 @@ async def main():
     #  操作者輸入預設停用（OPERATOR_INPUT=1 才開；vtuber 模式強制關）：直播輸入只收聊天室觀眾留言
     if operator_input_enabled():
         asyncio.create_task(continuous_live_worker(vts))
+        asyncio.create_task(instinct_live_worker())
         asyncio.create_task(text_file_listener_worker(input_queue))
         asyncio.create_task(console_keyboard_input_worker(input_queue))
     else:

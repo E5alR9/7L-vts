@@ -723,8 +723,16 @@ async def apply_spatial_position(
     log_print(f"🚀 [模型走位] 7L 模型平滑位移至: 「{clean_pos}」 (dx={delta_x}, dy={delta_y}, d_sz={d_size})")
     return f"已成功平滑移動模型至「{clean_pos}」！"
 
-async def set_vts_expression(vts, exp_tag):
-    global CURRENT_ACTIVE_EXP, shock_timer, wink_timer, wink_side, frown_timer
+LAST_CONSCIOUS_ACTION_TIME = 0.0
+
+async def set_vts_expression(vts, exp_tag, is_instinct=False):
+    global CURRENT_ACTIVE_EXP, shock_timer, wink_timer, wink_side, frown_timer, LAST_CONSCIOUS_ACTION_TIME
+    
+    if not is_instinct:
+        LAST_CONSCIOUS_ACTION_TIME = time.time()
+    elif time.time() - LAST_CONSCIOUS_ACTION_TIME < 6.0:
+        return  # 意識權限高於本能，短暫屏蔽本能動作
+
     try:
         clean_tag = str(exp_tag).strip().replace("[", "").replace("]", "").replace("EXPRESSION:", "").strip().lower()
         if clean_tag in ["_reset_", "_reset", "預設", "重置", "關閉", "正常", "恢復", "無", "取消", "reset", "default", "none", "close", "off", "0"]:
@@ -803,40 +811,57 @@ async def set_vts_expression(vts, exp_tag):
     except Exception as e:
         log_print(f"\n❌ [表情系統] 發生錯誤: {e}")
 
-async def trigger_vts_expression(expression_name: str) -> str:
+async def trigger_vts_expression(expression_name: str, is_instinct: bool = False) -> str:
     """切換 7L (Live2D 模型) 的臉部表情以表達情感或關閉表情。"""
     global GLOBAL_VTS
     clean_name = expression_name.strip().replace("[", "").replace("]", "").replace("EXPRESSION:", "").strip()
-    print(f"\n🎭 [Tool 調用] 7L 正在切換表情至: 「{clean_name}」")
+    if not is_instinct:
+        print(f"\n🎭 [Tool 調用] 7L 正在切換表情至: 「{clean_name}」")
     if GLOBAL_VTS:
         if clean_name in ["預設", "重置", "reset", "default", "_RESET_", "關閉", "正常", "恢復", "無", "取消", "none", "close", "off"]:
-            await set_vts_expression(GLOBAL_VTS, "_RESET_")
+            await set_vts_expression(GLOBAL_VTS, "_RESET_", is_instinct=is_instinct)
             return "已成功關閉表情，恢復預設狀態。"
         else:
-            await set_vts_expression(GLOBAL_VTS, clean_name)
+            await set_vts_expression(GLOBAL_VTS, clean_name, is_instinct=is_instinct)
             return f"已成功切換 Live2D 模型表情至：{clean_name}"
     return f"已記錄表情切換：{clean_name}"
 
 # ── 高階動作封裝 (High-Level Actions) ───────────────────────────────────────────
-async def trigger_wink(side=None):
+async def trigger_wink(side=None, is_instinct=False):
     """觸發眨眼放電"""
-    global wink_timer, wink_side
+    global wink_timer, wink_side, LAST_CONSCIOUS_ACTION_TIME
+    if not is_instinct:
+        LAST_CONSCIOUS_ACTION_TIME = time.time()
+    elif time.time() - LAST_CONSCIOUS_ACTION_TIME < 6.0:
+        return
     wink_timer = time.time() + 0.55
     wink_side = side or random.choice(["left", "right"])
 
-async def trigger_shock():
+async def trigger_shock(is_instinct=False):
     """觸發驚訝縮瞳與物理顫抖"""
-    global shock_timer
+    global shock_timer, LAST_CONSCIOUS_ACTION_TIME
+    if not is_instinct:
+        LAST_CONSCIOUS_ACTION_TIME = time.time()
+    elif time.time() - LAST_CONSCIOUS_ACTION_TIME < 6.0:
+        return
     shock_timer = time.time() + 4.0
 
-async def trigger_frown():
+async def trigger_frown(is_instinct=False):
     """觸發傲嬌八字皺眉/委屈表情"""
-    global frown_timer
+    global frown_timer, LAST_CONSCIOUS_ACTION_TIME
+    if not is_instinct:
+        LAST_CONSCIOUS_ACTION_TIME = time.time()
+    elif time.time() - LAST_CONSCIOUS_ACTION_TIME < 6.0:
+        return
     frown_timer = time.time() + 4.0
 
-async def trigger_eye_roll():
+async def trigger_eye_roll(is_instinct=False):
     """觸發翻白眼"""
-    global eye_roll_timer, is_tracking_mouse
+    global eye_roll_timer, is_tracking_mouse, LAST_CONSCIOUS_ACTION_TIME
+    if not is_instinct:
+        LAST_CONSCIOUS_ACTION_TIME = time.time()
+    elif time.time() - LAST_CONSCIOUS_ACTION_TIME < 6.0:
+        return
     is_tracking_mouse = False
     eye_roll_timer = time.time() + 3.8
 
