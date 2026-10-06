@@ -294,9 +294,13 @@ async def _yt_companion_session_loop(target_hwnd, initial_rect, initial_title):
                         pass
                     await asyncio.sleep(1.0)
 
-            # 任務 2: 系統音訊採集
+            # 任務 2: 系統音訊採集 (加入持續靜音推流防斷線機制)
             async def _audio_worker():
                 nonlocal session_running
+                # 預先準備好 0.04 秒長度的全 0 靜音 PCM 數據 (16kHz, 16-bit)
+                # 16000 samples/sec * 0.04 sec * 2 bytes/sample = 1280 bytes
+                silent_chunk = b'\x00' * 1280
+                
                 while session_running and IS_YT_WATCHER_ENABLED:
                     try:
                         pcm_chunk = _loopback_streamer.audio_queue.get_nowait()
@@ -305,6 +309,13 @@ async def _yt_companion_session_loop(target_hwnd, initial_rect, initial_title):
                                 audio=types.Blob(data=pcm_chunk, mime_type="audio/pcm;rate=16000")
                             )
                     except queue.Empty:
+                        # 佇列為空 (沒有系統音效) 時，持續發送全 0 音訊保活
+                        try:
+                            await session.send_realtime_input(
+                                audio=types.Blob(data=silent_chunk, mime_type="audio/pcm;rate=16000")
+                            )
+                        except Exception:
+                            pass
                         await asyncio.sleep(0.04)
                     except Exception:
                         await asyncio.sleep(0.04)
