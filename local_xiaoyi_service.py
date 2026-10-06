@@ -5,6 +5,8 @@ import time
 import asyncio
 import numpy as np
 import soundfile as sf
+import re
+import unicodedata
 
 os.environ["WANDB_DISABLED"] = "true"
 os.environ["WANDB_SILENT"] = "true"
@@ -66,6 +68,14 @@ class _WebLogStream:
                     tqdm_pct = int(m.group(1))
                     pct = 40 + int(tqdm_pct * 0.25)  # 40% ~ 65%
                     stage = "提取 BERT 特徵進度"
+                    
+                    try:
+                        import services.auto_cover_pipeline as acp
+                        if getattr(acp, "_IS_PRODUCING_COVER", False):
+                            stage = "提取 HuBERT/F0 特徵進度 (RVC)"
+                    except Exception:
+                        pass
+                        
                     detail = line
             elif "前端处理后的文本" in line or "前端處理後的文本" in line:
                 stage = "音素音律對齊"
@@ -142,50 +152,51 @@ _thread_lock = threading.Lock()
 
 def init_gpt_sovits():
     global _tts_pipeline
-    if _tts_pipeline is not None:
-        return _tts_pipeline
-        
-    prev_cwd = os.getcwd()
-    try:
-        os.chdir(BASE_DIR)
-        from TTS_infer_pack.TTS import TTS, TTS_Config
-        config = TTS_Config("GPT_SoVITS/configs/tts_infer.yaml")
-        config.device = "cuda"
-        config.is_half = True
-        config.t2s_weights_path = os.path.join(GPT_SOVITS_DIR, "GPT_weights_v2", "xiaoyi_finetune-e4.ckpt")
-        config.vits_weights_path = os.path.join(FINETUNE_DATA_DIR, "opt", "xiaoyi_finetune", "xiaoyi_sovits_inference.pth")
-        config.cnhubert_base_path = "pretrained_models/chinese-hubert-base"
-        config.bert_base_path = "pretrained_models/chinese-roberta-wwm-ext-large"
-        
-        _tts_pipeline = TTS(config)
-        
-        #  核心預熱與常駐快取：初始化時即完成參考音與文字 BERT 萃取，使後續所有合成省去 80% 時間！
-        try:
-            ref_audio = REF_VOICE_ZH
-            ref_text = "哇！真的假的？太棒了吧！今天也要一起加油喔！嘿嘿～"
-            with capture_tts_output():
-                _tts_pipeline.set_ref_audio(ref_audio)
-                # 預熱一次
-                _dummy = next(_tts_pipeline.run({
-                    "text": "哈囉",
-                    "text_lang": "auto",
-                    "ref_audio_path": ref_audio,
-                    "prompt_text": ref_text,
-                    "prompt_lang": "zh",
-                    "batch_size": 1,
-                    "speed_factor": 1.0,
-                }))
-        except Exception:
-            pass
+    with _thread_lock:
+        if _tts_pipeline is not None:
+            return _tts_pipeline
             
-        return _tts_pipeline
-    except Exception as e:
-        print(f"❌ [GPT-SoVITS 初始化異常]: {e}")
-        import traceback
-        traceback.print_exc()
-        return None
-    finally:
-        os.chdir(prev_cwd)
+        prev_cwd = os.getcwd()
+        try:
+            os.chdir(BASE_DIR)
+            from TTS_infer_pack.TTS import TTS, TTS_Config
+            config = TTS_Config("GPT_SoVITS/configs/tts_infer.yaml")
+            config.device = "cuda"
+            config.is_half = True
+            config.t2s_weights_path = os.path.join(GPT_SOVITS_DIR, "GPT_weights_v2", "xiaoyi_finetune-e4.ckpt")
+            config.vits_weights_path = os.path.join(FINETUNE_DATA_DIR, "opt", "xiaoyi_finetune", "xiaoyi_sovits_inference.pth")
+            config.cnhubert_base_path = "pretrained_models/chinese-hubert-base"
+            config.bert_base_path = "pretrained_models/chinese-roberta-wwm-ext-large"
+            
+            _tts_pipeline = TTS(config)
+            
+            #  核心預熱與常駐快取：初始化時即完成參考音與文字 BERT 萃取，使後續所有合成省去 80% 時間！
+            try:
+                ref_audio = REF_VOICE_ZH
+                ref_text = "哇！真的假的？太棒了吧！今天也要一起加油喔！嘿嘿～"
+                with capture_tts_output():
+                    _tts_pipeline.set_ref_audio(ref_audio)
+                    # 預熱一次
+                    _dummy = next(_tts_pipeline.run({
+                        "text": "哈囉",
+                        "text_lang": "auto",
+                        "ref_audio_path": ref_audio,
+                        "prompt_text": ref_text,
+                        "prompt_lang": "zh",
+                        "batch_size": 1,
+                        "speed_factor": 1.0,
+                    }))
+            except Exception:
+                pass
+                
+            return _tts_pipeline
+        except Exception as e:
+            print(f"❌ [GPT-SoVITS 初始化異常]: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+        finally:
+            os.chdir(prev_cwd)
 
 def synthesize_xiaoyi_bytes(text: str) -> bytes:
     """
@@ -224,25 +235,28 @@ def synthesize_xiaoyi_bytes(text: str) -> bytes:
                 ref_audio = REF_VOICE_JA
                 ref_text = "お兄ちゃん、今日も一日頑張ろうね！大好きだよ！"
                 ref_lang = "all_ja"
-                text_lang = "auto"
+                text_lang = "ja" if num_hanzi == 0 else "auto"
                 top_k = 15
                 top_p = 0.75
                 temp = 0.65
                 speed = 1.0
             else:
                 #  中文主體模式：
-                # 採用中文參考音訊，但交由 GPT-SoVITS 原生的 'auto' 語言檢測來完美處理中日夾雜
+                # 採用中文參考音訊，若為純中文則鎖定 'zh' 避免被誤判為日文，若有日文夾雜則交由 'auto'
                 ref_audio = REF_VOICE_ZH
                 ref_text = "哇！真的假的？太棒了吧！今天也要一起加油喔！嘿嘿～"
                 ref_lang = "all_zh"
-                text_lang = "auto"
+                has_english = bool(re.search(r'[a-zA-Z]', text))
+                text_lang = "zh" if (num_kana == 0 and not has_english) else "auto"
                 top_k = 15
                 top_p = 0.80
                 temp = 0.80
                 speed = 1.05
             
-            #  符號與專有名詞防卡頓處理：過濾非發音顏文字 (如 (∠・ω<)⌒☆ )，波浪號/符號轉為元氣感嘆號「！」
-            text = re.sub(r'[\(（][^\)）]*[\)）]', '', text)  # 移除括號表情如 (∠・ω<)
+            #  符號與專有名詞防卡頓處理：將數學字母/全形/特殊符號正規化為標準 ASCII (修復 KeyError)
+            text = unicodedata.normalize('NFKC', text)
+            # 過濾非發音顏文字 (如 ⌒☆ )，波浪號/符號轉為元氣感嘆號「！」
+            text = re.sub(r'[∠・ω<>\-_]+', '', text) # 改為只針對特定顏文字常見特殊符號移除
             text = re.sub(r'[⌒☆★♪♡✧✦๑•̀ㅂ•́و✧~～]+', '！', text)
             text = text.replace("7L", "小七").replace("7l", "小七")
             text = re.sub(r'[，,]{2,}', '，', text)

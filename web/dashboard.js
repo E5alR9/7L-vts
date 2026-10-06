@@ -1193,8 +1193,9 @@ class SevenLMonitorApp {
       this.ttsHideTimer = null;
     }
 
-    if (this.ttsHudIcon) safeSetText(this.ttsHudIcon, '🎙️');
-    if (this.ttsHudTitle) safeSetText(this.ttsHudTitle, '7L 聲音合成中');
+    const isRvc = data.mode === 'rvc' || (data.stage && data.stage.includes('RVC')) || (data.detail && data.detail.includes('RVC'));
+    if (this.ttsHudIcon) safeSetText(this.ttsHudIcon, isRvc ? '🎤' : '🎙️');
+    if (this.ttsHudTitle) safeSetText(this.ttsHudTitle, isRvc ? '7L 歌聲置換中 (RVC)' : '7L 聲音合成中');
 
     if (data.active) {
       this.ttsProgressHud.style.display = 'flex';

@@ -175,13 +175,20 @@ def rag_prompt_block(query: str, k: int = 3, min_score: float = None, budget_cha
         picked.append(h)
     if not picked:
         return ""
-    picked.sort(key=lambda h: str((h.get("metadata") or {}).get("time", "")))  # 按時間序排回
+    picked.sort(key=lambda h: str((h.get("metadata") or {}).get("timestamp", (h.get("metadata") or {}).get("time", ""))))  # 按時間序排回
     lines = []
     for i, h in enumerate(picked, 1):
-        src = (h["metadata"] or {}).get("source", "")
-        src_tag = f"（來源: {src}）" if src else ""
+        meta = h["metadata"] or {}
+        src = meta.get("source", "")
+        ts = meta.get("timestamp") or meta.get("time", "")
+        
+        tags = []
+        if ts: tags.append(f"時間: {ts}")
+        if src: tags.append(f"來源: {src}")
+        tag_str = f"（{'，'.join(tags)}）" if tags else ""
+        
         body = re.sub(r"\s+", " ", h["text"]).strip()[:300]
-        lines.append(f"{i}. {body}{src_tag}")
+        lines.append(f"{i}. {body} {tag_str}")
     return (
         "【RAG 記憶檢索（與本題最相近的過往記憶，僅供參考、可引用但別生硬照唸）】\n"
         + "\n".join(lines)

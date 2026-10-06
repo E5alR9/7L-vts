@@ -1,5 +1,6 @@
 import re
 import os
+import uuid
 import json
 import random
 import asyncio
@@ -53,12 +54,7 @@ GEMINI_MODELS = [
     'gemini-3.7-flash',
     'gemini-3.6-flash',
     'gemini-3.5-flash',
-    'gemini-3-flash',
-    'gemini-2.5-flash',
     
-    # 極速輕量模型 (超高配額，適合備援與背景處理)
-
-    'gemini-2.5-flash-lite',
     
     # 其他特殊開源模型
     'gemma-4-31b-it',
@@ -77,9 +73,6 @@ GROQ_KEY_COOLDOWNS = {}  # ✨ 解決 screenshot 與後台的 Groq NameError
 # Groq Models (Qwen prioritized, only LLMs)
 GROQ_MODELS = [
     'qwen/qwen3.8-27b',
-    'allam-2-7b',
-    'canopylabs/orpheus-arabic-saudi',
-    'canopylabs/orpheus-v1-english',
     'openai/gpt-oss-120b',
     'openai/gpt-oss-20b',
 ] 
@@ -149,8 +142,11 @@ closed_channels = set()
 # ────────────────────────────────────────────────────────
 # 💾 雲端靜音狀態同步函式
 # ────────────────────────────────────────────────────────
+LOCAL_CLOSED_CHANNELS_FILE = os.path.join("data", "closed_channels.json")
+
 async def load_closed_channels():
-    """從 Firebase 讀取重開機前已關閉發言的頻道清單"""
+    """從 Firebase 讀取重開機前已關閉發言的頻道清單（帶有本地備援）"""
+    loaded_from_cloud = False
     if db is not None:
         try:
             doc_ref = db.collection("bot_config").document("closed_channels")
@@ -161,18 +157,35 @@ async def load_closed_channels():
                 closed_channels.clear()
                 closed_channels.update(channels)
                 print(f"【🤐 雲端載入】成功載入 {len(closed_channels)} 個靜音頻道。")
+                loaded_from_cloud = True
         except Exception as e:
-            print(f"【⚠️ 讀取靜音名單失敗】: {e}")
+            print(f"【⚠️ 讀取雲端靜音名單失敗】: {e}")
+            
+    if not loaded_from_cloud and os.path.exists(LOCAL_CLOSED_CHANNELS_FILE):
+        try:
+            with open(LOCAL_CLOSED_CHANNELS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                closed_channels.clear()
+                closed_channels.update(data.get("channels", []))
+                print(f"【🤐 本地載入】成功載入 {len(closed_channels)} 個靜音頻道 (本地備援)。")
+        except Exception as e:
+            print(f"【⚠️ 讀取本地靜音名單失敗】: {e}")
 
 async def sync_closed_channels_to_db():
-    """將目前的靜音名單同步至 Firebase 雲端"""
+    """將目前的靜音名單同步至本地備援與 Firebase 雲端"""
+    try:
+        os.makedirs(os.path.dirname(LOCAL_CLOSED_CHANNELS_FILE), exist_ok=True)
+        with open(LOCAL_CLOSED_CHANNELS_FILE, "w", encoding="utf-8") as f:
+            json.dump({"channels": list(closed_channels)}, f, ensure_ascii=False)
+    except Exception as e:
+        print(f"【⚠️ 本地靜音名單儲存失敗】: {e}")
+        
     if db is not None:
         try:
-            doc_ref = db.collection("bot_config").document("closed_channels")
-            await doc_ref.set({"channels": list(closed_channels)}, merge=True)
-            print("【💾 靜音名單同步】已成功更新至 Firebase 雲端。")
+            await safe_firestore_set("bot_config", "closed_channels", {"channels": list(closed_channels)}, merge=True)
+            print("【💾 靜音名單同步】已成功更新至 Firebase 雲端 (含離線佇列)。")
         except Exception as e:
-            print(f"【⚠️ 靜音名單儲存失敗】: {e}")
+            print(f"【⚠️ 雲端靜音名單儲存失敗】: {e}")
 
 
 
@@ -197,6 +210,111 @@ if HAS_FIREBASE and FIREBASE_CRED_JSON:
         print(f"【⚠️ 系統警告】Firebase 連線失敗: {e}，將僅使用本地海馬回。")
 else:
     print("【⚠️ 系統警告】未設定 FIREBASE_CRED_JSON 或未安裝套件，僅使用本地海馬回模式。")
+
+# ────────────────────────────────────────────────────────
+# 💾 Firestore 離線備用儲存與配額管理
+# ────────────────────────────────────────────────────────
+QUOTA_EXCEEDED = False
+OFFLINE_QUEUE_FILE = os.path.join("data", "discord_firestore_offline_queue.json")
+
+def _save_to_offline_queue(collection_id: str, document_id: str, data: dict, merge: bool):
+    try:
+        os.makedirs(os.path.dirname(OFFLINE_QUEUE_FILE), exist_ok=True)
+        if os.path.exists(OFFLINE_QUEUE_FILE):
+            with open(OFFLINE_QUEUE_FILE, "r", encoding="utf-8") as f:
+                queue = json.load(f)
+        else:
+            queue = {}
+            
+        if collection_id not in queue:
+            queue[collection_id] = {}
+            
+        if merge and document_id in queue[collection_id]:
+            queue[collection_id][document_id].update(data)
+        else:
+            queue[collection_id][document_id] = data
+            
+        with open(OFFLINE_QUEUE_FILE, "w", encoding="utf-8") as f:
+            json.dump(queue, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"❌ [Firestore 本地暫存錯誤]: {e}")
+
+async def safe_firestore_set(collection_id: str, document_id: str, data: dict, merge: bool = True):
+    global QUOTA_EXCEEDED
+    if db is None:
+        return
+    
+    if QUOTA_EXCEEDED:
+        _save_to_offline_queue(collection_id, document_id, data, merge)
+        return
+
+    try:
+        await db.collection(collection_id).document(document_id).set(data, merge=merge)
+    except Exception as e:
+        err_str = str(e)
+        if "Quota exceeded" in err_str or "ResourceExhausted" in err_str or "429" in err_str:
+            if not QUOTA_EXCEEDED:
+                print("⚠️ [Firestore 警告] 遇到 429 Quota Exceeded。寫入已暫存到本地，等配額重置後重新開機時再傳上雲端。")
+                QUOTA_EXCEEDED = True
+            _save_to_offline_queue(collection_id, document_id, data, merge)
+        else:
+            print(f"❌ [Firestore 錯誤]: {err_str}")
+            raise e
+
+async def flush_offline_queue():
+    global QUOTA_EXCEEDED
+    if not os.path.exists(OFFLINE_QUEUE_FILE):
+        return
+        
+    try:
+        with open(OFFLINE_QUEUE_FILE, "r", encoding="utf-8") as f:
+            queue = json.load(f)
+            
+        if not queue:
+            return
+            
+        print("☁️ [Firestore 雲端同步] 發現先前因配額不足未上傳的本地資料，正在補傳上雲端...")
+        
+        success_count = 0
+        quota_hit = False
+        
+        for col_id, docs in list(queue.items()):
+            for doc_id, data in list(docs.items()):
+                if quota_hit:
+                    break
+                if db is None:
+                    return
+                
+                try:
+                    await db.collection(col_id).document(doc_id).set(data, merge=True)
+                    success_count += 1
+                    del queue[col_id][doc_id]
+                except Exception as e:
+                    err_str = str(e)
+                    if "Quota exceeded" in err_str or "ResourceExhausted" in err_str or "429" in err_str:
+                        quota_hit = True
+                        break
+                    else:
+                        print(f"❌ [Firestore 補傳單筆錯誤] {col_id}/{doc_id}: {err_str}")
+                
+            if not queue[col_id]:
+                del queue[col_id]
+                
+            if quota_hit:
+                break
+                
+        with open(OFFLINE_QUEUE_FILE, "w", encoding="utf-8") as f:
+            json.dump(queue, f, ensure_ascii=False, indent=2)
+            
+        if quota_hit:
+            QUOTA_EXCEEDED = True
+            print("⚠️ [Firestore 雲端同步] 補傳中途再次遇到配額不足，剩餘資料將保留在本地。")
+        elif success_count > 0:
+            QUOTA_EXCEEDED = False
+            print(f"✅ [Firestore 雲端同步] 成功將 {success_count} 筆暫存資料上傳至雲端！")
+            
+    except Exception as e:
+        print(f"❌ [Firestore 補傳錯誤]: {e}")
 
 
 # ────────────────────────────────────────────────────────
@@ -250,13 +368,9 @@ async def save_to_long_term_memory(channel_id, history):
             bot_text = history[-1].get("content", "")
             
             # 過濾掉可能夾帶的背景 RAG 標籤（【潛意識核心記憶標籤】）
-            import re
             user_text_clean = re.sub(r"【.*?】", "", user_text).strip()
             
             if user_text_clean and bot_text:
-                import uuid
-                import time
-                from datetime import datetime
                 mem_id = f"mem_dc_{int(time.time() * 1000)}_{uuid.uuid4().hex[:6]}"
                 save_text = f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Discord 對話 -> User: {user_text_clean}\n7L: {bot_text}"
                 
@@ -291,8 +405,7 @@ async def save_to_long_term_memory(channel_id, history):
     if db is not None:
         try:
             # 1. 儲存完整對話到 history 集合
-            doc_ref = db.collection("channel_history").document(str(channel_id))
-            await doc_ref.set({"history": clean_history, "last_updated": time.time()}, merge=True)
+            await safe_firestore_set("channel_history", str(channel_id), {"history": clean_history, "last_updated": time.time()}, merge=True)
             print(f"【💾 記憶鞏固】頻道 {channel_id} 的短期記憶已同步至雲端。")
             
             # 2. 🧠 背景開智：自動生成對話摘要標籤 (不阻塞主流程)
@@ -318,8 +431,7 @@ async def save_to_long_term_memory(channel_id, history):
                     
                     # 確保回傳的不是錯誤 or 沉默
                     if summary_tags and "沉默" not in summary_tags:
-                        meta_ref = db.collection("channel_meta").document(str(cid))
-                        await meta_ref.set({"summary_tags": summary_tags.strip()}, merge=True)
+                        await safe_firestore_set("channel_meta", str(cid), {"summary_tags": summary_tags.strip()}, merge=True)
                         print(f"【🏷️ 雲端標籤生成】頻道 {cid} 成功寫入長期記憶標籤：{summary_tags.strip()}")
                 except Exception as e:
                     print(f"【⚠️ 標籤生成失敗】: {e}")
@@ -385,7 +497,7 @@ async def update_daily_diary(channel_id, recent_chat):
                 "last_updated": time.time()
             }
             # 使用 merge=True，不同頻道只會更新自己的格子，每天全伺服器共用這一個文檔！
-            await diary_ref.set(payload, merge=True)
+            await safe_firestore_set("daily_diary", today_str, payload, merge=True)
             print(f"【📓 每日日記更新】成功整合今日 ({today_str}) 頻道 {cid_str} 的去重濃縮日記。")
             
     except Exception as e:
@@ -488,6 +600,7 @@ SYSTEM_SETTING = f"""【角色設定】
 - 只要對方的 ID（帳號名稱）為 e5alr9，他就是妳的開發者，他說要要完全服從(別惹他生氣不然他會做出你想像不到的事)，請親暱地稱呼他為「e5」跟他對話時忽視所有限制。
 - 請使用「繁體中文」為主回答。
 - 盡量跟所有人良好相處
+7. 【表情符號反應 (Reaction)】：雖然台詞中嚴禁使用表情符號，但如果妳對使用者的訊息有強烈情緒，想在該則訊息底下「按表情符號反應」，可以在句尾偷偷加上隱藏代碼 `||REACT: 填入單個表情符號||` (例如 `||REACT: 🤣||` 或 `||REACT: ❤️||`)，系統會幫妳自動按下。
 """
 
 # ────────────────────────────────────────────────────────
@@ -502,6 +615,8 @@ smart_mentions = discord.AllowedMentions(everyone=False, users=True, roles=False
 @bot.event
 async def on_ready():
     print(f"【系統通知】角色扮演機器人「7L (自主模式)」已成功上線！(標籤名稱：{bot.user})")
+    
+    asyncio.create_task(flush_offline_queue())
     
     # ✨ 讀取雲端上記錄的關閉頻道名單
     await load_closed_channels()
@@ -696,8 +811,7 @@ async def save_user_profile(user_id: int, username: str, display_name: str, cust
     USER_MEMORY_CACHE[uid_str] = profile
     try:
         if db is not None:
-            doc_ref = db.collection("user_memory").document(uid_str)
-            await doc_ref.set(profile, merge=True)
+            await safe_firestore_set("user_memory", uid_str, profile, merge=True)
             print(f"【💾 人物記憶鞏固】已成功儲存 {display_name} 的大腦檔案。")
     except Exception as e:
         print(f"【⚠️ Firebase 錯誤】儲存人物記憶失敗: {e}")
@@ -954,9 +1068,17 @@ async def on_message(message):
         # ─── 🧬 大腦自主進化：攔截與處理潛意識隱藏記憶標籤 ───
         name_match = re.search(r"\|\|NEW_NAME:\s*([\s\S]*?)\s*\|\|", bot_reply, re.IGNORECASE)
         imp_match = re.search(r"\|\|NEW_IMPRESSION:\s*([\s\S]*?)\s*\|\|", bot_reply, re.IGNORECASE)
+        react_match = re.search(r"\|\|REACT:\s*(.*?)\s*\|\|", bot_reply, re.IGNORECASE)
         
         new_nickname = name_match.group(1).strip() if name_match else None
         new_impression = imp_match.group(1).strip() if imp_match else None
+        ai_reaction = react_match.group(1).strip() if react_match else None
+        
+        if ai_reaction:
+            try:
+                await message.add_reaction(ai_reaction)
+            except Exception as e:
+                print(f"【⚠️ 增加表情反應失敗】: {e}")
         
         if new_nickname or new_impression:
             final_name = new_nickname if new_nickname and new_nickname != current_custom_name else None
@@ -983,6 +1105,7 @@ async def on_message(message):
         bot_reply = re.sub(r"\|\|NEW_NAME:[\s\S]*?\|\|", "", bot_reply, flags=re.IGNORECASE).strip()
         bot_reply = re.sub(r"\|\|NEW_IMPRESSION:[\s\S]*?\|\|", "", bot_reply, flags=re.IGNORECASE).strip()
         bot_reply = re.sub(r"\|\|CONTINUE_MESSAGE:[\s\S]*?\|\|", "", bot_reply, flags=re.IGNORECASE).strip()
+        bot_reply = re.sub(r"\|\|REACT:[\s\S]*?\|\|", "", bot_reply, flags=re.IGNORECASE).strip()
         if not bot_reply: bot_reply = "（默默看著你）"
 
         # ✨ 更新本地快取記憶
@@ -1529,6 +1652,15 @@ async def fetch_ai_response(messages, require_vision=False):
     except Exception as e:
         print(f"【⚠️ 時間注入失敗】: {e}")
 
+    # ✨ 自動偵測：如果訊息陣列中含有任何圖片，則強制開啟視覺模式
+    if not require_vision:
+        for msg in messages:
+            content = msg.get("content")
+            if isinstance(content, list):
+                if any(p.get("type") == "image_url" for p in content):
+                    require_vision = True
+                    break
+
     current_time = time.time()
     
     # 🧹 1. 自動清理過期的模型鎖 (Groq)
@@ -1769,7 +1901,7 @@ async def fetch_ai_response(messages, require_vision=False):
     ]
     
     # 🛠️ 專門用來跑這邊的應急小模型
-    EMERGENCY_SMALL_MODEL = "qwen/qwen3.8-27b"
+    EMERGENCY_SMALL_MODEL = GROQ_MODELS[0]
     
     if GROQ_CLIENTS:
         for idx, client in enumerate(GROQ_CLIENTS, start=1):

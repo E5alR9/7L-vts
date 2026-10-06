@@ -1,0 +1,143 @@
+24: # 12.  旗艦多模態大腦推理核心 (fetch_ai_response: Gemini Multimodal Dispatcher)
+265: "caption": {"type": "string", "description": "風格描述（如：溫柔抒情流行歌、鋼琴+弦樂、128BPM）"},
+267: "duration": {"type": "integer", "description": "時長秒數（10-600，預設 120）"},
+298: "program": {"type": "integer", "description": "音色 0-127"},
+611: num_keys = len(GEMINI_KEYS)
+687: num_keys = len(target_keys)
+706: if len(available) >= limit:
+710: if len(available) < limit:
+717: if len(available) >= limit:
+750: if ans and not ans.startswith("(") and len(ans) > 5:
+759: target_k_idx = get_pingpong_alternating_index(len(GEMINI_KEYS), CURRENT_GEMINI_KEY_STEP + k_offset)
+789: if ans and not ans.startswith("(") and len(ans) > 5:
+798: 'openai/gpt-oss-120b',
+811: max_tokens=120,
+831: if len(clean_l) > 15:
+833: if len(snippets) >= 2:
+838: if len(summary_core) > 90:
+905: _dur = int(fn_args.get("duration", 120) or 120)
+936: _r = _me2.delete_pitch_range(_mp, int(fn_args.get("lo", 0)), int(fn_args.get("hi", 127)))
+982: extracted_text += (f" （系統回報：扒帶包完成（{len(_sres['stems'])} 軌＋卡拉＋降速＋和弦＋旋律 MIDI）"
+1076: if len(img_bytes) < 1000:
+1096: if hist_bytes and len(hist_bytes) > 1000:
+1103: n_hist = len(temporal_frames) if temporal_frames else 0
+1297: #  放寬單通道等待時間至 120 秒，讓 3.8 / 3.7-flash 深度思考、多模態與工具調用在背景充裕完成，絕不 premature timeout！
+1304: timeout=120.0
+1505: k_idx = get_pingpong_alternating_index(len(GEMINI_KEYS), CURRENT_GEMINI_KEY_STEP)
+1523: while len(launched_gemini_targets) < max_gemini_attempts:
+1527: if len(active_gemini_tasks) < 2:
+1546: concurrent_count = len(active_gemini_tasks)
+1558: timeout=12.0,
+1590: # 12 秒到期：日誌提示，原任務未逾時未報錯、仍在背景深度思考，依序輪流加開雙軌熱備搶答！
+1767: target_k_idx = get_pingpong_alternating_index(len(GEMINI_KEYS), CURRENT_GEMINI_KEY_STEP)
+2208: print(f"✅ 找到 {len(GROQ_KEYS)} 把 Groq 金鑰")
+2212: print(f"✅ 找到 {len(GEMINI_KEYS)} 把 Gemini 核心金鑰")
+2220: KEYS_MIC_LIVE      = GEMINI_KEYS[6:12] if len(GEMINI_KEYS) >= 12 else GEMINI_KEYS
+2221: KEYS_PROACTIVE     = GEMINI_KEYS[18:24] if len(GEMINI_KEYS) >= 24 else GEMINI_KEYS
+2224: print(f"  ⚡ 100 句記憶潛意識哨兵 Live 通道: 分配 {len(KEYS_AUDIENCE_LIVE)} 把專用金鑰")
+2225: print(f"  🎙️ 麥克風情緒感知 Live 通道: 分配 {len(KEYS_MIC_LIVE)} 把專用金鑰")
+2226: print(f"  👁️ 餘光視覺感知通道: 分配 {len(KEYS_VISION)} 把專用金鑰")
+2227: print(f"  📻 鋼琴電台與 Proactive: 分配 {len(KEYS_PROACTIVE)} 把專用金鑰")
+2228: print(f"  👑 老爸主腦專屬對話: 享有全量 {len(KEYS_DAD_MAIN)} 把金鑰完整矩陣！")
+2238: print(f"✅ 找到 {len(TAVILY_KEYS)} 把 Tavily 金鑰")
+2299: num_keys = len(self._clients)
+2364: if len(raw_bytes) < 100:
+2376: if len(all_audios) > MAX_LOCAL_AUDIO_FILES:
+2641: avg = sum(API_LATENCY_HISTORY) / len(API_LATENCY_HISTORY)
+2765: for i in range(0, len(arr), frame_len):
+2767: if len(chunk) > 0:
+2776: return [0.0] * len(envelope)
+2907: if len(chat_text.strip()) < 40: return
+2943: 'openai/gpt-oss-120b',
+3015: c = item.get("content", "").strip()[:120]
+3127: print(f"💻 [Tool 完成] 執行結果: {result[:120]}...")
+3161: num_keys = min(4, len(GEMINI_KEYS))
+3289: if len(clean_new) < 4:
+3317: if len(clean_new) >= 12 and len(clean_past) >= 12:
+3335: if len(clean_new) >= 12 and len(clean_mem) >= 12:
+3356: if len(RECENT_STREAM_OF_CONSCIOUSNESS) > 10:
+3440: if len(mic_pcm) < 4000 or len(sys_pcm) < 4000:
+3444: mic_len = min(len(mic_pcm), 32000)
+3445: sys_len = min(len(sys_pcm), 48000)
+3453: mic_env = np.mean(np.abs(mic_sig)[:(len(mic_sig)//window_size)*window_size].reshape(-1, window_size), axis=1)
+3454: sys_env = np.mean(np.abs(sys_sig)[:(len(sys_sig)//window_size)*window_size].reshape(-1, window_size), axis=1)
+3518: stt_len = len(clean_stt)
+3521: # 短中句（< 12 字，如日常對話、短指令、覆誦）100% 保證通行，絕不當成回音過濾！
+3522: if is_dad_verified and stt_len < 12:
+3528: if not is_dad_verified or stt_len >= 12:
+3559: longest_match = matcher.find_longest_match(0, stt_len, 0, len(old_m))
+3594: coverage = match_sum / len(clean_stt)
+3639: formatted_lines.extend([line[i:i+20] for i in range(0, len(line), 20)])
+3690: #  12.5 Live API 即時神態導演與句中動態表情時間軸排程引擎
+3729: total_chars = max(1, len(clean_spoken))
+3736: char_offset = len(prefix_clean)
+3751: if not clean_text or total_duration < 1.8 or len(clean_text.strip()) < 6:
+3907: #  柔化自然縮放：將激進的語速縮放至人聲舒適黃金區間 (-12% ~ +12%)，杜絕怪聲與快轉機械感
+3909: clamped = max(-12, min(12, scaled))
+3942: c_len = len(re.sub(r'[^\w\u4e00-\u9fa5]', '', buf))
+3962: est_duration = max(1.5, len(tts_text) * 0.22)
+3985: if len(pre_timeline) < 2 and len(tts_text) >= 7 and target_vts:
+4000: if local_wav and len(local_wav) > 100:
+4008: log_print(f"🟢 【串流分段 TTS({_eng}) ⚡ 第 {idx+1}/{len(chunks)} 句秒出】: '{c_dict['text']}' (耗時:{cost:.2f}s)")
+4009: await audio_stream_queue.put({"file": part_file, "text": c_dict["text"], "idx": idx, "total": len(chunks)})
+4043: part_dur = max(0.5, len(item["text"]) * 0.22)
+4055: if len(pre_timeline) >= 2:
+4222: await asyncio.sleep(0.12)
+4253: if len(data.shape) > 1 and data.shape[1] > 1:
+4319: for offset in range(0, len(pcm_bytes), chunk_sz):
+4375: draw.polygon(shadow_poly, fill=(0, 0, 0, 120))
+4604: if not img_bytes or len(img_bytes) < 1000:
+4652: #  12. 旗艦多模態大腦推理核心 (fetch_ai_response)
+4690: if len(seen_apps) >= 3: break
+5090: if len(audio_data) > 0:
+5129: if len(pcm_arr) > 0:
+5137: if wav_bytes and len(wav_bytes) > 2000:
+5312: recent_prompts = [p for t, p in LIVE_CONTEXT_MEMORY if time.time() - t < 120]
+5315: inject_msg = f"[系統提示：剛才網路連線不穩重新連線。以下是你斷線前 120 秒內接收到的最新幾筆重要紙條/資訊，請自動延續剛才的話題或動作：]\n{memory_str}"
+5316: log_print(f"🧠 [記憶恢復] 已向新連線注入 {len(recent_prompts)} 筆近期上下文記憶。")
+5400: # 為了避免單字發音浪費 TTS 建立時間，強制緩衝至少 12 個有效字元 (忽略標籤) 後才找尋標點符號
+5401: if len(re.sub(r'\[.*?\]', '', chunk_buffer)) <= 12:
+5404: # 找出第一個「句子淨長度 > 12」的標點符號進行切割
+5407: if len(re.sub(r'\[.*?\]', '', chunk_buffer[:m.end()])) > 12:
+5452: if len(LIVE_CONTEXT_MEMORY) > 10:
+5486: if current_k_idx >= len(GEMINI_KEYS):
+5489: if current_m_idx >= len(live_models):
+5545: if len(GLOBAL_SPEECH_AUDIO_BUFFER) > 10:
+5550: if len(data.shape) > 1 and data.shape[1] > 1:
+5707: if latest_screen_cache and isinstance(latest_screen_cache, list) and len(latest_screen_cache) > 0:
+5773: if len(img_bytes) < 1000:
+5797: n_frames = len(since_frames)
+5798: # 若幀數太多（>12 張），均勻採樣留 12 張，避免 token 爆炸
+5799: if n_frames > 12:
+5800: step = n_frames // 12
+5801: since_frames = since_frames[::step][:12]
+5802: log_print(f"🎞️ [動態視覺] 傳入 {len(since_frames)} 張歷史幀 (上次看到現在 {round(time.time() - LAST_VISION_LOOK_TIME, 1)}s)")
+5918: if res_text and len(res_text) >= 2:
+5970: if len(data.shape) > 1 and data.shape[1] > 1:
+5986: data = recorder.record(numframes=1280)
+5994: with loopback_mic.recorder(samplerate=16000, blocksize=1280) as recorder:
+6036: if len(speech_audio_buffer) >= 20 and (now - last_transcribe_time > 2.5):
+6041: music_chunks = list(music_audio_buffer) if (len(music_audio_buffer) >= 80 and (now - LAST_MUSIC_IDENTIFY_TIME >= 18.0)) else None
+6165: smooth_sleep_eye = min(1.0, smooth_sleep_eye + 0.12)
+6242: if 0 <= frame_idx < len(CURRENT_MOUTH_ENVELOPE):
+6327: target_angle_x += math.sin(t * 12.0) * 0.20
+6408: await asyncio.sleep(12.0)
+6523: await asyncio.sleep(12.0)
+6760: if pe.is_piano_active and clean_q and len(clean_q) <= 40:
+6794: #  1. 純數字或標點符號（如 "67", "666", "777", "123"）絕對不是歌名！
+6799: if len(clean_ql) <= 1:
+6828: if len(bt_clean) >= 2 and not bt_clean.isdigit():
+6837: if any(artist in clean_ql for artist in famous_artists) and len(clean_ql) >= 4:
+7527: if latest_screen_cache and isinstance(latest_screen_cache, list) and len(latest_screen_cache) > 0:
+7662: if len(parts) > 1:
+7663: for i in range(0, len(parts)-1, 2):
+8224: k_idx = (get_pingpong_alternating_index(len(GEMINI_KEYS), CURRENT_GEMINI_KEY_STEP) + k_offset) % len(GEMINI_KEYS)
+8649: total_gemini = len(GEMINI_MODELS) * len(GEMINI_KEYS)
+8680: if len(all_locked) > 6:
+8681: locked_str += f"\n• ...以及其餘 {len(all_locked) - 6} 條通道"
+8692: f" **當前受限通道 ({len(all_locked)} 條)**:\n{locked_str}\n"
+8706: if len(current_chunk) + len(row) > 1850:
+8976: elif real_level > 12:
+9060: if latest_screen_cache and isinstance(latest_screen_cache, list) and len(latest_screen_cache) > 0:
+9422: char = spinner_chars[idx % len(spinner_chars)]
+9448: action_text = " 聆聽中..." if is_user_listening else fit_text_to_width(current_mic_action_str, 12)

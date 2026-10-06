@@ -1,5 +1,18 @@
 {
-  "timestamp": 1791001135.635161,
-  "gemini_available": 7,
-  "locks": {}
+  "timestamp": 1791307911.0588057,
+  "gemini_available": 192,
+  "locks": {
+    "G5_3.5-flash-lite": 48488,
+    "G1_3.5-flash-lite": 48488,
+    "G4_3.5-flash-lite": 48488,
+    "G2_3.5-flash-lite": 48488,
+    "G3_3.5-flash-lite": 48488,
+    "G0_3.5-flash-lite": 48488,
+    "G5_3.1-flash-lite": 48488,
+    "G1_3.1-flash-lite": 48488,
+    "G4_3.1-flash-lite": 48488,
+    "G2_3.1-flash-lite": 48488,
+    "G3_3.1-flash-lite": 48488,
+    "G0_3.1-flash-lite": 48488
+  }
 }

@@ -12,6 +12,9 @@ import os
 import threading
 
 _lock = threading.Lock()
+import logging
+logging.getLogger("faster_whisper").setLevel(logging.WARNING)
+
 _fw_model = None
 _fw_model_name = ""
 

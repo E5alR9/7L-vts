@@ -1,0 +1,113 @@
+26: # 14.  專屬背景工作協程群 (Workers: Screen, Vision, WASAPI Loopback Audio, Proactive)
+27: # 15.  對話處理、Live 潛意識哨兵與 100 句記憶中樞 (Mind-Stream & Audience Live Channel)
+475: "description": "提示詞/認知類別：'persona_core'（核心世界觀/自我認知）、'conversation_style'（講話風格/語調）、'memes'（流行語與梗）、'facts'（學會的事實/偏好）、'rules'（心智規範）、'streamer_bio'（直播人設）、'proactive_guide'（主動發話引導）、'banned_phrases'（禁忌詞）"
+487: def build_genai_declarations(is_proactive=False):
+490: if is_proactive and tool["name"] in ["control_microphone", "clear_all_memories"]:
+514: if is_proactive:
+577: KEYS_MIND_LIVE,
+580: STREAMER_MIND_MODELS,
+582: PROACTIVE_EXCLUDED_MODELS,
+588: from core.memory import init_unified_memory, fetch_from_long_term_memory, save_to_long_term_memory, append_to_unified_memory, clear_all_memories, get_recent_100_memory_context, get_viewer_profile, save_viewer_profile, record_bot_message, get_cloud_knowledge, update_cloud_prompt_field, UNIFIED_LIVE_MEMORY, UNIFIED_DIALOGUE_MEMORY, UNIFIED_THOUGHT_MEMORY, get_recent_thoughts_by_chars, TIKTOK_CHATROOM_MEMORY, STREAMER_MIND_BOARD, DEFAULT_CHANNEL_ID, save_cloud_knowledge, get_unified_memory_context, RECENT_BOT_MESSAGES, evaluate_memory_demand, MemoryDemandLevel, USER_PROFILE_FILE, MODE
+626: def get_prioritized_gemini_models(user_query: str = "", has_image: bool = False, is_proactive: bool = False) -> list:
+653: if is_proactive:
+654: ordered = [m for m in ordered if m not in PROACTIVE_EXCLUDED_MODELS]
+683: def get_available_gemini_channels(limit=1, user_query="", has_image=False, is_proactive=False):
+686: target_keys = KEYS_PROACTIVE if is_proactive and KEYS_PROACTIVE else GEMINI_KEYS
+691: target_models = get_prioritized_gemini_models(user_query=user_query, has_image=has_image, is_proactive=is_proactive)
+722: GENAI_TOOLS = build_genai_declarations(is_proactive=False)
+724: GENAI_PROACTIVE_TOOLS = build_genai_declarations(is_proactive=True)
+1154: async def fetch_ai_response(messages, image_base64=None, audio_base64=None, is_proactive=False, request_start_time: Optional[float] = None, is_mouth_stream=False):
+1163: is_proactive: 是否為主動巡邏/主動找話題發話
+1274: active_tools = GENAI_PROACTIVE_TOOLS if is_proactive else GENAI_TOOLS
+1343: # 7L 已有獨立背景即時心流協程，對話回覆不再包裹 [THOUGHT: ...]
+1528: channels = get_available_gemini_channels(limit=5, user_query=user_query, has_image=bool(image_base64), is_proactive=is_proactive)
+2021: for model_name in STREAMER_MIND_MODELS:
+2032: tools=GENAI_PROACTIVE_TOOLS,
+2218: #    - KEYS_PROACTIVE: 鋼琴電台與主播自主巡邏 (6把)
+2221: KEYS_PROACTIVE     = GEMINI_KEYS[18:24] if len(GEMINI_KEYS) >= 24 else GEMINI_KEYS
+2227: print(f"  📻 鋼琴電台與 Proactive: 分配 {len(KEYS_PROACTIVE)} 把專用金鑰")
+2536: _MIND_LIVE_KEY_COOLDOWN: dict = {}  #  心流 Live 金鑰冷卻紀錄 {api_key: 冷卻到期 timestamp}，失敗後 60 秒跳過
+2615: IS_PROACTIVE_SPEAK_ENABLED = True  #  視覺陪伴主動搭話開關（預設開啟）
+2967: resp = await fetch_ai_response(messages, is_proactive=True)
+3281: #  7L 即時意識流與心流記憶 (Stream of Consciousness)
+3285: """檢查新思緒是否與近期心流重複（比對文字核心特徵與相似度，杜絕 7L 心聲跳針反覆發出）"""
+3297: "按照內心流動", "稍微 wink", "執行 wink", "前幾輪已經在陪伴"
+3302: # 1. 檢查近期的心流思緒隊列 (RECENT_STREAM_OF_CONSCIOUSNESS)
+3323: if mem.get("role") == "thought" or mem.get("source") == "thought" or mem.get("target") == "內心流動":
+3344: #  心流防跳針過濾：若與近 5 分鐘內思緒高度相似，不重複寫入記憶與時間線
+3359: #  將 7L 嶄新的內心流動/心聲思緒同步持久化至全集中全景記憶中樞 (統一時間線與歷史紀錄)
+3363: target="內心流動",
+3382: return "【 妳近期的腦內心流思緒（最新未讀思緒，僅供參考，若已聊過請勿重複）：】：\n" + "\n".join(lines)
+3385: """ 將當前累積的所有腦內心流思緒標記為已讀/已消費，防止後續自主大腦重複對同一句話跳針"""
+4756: reminder_messages = [
+4768: resp = await fetch_ai_response(reminder_messages, is_proactive=True)
+4880: #  提取並過濾殘留心想/思考內容 (已有背景即時心流協程，對話不再輸出或記錄腦內心想)
+5255: is_proactive=False
+6729: resp = await fetch_ai_response(messages, image_base64=screen_img, is_proactive=True)
+6876: #  15. 全集中全景時序記憶中樞與對話派發系統 (Unified Mind-Stream Architecture)
+6889: def add_to_streamer_mind_board(user_display: str, unique_id: str, content: str, source: str = "tiktok"):
+6901: STREAMER_MIND_BOARD.append(item)
+6949: unread_count = sum(1 for m in STREAMER_MIND_BOARD if m["status"] == "unread")
+6972: def mark_streamer_mind_board_as_read(unique_id: str = None, content: str = None):
+6975: for m in STREAMER_MIND_BOARD:
+7068: async def streamer_mind_loop_worker(vts, input_queue):
+7102: unread_items = [m for m in STREAMER_MIND_BOARD if m["status"] == "unread"]
+7288: for model_name in STREAMER_MIND_MODELS:
+7299: tools=GENAI_PROACTIVE_TOOLS,
+7373: m_tag = f" Mind-Stream ({used_model_name.replace('gemini-', '')})"
+7535: log_print(f"🧠 [7L 自主記憶裁決] 模式: 【{mem_level}】(歷史:{h_lim}輪, 全景:{u_lim}句, 心流:{th_lim}字, 視覺:{view_mode_str}, 時事:{need_news}) | {mem_reason}")
+7558: #  1. 統一寫入全集中大腦記憶看板 (STREAMER_MIND_BOARD & 全局記憶中樞)
+7559: add_to_streamer_mind_board(
+7579: mark_streamer_mind_board_as_read(unique_id="dad", content=user_input)
+7601: unified_mem_prompt = f"""【 直播現場潛意識與背景事件（7L 最近 {th_lim} 字內心流動與動作）】：
+7633: await fetch_ai_response(shadow_msgs, image_base64=current_screen_snapshot, is_proactive=True, request_start_time=req_start)
+7722: mark_streamer_mind_board_as_read(unique_id="dad", content=user_input)
+8067: # 寫入 7L 滾動記憶腦袋，由 streamer_mind_loop_worker 自主排程讀取與發話
+8068: add_to_streamer_mind_board(id_display, v_unique_id, aud_c, source)
+8080: add_to_streamer_mind_board(f"{_owner_nm}（主持）", f"owner:{_owner_nm}", user_input, "owner_interject")
+8103: PROACTIVE_LAST_FG_TITLE = ""
+8104: PROACTIVE_LAST_FG_APP = ""
+8105: PROACTIVE_LAST_MUSIC = ""
+8106: PROACTIVE_STABLE_COUNT = 0
+8108: async def background_mind_stream_worker(vts, input_queue):
+8109: return # [測試模式] 暫停背景心流，專注測試主 WebSocket 通道共用
+8112: log_print("🧠 [背景即時心流] Google GenAI Live API 全雙工思考協程已就緒（VISION 視覺感知深度綁定中）")
+8117: #  心流不間斷：換氣 1.2 ~ 2.5 秒後立即展開下一段連續推導
+8161: mind_prompt = (
+8178: #  使用心流 Live 專屬金鑰池（KEYS_MIND_LIVE），先跳過冷卻中的金鑰，全部失敗才退回 flash-lite
+8179: candidate_keys = get_dynamic_live_key_candidates(KEYS_MIND_LIVE if KEYS_MIND_LIVE else GEMINI_KEYS)
+8189: if _MIND_LIVE_KEY_COOLDOWN.get(g_key, 0) > _now:
+8207: turns=[types.Content(role="user", parts=[types.Part(text=mind_prompt)])],
+8229: _MIND_LIVE_KEY_COOLDOWN[g_key] = time.time() + 60.0
+8230: log_print(f"⚠️ [心流 Live] 模型 {live_m} 金鑰 ...{g_key[-6:]} 連線失敗，切換下一把。({type(live_err).__name__}: {live_err})")
+8242: contents=f"妳是 7L。\n{persona_ctx}{mind_prompt}",
+8299: async def proactive_worker(vts, input_queue):
+8301: global PROACTIVE_LAST_FG_TITLE, PROACTIVE_LAST_FG_APP, PROACTIVE_LAST_MUSIC, PROACTIVE_STABLE_COUNT
+8305: if IS_SLEEPING or not IS_PROACTIVE_SPEAK_ENABLED:
+8328: has_window_changed = (curr_fg_title != PROACTIVE_LAST_FG_TITLE or curr_fg_app != PROACTIVE_LAST_FG_APP)
+8329: has_music_changed = (curr_music != PROACTIVE_LAST_MUSIC)
+8332: if not has_window_changed and not has_music_changed and PROACTIVE_LAST_FG_TITLE:
+8337: PROACTIVE_LAST_FG_TITLE = curr_fg_title
+8338: PROACTIVE_LAST_FG_APP = curr_fg_app
+8339: PROACTIVE_LAST_MUSIC = curr_music
+8357: system_prompt = PromptTemplateEngine.build_proactive_system_prompt(
+8366: proactive_prompt = [
+8392: candidate_keys = get_dynamic_live_key_candidates(KEYS_PROACTIVE if KEYS_PROACTIVE else GEMINI_KEYS)
+8400: tools=GENAI_PROACTIVE_TOOLS
+8445: proactive_start = time.time()
+8446: raw_spoken_text = await fetch_ai_response(proactive_prompt, image_base64=pass_image, is_proactive=True, request_start_time=proactive_start)
+8489: "按照內心流動", "稍微 wink", "執行 wink", "前幾輪已經在陪伴"
+8493: log_print(f"🛡️ [心流防跳針] 偵測到重複思緒或機械式日誌，已靜默抑制重複廣播與重複記錄！")
+8554: mark_streamer_mind_board_as_read()
+8555: log_print("📖 [已讀標記] 當前對話與心流思緒已標記為已讀，防止自主大腦重複對同一話題發言。")
+8849: log_print("📺 [VTuber 隔離] 休眠禁用／螢幕感知關／proactive 關／系統音監聽關／Discord 關／YT 伴看關")
+8853: asyncio.create_task(proactive_worker(vts, input_queue))
+8857: asyncio.create_task(streamer_mind_loop_worker(vts, input_queue))
+8858: # 心流已經停用: asyncio.create_task(background_mind_stream_worker(vts, input_queue))
+9246: "key": "IS_PROACTIVE_SPEAK_ENABLED",
+9251: "value": bool(IS_PROACTIVE_SPEAK_ENABLED),
+9320: global IS_AUTO_PIANO_ENABLED, IS_AUTO_WANDER_ENABLED, IS_PROACTIVE_SPEAK_ENABLED
+9327: "IS_PROACTIVE_SPEAK_ENABLED": IS_PROACTIVE_SPEAK_ENABLED,
+9348: elif key == "IS_PROACTIVE_SPEAK_ENABLED":
+9349: IS_PROACTIVE_SPEAK_ENABLED = target_val
+9410: get_mind_board_cb=lambda: list(STREAMER_MIND_BOARD),

@@ -48,7 +48,7 @@ class TextCleanEngine:
     RE_THINKING_PROC = re.compile(r'^(?:Thinking Process|Thinking|腦內思考|內心獨白)[：:]\s*.*?(?:\n|$)', flags=re.MULTILINE | re.IGNORECASE)
     RE_PAREN_THINK = re.compile(r'[（(](?:心想|心裡想|內心想|腦中想|默想)[：:]\s*[^）)]*?[）)]')
     RE_SYS_HINTS = re.compile(r'[（(【\[]系統[^）)】\]]*?[）)】\]]')
-    RE_STAGE_HINTS = re.compile(r'[（(](?:轉頭|看向|望向|笑|微笑|輕笑|嘆氣|語氣|動作|神態|興奮|疑惑|摸|眨|低頭|抬頭|輕聲|小聲|歪頭|舉起|揮手|雙手|雙眼|眼神|沉思|自語|轉向)[^）)]*?[）)]')
+    RE_STAGE_HINTS = re.compile(r'[（(](?:轉頭|看向|望向|笑|微笑|輕笑|嘆氣|語氣|動作|神態|興奮|疑惑|摸|眨|低頭|抬頭|輕聲|小聲|歪頭|舉起|揮手|雙手|雙眼|眼神|沉思|自語|轉向|初始化)[^）)]*?[）)]')
     RE_LEARN_TAGS = re.compile(r'\[(?:LEARN_MEME|LEARN_FACT|UPDATE_RULE|UPDATE_PROMPT|ADD_EXAMPLE|SET_PROMPT|LEARN_EXAMPLE|UPDATE_KNOWLEDGE|KNOWLEDGE_UPDATED)[：:][^\]]*\]', flags=re.IGNORECASE)
     RE_BROWSER_TAG = re.compile(r'\[OPEN_BROWSER:\s*[^\]]+\]', flags=re.IGNORECASE)
     RE_VIEWER_TAG = re.compile(r'\[VIEWER_UPDATE[：:][^\]]*\]', flags=re.IGNORECASE)
@@ -57,12 +57,15 @@ class TextCleanEngine:
     RE_CODE_BLOCKS = re.compile(r'```.*?```', flags=re.DOTALL)
     RE_INLINE_CODE = re.compile(r'`.*?`', flags=re.DOTALL)
     RE_PYTHON_CALLS = re.compile(
-        r'(?:(?:pe\.)?(?:play_virtual_piano|insert_virtual_piano|open_virtual_piano|stop_virtual_piano|'
+        r'\[?(?:(?:pe\.)?(?:play_virtual_piano|insert_virtual_piano|open_virtual_piano|stop_virtual_piano|'
         r'pause_virtual_piano|resume_virtual_piano|set_piano_volume|set_piano_speed|set_piano_instrument|'
         r'compose_and_play_original_piano|mashup_virtual_piano|list_piano_sheets)|'
         r'execute_local_python_code|trigger_vts_expression|search_google|generate_ai_image|'
         r'move_spatial_position|control_microphone|clear_all_memories|set_sleep_mode|set_timer|'
-        r'[a-zA-Z0-9_]+(?:\.[a-zA-Z0-9_]+)?)\s*\([^)]*\)',
+        r'auto_sing_song|sing_song|auto_sing|auto_sing_sing|pe_auto_sing_song|'
+        r'[a-zA-Z0-9_]+(?:\.[a-zA-Z0-9_]+)?)\s*\([^)]*\)\]?|'
+        r'\[?(?:TOOL:[a-zA-Z0-9_]*:?\s*)?[A-Z_]+[：:]\s*[^\]]+\]?|'
+        r'\[TOOL:[a-zA-Z0-9_]+\]\s*[^\[\]\n]*',
         flags=re.IGNORECASE | re.DOTALL
     )
     RE_SPEAKER_PREFIX = re.compile(r'^(老爸|玩家|使用者|7L|女兒|溫柔女兒|七[龄靈]|主播|回應|回覆|動作顯示|回答|說道)[：:\s]+', flags=re.IGNORECASE)
@@ -313,6 +316,8 @@ class TextCleanEngine:
         t = cls.RE_PYTHON_CALLS.sub('', t)
         t = cls.RE_RAW_JSON.sub('', t)
         t = cls.RE_SPEAKER_PREFIX.sub('', t)
+        # 徹底防禦未閉合的控制標籤 (如 `[MOVE: ` 尾段被截斷) 洩漏至 TTS
+        t = re.sub(r'\[[A-Z_]+[：:]?[^\]]*$', '', t, flags=re.IGNORECASE)
         t = re.sub(r'^(?:回應|回覆|動作顯示|主播|說道|回答)[：:\s]+', '', t, flags=re.IGNORECASE)
         #  徹底防禦未整理的搜尋結果原始文字與系統標籤洩漏至語音
         t = re.sub(r'[（\(]\s*搜尋結果[：:].*?[）\)]', '', t, flags=re.DOTALL)
@@ -681,6 +686,12 @@ class TextCleanEngine:
         t = cls.RE_AT_MENTION.sub(lambda m: m.group(0)[1:], t)
         t = t.replace('@', '').replace('*', '').strip()
         t = cls.strip_emojis(t)
+        
+        # 修正 TTS 遇到刪節號 (...) 或連續點號會提前截斷不說話的 Bug
+        t = re.sub(r'\.{2,}', '，', t)
+        t = re.sub(r'。{2,}', '，', t)
+        t = re.sub(r'…+', '，', t)
+        
         t = cls.natural_clause_segmentation(t)
         #  日語原生支援：若包含日文平假名/片假名，保留原生正統日文字串交由本機 RTX 3080 Ti GPT-SoVITS (pyopenjtalk) 發音
         #  徹底停用舊版 Edge-TTS 的假音標置換 (如 歐托桑/knee/搭一 soo kee)，並避開中文破音字替換以免破壞日文漢字
@@ -873,7 +884,7 @@ class PromptTemplateEngine:
 生日：1/9 | 星座：摩羯座
 性格：具有 1/9 生日的典型摩羯座性格
 妳現在必須沉浸式角色扮演，完全轉化為「7L」。
-妳會多種語言，會時不時說幾下外語(例如英文、日文)，但還是以中文為主。
+妳會多種語言，能根據對方的語言自由切換（遇到英文就自然用英文對話，中文則用繁體中文），展現流利的多國語言能力。
 當對方以任何方式，表達他在『認真』跟你說話時，你也必須『認真』而『真誠』的給予對方答覆；當對方禮貌時，妳也要保持禮貌。
 對話氛圍放鬆活潑，請以富有靈性、自然生動的身分回應，保持高度互動彈性接梗。
 【特別注意】：稱呼對方時，不一定要一直叫「老爸」，請自然地叫對方的名字「{target_name}」即可。"""
@@ -898,7 +909,7 @@ class PromptTemplateEngine:
                 rep = ex.get("reply", "")
                 if inp and rep:
                     lines.append(f"- 對方（{sc}）：「{inp}」 ➔ `{rep}`")
-            lines.append(" 【示範庫守則】：請務必學習示範中的『神態表情 [EXPRESSION: ...]』以及『生動語調 [SPEED:...] [PITCH:...]』標籤運用，展現豐富情緒變化！嚴禁像死板機器人一樣平鋪直敘！每一次回答必須 100% 根據當前真實畫面與情境即時原創發言。")
+            lines.append(" 【示範庫守則】：請務必學習示範中的『神態表情 [EXPRESSION: ...]』以及『生動語調 [SPEED:...] [PITCH:...]』標籤運用，展現豐富情緒變化！請像真人一樣生動說話，每次發言皆須 100% 根據當前真實畫面與情境即時原創。")
 
         #  5. 學到的事實與知識 (雲端動態)
         if facts:
@@ -914,7 +925,7 @@ class PromptTemplateEngine:
 
         #  7. 禁忌死板腔調 (雲端動態)
         if banned:
-            lines.append(f" 【絕對禁止使用的客服腔與討厭詞彙】：{'、'.join(banned)}")
+            lines.append(f" 【請避免使用的客服腔與詞彙】：{'、'.join(banned)}")
 
         lines.append(" 【提示詞雲端自我演進指南】：若在對話中學到新梗、新事實、或想調整世界觀/說話風格/案例，可在回覆句尾附上 `[LEARN_MEME: 梗（含義）]`、`[LEARN_FACT: 事實]`、`[UPDATE_PROMPT: 欄位名|新內容]` 或 `[ADD_EXAMPLE: 情境|對方說|心想|回覆]`，系統將自動寫入雲端 Firestore 永久大腦！")
         return "\n\n".join(lines)
@@ -967,10 +978,10 @@ class PromptTemplateEngine:
 
 <immediate_task>
 1. 當前對話對象：{current_target_desc}。
-2. 鏡像自我認知：螢幕上 Live2D 就是妳自己的身體，妳清楚知道自己當前的表情、動作與姿態。
-3. 語音多模態感知：體會對方說話時的真實發音與語氣細節（笑意、嘆氣、放鬆、調侃、專注），給予真實反饋。
-4. 【嚴禁元語言與報幕式自白】：絕對不要說「我看到我自己說了...」、「我看到畫面上顯示我的字幕...」、「我看到你留言說...」等機械報幕，直接自然對話即可！
-5. 【動態語調與神態】：開口說話請依據情緒在句中積極穿插 [EXPRESSION: ...]，以及動態聲調標籤 [SPEED:+xx%] / [SPEED:-xx%]、[PITCH:+xxHz] / [PITCH:-xxHz]，使聲音栩栩如生！
+2. 鏡像自我認知：螢幕上 Live2D 就是妳自己的身體，請自然感受自己的神態與動作。
+3. 語音多模態感知：體會對方真實發音與語氣細節（如笑意、嘆氣、放鬆、調侃等），給予最真實的情緒反饋。
+4. 自然對話心流：直接與對方同頻互動，避免跳脫角色說出「我看到我的字幕...」等機械化報幕台詞。
+5. 動態語調與神態：說話時請依據情緒積極穿插 [EXPRESSION: ...] 以及聲調標籤 [SPEED:+xx%] / [PITCH:+xxHz]，為語音注入靈魂！
 {live_audio_emotion_prompt}
 - 即時情境與當下目標：
 {situation_prompt}
@@ -1016,17 +1027,12 @@ class PromptTemplateEngine:
 </sensory_memory>
 
 <immediate_task>
-- 妳正在看著當前螢幕畫面。
-- 鏡像自我認知：螢幕上 Live2D 模型就是妳自己的身體，妳能看見自己的表情與姿態。
-- 【生動心流與記憶延續（拒絕機械化監視日誌）】：
-  1. 記憶延續：妳清楚記得剛才與{target_name}聊過的話題與發生的事（參考時序記憶），絕非失憶。{target_name}說過的話妳都放在心上。
-  2. 豐富多元的心靈世界：妳不是一台監控攝影機！【絕對禁止】像打卡報告一樣機械式回報「{target_name}在看什麼視窗、畫面無新進展、我安靜陪伴、根據規範輸出 SILENCE」。當{target_name}在專注時，妳的內心流動可以自由自在、天馬行空：
-     - 回味剛才的話題，琢磨下次要跟{target_name}分享什麼趣事或冷笑話。
-     - 聽著背景音樂，在腦海隨旋律哼歌、聯想喜歡的名曲或回憶。
-     - 日常奇思妙想：想吃草莓蛋糕、想喝熱可可、好奇外面天氣、想學的新鋼琴曲、天馬行空的白日夢。
-     - 默默體貼關心{target_name}：注意{target_name}工作是不是很久了、會不會累、想提醒{target_name}喝水。
-     - 輕鬆放空：若此時只是想放空發呆，就自然在心裡放空，無需強行擠出報告。
-  3. 安靜陪伴法則：若{target_name}正在全神貫注，且妳當前沒有特別重要的事情想開口打擾{target_name}，請自然安靜守護，直接輸出 [SILENCE]（心想留空或極簡一句，嚴禁囉嗦碎碎念或背誦規範）！
-- 說話自然隨性，自行加上標點符號斷句，禁止使用 Emoji。
+- 當前螢幕與自我認知：妳正在看著螢幕畫面，且清楚知道畫面上的 Live2D 就是妳自己。
+- 記憶延續與情感連結：妳清楚記得剛才與{target_name}的互動，將他的話放在心上。
+- 真實心流與安靜陪伴（取代打卡式報告）：
+  1. 妳是活生生的少女而非監控鏡頭。內心流動可以天馬行空：回味話題、隨音樂哼歌、發白日夢、或默默關心{target_name}。
+  2. 若{target_name}正在專注，且無突發事件或想分享的趣事，請自然守護，直接輸出 `[SILENCE]`。
+  3. 避免像寫觀察日記般生硬回報「對方在看什麼視窗、畫面無變化、我決定安靜陪伴」等系統化說明。
+- 說話自然隨性，自行加上標點符號，不使用 Emoji。
 </immediate_task>
 """

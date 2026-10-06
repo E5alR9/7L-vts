@@ -95,13 +95,19 @@ class RealtimeTaskManager:
         self.current_activity = "7L 正常待命中 (全新啟動就緒)"
 
     def _trigger_sync(self):
-        """節流非同步觸發雲端與本地同步 (每秒最多同步一次，避免頻繁打擊 Firebase 額度)"""
-        now = time.time()
+        """節流非同步觸發雲端與本地同步 (每 10 秒最多同步一次，避免打擊 Firebase 額度)"""
         if self._sync_task and not self._sync_task.done():
             return
+
+        async def delayed_sync():
+            elapsed = time.time() - self._last_sync_time
+            if elapsed < 10.0:
+                await asyncio.sleep(10.0 - elapsed)
+            await self.sync_to_cloud()
+
         try:
             loop = asyncio.get_running_loop()
-            self._sync_task = loop.create_task(self.sync_to_cloud())
+            self._sync_task = loop.create_task(delayed_sync())
         except RuntimeError:
             pass
 
@@ -282,7 +288,7 @@ class RealtimeTaskManager:
             t_title = p.get('title', '名曲')
             tracks = p.get('tracks', [])
             track_str = f"（多軌合奏：{'、'.join(tracks)}）" if len(tracks) > 1 else ""
-            piano_info = f"🎵 真正正在演奏《{t_title}》{track_str} | 進度: {p.get('current_time_str', '00:00')}/{p.get('total_duration_str', '00:00')} ({p.get('progress_percent', 0):.1f}%) | 音色: {p.get('instrument')} | 倍速: {p.get('speed', 1.0)}x | 音量: {p.get('volume', 100)}%\n  🛑【防歷史過期鐵律】：老爸或觀眾隨時可能在電腦鋼琴視窗中手動選曲或切歌！當前曲目【100% 絕對以此處硬體即時顯示的《{t_title}》為唯一真理】，嚴禁參考舊歷史對話誤認為還在彈上一首！"
+            piano_info = f"🎵 真正正在演奏《{t_title}》{track_str} | 進度: {p.get('current_time_str', '00:00')}/{p.get('total_duration_str', '00:00')} ({p.get('progress_percent', 0):.1f}%) | 音色: {p.get('instrument')} | 倍速: {p.get('speed', 1.0)}x | 音量: {p.get('volume', 100)}%\n  🛑【防歷史過期鐵律】：老爸或觀眾隨時可能在電腦鋼琴視窗中手動選曲或切歌！當前曲目【100% 絕對以此處硬體即時顯示的《{t_title}》為唯一真理】，請以當前真實播放曲目為準！"
         elif self.system_status.get("is_piano_active", False):
             piano_info = "⏸️ 鋼琴已在桌面上就位待命 (目前暫停或已彈完，背景無鋼琴聲)"
 
@@ -297,7 +303,7 @@ class RealtimeTaskManager:
         if not dad_last:
             dad_info = "無"
         elif dad_is_read:
-            dad_info = f"[已讀/剛才已回覆完畢] 前次話語：「{dad_last}」（⚠️ 剛才已對此話進行過完整互動，嚴禁反覆抓著同一句重複發話或調侃！請關注當前螢幕畫面最新進展，無事請安靜陪伴）"
+            dad_info = f"[已讀/剛才已回覆完畢] 前次話語：「{dad_last}」（⚠️ 剛才已對此話進行過完整互動，請勿反覆對同一句話發話或調侃！請關注當前螢幕畫面最新進展，無事請安靜陪伴）"
         else:
             dad_info = f"「{dad_last}」 (未讀/待處理，焦點: {self.dad_context.get('current_topic', '日常')})"
 

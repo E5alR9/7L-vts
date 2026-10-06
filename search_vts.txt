@@ -1,0 +1,18 @@
+131: "name": "trigger_vts_expression",
+859: if fn_name == "trigger_vts_expression":
+2147: from services.vts_client import RobustVTSClient, move_vts_spatial, apply_spatial_position, set_vts_expression, trigger_vts_expression
+2686: await set_vts_expression(vc.GLOBAL_VTS, "_RESET_")
+2695: await set_vts_expression(vc.GLOBAL_VTS, "_RESET_")
+3831: await set_vts_expression(vts, action_val)
+4824: asyncio.create_task(set_vts_expression(vts, exp_tag))
+4987: (r'trigger_vts_expression\(\s*(?:expression_name\s*=\s*)?[\'"]([^\'"]+)[\'"]\s*\)', lambda m: set_vts_expression(vts, m.group(1))),
+6705: await set_vts_expression(vts, "_RESET_")
+7755: await set_vts_expression(target_vts, "臉紅")
+7839: await set_vts_expression(target_vts, "臉紅")
+7854: await set_vts_expression(target_vts, "星星眼")
+7869: await set_vts_expression(target_vts, "愛心")
+8797: await set_vts_expression(vts, "_RESET_")
+9045: "vts_expression": getattr(vts, "current_expression", "自然") if vts else "未連線",
+9064: await set_vts_expression(vts, expr)
+9160: elif tool_name == "trigger_vts_expression":
+9163: await set_vts_expression(vts, expr)

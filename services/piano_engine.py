@@ -647,7 +647,7 @@ def get_piano_realtime_prompt() -> str:
 
         if IS_PIANO_AUTO_RADIO_MODE:
             info_lines.append(f"- 電台模式：📻 已開啟無限隨機接曲模式")
-        info_lines.append(f"- 互動指引：若對象點新歌、要求換歌或點播曲目，【嚴禁調用 play_virtual_piano 切歌或插歌】！請用自然口語告知對方：『我現在正在彈《{title}》呢～等我這首彈完再點歌喔！』。若對象稱讚或詢問正在彈什麼，依真實曲名自然回應！")
+        info_lines.append(f"- 互動指引：若對象點新歌、要求換歌或點播曲目，【請勿調用 play_virtual_piano 切歌或插歌】！請用自然口語告知對方：『我現在正在彈《{title}》呢～等我這首彈完再點歌喔！』。若對象稱讚或詢問正在彈什麼，依真實曲名自然回應！")
         return "\n".join(info_lines)
     elif win_alive or is_piano_active:
         vol = GLOBAL_PIANO_REALTIME_STATE.get("volume", GLOBAL_PIANO_VOLUME)
@@ -660,7 +660,7 @@ def get_piano_realtime_prompt() -> str:
         ]
         return "\n".join(info_lines)
     else:
-        return "【🎹 鋼琴即時即況情報】：\n- 演奏狀態：⏹️ 鋼琴已關閉/未演奏，背景【完全沒有任何鋼琴聲音】。歷史記錄若有提到彈琴那是之前的事，絕對不要自己幻想或宣稱現在背景在彈鋼琴！"
+        return "【🎹 鋼琴即時即況情報】：\n- 演奏狀態：⏹️ 鋼琴已關閉/未演奏，背景【完全沒有任何鋼琴聲音】。歷史記錄若有提到彈琴那是之前的事，請根據當前狀態回答。"
 
 def send_piano_ipc_command(cmd_dict: dict) -> bool:
     """透過 UDP (Port 39282) 向已開啟的 88 鍵鋼琴視窗發送控制指令 (換歌/調音量/調倍速/停止/關閉)"""
@@ -825,8 +825,8 @@ async def piano_liveness_watchdog_worker():
 
             # 2. 若鋼琴當前為活躍狀態或視窗為開啟狀態
             if is_piano_active or GLOBAL_PIANO_REALTIME_STATE.get("is_window_open", False):
-                # 啟動與就位寬限期：發起演奏 10 秒內，7L 正在就位、念開場白或視窗初始化中，絕不提前誤殺！
-                if now - LAST_PIANO_OPEN_TIME < 10.0:
+                # 啟動與就位寬限期：發起演奏 30 秒內，7L 正在就位、念開場白或視窗初始化中，絕不提前誤殺！
+                if now - LAST_PIANO_OPEN_TIME < 30.0:
                     continue
 
                 # 心跳逾時檢查：超過 2.5 秒未收到心跳包
@@ -1543,8 +1543,8 @@ async def resolve_piano_intent_by_ai(
    - 是否為隨機/隨便/電台意圖。
 
 5. 🎹 本地與演奏家版本比對：
-   - ⚠️【核心鐵律：嚴禁弱相關強行湊數】：matched_files 僅能填入「歌曲本體完全吻合」之本地檔案！
-   - 若使用者點播的歌曲本地曲庫根本沒有（例如點《未完成婚姻論》，但本地只有《前前前世(未完成)》，兩者核心曲名完全不同，括號內的『未完成』只是編曲狀態標籤），【絕對禁止強行填入 matched_files，必須填 [] 空陣列】！
+   - ⚠️【核心鐵律：精準匹配】：matched_files 僅能填入「歌曲本體完全吻合」之本地檔案！
+   - 若使用者點播的歌曲本地曲庫根本沒有（例如點《未完成婚姻論》，但本地只有《前前前世(未完成)》，兩者核心曲名完全不同，括號內的『未完成』只是編曲狀態標籤），【請直接填入 [] 空陣列，不要強行填入】！
    - 若使用者點的歌本地無收錄、或指定特定演奏家而本地無此版本，matched_files 務必留空 []，並在 search_online_query 填寫真實精確曲名（如 "未完成婚姻論"），引導系統自動走線上/YouTube 抓譜！
    - 只有當本地確實有同名或完全相符之樂曲時，才將最吻合的檔案放入 matched_files（若要求換版本，必須為另一個版本的檔名）。
 
@@ -1588,6 +1588,15 @@ async def resolve_piano_intent_by_ai(
                     if resp and resp.text:
                         data = json.loads(resp.text.strip())
                         data["_from_ai"] = True
+                        try:
+                            import opencc
+                            converter = opencc.OpenCC('s2twp')
+                            if data.get("song_title"):
+                                data["song_title"] = converter.convert(data["song_title"])
+                            if data.get("search_query"):
+                                data["search_query"] = converter.convert(data["search_query"])
+                        except Exception:
+                            pass
                         return data
                 except Exception:
                     continue
@@ -1749,7 +1758,7 @@ async def generate_dynamic_piano_chatter(song_title: str, target: str = "dad", r
         c_name = user_prof.get("custom_name", main_obj.DEFAULT_USER_TITLE)
         song_title = clean_song_title_for_speech(song_title)
         
-        # 🛑 觀眾頻道絕對嚴禁稱呼為「老爸」
+        # 🛑 觀眾頻道請勿稱呼為「老爸」
         if target == "audience" and requester_name in ["老爸", "老爸（主播）", ""]:
             requester_name = "大家"
         
@@ -1772,7 +1781,7 @@ async def generate_dynamic_piano_chatter(song_title: str, target: str = "dad", r
 妳現在正準備{mode_desc}。
 【自由意志決定】：
 妳可以自由決定要不要開口對【{audience_prompt}】隨興說一句話（例如發表對這首曲子的感受、即興搭話、或向對方致意），或者妳也可以選擇「安靜專注沉醉彈奏、不開口說話」。
-- 若妳想說話：請以妳自然、隨性真人的語氣，直接輸出妳要說的簡短一句話（10~25字以內，嚴禁任何死板套話，嚴禁 Emoji，注意妳說話的對象是{audience_prompt}）。
+- 若妳想說話：請以妳自然、隨性真人的語氣，直接輸出妳要說的簡短一句話（10~25字以內，避免死板套話，請使用純文字，注意妳說話的對象是{audience_prompt}）。
 - 若妳現在想安靜彈琴、不說話：請只輸出 `[SILENCE]`。
 直接輸出妳的決定："""
         
@@ -2359,7 +2368,9 @@ async def play_virtual_piano(song_name: str = "", custom_sheet: str = "", auto_r
     async def async_fetch_and_play_worker(song_q: str, sid: int, c_sheet: str):
         global current_piano_song_title, current_piano_midi_file, is_piano_active
         log_print(f"🌐 [智慧曲庫搜尋] 正在線上/YouTube 搜尋《{song_q}》...")
-        await move_vts_spatial(target_pos="鋼琴旁", duration=1.2)
+        
+        # 立即展現鋼琴與走位，讓等待過程有視覺回饋
+        await open_virtual_piano()
         
         dl_path = await asyncio.to_thread(pianist_midi_engine.fetch_and_download_pianist_match, song_q, MIDI_SHEETS_DIR)
         
@@ -2614,7 +2625,7 @@ async def mashup_virtual_piano(*songs, song_name1: str = "", song_name2: str = "
     return "[EXPRESSION: 星星眼]"
 
 async def insert_virtual_piano(song_name: str = "") -> str:
-    """🛑 不插歌保護：當前開啟【彈完再點歌】模式，禁止演奏中途插歌或切換。"""
+    """🛑 不插歌保護：當前開啟【彈完再點歌】模式，請勿於演奏中途插歌或切換。"""
     display_title = current_piano_song_title or "這首曲子"
     log_print(f"🛑 [鋼琴防插歌保護] 收到插歌請求，但目前已開啟【彈完再點歌】保護，維持專注演奏《{display_title}》！")
     return f"（系統提示：7L 目前正坐在鋼琴前專心彈奏《{display_title}》，請不要中途插歌或切換。請用口語自然告知對方：『我現在正在彈《{display_title}》呢，等我這首彈完再點歌喔！』）"

@@ -22,7 +22,7 @@ wink_side = "left"
 frown_timer = 0.0
 
 GLOBAL_VTS = None
-MY_CONTROLLED_EXPS = ["黑脸.exp3.json", "爱心.exp3.json", "星星眼.exp3.json", "红脸.exp3.json"]
+MY_CONTROLLED_EXPS = ["黑脸.exp3.json", "爱心.exp3.json", "星星眼.exp3.json", "红脸.exp3.json", "吐舌.exp3.json", "哭哭.exp3.json", "晕晕.exp3.json", "比心.exp3.json", "流汗.exp3.json", "生气.exp3.json", "着急.exp3.json", "花花.exp3.json", "问号.exp3.json", "黑化.exp3.json", "话筒.exp3.json", "打游戏.exp3.json", "双马尾.exp3.json", "右抬手.exp3.json", "左抬手.exp3.json"]
 CURRENT_ACTIVE_EXP = None
 EXPRESSION_HOLD_SECONDS = 3.5  #  說完話後表情持續保留的秒數（保持自然情緒餘韻）
 
@@ -49,6 +49,10 @@ VTS_EXPRESSION_MAP = {
     "崇拜": "星星眼.exp3.json",
     "期待": "星星眼.exp3.json",
     "亮晶晶": "星星眼.exp3.json",
+    "興奮": "星星眼.exp3.json",
+    "兴奋": "星星眼.exp3.json",
+    "激動": "星星眼.exp3.json",
+    "激动": "星星眼.exp3.json",
 
     # 臉紅 / 紅臉
     "臉紅": "红脸.exp3.json",      
@@ -63,34 +67,72 @@ VTS_EXPRESSION_MAP = {
     "尷尬": "红脸.exp3.json",
     "尴尬": "红脸.exp3.json",
 
-    # 委屈 / 哭哭 (改用紅臉，避免黑臉蓋住五官)
-    "難過": "红脸.exp3.json",
-    "难过": "红脸.exp3.json",
-    "哭哭": "红脸.exp3.json",
-    "哭": "红脸.exp3.json",
-    "委屈": "红脸.exp3.json",
-    "sad": "红脸.exp3.json",
+    # 委屈 / 哭哭 
+    "難過": "哭哭.exp3.json",
+    "难过": "哭哭.exp3.json",
+    "哭哭": "哭哭.exp3.json",
+    "哭": "哭哭.exp3.json",
+    "委屈": "哭哭.exp3.json",
+    "sad": "哭哭.exp3.json",
 
-    # 生氣 / 黑臉 / 翻白眼 / 傲慢 (僅限真正生氣黑化)
-    "生氣": "黑脸.exp3.json",
-    "生气": "黑脸.exp3.json",
+    # 生氣 / 黑臉 / 翻白眼 / 傲慢 (僅限真正生氣)
+    "生氣": "生气.exp3.json",
+    "生气": "生气.exp3.json",
     "黑臉": "黑脸.exp3.json",
     "黑脸": "黑脸.exp3.json",
-    "哼": "黑脸.exp3.json",
-    "傲慢": "黑脸.exp3.json",
-    "angry": "黑脸.exp3.json",
-    "不爽": "黑脸.exp3.json",
-    "憤怒": "黑脸.exp3.json",
-    "愤怒": "黑脸.exp3.json",
+    "哼": "生气.exp3.json",
+    "傲慢": "生气.exp3.json",
+    "angry": "生气.exp3.json",
+    "不爽": "生气.exp3.json",
+    "憤怒": "生气.exp3.json",
+    "愤怒": "生气.exp3.json",
     "陰沉": "黑脸.exp3.json",
     "阴沉": "黑脸.exp3.json",
-    "黑化": "黑脸.exp3.json",
+    "黑化": "黑化.exp3.json",
+    "病嬌": "黑化.exp3.json",
     "翻白眼": "黑脸.exp3.json",
     "白眼": "黑脸.exp3.json",
-    "無語": "黑脸.exp3.json",
-    "无语": "黑脸.exp3.json",
+    "無語": "流汗.exp3.json",
+    "无语": "流汗.exp3.json",
     "鄙視": "黑脸.exp3.json",
-    "鄙视": "黑脸.exp3.json"
+    "鄙视": "黑脸.exp3.json",
+
+    # 暈暈 / 流汗 / 著急
+    "暈暈": "晕晕.exp3.json",
+    "暈": "晕晕.exp3.json",
+    "流汗": "流汗.exp3.json",
+    "汗": "流汗.exp3.json",
+    "著急": "着急.exp3.json",
+    "着急": "着急.exp3.json",
+    "慌張": "着急.exp3.json",
+
+    # 可愛附加
+    "吐舌": "吐舌.exp3.json",
+    "略": "吐舌.exp3.json",
+    "比心": "比心.exp3.json",
+    "愛你": "比心.exp3.json",
+    "花花": "花花.exp3.json",
+    "花": "花花.exp3.json",
+    "問號": "问号.exp3.json",
+    "问号": "问号.exp3.json",
+    "疑惑": "问号.exp3.json",
+    "？": "问号.exp3.json",
+
+    # 道具與動作 (麥克風、遊戲機、抬手、雙馬尾)
+    "麥克風": "话筒.exp3.json",
+    "麦克风": "话筒.exp3.json",
+    "唱歌": "话筒.exp3.json",
+    "話筒": "话筒.exp3.json",
+    "打遊戲": "打游戏.exp3.json",
+    "打游戏": "打游戏.exp3.json",
+    "遊戲機": "打游戏.exp3.json",
+    "手把": "打游戏.exp3.json",
+    "雙馬尾": "双马尾.exp3.json",
+    "双马尾": "双马尾.exp3.json",
+    "抬手": "右抬手.exp3.json",
+    "右抬手": "右抬手.exp3.json",
+    "左抬手": "左抬手.exp3.json",
+    "打招呼": "右抬手.exp3.json"
 }
 
 CURRENT_SPATIAL_LOCATION = "center"
@@ -701,48 +743,63 @@ async def set_vts_expression(vts, exp_tag):
                     except Exception: pass
             return
 
-        if any(k in clean_tag for k in ["wink", "眨眼", "單眼", "眨單眼", "单眼", "眨单眼"]):
-            wink_timer = time.time() + 0.55
-            wink_side = random.choice(["left", "right"])
-            log_print(f"😉 [Live2D 動作] 觸發 Wink 單邊眨一下眼放電 ({wink_side})")
-            return
-        elif any(k in clean_tag for k in ["shock", "surprise", "驚訝", "惊讶", "震驚", "震惊", "驚", "惊", "瞳孔", "縮小", "缩小", "嚇到", "吓到", "恐懼", "害怕"]):
-            shock_timer = time.time() + 4.0
-            log_print("😱 [Live2D 動作] 觸發驚訝縮瞳瞪大雙眼與物理顫抖")
-            return
-        elif any(k in clean_tag for k in ["frown", "皺眉", "皱眉", "八字眉", "困擾", "困扰", "委屈"]):
-            frown_timer = time.time() + 4.0
-            log_print("🥺 [Live2D 動作] 觸發傲嬌八字皺眉/委屈表情")
+        import re
+        raw_tags = re.split(r'[+/, 、，&]+', clean_tag)
+        
+        target_filenames = set()
+        for t in raw_tags:
+            t = t.strip()
+            if not t: continue
+            
+            # 處理特殊動作 (Wink, Shock, Frown)
+            if any(k in t for k in ["wink", "眨眼", "單眼", "眨單眼", "单眼", "眨单眼"]):
+                wink_timer = time.time() + 0.55
+                wink_side = random.choice(["left", "right"])
+                log_print(f"😉 [Live2D 動作] 觸發 Wink 單邊眨一下眼放電 ({wink_side})")
+                continue
+            if any(k in t for k in ["shock", "surprise", "驚訝", "惊讶", "震驚", "震惊", "驚", "惊", "瞳孔", "縮小", "缩小", "嚇到", "吓到", "恐懼", "害怕"]):
+                shock_timer = time.time() + 4.0
+                log_print("😱 [Live2D 動作] 觸發驚訝縮瞳瞪大雙眼與物理顫抖")
+                continue
+            if any(k in t for k in ["frown", "皺眉", "皱眉", "八字眉", "困擾", "困扰", "委屈"]):
+                frown_timer = time.time() + 4.0
+                log_print("🥺 [Live2D 動作] 觸發傲嬌八字皺眉/委屈表情")
+                continue
+
+            found = VTS_EXPRESSION_MAP.get(t)
+            if not found:
+                for k, v in VTS_EXPRESSION_MAP.items():
+                    if k in t or t in k:
+                        found = v
+                        break
+            if found:
+                target_filenames.add(found)
+
+        if not target_filenames:
             return
 
-        target_filename = VTS_EXPRESSION_MAP.get(clean_tag)
-        if not target_filename:
-            for k, v in VTS_EXPRESSION_MAP.items():
-                if k in clean_tag or clean_tag in k:
-                    target_filename = v
-                    break
-        if not target_filename:
-            log_print(f"⚠️ [Live2D 表情] 未知表情標籤: 「{clean_tag}」，已忽略。")
-            return
-
-        CURRENT_ACTIVE_EXP = target_filename  
-        log_print(f"✨ [Live2D 表情] 成功啟動表情檔: 《{target_filename}》 (標籤: {clean_tag})")
+        CURRENT_ACTIVE_EXP = list(target_filenames)[0] if target_filenames else None
+        log_print(f"✨ [Live2D 表情] 成功啟動表情檔組合: 《{', '.join(target_filenames)}》 (標籤: {clean_tag})")
+        
         async with vts_lock:
+            # 關閉不需要的表情
             for exp_file in MY_CONTROLLED_EXPS:
-                if exp_file != target_filename:
+                if exp_file not in target_filenames:
                     try:
                         await asyncio.wait_for(vts.request({
                             "apiName": "VTubeStudioPublicAPI", "apiVersion": "1.0", "requestID": "DeactivateExp",
                             "messageType": "ExpressionActivationRequest", "data": {"expressionFile": exp_file, "active": False}
-                        }), timeout=0.3)
+                        }), timeout=0.2)
                     except Exception: pass
 
-            try:
-                await asyncio.wait_for(vts.request({
-                    "apiName": "VTubeStudioPublicAPI", "apiVersion": "1.0", "requestID": "ActivateExpression",
-                    "messageType": "ExpressionActivationRequest", "data": {"expressionFile": target_filename, "active": True}
-                }), timeout=0.5)
-            except Exception: pass
+            # 啟動需要的表情組合
+            for exp_file in target_filenames:
+                try:
+                    await asyncio.wait_for(vts.request({
+                        "apiName": "VTubeStudioPublicAPI", "apiVersion": "1.0", "requestID": "ActivateExpression",
+                        "messageType": "ExpressionActivationRequest", "data": {"expressionFile": exp_file, "active": True}
+                    }), timeout=0.2)
+                except Exception: pass
     except Exception as e:
         log_print(f"\n❌ [表情系統] 發生錯誤: {e}")
 

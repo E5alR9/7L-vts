@@ -46,7 +46,7 @@ def download_youtube_audio(song_query: str, output_wav: str) -> bool:
     - 優先抓取真實優秀女歌手的翻唱版本，從根本上徹底根除男聲變調的花栗鼠怪音與神經破音
     - 保留 100% 真人歌手的換氣、轉音、顫音與細膩情感
     """
-    print(f"🔍 [YT-DLP 智慧搜歌中] 正在向 YouTube 搜尋《{song_query}》頂級女聲/翻唱音軌...")
+    print(f"🔍 [YT-DLP 智慧搜歌中] 正在向 YouTube 搜尋《{song_query}》原版高音質音軌...")
     if os.path.exists(output_wav) and os.path.getsize(output_wav) > 100000:
         print(f"💾 [快取命中] 已存在高品質音訊: {output_wav}")
         return True
@@ -56,10 +56,10 @@ def download_youtube_audio(song_query: str, output_wav: str) -> bool:
     if clean_q in CURATED_SEARCH_MAP:
         candidates.append(f"ytsearch1:{CURATED_SEARCH_MAP[clean_q]}")
     candidates.extend([
-        f"ytsearch1:{song_query} female cover",
-        f"ytsearch1:{song_query} song",
         f"ytsearch1:{song_query}",
-        f"ytsearch1:{song_query} audio"
+        f"ytsearch1:{song_query} song",
+        f"ytsearch1:{song_query} audio",
+        f"ytsearch1:{song_query} female cover"
     ])
     
     for q_str in candidates:
@@ -81,7 +81,7 @@ def download_youtube_audio(song_query: str, output_wav: str) -> bool:
                 if f.startswith("temp_dl_") and f.endswith(".wav"):
                     src = os.path.join(CACHE_DIR, f)
                     shutil.move(src, output_wav)
-                    print(f"✅ [YT-DLP 下載成功] 成功獲取頂級自然女聲母帶: {output_wav}")
+                    print(f"✅ [YT-DLP 下載成功] 成功獲取高音質母帶: {output_wav}")
                     return True
         except Exception:
             continue
@@ -106,7 +106,8 @@ def separate_stems_gpu(input_wav: str, song_name: str) -> tuple[str, str]:
     demucs_cmd = [
         sys.executable, "-m", "demucs",
         "--two-stems", "vocals",
-        "-n", "htdemucs",
+        "-n", "htdemucs_ft",
+        "--shifts", "2",
         "-d", "cuda",
         "-o", CACHE_DIR,
         input_wav
@@ -114,9 +115,9 @@ def separate_stems_gpu(input_wav: str, song_name: str) -> tuple[str, str]:
     try:
         ret = subprocess.run(demucs_cmd, capture_output=True, text=True, timeout=180)
         if ret.returncode == 0:
-            # 尋找 htdemucs/{track_name}/vocals.wav & no_vocals.wav
+            # 尋找 htdemucs_ft/{track_name}/vocals.wav & no_vocals.wav
             base_name = os.path.splitext(os.path.basename(input_wav))[0]
-            demucs_dir = os.path.join(CACHE_DIR, "htdemucs", base_name)
+            demucs_dir = os.path.join(CACHE_DIR, "htdemucs_ft", base_name)
             d_voc = os.path.join(demucs_dir, "vocals.wav")
             d_inst = os.path.join(demucs_dir, "no_vocals.wav")
             if os.path.exists(d_voc) and os.path.exists(d_inst):
@@ -157,7 +158,10 @@ def pitch_shift_vocal_to_female(vocal_in: str, vocal_out: str, semitones: float 
         from services.neural_voice_converter import convert_vocal_to_xiaoyi
         mode_str = "自適應男女聲智慧辨識" if auto_pitch else f"固定 key={semitones:+0.1f}"
         print(f"👑 [7L 專屬曉伊原聲音色轉換] 啟用曉伊原生歌聲神經轉換 ({mode_str})...")
-        ok = convert_vocal_to_xiaoyi(vocal_in, vocal_out, key=semitones, model_name="xiaoyi", index_rate=0.88, auto_pitch=auto_pitch)
+        ok = convert_vocal_to_xiaoyi(vocal_in, vocal_out, key=semitones, 
+            model_pth=r"C:\Users\qiwai\RVC-WebUI\assets\weights\7L_v2.pth",
+            index_file=r"C:\Users\qiwai\RVC-WebUI\assets\indices\7L_v2_added_IVF256_Flat_nprobe_1_7L_v2_v2.index",
+            index_rate=0.88, auto_pitch=auto_pitch)
         if ok and os.path.exists(vocal_out) and os.path.getsize(vocal_out) > 10000:
             print("🎉 [7L 曉伊原聲翻唱成功] 成功統一 7L 專屬甜妹歌聲！")
             return True
@@ -215,7 +219,11 @@ async def wait_for_intro_speech_complete():
         has_queued = sq and not sq.empty()
         is_talking = getattr(core_vts, "current_ai_state", "") == "TALKING"
         is_music = pygame.mixer.get_init() and pygame.mixer.music.get_busy() and not IS_SINGING_ACTIVE
-        if has_queued or is_talking or is_music:
+        
+        last_tts_end = getattr(core_vts, "LAST_TTS_END_TIME", 0.0)
+        recent_speech = (time.time() - last_tts_end) < 2.5
+        
+        if has_queued or is_talking or is_music or recent_speech:
             await asyncio.sleep(0.3)
         else:
             break
@@ -285,31 +293,49 @@ async def produce_and_sing_cover(song_name: str) -> str:
             await wait_for_intro_speech_complete()
             await play_cover_audio(play_vocal, song_name, inst_path=play_inst)
             
-            outro_msg = f"謝謝大家～剛才為老爸帶來的是翻唱歌曲《{song_name}》！希望老爸喜歡～"
-            core_vts = get_core_vts()
-            if core_vts:
-                sq = getattr(core_vts, "speech_queue", None)
-                if sq:
-                    try:
-                        await sq.put({
-                            "text": outro_msg,
-                            "target": "dad",
-                            "raw_text": f"[EXPRESSION: 喜悅] {outro_msg}"
-                        })
-                    except Exception:
-                        pass
-            return outro_msg
+            # 演唱完畢後，化作紙條塞給 Live 主腦，由主腦動態謝幕（不再使用罐頭回覆）
+            try:
+                from vts_7L_test import GLOBAL_LIVE_SESSION
+                if GLOBAL_LIVE_SESSION:
+                    slip_text = f"[系統提示：妳剛才演唱完畢了歌曲《{song_name}》，請自然地向老爸與觀眾謝幕，可以順便問問他們覺得好不好聽！]"
+                    print(f"🚨 [翻唱引擎] 已將謝幕指示塞給 Live 主腦，由主腦動態接管發言！")
+                    asyncio.create_task(GLOBAL_LIVE_SESSION.send_realtime_input(text=slip_text))
+            except Exception as e:
+                print(f"⚠️ [翻唱引擎] 轉交謝幕紙條失敗 ({e})")
+            return f"謝謝大家～剛才為老爸帶來的是翻唱歌曲《{song_name}》！希望老爸喜歡～"
 
         print(f"🚀 [7L 全自動翻唱引擎啟動] 目標曲目: 《{song_name}》")
+        try:
+            import services.web_dashboard as web_dash
+            web_dash.broadcast_event("tts_progress", {
+                "active": True, "mode": "rvc", "stage": "下載 YouTube 高音質音軌", "percent": 10, "detail": song_name
+            })
+        except Exception: pass
+        
         raw_wav = os.path.join(CACHE_DIR, f"{safe_name}_raw.wav")
         
         # 步驟 1: 下載
         success = await asyncio.to_thread(download_youtube_audio, song_name, raw_wav)
         if not success or not os.path.exists(raw_wav):
+            try:
+                web_dash.broadcast_event("tts_progress", {"active": False, "stage": "下載失敗", "percent": 0})
+            except Exception: pass
             return f"老爸，在 YouTube 找《{song_name}》時麥克風卡了一下，待會再試試！"
+
+        try:
+            web_dash.broadcast_event("tts_progress", {
+                "active": True, "mode": "rvc", "stage": "Demucs GPU 拆解人聲與伴奏", "percent": 30, "detail": song_name
+            })
+        except Exception: pass
 
         # 步驟 2: 分離伴奏與人聲
         vocal_wav, inst_wav = await asyncio.to_thread(separate_stems_gpu, raw_wav, song_name)
+
+        try:
+            web_dash.broadcast_event("tts_progress", {
+                "active": True, "mode": "rvc", "stage": "準備進行 RVC 聲線置換", "percent": 50, "detail": song_name
+            })
+        except Exception: pass
 
         # 步驟 3: RVC 原生少女歌聲轉換 (自適應男女聲智慧升八度：男聲+12半音，女聲0半音，男女混唱逐句自適應)
         trans_vocal = os.path.join(CACHE_DIR, f"{safe_name}_7l_vocal.wav")
@@ -324,22 +350,17 @@ async def produce_and_sing_cover(song_name: str) -> str:
         # 步驟 5: 本地雙軌獨立同步放音（軌道 6: 7L 歌聲 + 軌道 7: 純伴奏，免去合成 MP3 延遲）
         await play_cover_audio(trans_vocal, song_name, inst_path=inst_wav)
 
-        # 步驟 6: 演唱完畢後自動向 speech_queue 發送謝幕詞
-        outro_msg = f"謝謝大家～剛才為老爸帶來的是翻唱歌曲《{song_name}》！希望老爸喜歡～"
-        core_vts = get_core_vts()
-        if core_vts:
-            sq = getattr(core_vts, "speech_queue", None)
-            if sq:
-                try:
-                    await sq.put({
-                        "text": outro_msg,
-                        "target": "dad",
-                        "raw_text": f"[EXPRESSION: 喜悅] {outro_msg}"
-                    })
-                except Exception:
-                    pass
+        # 步驟 6: 演唱完畢後，化作紙條塞給 Live 主腦，由主腦動態謝幕（不再使用罐頭回覆）
+        try:
+            from vts_7L_test import GLOBAL_LIVE_SESSION
+            if GLOBAL_LIVE_SESSION:
+                slip_text = f"[系統提示：妳剛才演唱完畢了歌曲《{song_name}》，請自然地向老爸與觀眾謝幕，可以順便問問他們覺得好不好聽！]"
+                print(f"🚨 [翻唱引擎] 已將謝幕指示塞給 Live 主腦，由主腦動態接管發言！")
+                asyncio.create_task(GLOBAL_LIVE_SESSION.send_realtime_input(text=slip_text))
+        except Exception as e:
+            print(f"⚠️ [翻唱引擎] 轉交謝幕紙條失敗 ({e})")
 
-        return outro_msg
+        return f"剛才播放了《{song_name}》。"
     finally:
         _IS_PRODUCING_COVER = False
 
@@ -384,7 +405,8 @@ async def play_cover_audio(vocal_path: str, song_name: str, inst_path: str = Non
             try:
                 extract_fn = getattr(core_vts, "extract_audio_mouth_envelope", None)
                 if extract_fn:
-                    setattr(core_vts, "CURRENT_MOUTH_ENVELOPE", extract_fn(snd_vocal, fps=25))
+                    envelope = await asyncio.to_thread(extract_fn, snd_vocal, 25)
+                    setattr(core_vts, "CURRENT_MOUTH_ENVELOPE", envelope)
                     setattr(core_vts, "CURRENT_SMOOTH_MOUTH", 0.0)
                     print("👄 [口型同步] 成功將【純人聲音軌】波形包絡同步至 Live2D 對嘴中樞（100% 精準對嘴，零伴奏雜音干擾）！")
             except Exception as env_err:
@@ -404,9 +426,14 @@ async def play_cover_audio(vocal_path: str, song_name: str, inst_path: str = Non
             setattr(core_vts, "IS_SINGING_ACTIVE", True)
             setattr(core_vts, "IS_MP3_PLAYING", True)
             setattr(core_vts, "current_ai_state", "SINGING")
+            
+            # 🎤 唱歌自動拿出麥克風
+            import services.vts_client as vc
+            if vc.GLOBAL_VTS:
+                asyncio.create_task(vc.trigger_vts_expression("麥克風"))
 
         inst_info = " + 獨立伴奏雙軌同步" if snd_inst else " (純人聲清唱)"
-        print(f"🎤 [7L 舞台開唱] 正在演唱《{song_name}》（7L 草莓甜妹主唱{inst_info}）！")
+        print(f"🎤 [7L 舞台開唱] 正在演唱《{song_name}》（7L 甜妹主唱{inst_info}）！")
         
         # 完整播放整首歌曲，雙軌皆播畢或被手動指令中斷
         while (ch_vocal.get_busy() or (snd_inst and ch_inst.get_busy())) and IS_SINGING_ACTIVE:
@@ -426,6 +453,12 @@ async def play_cover_audio(vocal_path: str, song_name: str, inst_path: str = Non
             pygame.mixer.Channel(7).stop()
         except Exception:
             pass
+            
+        # 唱歌結束自動收起麥克風，恢復預設狀態
+        if core_vts:
+            import services.vts_client as vc
+            if vc.GLOBAL_VTS:
+                asyncio.create_task(vc.trigger_vts_expression("_RESET_"))
         core_vts = get_core_vts()
         if core_vts:
             setattr(core_vts, "IS_SINGING_ACTIVE", False)

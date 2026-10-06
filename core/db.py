@@ -9,6 +9,86 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from core.utils import log_print
 
+QUOTA_EXCEEDED = False
+OFFLINE_QUEUE_FILE = os.path.join("data", "firestore_offline_queue.json")
+
+def _handle_quota_exceeded(collection_id: str, document_id: str, data: dict, merge: bool):
+    global QUOTA_EXCEEDED
+    if not QUOTA_EXCEEDED:
+        log_print("⚠️ [Firestore 警告] 遇到 429 Quota Exceeded。寫入已暫存到本地，等明天配額重置後重新開機時再傳上雲端。")
+        QUOTA_EXCEEDED = True
+    
+    try:
+        os.makedirs(os.path.dirname(OFFLINE_QUEUE_FILE), exist_ok=True)
+        if os.path.exists(OFFLINE_QUEUE_FILE):
+            with open(OFFLINE_QUEUE_FILE, "r", encoding="utf-8") as f:
+                queue = json.load(f)
+        else:
+            queue = {}
+            
+        if collection_id not in queue:
+            queue[collection_id] = {}
+            
+        if merge and document_id in queue[collection_id]:
+            queue[collection_id][document_id].update(data)
+        else:
+            queue[collection_id][document_id] = data
+            
+        with open(OFFLINE_QUEUE_FILE, "w", encoding="utf-8") as f:
+            json.dump(queue, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        log_print(f"❌ [Firestore 本地暫存錯誤]: {e}")
+
+async def flush_offline_queue():
+    global QUOTA_EXCEEDED
+    if not os.path.exists(OFFLINE_QUEUE_FILE):
+        return
+        
+    try:
+        with open(OFFLINE_QUEUE_FILE, "r", encoding="utf-8") as f:
+            queue = json.load(f)
+            
+        if not queue:
+            return
+            
+        log_print("☁️ [Firestore 雲端同步] 發現先前因配額不足未上傳的本地資料，正在補傳上雲端...")
+        
+        success_count = 0
+        quota_hit = False
+        
+        for col_id, docs in list(queue.items()):
+            for doc_id, data in list(docs.items()):
+                if quota_hit:
+                    break
+                if db is None:
+                    return
+                status = await db.collection(col_id).document(doc_id).set(data, merge=True)
+                if status == 429:
+                    quota_hit = True
+                    break
+                elif status in (200, 201):
+                    success_count += 1
+                    del queue[col_id][doc_id]
+                
+            if not queue[col_id]:
+                del queue[col_id]
+                
+            if quota_hit:
+                break
+                
+        with open(OFFLINE_QUEUE_FILE, "w", encoding="utf-8") as f:
+            json.dump(queue, f, ensure_ascii=False, indent=2)
+            
+        if quota_hit:
+            QUOTA_EXCEEDED = True
+            log_print("⚠️ [Firestore 雲端同步] 補傳中途再次遇到配額不足，剩餘資料將保留在本地。")
+        elif success_count > 0:
+            QUOTA_EXCEEDED = False
+            log_print(f"✅ [Firestore 雲端同步] 成功將 {success_count} 筆暫存資料上傳至雲端！")
+            
+    except Exception as e:
+        log_print(f"❌ [Firestore 補傳錯誤]: {e}")
+
 def val_to_firestore(val: Any) -> dict:
     """將 Python 原生資料型態（str, int, dict, list 等）轉換為 Firestore REST API 的欄位格式"""
     if val is None: return {"nullValue": None}
@@ -63,8 +143,11 @@ class PureFirestoreDocumentRef:
                 elif resp.status == 404:
                     return PureFirestoreDocumentSnapshot(False, {})
                 else:
+                    err_txt = await resp.text()
+                    log_print(f"❌ [Firestore GET 錯誤] HTTP {resp.status}: {err_txt}")
                     return PureFirestoreDocumentSnapshot(False, {})
-        except Exception:
+        except Exception as e:
+            log_print(f"❌ [Firestore GET 異常]: {e}")
             return PureFirestoreDocumentSnapshot(False, {})
 
     async def set(self, data: dict, merge: bool = False):
@@ -75,8 +158,15 @@ class PureFirestoreDocumentRef:
             mask = "&".join([f"updateMask.fieldPaths={k}" for k in fields.keys()]) if merge else ""
             req_url = f"{self.url}?{mask}" if mask else self.url
             async with session.patch(req_url, json={"fields": fields}, headers=headers, timeout=aiohttp.ClientTimeout(total=8.0)) as resp:
+                if resp.status not in (200, 201):
+                    if resp.status == 429:
+                        _handle_quota_exceeded(self.collection_id, self.document_id, data, merge)
+                    else:
+                        err_txt = await resp.text()
+                        log_print(f"❌ [Firestore REST API 錯誤] HTTP {resp.status}: {err_txt}")
                 return resp.status
-        except Exception:
+        except Exception as e:
+            log_print(f"❌ [Firestore REST API 異常]: {e}")
             return 500
 
     async def delete(self):

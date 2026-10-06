@@ -317,6 +317,13 @@ async def clear_all_memories() -> str:
             UNIFIED_THOUGHT_MEMORY.clear()
         if 'UNIFIED_LIVE_MEMORY' in globals() and hasattr(UNIFIED_LIVE_MEMORY, 'clear'):
             UNIFIED_LIVE_MEMORY.clear()
+            
+        try:
+            from services.rag_store import reset as reset_rag_store
+            reset_rag_store()
+        except Exception:
+            pass
+            
     except Exception:
         pass
     log_print("🧹 [系統] 雲端與本地所有記憶（含對話 500 句專區、心流思緒專區與全景記憶）已徹底重置！")
@@ -948,15 +955,21 @@ async def save_cloud_knowledge(knowledge: dict):
     CLOUD_KNOWLEDGE_CACHE = knowledge
     CLOUD_KNOWLEDGE_CACHE_TIME = time.time()
 
-    if db_module.db is not None:
-        try:
-            await db_module.db.collection("cloud_mind_knowledge").document("core_knowledge").set(knowledge, merge=True)
-        except Exception as e:
-            log_print(f"⚠️ [雲端記憶寫入異常]: {e}")
-
     local_path = CLOUD_KNOWLEDGE_FILE
     try:
         with open(local_path, "w", encoding="utf-8") as f:
             json.dump(knowledge, f, ensure_ascii=False, indent=2)
-    except Exception:
+    except Exception as e:
+        log_print(f"⚠️ [本地大腦寫入錯誤]: {e}")
+
+    if db_module.db is not None:
+        try:
+            status = await db_module.db.collection("cloud_mind_knowledge").document("core_knowledge").set(knowledge, merge=True)
+            if status == 429:
+                log_print("⚠️ [雲端大腦同步] Firestore 配額不足，已轉交離線備用佇列。")
+            elif status not in (200, 201):
+                raise Exception(f"Firestore API returned status {status}")
+        except Exception as e:
+            log_print(f"⚠️ [雲端記憶寫入異常]: {e}")
+            raise Exception(f"雲端大腦同步失敗，請檢查網路 ({e})")
         pass

@@ -102,28 +102,23 @@ def get_dynamic_live_key_candidates(preferred_pool: List[str]) -> List[str]:
 DEAD_GEMINI_MODELS = set()
 
 STREAMER_MIND_MODELS = [
-    # ⚡ 第 1~4 位：極速秒回前鋒 (實測 0.95s ~ 3s 越快排越前面)
-    "gemini-3.5-flash-lite",               # 🥇 第 1 位：0.95s ~ 1.21s 極速秒回王 (超低延遲輕量防線)
-    "gemini-3.6-flash",                    # 🥈 第 2 位：1.59s 高智商極速主力 (兼具高智商與超低延遲)
-    "gemini-3.1-flash-lite",               # 🥉 第 3 位：1.6s ~ 3.3s 自然口語秒回首選
-    "gemini-3-flash-preview",              # ⚡ 第 4 位：3.1s ~ 4.2s 閃電推理預覽
-    
-    # 🧠 第 5~8 位：主力保底與旗艦深度推理大腦
-    "gemini-3.5-flash",                    # 🛡️ 第 5 位：10s ~ 14s 高智商穩定主力保底
-    "gemini-3.7-flash",                    # 👑 第 6 位：頂配旗艦大腦
-    "gemini-3.8-flash",                    # 🚀 第 7 位：2026 全新頂配旗艦大腦
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
+    "gemini-3.5-flash",
+    "gemini-3.6-flash",
+    "gemini-3.7-flash",
+    "gemini-3.8-flash"
 ]
 
 KEYS_VISION        = GEMINI_KEYS[12:18] if len(GEMINI_KEYS) >= 18 else GEMINI_KEYS
 
 HIGH_IQ_GEMINI_MODELS = [ 
-    "gemini-3.8-flash",                    # 🚀 第 1 優先：2026 全新頂配旗艦大腦（最強深度思考與頂尖推理）
-    "gemini-3.7-flash",                    # 👑 第 2 位：頂配旗艦大腦（深度思考 Thinking 原生開啟）
-    "gemini-3.6-flash",                    # 👑 第 3 位：高智商旗艦主力，視覺與工具調用精確
-    "gemini-3.5-flash",                    # 🥈 第 4 位：高智商穩定主力保底
-    "gemini-3-flash-preview",              # ⚡ 第 5 位：閃電推理預覽
-    "gemini-3.5-flash-lite",               # 🛡️ 第 6 位：超大額度輕量保底防線
-    "gemini-3.1-flash-lite",               # ⚡ 第 7 位：超低延遲輕量秒回
+    "gemini-3.8-flash",
+    "gemini-3.7-flash",
+    "gemini-3.6-flash",
+    "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite"
 ]
 
 PROACTIVE_EXCLUDED_MODELS = {

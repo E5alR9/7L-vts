@@ -296,7 +296,7 @@ async def tiktok_live_worker(input_queue):
                 u_name = (user_name.nickname or user_name.unique_id) if user_name else "觀眾"
                 b_text = getattr(event, 'content', '') or getattr(event, 'comment', '') or ""
                 b_text = str(b_text).strip()
-                if b_text:
+                if b_text and not b_text.startswith("Text(key="):
                     # 🛡️ Fallback 去重：BarrageEvent 可能與 CommentEvent 攜帶同一則訊息，5 秒內不重複入 queue
                     if not msg_id:
                         now = time.time()

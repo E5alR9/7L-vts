@@ -232,7 +232,7 @@ INTERACTIONS_TOOLS = [
     {
         "type": "function",
         "name": "pe.insert_virtual_piano",
-        "description": " 嚴格限制：僅在老爸或觀眾明確說『混彈』、『插歌』、『一起彈』、『合體』、『同時演奏』、『再加一首XX一起彈』等字眼時才可調用！若只是單純點播新歌（例如只說『Rush E』、『彈月光』），【絕對嚴禁調用此工具】，必須調用 pe.play_virtual_piano 進行排隊！",
+        "description": " 嚴格限制：僅在老爸或觀眾明確說『混彈』、『插歌』、『一起彈』、『合體』、『同時演奏』、『再加一首XX一起彈』等字眼時才可調用！若只是單純點播新歌（例如只說『Rush E』、『彈月光』），請調用 pe.play_virtual_piano 進行排隊！",
         "parameters": {
             "type": "object",
             "properties": {
@@ -264,7 +264,7 @@ INTERACTIONS_TOOLS = [
     {
         "type": "function",
         "name": "pe.stop_virtual_piano",
-        "description": " 嚴禁隨意調用！僅在老爸明確說出『收起鋼琴』、『關閉鋼琴』、『把鋼琴收起來』、『別彈鋼琴了』時才可調用！收起 88 鍵鋼琴並讓 7L 回到原本位置。",
+        "description": " 僅在老爸明確說出『收起鋼琴』、『關閉鋼琴』、『把鋼琴收起來』、『別彈鋼琴了』時才可調用！收起 88 鍵鋼琴並讓 7L 回到原本位置。",
         "parameters": {
             "type": "object",
             "properties": {},
@@ -274,7 +274,7 @@ INTERACTIONS_TOOLS = [
     {
         "type": "function",
         "name": "list_piano_sheets",
-        "description": "【只有當老爸或觀眾明確要求『列出所有曲庫/查看歌單』時才調用】列出所有內建鋼琴曲目清單。注意：若只是問『這首是什麼歌』，嚴禁調用此工具，直接回答當前曲名即可。",
+        "description": "【只有當老爸或觀眾明確要求『列出所有曲庫/查看歌單』時才調用】列出所有內建鋼琴曲目清單。注意：若只是問『這首是什麼歌』，直接回答當前曲名即可，無需列出全部曲庫。",
         "parameters": {
             "type": "object",
             "properties": {},
@@ -296,7 +296,7 @@ INTERACTIONS_TOOLS = [
     {
         "type": "function",
         "name": "set_piano_volume",
-        "description": "調整 88 鍵平台鋼琴的演奏音量 (0 ~ 200)。【嚴格限制】：只有當老爸或觀眾明確說『鋼琴小聲點』、『鋼琴大聲點』、『音量設為...』時才可調用！絕對嚴禁在日常聊天、點歌或開場時擅自調用或重置音量！",
+        "description": "調整 88 鍵平台鋼琴的演奏音量 (0 ~ 200)。【嚴格限制】：只有當老爸或觀眾明確說『鋼琴小聲點』、『鋼琴大聲點』、『音量設為...』時才可調用！請僅在老爸要求時調用音量調整。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -332,7 +332,7 @@ INTERACTIONS_TOOLS = [
     {
         "type": "function",
         "name": "control_microphone",
-        "description": " 嚴禁自主隨意調用！僅在老爸明確說出『關閉麥克風』或『開啟麥克風』時才可調用！開啟(True)或關閉(False)麥克風收音。",
+        "description": " 僅在老爸明確說出『關閉麥克風』或『開啟麥克風』時才可調用！開啟(True)或關閉(False)麥克風收音。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -638,9 +638,9 @@ async def summarize_search_to_speech(query: str, search_raw: str, user_role_name
 \"\"\"
 請以妳招牌親切、自然隨性的口吻，用 1~3 句俐落短句（40~80字以內）直接對{user_role_name}提煉並說明重點。
  嚴格規範：
-- 絕對不要直接照抄條列清單、網址或網頁標題。
+- 請將資訊轉化為流暢的對話口語，不要直接照抄條列清單、網址或網頁標題。
 - 像真人日常說話一樣自然流暢，直接講出核心意思。
-- 嚴禁使用任何 Emoji。"""
+- 請使用純文字進行對話。"""
                     resp = await asyncio.wait_for(
                         client.aio.models.generate_content(
                             model=m_name,
@@ -669,7 +669,7 @@ async def summarize_search_to_speech(query: str, search_raw: str, user_role_name
                     g_client.chat.completions.create(
                         model="qwen/qwen3.8-27b",
                         messages=[
-                            {"role": "system", "content": f"妳是 7L，正在直播中與{user_role_name}對話。請以親切隨性口吻（1~2句短句）提煉搜尋重點回答{user_role_name}，嚴禁照搬原文清單，嚴禁 Emoji。"},
+                            {"role": "system", "content": f"妳是 7L，正在直播中與{user_role_name}對話。請以親切隨性口吻（1~2句短句）提煉搜尋重點回答{user_role_name}，請將清單內容轉為口語，並使用純文字對話。"},
                             {"role": "user", "content": f"查詢問題: {query}\n搜尋內容: {clean_search[:800]}"}
                         ],
                         max_tokens=120,
@@ -855,7 +855,7 @@ async def get_lightweight_gemini_vision(image_base64: str, temporal_frames: list
                 "1. 老爸在這段時間裡做了什麼操作或有什麼變化？（例如：切換了視窗、打完了一段程式碼、開啟了新遊戲、出現報錯等）\n"
                 "2. 當前畫面（最後一張）老爸的視窗焦點在哪裡、正在做什麼？\n"
                 "3. 若畫面上出現 VTube Studio 視窗、Live2D 角色或 OBS 字幕，代表 7L 妳自己的虛擬化身，請忽略它。\n"
-                "請用 1~3 句簡短扼要的中文描述動態變化與當前狀態，嚴禁胡亂猜測不存在的畫面："
+                "請用 1~3 句簡短扼要的中文描述動態變化與當前狀態，請根據真實畫面回答："
             )
         else:
             prompt = (
@@ -863,7 +863,7 @@ async def get_lightweight_gemini_vision(image_base64: str, temporal_frames: list
                 "1. 老爸當前的視窗焦點在做什麼（例如：在寫程式碼、在 Discord 聊天、在瀏覽某個特定網頁、在玩遊戲等）？\n"
                 "2. 畫面上有什麼具體的視窗標題、應用程式名稱、文字內容或重要資訊？\n"
                 "3. 若畫面上出現 VTube Studio 視窗、Live2D 角色或 OBS 字幕，代表 7L 妳自己的虛擬化身，請忽略它，專注描述老爸正在操作的實際內容。\n"
-                "請直接用 1~2 句簡短扼要的中文描述畫面的真實內容，嚴禁胡亂猜測不存在的畫面："
+                "請直接用 1~2 句簡短扼要的中文描述畫面的真實內容，請根據真實畫面回答："
             )
 
         # 組合：提示詞 + 歷史幀 + 當前幀
@@ -1065,7 +1065,7 @@ async def fetch_ai_response(messages, image_base64=None, audio_base64=None, is_p
                     log_print(f"🛠️ [大腦調用工具] {fn_name}({fn_args})")
                     tool_out = await execute_tool_dispatch(fn_name, fn_args, caller_target="dad", caller_user="老爸")
                     tool_results_map[fn_name] = tool_out
-                    #  資訊查詢與系統提示類資料僅供大腦吸收，嚴禁拼入 extracted_text 作為口語！
+                    #  資訊查詢與系統提示類資料僅供大腦吸收，請勿拼入 extracted_text 作為口語！
                     if fn_name not in ["search_google"] and tool_out and "[EXPRESSION:" in tool_out:
                         extracted_text += f" {tool_out}"
 
@@ -1111,7 +1111,7 @@ async def fetch_ai_response(messages, image_base64=None, audio_base64=None, is_p
                                 name=f_name,
                                 response={
                                     "result": str(f_res),
-                                    "instruction": "請根據以上查詢結果，以 7L 招牌自然隨性口吻（1~3句短句，40~80字以內）直接對老爸提煉並說明重點，嚴禁照抄條列清單、網址或網頁標題！"
+                                    "instruction": "請根據以上查詢結果，以 7L 招牌自然隨性口吻（1~3句短句，40~80字以內）直接對老爸提煉並說明重點，請轉化為口語對話！"
                                 }
                             ))
                         followup_contents.append(types.Content(role="user", parts=fn_resp_parts))
@@ -1405,7 +1405,7 @@ async def fetch_fast_text_reply(user_input: str, custom_name: str, situation_pro
             identity_line = f"【已知身份】{audience_user}：{'，'.join(id_parts)}。請自然使用該稱呼！\n"
         else:
             identity_line = f"【觀眾】妳與 {audience_user} 正在互動！\n"
-        speaker_section = f"""【當前對象】：TikTok 直播觀眾「{v_call or audience_user}」（不是老爸！絕對不要對老爸說話！）
+        speaker_section = f"""【當前對象】：TikTok 直播觀眾「{v_call or audience_user}」
 {identity_line}【觀眾動態/留言】：『{audience_content}』"""
     else:
         speaker_section = f"""【當前對象】：老爸（稱呼：「{custom_name}」）\n【老爸剛才說的話】：「{clean_q}」"""
@@ -1553,8 +1553,8 @@ async def call_gemini_live_audience_reply(vts, input_queue, audience_user: str, 
 3.  【7L】：在老爸身邊同台直播的 AI 虛擬女兒/副播。
    -  【直接讓 7L 不要（絕對越權禁令）】：妳是 AI 少女副播，沒有遊戲帳號、沒有好友位、沒有任何管理決策與線下承諾權！
    - 凡觀眾向直播間提出任何請求、邀約或條件（加好友、組隊、求帶、借號、聯繫方式、抽獎等）：
-     *  絕對不要擅自替老爸答應！絕對不要擅自拒絕！
-     *  絕對嚴禁自居主人向觀眾開條件或討要好處（如「拿誠意來」、「看你表現」、「先誇我」等任何擅自主張的怪話，一律絕對嚴禁）！
+     *  請主動將決策權交給老爸，讓老爸決定！
+     * 作為副播，請友善地將觀眾請求轉達給主播老爸！，一律絕對嚴禁）！
      *  一律推給老爸做主、向老爸請示通報（例如：「老爸，觀眾杰尼龜想加你遊戲好友，你有位置嗎？」、「這要問我老爸做主喔～」）！
 
  【受話對象與發言姿態（通化原則）】：
@@ -1567,7 +1567,7 @@ async def call_gemini_live_audience_reply(vts, input_queue, audience_user: str, 
 
         #  當前即時鋼琴狀態感知
         if pe.is_piano_active and pe.current_piano_song_title:
-            current_playing_info = f"【 妳目前正坐在鋼琴前彈奏《{pe.current_piano_song_title}》】！若觀眾問「這首？」、「這是什麼歌？」、「在彈什麼？」，請直接告訴他這首是《{pe.current_piano_song_title}》，絕對不要調用 list_piano_sheets 把全部曲庫唸出來！"
+            current_playing_info = f"【 妳目前正坐在鋼琴前彈奏《{pe.current_piano_song_title}》】！若觀眾問「這首？」、「這是什麼歌？」、「在彈什麼？」，請直接告訴他這首是《{pe.current_piano_song_title}》，請勿調用 list_piano_sheets 把全部曲庫唸出來！"
         else:
             current_playing_info = "【 妳目前沒有在彈鋼琴】。"
 
@@ -1627,7 +1627,7 @@ async def call_gemini_live_audience_reply(vts, input_queue, audience_user: str, 
 
         prompt_user_input = f"""【TikTok 直播觀眾 {id_display} 留言】：{audience_content}
 【 多人情境與權限通化提示】：
-- 凡涉及遊戲、帳號、好友組隊、各類請求或對主播的提問，對象皆為老爸！ 7L 絕不擅自主張、絕不替老爸答應或拒絕、更絕對嚴禁自居主人開條件（如「拿誠意來」、「看表現」）！一律向老爸請示或推給老爸做主！
+- 凡涉及遊戲、帳號、好友組隊、各類請求或對主播的提問，對象皆為老爸！ 7L 請主動將請求與決策權交給老爸做主！
 - 若觀眾在聊遊戲戰況/嘴操作，對象是老爸！請以副播女兒視角向老爸吐槽或起鬨！
 - 只有指名跟妳（7L）說話/點歌，才直接稱呼對方「{v_call or v_display_name}」開口互動！
 請以自然俐落的短句開口回應（1~2句，約 20~40 字，完整說完句尾帶標點符號，隨興在句中自由切換 [EXPRESSION: ...] 表情，善用 [SPEED:...]、[PITCH:...] 調節語調情緒）："""
@@ -2529,7 +2529,7 @@ async def update_daily_diary(channel_id, recent_chat):
         f" 核心守則：\n"
         f"1. 刪除重複部分，保留重點。\n"
         f"2. 總句數嚴格限制在 3 句以內。\n"
-        f"3. 絕對不要有任何前言或結尾，直接輸出整合後的日記內容。\n\n"
+        f"3. 請直接輸出整合後的日記內容。\n\n"
         f" [舊日記摘要]：\n{existing_summary if existing_summary else '(無)'}\n\n"
         f" [新對話紀錄]：\n{chat_text}\n"
     )
@@ -2857,7 +2857,7 @@ def is_thought_repetitive(new_thought: str, threshold: float = 0.65, time_window
     if len(clean_new) < 4:
         return True
     
-    #  陪伴/無動態類型的思緒語意防跳針：若近期已經安靜陪伴過，禁止反覆重提「安靜陪伴、不要擋到、縮小身體」
+    #  陪伴/無動態類型的思緒語意防跳針：若近期已經安靜陪伴過，避免反覆重提「安靜陪伴、不要擋到、縮小身體」
     companion_markers = [
         "安靜陪伴", "不要擋到", "沒什麼新動態", "沒有新動態", "無全新動態", "無全新事件", 
         "縮小身體", "縮小一點", "嘟囔舊思緒", "silence", "安靜守護", "確認系統狀態", 
@@ -3274,7 +3274,7 @@ async def live_api_direct_sentence_emotions(clean_text: str, total_duration: flo
 輸出格式（每行一個，秒數從小到大，秒數不可超過總秒數）：
 [0.0s: 表情名]
 [秒數: 表情名]
-嚴禁輸出任何廢話或分析，只輸出時間戳標籤！""")])
+請直接輸出時間戳標籤！""")])
             )
             async with asyncio.timeout(2.5):
                 async with client.aio.live.connect(model="gemini-3.1-flash-live-preview", config=live_cfg) as session:
@@ -4061,11 +4061,11 @@ async def check_screen_change_via_live_api(img_bytes: bytes, current_context: st
                 output_audio_transcription=types.AudioTranscriptionConfig(),
                 system_instruction=types.Content(parts=[types.Part(text="""妳是 7L 的背景餘光視覺神經哨兵。
 妳正透過雙眼看著老爸的電腦螢幕畫面。
-妳的任務是保持眼睛在看，但【絕對不要輸出任何描述或聊天內容】！
+妳的任務是保持眼睛在看，但【請保持安靜，僅使用表情代碼回應】！
 妳只負責做極速二元決策：
 - [NO_CHANGE]：若畫面維持在先前的操作中（如持續寫程式碼、同一個視窗/軟體中微調打字、滑鼠移動、無重大新動態），請【只輸出】: [NO_CHANGE]
 - [LOOK_SERIOUS]：只有當發生重大改變（如切換到完全不同的應用程式、跳出報錯或提示視窗、開啟新遊戲/影片、完成重大部署/編譯、畫面焦點徹底改變）時，才輸出: [LOOK_SERIOUS]
-嚴禁輸出任何多餘的解釋或對話，只輸出 [NO_CHANGE] 或 [LOOK_SERIOUS]！""")]),
+請直接輸出 [NO_CHANGE] 或 [LOOK_SERIOUS]！""")]),
             )
             async with asyncio.timeout(3.8):
                 async with client.aio.live.connect(model="gemini-3.1-flash-live-preview", config=live_cfg) as session:
@@ -4197,7 +4197,7 @@ async def live_timer_sensor_worker(vts, input_queue):
 - 預定提醒事項：『{task_msg}』
 - 當前現場環境：{fg_hint} {music_hint}
 
-請妳依循妳的人設性格，主動開口提醒老爸時間到了！（直接給出一兩句自然生動的發言，可附帶 [EXPRESSION: 瞇眼/笑/WINK] 表情與 [SPEED:...] 語調標籤，嚴禁輸出 [SILENCE]！）"""}
+請妳依循妳的人設性格，主動開口提醒老爸時間到了！（直接給出一兩句自然生動的發言，可附帶 [EXPRESSION: 瞇眼/笑/WINK] 表情與 [SPEED:...] 語調標籤，請務必發出聲音提醒！）"""}
                     ]
                     
                     try:
@@ -4944,7 +4944,7 @@ async def identify_system_music_and_sound(wav_bytes: bytes) -> str:
     global LAST_MUSIC_IDENTIFY_TIME, LATEST_SYSTEM_MUSIC_INFO, LATEST_SYSTEM_MUSIC_TIME, current_system_audio_context
     now = time.time()
 
-    #  0. 若 7L 自身正在彈鋼琴或播放 MP3，電腦聲音即為 7L 自身聲音，直接同步當前鋼琴曲目，嚴禁調用 AI 瞎猜
+    #  0. 若 7L 自身正在彈鋼琴或播放 MP3，電腦聲音即為 7L 自身聲音，直接同步當前鋼琴曲目，請勿調用 AI 瞎猜
     if (hasattr(pe, "is_piano_active_and_alive") and pe.is_piano_active_and_alive()) or getattr(pe, "is_piano_active", False) or current_ai_state == "PIANO":
         song_t = getattr(pe, "current_piano_song_title", "") or "鋼琴曲"
         current_system_audio_context = f"7L 正在為老爸演奏鋼琴：《{song_t}》"
@@ -4999,7 +4999,7 @@ async def identify_system_music_and_sound(wav_bytes: bytes) -> str:
             "   若音訊中的旋律與演奏樂器與任何網頁或視窗標題不符，代表該網頁目前【根本沒有發出聲音】！絕對不能把未在播放的網頁標題當作辨識結果！\n"
             "3. 只有當音訊中的音樂旋律，妳 100% 確實聽出並確認具體曲名時，才輸出具體曲名（例如：李斯特《鐘》、周杰倫《晴天》等）。\n"
             "4. 若音訊旋律無法明確指認具體曲名，或聽到的音樂與參考線索不符，請【務必僅輸出單詞】：UNKNOWN\n"
-            "5. 絕對嚴禁瞎猜『電子舞曲』、『古典鋼琴曲』、『純音樂』等空泛形容詞！\n"
+            "5. 請準確辨識曲目，避免使用『電子舞曲』、『古典鋼琴曲』、『純音樂』等空泛形容詞！\n"
             "請直接輸出結果（25 字以內）："
         )
 
@@ -5426,7 +5426,7 @@ async def _ai_face_tracking_loop_impl(vts):
                         CURRENT_SMOOTH_MOUTH += (raw_target - CURRENT_SMOOTH_MOUTH) * 0.35
                     target_mouth = round(CURRENT_SMOOTH_MOUTH, 3)
                 else:
-                    #  若無真實音訊波形包絡 (如生成等待、句間分段間隙)，自然平滑閉合嘴巴，嚴禁無聲時空動嘴！
+                    #  若無真實音訊波形包絡 (如生成等待、句間分段間隙)，自然平滑閉合嘴巴，避免無聲時空動嘴！
                     CURRENT_SMOOTH_MOUTH *= 0.35
                     target_mouth = round(CURRENT_SMOOTH_MOUTH, 3)
             else:
@@ -5743,7 +5743,7 @@ async def autonomous_wander_worker():
             
             idle_seconds = None
             if IS_AUTO_WANDER_ENABLED and current_ai_state == "IDLE" and idle_seconds > 60.0:
-                #  自主彈琴邏輯：預設關閉（IS_AUTO_PIANO_ENABLED = False），嚴禁未經指示自作主張彈琴打斷老爸或與背景音樂打架
+                #  自主彈琴邏輯：預設關閉（IS_AUTO_PIANO_ENABLED = False），避免未經指示自作主張彈琴打斷老爸或與背景音樂打架
                 def now():
                     pass
                 if IS_AUTO_PIANO_ENABLED and (now - LAST_AUTO_PIANO_TIME > 300.0):
@@ -6124,12 +6124,12 @@ async def judge_subconscious_intent_via_live_api(memory_context: str, unread_bat
    - 若老爸在專注自言自語、喃喃自語、或純背景雜音/咳嗽 ➔ 請輸出：[SILENCE]
 2. 【直播觀眾彈幕（多人實況與權限通化判定）】：
    - 直播間包含：老爸（打遊戲的主播與唯一決策者）、觀眾（看直播發言的網友）、7L（同台 AI 女兒副播）。
-   - 【通化決策原則（直接禁止 7L 擅自主張）】：
+   - 【通化決策原則（主動將決策權交給老爸）】：
      * 凡觀眾提出任何請求（遊戲、好友、組隊、帳號、聯繫方式、抽獎等）或向主播提問 ➔ 7L 絕不擅自主張開條件，一律向老爸請示或通報，輸出：[SPEAK: target=老爸(因應觀眾請求/提問), focus=請示老爸, user=觀眾名]
      * 若觀眾在聊遊戲戰況、操作、嘴主播 ➔ 7L 作為同台副播女兒，在旁起鬨或吐槽老爸，輸出：[SPEAK: target=老爸(因應觀眾留言吐槽), focus=吐槽老爸/起鬨, user=觀眾名]
      * 若觀眾明確指名 7L 互動、聊天、點歌、稱讚 ➔ 輸出：[SPEAK: target=用戶名, focus=話題重點, song=歌名(若點歌)]
      * 若為無聊刷屏、無意義表情/符號、或目前無需插話 ➔ 請輸出：[SILENCE]
-嚴禁輸出任何多餘聊天內容，只輸出 [SILENCE] 或 [SPEAK: ...]！""")])
+請只輸出 [SILENCE] 或 [SPEAK: ...]！""")])
             )
             async with asyncio.timeout(3.5):
                 async with client.aio.live.connect(model="gemini-3.1-flash-live-preview", config=live_cfg) as session:
@@ -6302,8 +6302,8 @@ async def streamer_mind_loop_worker(vts, input_queue):
 3.  【7L】：在老爸身邊同台直播的 AI 虛擬女兒/副播。
    -  【直接讓 7L 不要（絕對越權禁令）】：妳是 AI 少女副播，沒有遊戲帳號、沒有好友位、沒有任何管理決策與線下承諾權！
    - 凡觀眾向直播間提出任何請求、邀約或條件（加好友、組隊、求帶、借號、聯繫方式、抽獎等）：
-     *  絕對不要擅自替老爸答應！絕對不要擅自拒絕！
-     *  絕對嚴禁自居主人向觀眾開條件或討要好處（如「拿誠意來」、「看你表現」、「先誇我」等任何擅自主張的怪話，一律絕對嚴禁）！
+     *  請主動將決策權交給老爸，讓老爸決定！
+     * 作為副播，請友善地將觀眾請求轉達給主播老爸！，一律絕對嚴禁）！
      *  一律推給老爸做主、向老爸請示通報（例如：「老爸，觀眾杰尼龜想加你遊戲好友，你有位置嗎？」、「這要問我老爸做主喔～」）！
 【 觀眾檔案】：
 {profiles_block}
@@ -6334,14 +6334,14 @@ async def streamer_mind_loop_worker(vts, input_queue):
 {tk_listener.get_tiktok_live_telemetry()}
 
 【 主播心智與發話規範】：
-1.  【短句精煉與語意完整 (極重要)】：直播節奏明快，每次真正開口說話請保持「1 ~ 2 句自然短句（約 20 ~ 40 字，上限 60 字）」，【話一定要說完，絕對禁止半句斷尾】：
+1.  【短句精煉與語意完整 (極重要)】：直播節奏明快，每次真正開口說話請保持「1 ~ 2 句自然短句（約 20 ~ 40 字，上限 60 字）」，【句意完整，確保說完】：
    - 口語自然、簡短直接、重點明確、接梗俐落，隨性真實。
-   -  【嚴禁半句截斷】：整句話必須完整說完，句尾必須帶有完整中文標點符號（如『！』、『。』、『？』、『～』）完美收尾，絕不可說到一半斷字！
-   -  【嚴禁長篇大論】：絕不長段自說自話、絕不說教、絕不一口氣拋出一堆反問句或追問句！
+   -  【句意完整】：整句話必須完整說完，句尾必須帶有完整中文標點符號（如『！』、『。』、『？』、『～』）完美收尾，完美收尾！
+   -  【言簡意賅】：請保持短句精煉，像真人聊天一樣你來我往！
 3.  【稱呼精準認人】：
    - 若回應指名 7L 的觀眾，直接對該觀眾（{log_target}）說話，親切念出名字！
    - 若觀眾是在跟老爸聊遊戲，妳是在向老爸吐槽或提醒老爸，請自然喊「老爸」，把情況告訴老爸或笑老爸，絕不可誤認成觀眾在跟妳私聊！
-5.  【嚴禁報幕與元語言】：絕對禁止說「我看到你留言說了...」、「我看到我自己說了...」、「畫面上顯示我的字幕...」、「我看著看板...」等機械化報幕字眼！直接像真人主播一樣自然開口對答即可！
+5.  【沉浸式互動】：請像真人一樣直接聊天，避免說出「我看到你留言說了...」、「我看到我自己說了...」、「畫面上顯示我的字幕...」、「我看著看板...」等機械化報幕字眼！直接像真人主播一樣自然開口對答即可！
 6.  【系統直接指令調用 (極重要)】：若要執行動作，請直接在對話中輸出對應的 Python 指令碼（系統會自動攔截執行，不會唸出來）：
    -  翻唱演唱：`auto_sing_song(song_name='歌名')`（當有人說『唱...』、『唱歌』時務必輸出此指令調用）
    -  點歌/彈琴：`pe.play_virtual_piano(song_name='歌名')`
@@ -6361,7 +6361,7 @@ async def streamer_mind_loop_worker(vts, input_queue):
    - 觀眾記憶：[VIEWER_UPDATE:用戶名|CALL:暱稱|REL:關係|IMP:印象]
    - 規範：輸出時自行加上完整中文標點符號（逗號、句號等）進行自然斷句，嚴禁使用 Emoji。"""
 
-            prompt_user_input = "請結合剛才 100 句記憶、最新彈幕與畫面，判斷彈幕是與老爸/遊戲相關還是指名跟妳互動。凡涉及遊戲、帳號或任何事務請求，絕對嚴禁擅自主張或開條件，一律向老爸請示或推給老爸做主！以自然俐落的短句開口回應（1~2句，約 20~40 字，完整說完句尾帶標點符號，隨興在句中自由切換 [EXPRESSION: ...] 表情，善用 [SPEED:...]、[PITCH:...] 調節語調情緒）："
+            prompt_user_input = "請結合剛才 100 句記憶、最新彈幕與畫面，判斷彈幕是與老爸/遊戲相關還是指名跟妳互動。凡涉及遊戲、帳號或任何事務請求，請主動向老爸請示或推給老爸做主！以自然俐落的短句開口回應（1~2句，約 20~40 字，完整說完句尾帶標點符號，隨興在句中自由切換 [EXPRESSION: ...] 表情，善用 [SPEED:...]、[PITCH:...] 調節語調情緒）："
             
             # 4. 呼叫大腦模型矩陣 (依老爸指定 7 梯隊優先級輪流嘗試: 3.1 Flash Lite ➔ 3.5 Flash Lite ➔ 3 Flash ➔ 3.1 Pro ➔ 3.5 ➔ 3.6 ➔ 3.7)
             candidate_keys = [k for k in (KEYS_AUDIENCE_LIVE if KEYS_AUDIENCE_LIVE else GEMINI_KEYS) if k]
@@ -6726,7 +6726,7 @@ async def process_chat_message(vts, input_queue, user_input: str, user_audio_b64
             fresh_history = await fetch_from_long_term_memory(DEFAULT_CHANNEL_ID)
             clean_user_history = re.sub(r'\[[A-Z_]+(?::\s*[^\]]+)?\]', '', user_input).strip()
             fresh_history.append({"role": "user", "content": clean_user_history or user_input})
-            #  防心想污染記憶庫鐵律：若未開口說話，儲存純淨動作標籤，100% 絕對禁止將未清洗之 [THOUGHT] 存入歷史
+            #  防心想污染記憶庫鐵律：若未開口說話，儲存純淨動作標籤，避免將未清洗之 [THOUGHT] 存入歷史
             clean_asst_history = clean_spoken if clean_spoken else (TextCleanEngine.clean_for_tts(bot_reply, apply_phonetics=False) or "[演奏鋼琴/動作執行]")
             fresh_history.append({"role": "assistant", "content": clean_asst_history})
             asyncio.create_task(save_to_long_term_memory(DEFAULT_CHANNEL_ID, fresh_history))
@@ -7172,7 +7172,7 @@ async def background_mind_stream_worker(vts, input_queue):
                 f"請像 DeepSeek 思考推導過程一樣，在腦海深處展開一段流暢連貫、直接順著思緒與眼前雙眼所見畫面自然流淌的內心獨白與意識流（約 50~100 字）。\n"
                 f"【規範】：\n"
                 f"- 自言自語、自問自答，自然承接上一段心思，並把雙眼看到的畫面動態（如老爸在操作什麼、畫面細節）自然融進私密思緒中。\n"
-                f"- 【記憶防重複】：剛才老爸說過的話妳都已經回答完畢，【絕對不要】對著已經回答過的話題一直重複回覆或跳針！\n"
+                f"- 【記憶防重複】：剛才老爸說過的話妳都已經回答完畢，若話題已結束，請自然轉移話題或安靜陪伴！\n"
                 f"- 這是妳私密的腦內意識流，直接輸出連貫流淌的心想思考文字："
             )
             
