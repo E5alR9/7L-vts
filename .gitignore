@@ -1,10 +1,7 @@
 # --- secrets / tokens ---
-.env
-.env.backup
-*.envtmp
+.env*
 6.env
-vts_token.txt
-vts_token.txt.bak
+vts_token.txt*
 
 # --- python ---
 __pycache__/
