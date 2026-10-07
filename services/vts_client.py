@@ -726,7 +726,7 @@ async def apply_spatial_position(
 LAST_CONSCIOUS_ACTION_TIME = 0.0
 
 async def set_vts_expression(vts, exp_tag, is_instinct=False):
-    global CURRENT_ACTIVE_EXP, shock_timer, wink_timer, wink_side, frown_timer, LAST_CONSCIOUS_ACTION_TIME
+    global CURRENT_ACTIVE_EXP, shock_timer, wink_timer, wink_side, frown_timer, eye_roll_timer, is_tracking_mouse, LAST_CONSCIOUS_ACTION_TIME
     
     if not is_instinct:
         LAST_CONSCIOUS_ACTION_TIME = time.time()
@@ -740,6 +740,8 @@ async def set_vts_expression(vts, exp_tag, is_instinct=False):
             shock_timer = 0.0
             wink_timer = 0.0
             frown_timer = 0.0
+            eye_roll_timer = 0.0
+            is_tracking_mouse = True
             log_print("✨ [Live2D 表情] 表情已重置為預設自然狀態")
             async with vts_lock:
                 for exp_file in MY_CONTROLLED_EXPS:
@@ -772,6 +774,11 @@ async def set_vts_expression(vts, exp_tag, is_instinct=False):
             if any(k in t for k in ["frown", "皺眉", "皱眉", "八字眉", "困擾", "困扰", "委屈"]):
                 frown_timer = time.time() + 4.0
                 log_print("🥺 [Live2D 動作] 觸發傲嬌八字皺眉/委屈表情")
+                continue
+            if any(k in t for k in ["eye_roll", "白眼", "翻白眼", "鄙視", "不屑", "無語"]):
+                eye_roll_timer = time.time() + 3.0
+                is_tracking_mouse = False
+                log_print("🙄 [Live2D 動作] 觸發 7L 鄙視翻白眼")
                 continue
 
             found = VTS_EXPRESSION_MAP.get(t)

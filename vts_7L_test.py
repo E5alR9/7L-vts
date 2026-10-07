@@ -55,8 +55,7 @@ from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"), override=True)
 
 
-# 原作者本機版 EulerApiSdk 才有 record_string_unknown；PyPI 正式版沒有此符號
-# （且下方程式從未實際使用），故改為容錯 import，避免整支程式起不來。
+
 try:
     from EulerApiSdk.models import record_string_unknown  # noqa: F401
 except ImportError:
@@ -133,7 +132,7 @@ INTERACTIONS_TOOLS = [
         "parameters": {
             "type": "object",
             "properties": {
-                "expression_name": {"type": "string", "description": "表情名稱：happy, sad, shock, heart, shy, wink, frown, 臉紅, 生氣, 星星眼, 皺眉, 震驚 等"}
+                "expression_name": {"type": "string", "description": "表情/動作名稱：愛心, 星星眼, 臉紅, 哭哭, 生氣, 黑臉, 黑化, 暈暈, 流汗, 著急, 花花, 問號, 話筒(麥克風), 打遊戲, 雙馬尾, 右抬手, 左抬手, 比心, wink, 皺眉, 震驚, 白眼"}
             },
             "required": ["expression_name"]
         }
@@ -2345,9 +2344,7 @@ else:
 # ────────────────────────────────────────────────────────
 #  2. 模型清單與大腦池定義 (GEMINI_MODELS 7-Tier Matrix)
 # ────────────────────────────────────────────────────────
-#  功能目的：
-#    定義 7L 核心大腦的 8 大階梯模型順序，由超低延遲輕量模型優先秒回，
-#    並在複雜任務或高質量需求時自動升級至頂配旗艦大腦。
+
 
 GEMINI_MODELS = [
     # 第一防線：極速秒回前鋒
@@ -3507,8 +3504,7 @@ def is_7l_voice_echo(stt_text: str, is_dad_verified: bool = False) -> bool:
     #  1. 老爸專屬呼喚 / 指令前綴豁免保護 (支援半形與全形同音詞)：
     # 7L 自身發話絕不可能以「7L」、「阿七」、「CL」、「謝龍」自稱下指令
     call_names = [
-        "7l", "七l", "cl", "謝龍", "谢龙", "西l", "吸l", 
-        "奇l", "琪l", "期l", "氣l", "切爾", "琪兒", 
+        "7l", "七l",
         "阿七", "小七", "七妹", "7妹", "7哥", "七哥"
     ]
     if any(name in clean_stt for name in call_names):
@@ -5478,14 +5474,18 @@ async def continuous_live_worker(vts):
                             
                             # 為了防止 Google Live API 因為太久沒收到音訊封包而踢人 (1011 Timeout)，
                             # 必須「持續」將音訊推流過去，讓 Google 自己做 VAD 判斷。即使靜音也推送全 0 數據。
-                            async with ws_send_lock:
-                                await session.send_realtime_input(audio=types.Blob(data=data, mime_type="audio/pcm;rate=16000"))
-                                
+                            async def _send_main():
+                                async with ws_send_lock:
+                                    await session.send_realtime_input(audio=types.Blob(data=data, mime_type="audio/pcm;rate=16000"))
+                            
+                            async def _send_instinct():
+                                await INSTINCT_LIVE_SESSION.send_realtime_input(audio=types.Blob(data=data, mime_type="audio/pcm;rate=16000"))
+
+                            send_tasks = [_send_main()]
                             if INSTINCT_LIVE_SESSION:
-                                try:
-                                    # 平行將環境音訊串流給本能大腦
-                                    asyncio.create_task(INSTINCT_LIVE_SESSION.send_realtime_input(audio=types.Blob(data=data, mime_type="audio/pcm;rate=16000")))
-                                except Exception: pass
+                                send_tasks.append(_send_instinct())
+                                
+                            await asyncio.gather(*send_tasks, return_exceptions=True)
                             
                             if rms > 150:
                                 current_mic_action_str = "🎤 收音辨識中..."
