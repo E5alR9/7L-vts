@@ -3870,6 +3870,13 @@ async def execute_action_timeline(vts, timeline: list, cancel_event: asyncio.Eve
 
 async def play_voice_complete(text, target: str = "dad", raw_actions_text: str = "", vts=None):
     global current_ai_state, LAST_TTS_END_TIME, IS_MP3_PLAYING, MP3_ECHO_TRAILING_CHUNKS, CURRENT_SPEAKING_TARGET
+    global CURRENT_MOUTH_ENVELOPE, CURRENT_SPEECH_START_TIME, CURRENT_SMOOTH_MOUTH
+    
+    import services.auto_cover_pipeline as auto_cover
+    is_singing_now = globals().get("IS_SINGING_ACTIVE", False) or auto_cover.IS_SINGING_ACTIVE
+    backup_envelope = CURRENT_MOUTH_ENVELOPE if is_singing_now else None
+    backup_start_time = CURRENT_SPEECH_START_TIME if is_singing_now else 0.0
+
     if not text: return
     
     # 提早進行文字清理：把神態、語速、音高、工具呼叫等標籤過濾掉，只留下純淨的台詞
@@ -3969,7 +3976,6 @@ async def play_voice_complete(text, target: str = "dad", raw_actions_text: str =
             except Exception: pass
 
             #  播放與對嘴主迴圈（消費者）
-            global CURRENT_MOUTH_ENVELOPE, CURRENT_SPEECH_START_TIME, CURRENT_SMOOTH_MOUTH
             #  注意：第一段音訊生成完畢並開始播放前，絕不提前開啟 TALKING / IS_MP3_PLAYING，杜絕發聲前嘴巴空動
             timeline_cancel_event = asyncio.Event()
             timeline_task = None
@@ -4044,8 +4050,13 @@ async def play_voice_complete(text, target: str = "dad", raw_actions_text: str =
                             await asyncio.sleep(0.04)
 
                     total_actual_spoken_time += part_dur
-                    CURRENT_MOUTH_ENVELOPE = []
-                    CURRENT_SMOOTH_MOUTH = 0.0
+                    if is_singing_now and backup_envelope is not None:
+                        CURRENT_MOUTH_ENVELOPE = backup_envelope
+                        CURRENT_SPEECH_START_TIME = backup_start_time
+                        CURRENT_SMOOTH_MOUTH = 0.0
+                    else:
+                        CURRENT_MOUTH_ENVELOPE = []
+                        CURRENT_SMOOTH_MOUTH = 0.0
 
             finally:
                 if timeline_cancel_event:
@@ -4068,8 +4079,12 @@ async def play_voice_complete(text, target: str = "dad", raw_actions_text: str =
                         if os.path.exists(tf): os.remove(tf)
                     except Exception: pass
 
-                # 清除口型波形狀態
-                if not IS_SINGING_ACTIVE and current_ai_state != "SINGING":
+                # 清除或還原口型波形狀態
+                if is_singing_now and backup_envelope is not None:
+                    CURRENT_MOUTH_ENVELOPE = backup_envelope
+                    CURRENT_SPEECH_START_TIME = backup_start_time
+                    CURRENT_SMOOTH_MOUTH = 0.0
+                else:
                     CURRENT_MOUTH_ENVELOPE = []
                     CURRENT_SMOOTH_MOUTH = 0.0
                     CURRENT_SPEECH_START_TIME = 0.0
@@ -4749,7 +4764,7 @@ async def execute_speech_visual_actions(vts, text: str):
     if not text:
         return
         
-    exp_match = re.search(r'\[EXPRESSION:\s*([^\]\[]+)\]', text, re.IGNORECASE)
+    exp_match = re.search(r'\[EXPRESSION[：:]\s*([^\]\[]+)\]', text, re.IGNORECASE)
     if exp_match:
         exp_tag = exp_match.group(1).strip()
         if any(k in exp_tag.upper() for k in ["WINK", "眨眼", "單眼", "眨單眼"]):
@@ -5158,11 +5173,10 @@ def check_immediate_shutdown(text: str) -> bool:
     if clean_compact.endswith("了嗎") or clean_compact.endswith("了吗"):
         return False
 
-    #  目標判定：指名 7L / 7l / 七L / 阿七 / 小七 / 七妹，並加入中文語音常見同音詞 (謝龍 / CL / 西L 等)
+
     target_names = [
-        "7l", "七l", "cl", "謝龍", "谢龙", "西l", "吸l", 
-        "奇l", "琪l", "期l", "氣l", "切爾", "琪兒", 
-        "阿七", "小七", "七妹", "7妹", "7哥", "七哥"
+        "7l", "七l", 
+        "阿七", "小七"
     ]
     has_target = any(name in clean_compact for name in target_names)
 
@@ -5359,7 +5373,7 @@ async def instinct_live_worker():
                         text = c.output_transcription.text
                         import services.vts_client as vc
                         
-                        exp_match = re.search(r'\[EXPRESSION:\s*([^\]\[]+)\]', text, re.IGNORECASE)
+                        exp_match = re.search(r'\[EXPRESSION[：:]\s*([^\]\[]+)\]', text, re.IGNORECASE)
                         if exp_match:
                             exp_tag = exp_match.group(1).strip()
                             if any(k in exp_tag.upper() for k in ["WINK", "眨眼", "單眼", "眨單眼"]):
@@ -5509,7 +5523,7 @@ async def continuous_live_worker(vts):
                             c = resp.server_content
                             if c:
                                 if getattr(c, 'interrupted', False):
-                                    log_print("🛑 [Live 大腦] 偵測到老爸打斷，清空語音佇列！")
+                                    log_print("🛑 [Live 大腦] 偵測到新對話/環境指令打斷，清空舊語音佇列！")
                                     if CURRENT_PLAYING_VOICE_TASK and not CURRENT_PLAYING_VOICE_TASK.done():
                                         CURRENT_PLAYING_VOICE_TASK.cancel()
                                     while not speech_queue.empty():
@@ -5576,7 +5590,11 @@ async def continuous_live_worker(vts):
                                         turn_buffer = ""
                     except asyncio.CancelledError: pass
                     except Exception as e:
-                        log_print(f"⚠️ [接收串流錯誤] {e}")
+                        err_str = str(e).lower()
+                        if "goaway" in err_str or "1008" in err_str:
+                            log_print(f"⏱️ [Live 週期重置] 收到伺服器安全換班訊號 (15分鐘上限)")
+                        else:
+                            log_print(f"⚠️ [接收串流錯誤] {e}")
                         raise e
 
                 async def send_system_prompts_to_live():
@@ -5631,6 +5649,8 @@ async def continuous_live_worker(vts):
             err_str = str(e).lower()
             if any(w in err_str for w in ["limit", "exceed", "quota", "403", "429"]):
                 log_print(f"⚠️ [Live 連線超限 429] 模型 {live_models[current_m_idx]} 通道 G{current_k_idx} 耗盡。")
+            elif "goaway" in err_str or "1008" in err_str:
+                log_print(f"⏱️ [Live 週期重置] 模型 {live_models[current_m_idx]} 達到 15 分鐘安全連線上限 (GoAway)，準備無縫重連...")
             else:
                 log_print(f"❌ [Live 連線斷開] 模型 {live_models[current_m_idx]} 通道 G{current_k_idx} 遇阻: {e}")
                 
@@ -6558,8 +6578,9 @@ async def expression_keeper_worker(vts):
     
     while True:
         await asyncio.sleep(12.0)
-        if vc.CURRENT_ACTIVE_EXP:
-            try:
+        try:
+            active_exps = getattr(vc, "CURRENT_ACTIVE_EXPS", None)
+            if active_exps:
                 msg_state = {
                     "apiName": "VTubeStudioPublicAPI", 
                     "apiVersion": "1.0", 
@@ -6571,18 +6592,20 @@ async def expression_keeper_worker(vts):
                     resp_state = await asyncio.wait_for(vts.request(msg_state), timeout=1.0)
                 
                 expressions = resp_state.get("data", {}).get("expressions", [])
-                active_files = [exp.get("file") for exp in expressions if exp.get("active")]
-                if vc.CURRENT_ACTIVE_EXP not in active_files:
-                    async with vc.vts_lock:
-                        await asyncio.wait_for(vts.request({
-                            "apiName": "VTubeStudioPublicAPI",
-                            "apiVersion": "1.0",
-                            "requestID": "ForceActivate",
-                            "messageType": "ExpressionActivationRequest",
-                            "data": {"expressionFile": vc.CURRENT_ACTIVE_EXP, "active": True}
-                        }), timeout=0.8)
-            except Exception:
-                pass
+                vts_active_files = [exp.get("file") for exp in expressions if exp.get("active")]
+                
+                for exp_file in list(active_exps):
+                    if exp_file not in vts_active_files:
+                        async with vc.vts_lock:
+                            await asyncio.wait_for(vts.request({
+                                "apiName": "VTubeStudioPublicAPI",
+                                "apiVersion": "1.0",
+                                "requestID": "ForceActivate",
+                                "messageType": "ExpressionActivationRequest",
+                                "data": {"expressionFile": exp_file, "active": True}
+                            }), timeout=0.8)
+        except Exception:
+            pass
 
 async def anti_watermark_worker(vts):
     await asyncio.sleep(2.0)
@@ -6760,6 +6783,31 @@ async def speech_queue_worker(vts, input_queue):
             if not item:
                 continue
 
+            # 若正在唱歌，判斷接下來 3 秒是否有歌聲。若有，則暫停 TTS；若為空白伴奏，則允許插話！
+            import services.auto_cover_pipeline as auto_cover
+            is_singing = lambda: globals().get("IS_SINGING_ACTIVE", False) or auto_cover.IS_SINGING_ACTIVE
+            
+            def is_vocal_upcoming(window_sec=3.0):
+                if not is_singing(): return False
+                env = globals().get("CURRENT_MOUTH_ENVELOPE", [])
+                start_t = globals().get("CURRENT_SPEECH_START_TIME", 0)
+                if not env or not start_t: return True
+                current_t = time.time() - start_t
+                start_idx, end_idx = int(current_t * 25), int((current_t + window_sec) * 25)
+                if start_idx >= len(env): return False
+                window_data = env[start_idx:min(end_idx, len(env))]
+                return max(window_data) > 0.05 if window_data else False
+
+            if is_singing():
+                if is_vocal_upcoming(3.0):
+                    log_print("🎤 [語音佇列] 檢測到即將有歌聲，TTS 發言已暫停並排入等候區...")
+                    while is_singing() and is_vocal_upcoming(3.0):
+                        await asyncio.sleep(0.5)
+                    if is_singing():
+                        log_print("🎵 [語音佇列] 遇到伴奏空白區，抓緊時機插話！")
+                    else:
+                        log_print("🎵 [語音佇列] 唱歌結束，恢復 TTS 播放序列！")
+
             if isinstance(item, dict):
                 text = item.get("text", "")
                 target = item.get("target", "dad")
@@ -6829,7 +6877,9 @@ async def speech_queue_worker(vts, input_queue):
                     break
                 await asyncio.sleep(0.1)
             
-            if input_queue.empty() and speech_queue.empty() and not pe.is_piano_active:
+            import services.auto_cover_pipeline as auto_cover
+            is_singing = globals().get("IS_SINGING_ACTIVE", False) or auto_cover.IS_SINGING_ACTIVE
+            if input_queue.empty() and speech_queue.empty() and not pe.is_piano_active and not is_singing:
                 await set_vts_expression(vts, "_RESET_")
             
             if current_ai_state == "TALKING":
@@ -7570,28 +7620,43 @@ async def background_tool_executor(user_text: str, target: str = "dad", requeste
         matched_args = {}
         
         # 唱歌指令
-        sing_match = re.search(r'(?:唱|點歌)[:：\s]*([^，。！\!\]]+)', user_text)
+        sing_match = re.search(r'(?:唱|點歌)[:：\s]*[「『"”](.*?)[」』"”]', user_text)
+        if not sing_match:
+            sing_match = re.search(r'(?:唱|點歌)[:：\s]*([^，。！\!\]]+)', user_text)
+            
         if sing_match and not re.search(r'(?:不|別)唱', user_text):
             song = sing_match.group(1).strip()
-            if song:
+            song = re.sub(r'[嗎啊吧呢喔哦]+$', '', song).strip()
+            invalid_songs = ["", "歌", "一首", "一首歌", "什麼", "啥", "首歌", "些什麼", "點什麼", "歌嗎", "歌啊"]
+            if song and song not in invalid_songs:
                 matched_tool = "auto_sing_song"
                 matched_args = {"song_name": song}
                 
         # 鋼琴指令
         if not matched_tool:
-            piano_match = re.search(r'(?:彈琴|彈鋼琴|彈)[:：\s]*([^，。！\!\]]+)', user_text)
+            piano_match = re.search(r'(?:彈琴|彈鋼琴|彈)[:：\s]*[「『"”](.*?)[」』"”]', user_text)
+            if not piano_match:
+                piano_match = re.search(r'(?:彈琴|彈鋼琴|彈)[:：\s]*([^，。！\!\]]+)', user_text)
+                
             if piano_match and not re.search(r'(?:不|別)彈', user_text):
                 song = piano_match.group(1).strip()
-                if song:
+                song = re.sub(r'[嗎啊吧呢喔哦]+$', '', song).strip()
+                invalid_piano_songs = ["", "琴", "鋼琴", "一首", "一首曲子", "曲子", "什麼", "啥", "琴嗎", "琴啊"]
+                if song and song not in invalid_piano_songs:
                     matched_tool = "pe.play_virtual_piano"
                     matched_args = {"song_name": song}
                     
         # 搜尋指令
         if not matched_tool:
-            search_match = re.search(r'(?:搜尋|上網查|幫我查)[:：\s]*([^，。！\!\]]+)', user_text)
+            search_match = re.search(r'(?:搜尋|上網查|幫我查)[:：\s]*[「『"”](.*?)[」』"”]', user_text)
+            if not search_match:
+                search_match = re.search(r'(?:搜尋|上網查|幫我查)[:：\s]*([^，。！\!\]]+)', user_text)
+                
             if search_match and not re.search(r'(?:不|別)查', user_text):
                 query = search_match.group(1).strip()
-                if query:
+                query = re.sub(r'[嗎啊吧呢喔哦]+$', '', query).strip()
+                invalid_queries = ["", "什麼", "啥", "一下"]
+                if query and query not in invalid_queries:
                     matched_tool = "search_web_background"
                     matched_args = {"query": query}
                     
@@ -8287,6 +8352,8 @@ async def chat_processor_worker(vts, input_queue):
                 # VTuber 模式：擁有者公開帳號留言視同觀眾（無特權；插話請走 /api/interject）
                 if is_dad_account and operator_input_enabled():
                     log_print(f"👑 [老爸幕後指令] 收到老爸在直播間留言: {aud_c}")
+                    # 同樣為老爸的指令進行 CPU 極速指令攔截，確保點歌等指令能秒級觸發
+                    asyncio.create_task(background_tool_executor(aud_c, target="dad", requester_name=id_display, fallback_ai=False))
                     current_dad_task = asyncio.create_task(
                         process_chat_message(vts, input_queue, aud_c, None, request_start_time=req_time, source="tiktok_dad")
                     )
@@ -8994,6 +9061,17 @@ async def main():
             voiceprint_verifier.reload_voiceprint()
         except Exception as e:
             print(f"⚠️ 聲紋綁定過程發生錯誤: {e}")
+
+    # 🔥 GPT-SoVITS 曉伊模型預熱（提早至 main 最前端）：在背景 Thread 初始化，與 RAG / 記憶 / VTS 連線並行，避免第一句說話卡頓
+    # ⚠️ init_gpt_sovits() 內部會暫時 os.chdir(GPT-SoVITS)，此期間其他程式碼請使用絕對路徑
+    def _prewarm_xiaoyi():
+        try:
+            import local_xiaoyi_service
+            local_xiaoyi_service.init_gpt_sovits()
+            log_print("🟢 [GPT-SoVITS 預熱完成] 7L 本地顯卡語音引擎已就緒！")
+        except Exception as e:
+            log_print(f"⚠️ [GPT-SoVITS 預熱跳過]: {e}")
+    asyncio.create_task(asyncio.to_thread(_prewarm_xiaoyi))
             
     try:
         rag_service.init_rag(GEMINI_KEYS[0])
@@ -9011,7 +9089,9 @@ async def main():
     #  載入或初始化全集中全景時序記憶中樞
     init_unified_memory()
 
-    plugin_info = {"plugin_name": "7L_AI_VTuber", "developer": "e5_Studio", "authentication_token_path": "./vts_token.txt"}
+    # 使用絕對路徑：避免 GPT-SoVITS 預熱期間 os.chdir 導致讀不到 Token 而重新要求授權
+    _vts_token_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vts_token.txt")
+    plugin_info = {"plugin_name": "7L_AI_VTuber", "developer": "e5_Studio", "authentication_token_path": _vts_token_path}
     vts = RobustVTSClient(plugin_info=plugin_info)
     
     vc.GLOBAL_VTS = vts
@@ -9048,15 +9128,7 @@ async def main():
     GLOBAL_INPUT_QUEUE = input_queue
     
     # 啟動全部背景協程
-    # 🔥 GPT-SoVITS 曉伊模型預熱：在背景 Thread 初始化，避免第一句說話卡頓
-    def _prewarm_xiaoyi():
-        try:
-            import local_xiaoyi_service
-            local_xiaoyi_service.init_gpt_sovits()
-            log_print("🟢 [GPT-SoVITS 預熱完成] 7L 本地顯卡語音引擎已就緒！")
-        except Exception as e:
-            log_print(f"⚠️ [GPT-SoVITS 預熱跳過]: {e}")
-    asyncio.create_task(asyncio.to_thread(_prewarm_xiaoyi))
+    # （GPT-SoVITS 預熱已提早至 main() 開頭啟動）
     asyncio.create_task(mic_volume_worker())
     # ── 提前載入雲端 MODE_TOGGLE，取代 .env ──
     try:
