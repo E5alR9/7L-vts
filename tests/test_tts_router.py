@@ -123,6 +123,5 @@ def test_get_active_engine_initially_none_or_registered():
     assert ae is None or ae in t._ENGINES
 
 
-def test_kokoro_voice_defaults_present():
+def test_voice_defaults_present():
     assert t.ZH_VOICE, "中文聲線不可為空"
-    assert t.EN_VOICE, "英文聲線不可為空"

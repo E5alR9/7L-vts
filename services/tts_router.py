@@ -45,7 +45,6 @@ if not ENGINE_CHAIN:
 
 ZH_VOICE = os.getenv("TTS_ZH_VOICE") or "zf_001"
 JA_VOICE = os.getenv("TTS_JA_VOICE") or "edge"
-EN_VOICE = os.getenv("TTS_EN_VOICE") or "af_sol"
 TTS_SPEED = float(os.getenv("TTS_SPEED") or "1.0")
 
 _active_engine: Optional[str] = None
@@ -189,7 +188,7 @@ def detect_language(text: str) -> str:
     - 中日混合句仍判 zh（整句是中文），但中文路徑會先把假名音譯
       （transliterate_kana_to_zh），所以聲線不會唸爛片假名。
     - 全漢字日文（無假名）啟發式無解，維持 zh；純英文維持 zh（引擎鏈無 EN
-      聲線可接，接了也沒地方去——見 _ENGINES／EN_VOICE 仍是舊 kokoro 殘留）。
+      聲線可接，接了也沒地方去——kokoro 引擎與 EN_VOICE 已同步清掉）。
     """
     num_kana = len(re.findall(r'[\u3040-\u309F\u30A0-\u30FF\uFF61-\uFF9F]', text))
     num_hanzi = len(re.findall(r'[\u4E00-\u9FFF]', text))

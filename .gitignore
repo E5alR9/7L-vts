@@ -115,3 +115,6 @@ backup_before_revert_20261008/
 data_backup_before_sync/
 *.onnx
 *.bin
+
+# --- 運行時記憶/狀態資料（本機狀態，不上版控、不進 GitHub 鏡像）---
+data/*.json

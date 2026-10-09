@@ -566,7 +566,7 @@ from core.utils import (
     record_interaction_tick, get_silence_ticks, get_uptime_ticks, format_ticks_to_human,
     speech_allowed, operator_input_enabled
 )
-from core.hard_command import parse_hard_command, build_slip_text, display_requester, parse_slip_for_song
+from core.hard_command import parse_hard_command, build_slip_text, display_requester, parse_slip_for_song, strip_blob_noise, sanitize_search_query
 from core.subagent_router import resolve_subagent_chain
 from core.db import *
 from core.live_timer_sensor import live_timer_hub
@@ -1806,7 +1806,15 @@ async def fetch_fast_text_reply(user_input: str, custom_name: str, situation_pro
                             log_print(f"🛠️ [極速大腦調用工具] {fn_name}({fn_args})")
                             fast_target = "audience" if tt_parsed else "dad"
                             fast_user = audience_user if tt_parsed else "老爸"
-                            asyncio.create_task(execute_tool_dispatch(fn_name, fn_args, caller_target=fast_target, caller_user=fast_user))
+                            if fn_name == "trigger_vts_expression":
+                                # 表情 direct 執行（同 CPU 路徑：dispatch 回傳被丟棄、標籤沒人唸＝不會動）
+                                try:
+                                    asyncio.create_task(trigger_vts_expression(
+                                        (fn_args or {}).get("expression_name", "")))
+                                except Exception:
+                                    pass
+                            else:
+                                asyncio.create_task(execute_tool_dispatch(fn_name, fn_args, caller_target=fast_target, caller_user=fast_user))
                             txt += f" [OUTCOME: {fn_name}({fn_args})] [HAD_TOOL_CALL]"
                             
                     if txt:
@@ -2585,7 +2593,6 @@ latest_screen_cache = None
 LATEST_HD_SCREEN_BYTES = None  #  原生 100% 超高清全解析度截圖緩存 (4K/原生，供燈箱放大檢視)
 SCREEN_TEMPORAL_HISTORY = deque(maxlen=60)  #  螢幕時序動態連續影格緩衝區（每 1.8s 一幀，保留最多 60 幀 ≈ 108 秒歷史）
 LAST_VISION_LOOK_TIME = 0.0  #  上次餘光「認真看」的時間，用於切取時序動態幀
-current_voice_task = None
 last_spoken_text = ""
 
 IS_MIC_ENABLED = False
@@ -5639,12 +5646,18 @@ async def continuous_live_worker(vts):
                                     text_chunk = c.output_transcription.text
                                     
                                     import re
+                                    # 先拔 blob（腦偶爾會吐幾 MB 的 base64 音訊；不先清，正則橫跨、
+                                    # 日誌刷屏、搜尋燒額度、TTS 會去唸亂碼——一律視為雜訊）
+                                    text_chunk = strip_blob_noise(text_chunk)
                                     search_match = re.search(r'\[TOOL:SEARCH\]\s*(.*?)(?=\[|$)', text_chunk)
                                     if search_match:
-                                        query = search_match.group(1).strip()
-                                        log_print(f"🌐 [攔截暗號] 啟動平行代理人：搜網專家！關鍵字：{query}")
+                                        query = sanitize_search_query(search_match.group(1))
                                         text_chunk = text_chunk.replace(search_match.group(0), "").strip()
-                                        asyncio.create_task(live_search_tool_task(session, query))
+                                        if query:
+                                            log_print(f"🌐 [攔截暗號] 啟動平行代理人：搜網專家！關鍵字：{query}")
+                                            asyncio.create_task(live_search_tool_task(session, query))
+                                        else:
+                                            log_print(f"⚠️ [攔截暗號] 搜尋關鍵字全是雜訊，跳過不搜。")
                                     if "[TOOL:VISION]" in text_chunk:
                                         log_print("⚡ [攔截暗號] 啟動平行代理人：視覺大腦！")
                                         text_chunk = text_chunk.replace("[TOOL:VISION]", "").strip()
@@ -7008,9 +7021,6 @@ async def background_system_task(vts, input_queue, user_input, stage1_text, syst
     
     clean_bot_reply = re.sub(r"(?:\[|\|\|)?(NEW_NAME|NEW_IMPRESSION|改稱呼|記印象)[：:].*", "", raw_stage2_text, flags=re.IGNORECASE|re.DOTALL)
     
-    if current_voice_task and not current_voice_task.done():
-        current_voice_task.cancel()
-    
     spoken = await execute_actions(vts, clean_bot_reply, input_queue, caller_target="dad", caller_user="老爸")
     clean_spoken = spoken.strip(" *'\"-.,!?。，！？\n\r") if spoken else ""
     if clean_spoken:
@@ -7929,7 +7939,15 @@ async def nv_interpret_task(task_ins: str, target: str = "dad", requester_name: 
                     return "tool", f"[系統底層：搜網專家回報（轉述給{requester_name or '大家'}聽，不要照唸）：{_sum}]"
                 except Exception as _se:
                     return "tool", f"[系統底層：搜網專家查詢失敗（{str(_se)[:60]}），請跟{requester_name or '大家'}說待會再查。]"
-            asyncio.create_task(execute_tool_dispatch(fn_name, fn_args, caller_target=target, caller_user=requester_name))
+            if fn_name == "trigger_vts_expression":
+                # 表情直接執行（同 CPU 路徑理由：dispatch 只排字不執行）
+                try:
+                    asyncio.create_task(trigger_vts_expression(
+                        (fn_args or {}).get("expression_name", "")))
+                except Exception:
+                    pass
+            else:
+                asyncio.create_task(execute_tool_dispatch(fn_name, fn_args, caller_target=target, caller_user=requester_name))
             # ⚠️ 同 CPU 路徑：唱歌/彈琴紙條必須寫明演唱者是 7L 本人，避免主腦說成「老爸唱的」
             return "tool", build_slip_text(fn_name, fn_args, requester_name, via="")
         # —— 第二棒：深度思考（第一棒乾淨無調用才到這裡；聰明的活優先給 NV）——
@@ -8028,7 +8046,16 @@ async def background_tool_executor(user_text: str, target: str = "dad", requeste
         slip_text = ""
         if fn_name:
             log_print(f"⚡ [CPU 硬體直連] 成功攔截指令: {fn_name}({fn_args})")
-            asyncio.create_task(execute_tool_dispatch(fn_name, fn_args, caller_target=target, caller_user=requester_name))
+            if fn_name == "trigger_vts_expression":
+                # 表情指令直接執行（execute_tool_dispatch 只會排字、不會執行；
+                # REST 路徑靠口語標籤執行，這裡走 direct 才會動）
+                try:
+                    asyncio.create_task(trigger_vts_expression(
+                        (fn_args or {}).get("expression_name", "")))
+                except Exception:
+                    pass
+            else:
+                asyncio.create_task(execute_tool_dispatch(fn_name, fn_args, caller_target=target, caller_user=requester_name))
             # ⚠️ 紙條必須寫明「唱歌的是 7L 本人」，否則主腦會把點歌的人當成演唱者
             slip_text = build_slip_text(fn_name, fn_args, requester_name)
         else:
@@ -8672,8 +8699,6 @@ async def chat_processor_worker(vts, input_queue):
                     current_dad_task.cancel()
                     if interrupted_msg:
                         log_print(f"⚡ [思考打斷記憶] 已暫存前一秒被中斷的話語：「{interrupted_msg}」")
-                if current_voice_task and not current_voice_task.done():
-                    current_voice_task.cancel()
                 
                 CURRENT_PROCESSING_USER_INPUT = user_input
                 #  立即啟動主腦深度思考任務（帶入被打斷的前文）
@@ -8753,7 +8778,7 @@ async def chat_processor_worker(vts, input_queue):
                 tk_listener.current_tiktok_status_str = f"[ {user_input[:20]}]"
                 is_piano_playing = pe.GLOBAL_PIANO_REALTIME_STATE.get("is_playing", False)
                 # 若 7L 正在彈琴、或老爸正在說話/主腦正在思考，直接靜默丟棄瑣碎動態
-                if is_piano_playing or (current_dad_task and not current_dad_task.done()) or (current_voice_task and not current_voice_task.done()):
+                if is_piano_playing or (current_dad_task and not current_dad_task.done()):
                     input_queue.task_done()
                     continue
             else:
@@ -9166,9 +9191,6 @@ async def proactive_worker(vts, input_queue):
             bot_reply = re.sub(r"(?:\[|\|\|)?(NEW_NAME|NEW_IMPRESSION|改稱呼|記印象)[：:].*", "", bot_reply, flags=re.IGNORECASE|re.DOTALL)
             bot_reply = re.sub(r"\[SILENCE\].*", "", bot_reply, flags=re.IGNORECASE).strip()
             
-            if current_voice_task and not current_voice_task.done():
-                current_voice_task.cancel()
-
             #  自主發話時自然轉動眼珠環視（若大腦未指定其他視線）
             if not pe.is_piano_active and not any(k in bot_reply.upper() for k in ["LOOK:", "WINK", "SHOCK", "FROWN"]):
                 vc.eye_roll_timer = time.time() + 3.5
