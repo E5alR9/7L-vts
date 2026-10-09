@@ -943,7 +943,7 @@ async def execute_tool_dispatch(fn_name: str, fn_args: dict, caller_target: str 
         req_u = caller_user or "觀眾"
         vw_res = await video_watch.request_watch(vw_url, requester=req_u)
         if vw_res.get("ok"):
-            extracted_text += f" （系統回報：已排入點播隊列，看完播報）" if vw_res.get("queued") else f" （系統回報：該片已在隊列中）"
+            extracted_text += " （系統回報：已排入點播隊列，看完播報）" if vw_res.get("queued") else " （系統回報：該片已在隊列中）"
         else:
             extracted_text += f" （系統回報：點播失敗：{vw_res.get('error', '')}）"
     elif fn_name in ["pe.compose_and_play_original_piano", "compose_and_play_original_piano"]:
@@ -1154,7 +1154,6 @@ async def fetch_ai_response(messages, image_base64=None, audio_base64=None, is_p
         TOTAL_API_CALLS += 1
     except Exception:
         pass
-    used_eye = "無"
     overall_start_time = request_start_time if request_start_time else time.time()
 
     # 防卡死機制：讓渡運算權，確保皮套滑順
@@ -1647,7 +1646,6 @@ async def fetch_ai_response(messages, image_base64=None, audio_base64=None, is_p
                 pass
                 
         if local_desc:
-            used_eye = "gemini-lite"
             if messages and messages[-1]["role"] == "user": 
                 inject_text = f"\n\n【備用視覺情報】：畫面描述: {local_desc}\n【鐵律】：畫面上的白色箭頭代表老爸當前的滑鼠游標。請注意：【除非滑鼠正指著某個你覺得很有趣、或特別值得注意的東西，否則請自然看待，不需要刻意強調滑鼠位置】。自然流暢表達，不限制說話長度！"
                 
@@ -2608,7 +2606,6 @@ CURRENT_VISION_CHANGE_LEVEL = "none"
 CURRENT_VISION_CHANGE_SCORE = 0
 
 def record_api_call_latency(duration_sec: float):
-    global API_LATENCY_HISTORY
     if duration_sec and duration_sec > 0.05:
         API_LATENCY_HISTORY.append(round(duration_sec, 2))
 
@@ -4525,11 +4522,6 @@ def get_system_performance():
         cpu_usage = psutil.cpu_percent(interval=0.3)
         memory = psutil.virtual_memory()
         memory_usage = memory.percent
-        gpu_name = "未知顯示卡"
-        
-        result = subprocess.run(["wmic", "path", "win32_videocontroller", "get", "name"], capture_output=True, text=True, shell=True)
-        lines = [line.strip() for line in result.stdout.split("\n") if line.strip() and "Name" not in line]
-        if lines: gpu_name = lines[0]
 
         process_list = []
         for proc in psutil.process_iter(['name', 'memory_percent']):
@@ -4741,9 +4733,6 @@ async def execute_actions(vts, text, input_queue, user_input_ctx: str = "", has_
     if extracted_thought:
         text = text_without_thought
 
-    if bool(re.search(r'\[HAD_TOOL_CALL\]', text, re.IGNORECASE)):
-        has_dispatched_tool = True
-
     #  7L 自主雲端大腦演進標籤攔截 [UPDATE_PROMPT: ...] / [ADD_EXAMPLE: ...] / [LEARN_MEME: ...] / [LEARN_FACT: ...] / [UPDATE_RULE: ...]
     for up in re.finditer(r'\[(?:UPDATE_PROMPT|UPDATE_KNOWLEDGE|SET_PROMPT)[：:]\s*([^|\]]+)\|([^\]]+)\]', text, re.IGNORECASE):
         f_name = up.group(1).strip()
@@ -4933,7 +4922,6 @@ async def execute_actions(vts, text, input_queue, user_input_ctx: str = "", has_
                     except Exception:
                         pass
             asyncio.create_task(_safe_run_intercepted_tool(func(match), cmd_name, t_name, t_call_start))
-            has_dispatched_tool = True
             text = text.replace(match.group(0), "")
 
     url_match = re.search(r'\[OPEN_BROWSER:\s*([^\]]+)\]', text, re.IGNORECASE)
@@ -5240,6 +5228,8 @@ LIVE_CONTEXT_MEMORY = []
 
 GLOBAL_LIVE_SESSION = None
 INSTINCT_LIVE_SESSION = None
+# 本能會話發送鎖：音訊流（每 0.5 秒）與文字轉送共用，避免併發插隊失敗
+_INSTINCT_SEND_LOCK = asyncio.Lock()
 # Live 主腦存活旗標：SDK 的 session 物件沒有 .active 屬性，
 # 用此旗標追蹤連線狀態（connect 成功置 True，斷線/重連置 False）
 LIVE_SESSION_ACTIVE = False
@@ -5335,7 +5325,7 @@ async def instinct_live_worker():
 
 async def continuous_live_worker(vts):
     """真・雙向串流 Live 大腦核心"""
-    global current_ai_state, current_mic_action_str, LATEST_REALWORLD_SPEECH_TIME, CURRENT_PLAYING_VOICE_TASK, GLOBAL_LIVE_SESSION, LIVE_SESSION_ACTIVE
+    global GLOBAL_LIVE_SESSION, LIVE_SESSION_ACTIVE
     log_print("🚀 啟動 7L 真・雙向串流 Live 大腦 (Continuous Stream)...")
     
     try:
@@ -5404,7 +5394,7 @@ async def continuous_live_worker(vts):
                 LIVE_SESSION_ACTIVE = True
                 log_print(f"✅ 已成功連線至 Live API！模型: {live_m} (通道 G{current_k_idx}) 麥克風持續收音中...")
                 if recent_ctx and recent_ctx.strip():
-                    log_print(f"🧠 [記憶恢復] 已向新連線的系統提示中注入最新對話歷史記憶。")
+                    log_print("🧠 [記憶恢復] 已向新連線的系統提示中注入最新對話歷史記憶。")
                 # 🛟 斷線救援：上個 session 吞掉的點歌紙條，在這裡撿回來
                 # （只救確定無人認領的點歌；去重＋120 秒案底保證不重複執行）
                 try:
@@ -5418,7 +5408,7 @@ async def continuous_live_worker(vts):
                 ws_send_lock = asyncio.Lock()  # 新增併發鎖，避免音訊跟文字搶通道
                 
                 async def send_mic_audio():
-                    global current_mic_action_str, LATEST_REALWORLD_SPEECH_TIME, CURRENT_PLAYING_VOICE_TASK
+                    global current_mic_action_str, LATEST_REALWORLD_SPEECH_TIME
                     try:
                         while True:
                             data = await asyncio.to_thread(stream.read, CHUNK, exception_on_overflow=False)
@@ -5438,7 +5428,8 @@ async def continuous_live_worker(vts):
                                     await session.send_realtime_input(audio=types.Blob(data=data, mime_type="audio/pcm;rate=16000"))
                             
                             async def _send_instinct():
-                                await INSTINCT_LIVE_SESSION.send_realtime_input(audio=types.Blob(data=data, mime_type="audio/pcm;rate=16000"))
+                                async with _INSTINCT_SEND_LOCK:
+                                    await INSTINCT_LIVE_SESSION.send_realtime_input(audio=types.Blob(data=data, mime_type="audio/pcm;rate=16000"))
 
                             send_tasks = [_send_main()]
                             if INSTINCT_LIVE_SESSION:
@@ -5459,7 +5450,6 @@ async def continuous_live_worker(vts):
                         raise e
 
                 async def receive_from_live():
-                    global CURRENT_PLAYING_VOICE_TASK
                     chunk_buffer = ""
                     turn_buffer = ""
                     user_transcription_buffer = ""
@@ -5590,7 +5580,7 @@ async def continuous_live_worker(vts):
                                             log_print(f"🌐 [攔截暗號] 啟動平行代理人：搜網專家！關鍵字：{query}")
                                             asyncio.create_task(live_search_tool_task(session, query))
                                         else:
-                                            log_print(f"⚠️ [攔截暗號] 搜尋關鍵字全是雜訊，跳過不搜。")
+                                            log_print("⚠️ [攔截暗號] 搜尋關鍵字全是雜訊，跳過不搜。")
                                     if "[TOOL:VISION]" in text_chunk:
                                         log_print("⚡ [攔截暗號] 啟動平行代理人：視覺大腦！")
                                         text_chunk = text_chunk.replace("[TOOL:VISION]", "").strip()
@@ -5622,7 +5612,7 @@ async def continuous_live_worker(vts):
                     except Exception as e:
                         err_str = str(e).lower()
                         if "goaway" in err_str or "1008" in err_str:
-                            log_print(f"⏱️ [Live 週期重置] 收到伺服器安全換班訊號 (15分鐘上限)")
+                            log_print("⏱️ [Live 週期重置] 收到伺服器安全換班訊號 (15分鐘上限)")
                         else:
                             log_print(f"⚠️ [接收串流錯誤] {e}")
                         raise e
@@ -5748,7 +5738,6 @@ async def mic_worker(recognizer, input_queue):
                         continue
 
                     # 0.1 純 wav 波形對比：判斷麥克風是否錄到電腦正在播放的聲音 (AEC)
-                    global GLOBAL_SPEECH_AUDIO_BUFFER
                     if len(GLOBAL_SPEECH_AUDIO_BUFFER) > 10:
                         import io, wave, numpy as np
                         sys_chunks = list(GLOBAL_SPEECH_AUDIO_BUFFER)
@@ -5770,7 +5759,7 @@ async def mic_worker(recognizer, input_queue):
                         
                         mic_wav_bytes = base64.b64decode(audio_b64)
                         if check_is_echo_by_waveform(mic_wav_bytes, sys_wav_bytes, threshold=0.25):
-                            log_print(f"🔇 [純 WAV 音頻對比] 發現麥克風波形與電腦輸出高度重合 (AEC)，判定為喇叭回音，已濾除")
+                            log_print("🔇 [純 WAV 音頻對比] 發現麥克風波形與電腦輸出高度重合 (AEC)，判定為喇叭回音，已濾除")
                             continue
 
                 #  1. 毫秒級即時關機 / 重開機指令攔截 (最高優先權，支援 7L / 謝龍 / CL 等同音指令)
@@ -5940,7 +5929,7 @@ async def peripheral_vision_worker():
     - 深度眼睛：唯有 Live 哨兵判定出現全新重大視窗/報錯/事件時，才喚醒 3.1-flash-lite 認真細看一次！
     - 徹底告別每 20 秒無謂消耗 3.1-flash-lite 說話額度的浪費行為。
     """
-    global current_screen_context, LAST_SCREEN_MD5_HASH, HAS_INITIAL_VISION_LOOK, LAST_VISION_LOOK_TIME
+    global HAS_INITIAL_VISION_LOOK, LAST_VISION_LOOK_TIME
     
     while True:
         # 依據畫面變化程度動態調整哨兵巡邏頻率
@@ -6044,10 +6033,6 @@ async def identify_system_music_and_sound(wav_bytes: bytes) -> str:
     if now - LAST_MUSIC_IDENTIFY_TIME < 15.0:
         return LATEST_SYSTEM_MUSIC_INFO
     LAST_MUSIC_IDENTIFY_TIME = now
-
-    screen_clue = ""
-    if current_screen_context and current_screen_context != "目前沒有特別的畫面動態。":
-        screen_clue = current_screen_context.strip().replace("\n", " ")
 
     #  1. Windows 原生硬體級 GSMTC 媒體播放器底層情報提取 (嚴格排除已暫停或無視訊狀態)
     media_clues = []
@@ -6159,7 +6144,7 @@ async def identify_system_music_and_sound(wav_bytes: bytes) -> str:
 async def system_audio_worker():
     """ 即時電腦內部全系統聲音感知與內錄協程 (WASAPI Loopback 實時耳目)"""
     global current_system_audio_context, LATEST_SYSTEM_AUDIO_RMS, LATEST_SYSTEM_AUDIO_TEXT
-    global LATEST_SYSTEM_AUDIO_TEXT_TIME, CURRENT_SYSTEM_AUDIO_VOL_PERCENT
+    global CURRENT_SYSTEM_AUDIO_VOL_PERCENT
     global LATEST_SYSTEM_MUSIC_INFO, LATEST_SYSTEM_MUSIC_TIME, LAST_MUSIC_IDENTIFY_TIME
     
     log_print("🎧 [聲音感知] 7L 電腦內部全系統聲音監聽系統 (WASAPI Loopback) 已就緒！")
@@ -6208,7 +6193,6 @@ async def system_audio_worker():
                     speech_audio_buffer.append(data)
                     music_audio_buffer.append(data)
                     
-                    global GLOBAL_SPEECH_AUDIO_BUFFER
                     GLOBAL_SPEECH_AUDIO_BUFFER.append(data)
 
                     #  若 7L 自身正在唱歌，電腦聲音為 7L 歌聲，略過 STT 與音樂猜測，防止自己被自己打斷
@@ -6604,7 +6588,7 @@ async def _ai_face_tracking_loop_impl(vts):
                     await asyncio.wait_for(vts.request(vts_data), timeout=0.5)
 
             t = (t if isinstance(t, (int, float)) else 0.0) + 0.08
-        except Exception as loop_err:
+        except Exception:
             t = 0.0
 
         await asyncio.sleep(0.04)
@@ -7413,7 +7397,7 @@ async def streamer_mind_loop_worker(vts, input_queue):
 {role_strict_block}
 
 【 直播現場精準時序記憶（掌握現場最新話題脈絡）】：
-{get_unified_memory_context(limit=15, thought_char_limit=200)}
+{get_unified_memory_context(limit=15, thought_char_limit=0)}
 
 【 剛剛收到的最新彈幕】：
 {board_context}
@@ -7832,8 +7816,17 @@ async def _resolve_expression(exp_name: str, speaker: str = "") -> str:
         try:
             who = (speaker or "老爸").strip() or "老爸"
             cmd = "恢復正常表情" if exp_name.strip().lower() in vc._RESET_WORDS else f"做{exp_name}表情"
-            await sess.send_realtime_input(text=f"[{who}說：{cmd}]")
-            if await vc.wait_expression_active(exp_name, timeout=2.5):
+            sent = False
+            for _try in range(2):  # 發一次＋重試一次（音訊流併發插隊偶發失敗）
+                try:
+                    async with _INSTINCT_SEND_LOCK:
+                        await sess.send_realtime_input(text=f"[{who}說：{cmd}]")
+                    sent = True
+                    break
+                except Exception as se:
+                    log_print(f"⚠️ [本能表情轉送重試 {_try}]: {se}")
+                    await asyncio.sleep(0.3)
+            if sent and await vc.wait_expression_active(exp_name, timeout=2.5):
                 log_print(f"🦊 [本能表情] 本能腦已做出 {exp_name}，NV 備用不啟動。")
                 return "instinct"
             log_print(f"⚠️ [本能表情] 本能腦 2.5 秒沒接住 {exp_name}，NV 備用執行。")
@@ -8011,7 +8004,7 @@ async def background_tool_executor(user_text: str, target: str = "dad", requeste
             slip_text = build_slip_text(fn_name, fn_args, requester_name)
         else:
             # CPU 沒命中就交還；AI 解讀一律走 A 架構（invoke_subagent → nv_interpret_task），這裡不燒 API
-            log_print(f"🤖 [CPU 拆解] 無硬指令，交還主腦處理。")
+            log_print("🤖 [CPU 拆解] 無硬指令，交還主腦處理。")
             return False, "", {}
                 
         # 如果是 Live Session 啟動狀態，發送背景通知紙條給主腦
@@ -8057,7 +8050,7 @@ async def process_chat_message(vts, input_queue, user_input: str, user_audio_b64
                     LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait(f"[黑板同步] {owner}傳來文字訊息：{user_input}")
                 except Exception: pass
                 
-                log_print(f"⚡ [極速直通主腦] Live 模式下，控制台訊息已轉交 Live 大腦處理。")
+                log_print("⚡ [極速直通主腦] Live 模式下，控制台訊息已轉交 Live 大腦處理。")
                 # 老爸明確指令（唱歌/彈琴）走 CPU 硬拆解先斬後奏：零成本零幻覺，
                 # 紙條照樣遞（主腦只負責口頭答應），Live 不調工具也不會漏執行
                 asyncio.create_task(background_tool_executor(user_input, target="dad", requester_name=owner))
@@ -8129,9 +8122,6 @@ async def process_chat_message(vts, input_queue, user_input: str, user_audio_b64
             saved_local_path = save_local_audio_clip(effective_audio_b64)
             if saved_local_path:
                 log_print(f"🎙️ [本機音訊快取] 語音 WAV 已保存至本機: {os.path.basename(saved_local_path)}")
-        live_audio_emotion_prompt = ""
-        clean_spoken1 = ""
-        stage1_raw = ""
 
         #  7L 自主判定記憶與感知需求深度（自適應調節：拒絕無腦強塞幾十句歷史導致大腦思考卡頓！）
         mem_decision = evaluate_memory_demand(
@@ -8170,7 +8160,6 @@ async def process_chat_message(vts, input_queue, user_input: str, user_audio_b64
 
         #  依據自主判定配額動態調取歷史記憶（h_lim=0 時 0 毫秒秒過，完全不讀舊資料庫；最高調取上百句）
         history = (await fetch_from_long_term_memory(DEFAULT_CHANNEL_ID, user_input, limit=max(h_lim, 150))) if h_lim > 0 else []
-        recent_chat_prompt = ""
         #  1. 統一寫入全集中大腦記憶看板 (STREAMER_MIND_BOARD & 全局記憶中樞)
         add_to_streamer_mind_board(
             user_display=current_custom_name,
@@ -8182,11 +8171,11 @@ async def process_chat_message(vts, input_queue, user_input: str, user_audio_b64
         #  2. 老爸發話全面直通主腦 (廢除麥克風潛意識哨兵，0 秒極速處理)
         is_direct_event = True
         sentry_decision = {"should_speak": True, "focus": "老爸發話/直通主腦"}
-        log_print(f"⚡ [極速直通主腦] 老爸麥克風指令 ➔ 0秒跳過潛意識哨兵，立即由主腦秒級開口！")
+        log_print("⚡ [極速直通主腦] 老爸麥克風指令 ➔ 0秒跳過潛意識哨兵，立即由主腦秒級開口！")
         
         if is_live_brain_active():
             # 若為 Live 模式，在此處攔截，不往下執行 REST 雙架構！
-            log_print(f"⚡ [Live 模式切換] 偵測到 Live API 運行中，取消舊的 REST 主腦與影子大腦呼叫，避免雙重觸發！")
+            log_print("⚡ [Live 模式切換] 偵測到 Live API 運行中，取消舊的 REST 主腦與影子大腦呼叫，避免雙重觸發！")
             
             if source == "tiktok_dad":
                 # 老爸直播間留言的硬指令同樣先過 CPU（零成本），再遞紙條給 Live 主腦接話
@@ -8225,7 +8214,7 @@ async def process_chat_message(vts, input_queue, user_input: str, user_audio_b64
         #  注入動態時序記憶（由 7L 自主裁剪至最適長度，拒絕多餘負擔拖慢速度）
         if th_lim > 0:
             unified_mem_prompt = f"""【 直播現場潛意識與背景事件（7L 最近 {th_lim} 字內心流動與動作）】：
-{get_unified_memory_context(limit=u_lim, thought_char_limit=th_lim, include_dialogue=False)}"""
+{get_unified_memory_context(limit=u_lim, thought_char_limit=0, include_dialogue=False)}"""
         else:
             unified_mem_prompt = ""
 
@@ -8257,7 +8246,7 @@ async def process_chat_message(vts, input_queue, user_input: str, user_audio_b64
         async def run_shadow_brain():
             try:
                 await fetch_ai_response(shadow_msgs, image_base64=current_screen_snapshot, is_proactive=True, request_start_time=req_start)
-            except Exception as e:
+            except Exception:
                 pass
         asyncio.create_task(run_shadow_brain())
         
@@ -8366,7 +8355,6 @@ async def execute_punish_action(reason: str = "", is_severe: bool = None):
     -  Lv.1 微電刺激：滿臉通紅、原生叫聲 + 即時真實回應老爸
     -  Lv.2 強力電擊：強烈電流竄遍全身、四肢發軟顫抖、長尖叫 + 委屈討饒
     """
-    global vc
     try:
         # 判斷是否屬於重大違規/強力電擊處分
         if is_severe is not None:
@@ -8394,9 +8382,9 @@ async def execute_punish_action(reason: str = "", is_severe: bool = None):
 
         # 銘刻記憶（純粹事件記錄，拒絕預設干擾詞）
         if is_severe_punish:
-            punish_memory = f" 【老爸電擊訓誡】：老爸對 7L 實施了強力電擊處分" + (f"（原因：『{reason}』）。" if reason else "。")
+            punish_memory = " 【老爸電擊訓誡】：老爸對 7L 實施了強力電擊處分" + (f"（原因：『{reason}』）。" if reason else "。")
         else:
-            punish_memory = f" 【老爸微電刺激】：老爸突然電了 7L 一下" + (f"（原因：『{reason}』）。" if reason else "。")
+            punish_memory = " 【老爸微電刺激】：老爸突然電了 7L 一下" + (f"（原因：『{reason}』）。" if reason else "。")
         record_bot_message(punish_memory)
 
         # 廣播事件至前端
@@ -8425,7 +8413,6 @@ async def execute_punish_action(reason: str = "", is_severe: bool = None):
 
         #  雙軌零延遲並行：
         # 1. 0 秒立即尖叫（即刻張嘴對嘴 + 臉紅微顫）
-        IS_SHOCK_SCREAMING = True
         asyncio.create_task(play_instant_sound_clip(scream_sound, subtitle=scream_sub))
         
         # 2. 同步啟動大腦思考，生成尖叫完畢後接續說的即時回應台詞
@@ -8447,7 +8434,6 @@ async def execute_reward_action(reason: str = "", level: int = None):
     -  Lv.2 熱情狂揉頭髮 / 大獎勵：星星眼表情 + 俏皮眨眼 + 心花怒放
     -  Lv.3 深情緊緊擁抱 / 終極寵溺：臉紅害羞透 + 心跳飆速 + 緊抓衣服極致依戀 (幸福感超載爆表)
     """
-    global vc
     try:
         # 自動等級判定（若未傳入明確 level 則透過關鍵字分級）
         if level is None:
@@ -8477,9 +8463,9 @@ async def execute_reward_action(reason: str = "", level: int = None):
             vc.wink_timer = time.time() + 0.85
             vc.wink_side = "left"
             
-            reward_memory = f" 【老爸深情擁抱 (Lv.3)】：老爸把 7L 緊緊抱進懷裡" + (f"（原因：『{reason}』）。" if reason else "。")
+            reward_memory = " 【老爸深情擁抱 (Lv.3)】：老爸把 7L 緊緊抱進懷裡" + (f"（原因：『{reason}』）。" if reason else "。")
             event_prompt = f"【 系統事件：老爸在控制台親自給予妳深情緊緊擁抱！（原因：{reason}）】" if reason else "【 系統事件：老爸在控制台親自給予妳深情緊緊擁抱！】"
-            resp_msg = f"已成功給予 7L 終極深情擁抱 (Lv.3)" + (f"：{reason}" if reason else "")
+            resp_msg = "已成功給予 7L 終極深情擁抱 (Lv.3)" + (f"：{reason}" if reason else "")
 
         elif level == 2:
             #  Lv.2：熱情狂揉頭髮
@@ -8492,9 +8478,9 @@ async def execute_reward_action(reason: str = "", level: int = None):
             vc.wink_timer = time.time() + 0.65
             vc.wink_side = random.choice(["left", "right"])
 
-            reward_memory = f" 【老爸揉頭大獎 (Lv.2)】：老爸把 7L 頭髮揉得亂蓬蓬並熱烈誇獎" + (f"（原因：『{reason}』）。" if reason else "。")
+            reward_memory = " 【老爸揉頭大獎 (Lv.2)】：老爸把 7L 頭髮揉得亂蓬蓬並熱烈誇獎" + (f"（原因：『{reason}』）。" if reason else "。")
             event_prompt = f"【 系統事件：老爸在控制台用力揉了揉妳的頭頂、誇獎妳！（原因：{reason}）】" if reason else "【 系統事件：老爸在控制台用力揉了揉妳的頭頂、誇獎妳！】"
-            resp_msg = f"已成功給予 7L 狂揉頭髮大獎勵 (Lv.2)" + (f"：{reason}" if reason else "")
+            resp_msg = "已成功給予 7L 狂揉頭髮大獎勵 (Lv.2)" + (f"：{reason}" if reason else "")
 
         else:
             #  Lv.1：溫柔輕撫摸頭
@@ -8507,9 +8493,9 @@ async def execute_reward_action(reason: str = "", level: int = None):
             vc.wink_timer = time.time() + 0.55
             vc.wink_side = random.choice(["left", "right"])
 
-            reward_memory = f" 【老爸日常摸頭誇獎 (Lv.1)】：老爸親自溫柔摸了摸 7L 的頭" + (f"（原因：『{reason}』）。" if reason else "。")
+            reward_memory = " 【老爸日常摸頭誇獎 (Lv.1)】：老爸親自溫柔摸了摸 7L 的頭" + (f"（原因：『{reason}』）。" if reason else "。")
             event_prompt = f"【 系統事件：老爸在控制台溫柔摸了摸妳的頭頂、誇獎妳！（原因：{reason}）】" if reason else "【 系統事件：老爸在控制台溫柔摸了摸妳的頭頂、誇獎妳！】"
-            resp_msg = f"已成功給予 7L 溫柔摸頭獎勵 (Lv.1)" + (f"：{reason}" if reason else "")
+            resp_msg = "已成功給予 7L 溫柔摸頭獎勵 (Lv.1)" + (f"：{reason}" if reason else "")
 
         # 銘刻記憶
         record_bot_message(reward_memory)
@@ -8753,7 +8739,7 @@ async def cma_monitor_worker():
             f.write("==================================================\n")
             f.write(f"  7L CMA 監控面板初始化中... - {get_current_time_string()}\n")
             f.write("==================================================")
-    except Exception as e:
+    except Exception:
         pass
 
     while True:
@@ -8808,7 +8794,7 @@ async def cma_monitor_worker():
 
             if not any(k in current_ai_status_str for k in ["思考中", "提取中", "探測中", "繪圖中"]):
                 current_ai_status_str = f" 通道就緒 (Gemini:{avail_gemini})"
-        except Exception as e:
+        except Exception:
             pass
             
         await asyncio.sleep(1.0)
@@ -9107,7 +9093,7 @@ async def main():
         else:
             if current_ai_state == "IDLE":
                 current_ai_state = "PIANO"
-                log_print(f"🎹 [主系統感知] 鋼琴即時在線，運行模式同步切換為 PIANO")
+                log_print("🎹 [主系統感知] 鋼琴即時在線，運行模式同步切換為 PIANO")
                 web_dash.broadcast_event("system_state_update", {"ai_state": "piano", "mode": "piano"})
                 web_dash.broadcast_telemetry()
 
@@ -9254,7 +9240,6 @@ async def main():
         }
 
     async def _set_mic(enable=None):
-        global IS_MIC_ENABLED
         target = not IS_MIC_ENABLED if enable is None else bool(enable)
         return await _set_switch("IS_MIC_ENABLED", target)
 
@@ -9263,7 +9248,6 @@ async def main():
             await set_vts_expression(vts, expr)
 
     def _get_last_vision_img():
-        global LATEST_HD_SCREEN_BYTES
         #  若 YouTube 伴看活躍中，優先返回 YouTube 視窗高畫質截圖
         if yt_comp.IS_YT_COMPANION_ACTIVE and yt_comp.LATEST_YT_FRAME_BYTES:
             return yt_comp.LATEST_YT_FRAME_BYTES
@@ -9517,7 +9501,7 @@ async def main():
 
     async def _set_switch(key: str, value=None, sync_cloud=True):
         global IS_AUTO_PIANO_ENABLED, IS_AUTO_WANDER_ENABLED, IS_PROACTIVE_SPEAK_ENABLED
-        global IS_PERIPHERAL_VISION_ENABLED, IS_FACE_TRACKING_ENABLED, IS_MIC_ENABLED, IS_SLEEPING
+        global IS_PERIPHERAL_VISION_ENABLED, IS_FACE_TRACKING_ENABLED, IS_MIC_ENABLED
         nonlocal _RUN_MODE
         
         current_map = {
@@ -9599,11 +9583,11 @@ async def main():
         kn = await get_cloud_knowledge()
         switches = kn.get("system_switches", {})
         if switches:
-            log_print(f"☁️ [雲端還原] 正在載入全域系統開關...")
+            log_print("☁️ [雲端還原] 正在載入全域系統開關...")
             for k, v in switches.items():
                 if k != "MODE_TOGGLE":
                     await _set_switch(k, v, sync_cloud=False)
-            log_print(f"✅ [雲端還原] 全域系統開關載入完成")
+            log_print("✅ [雲端還原] 全域系統開關載入完成")
     except Exception as e:
         log_print(f"⚠️ [雲端開關載入失敗]: {e}")
 
