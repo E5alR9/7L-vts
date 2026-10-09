@@ -9,6 +9,16 @@ import time
 import services.vts_client as v
 
 
+def test_menu_names_all_resolvable():
+    """選單唯一真相：每個名都必須可落地（查表/計時器/重置），否則開空頭支票。"""
+    for ctx, names in v.EXPRESSION_MENU:
+        for n in names:
+            files, kind, is_reset = v._expression_targets(n)
+            assert files or kind or is_reset, f"選單落空：{n!r}（場合：{ctx}）"
+    assert v.EXPRESSION_MENU_TEXT, "選單文字不可為空"
+    assert "暈" in v.EXPRESSION_MENU_TEXT
+
+
 def _seed(files=(), **timers):
     v.CURRENT_ACTIVE_EXPS = set(files)
     now = time.time()

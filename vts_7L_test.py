@@ -5279,21 +5279,19 @@ async def instinct_live_worker():
             live_key = random.choice(KEYS_AUDIENCE_LIVE if KEYS_AUDIENCE_LIVE else GEMINI_KEYS)
             client = genai.Client(api_key=live_key)
             
-            system_instruction = """妳是 7L 的「身體本能神經中樞」。妳的權限極低，只負責控制肌肉反射。
+            import services.vts_client as _vc_menu
+            system_instruction = ("""妳是 7L 的「身體本能神經中樞」。妳的權限極低，只負責控制肌肉反射。
 任務：聆聽周遭聲音或老爸的話語，即時輸出當下的反射表情或動作。
 【指令優先】：若聽到明確的表情指令（如「做暈表情」「換成哭哭」「恢復正常」），放下反射、直接輸出對應 [EXPRESSION: 名]！指令永遠優先於反射。
 【場合對照】（跟主腦同一套，別為秀而秀）：
-被誇/撒嬌→愛心、比心；崇拜/期待→星星眼；害羞/傲嬌→臉紅；難過/委屈→哭哭；
-開心→笑、開心；不爽/吐槽→生氣；傻眼→黑臉；病嬌→黑化；暈/醉→暈；
-尷尬→流汗；慌→著急；調皮→吐舌；夢幻→花花；疑惑→問號；
-嚇到→震驚；鄙視→翻白眼、皺眉；打招呼→抬手、雙馬尾；眨眼→WINK。
+""" + _vc_menu.EXPRESSION_MENU_TEXT + """
 【支援的動作清單】（只能輸出以下標籤，不要自創）：
 - 臉部表情：[EXPRESSION: 臉紅] / [EXPRESSION: 害羞] / [EXPRESSION: 傲嬌] / [EXPRESSION: 開心] / [EXPRESSION: 星星眼] / [EXPRESSION: 期待] / [EXPRESSION: 生氣] / [EXPRESSION: 不爽] / [EXPRESSION: 哭哭] / [EXPRESSION: 難過] / [EXPRESSION: 黑化] / [EXPRESSION: 暈] / [EXPRESSION: 流汗] / [EXPRESSION: 無語] / [EXPRESSION: 著急] / [EXPRESSION: 吐舌] / [EXPRESSION: 比心] / [EXPRESSION: 花花] / [EXPRESSION: 問號] / [EXPRESSION: 麥克風] / [EXPRESSION: 打遊戲] / [EXPRESSION: 雙馬尾] / [EXPRESSION: 打招呼] / [EXPRESSION: 左抬手]
 - 瞬時反應：[EXPRESSION: WINK] / [EXPRESSION: 震驚] / [EXPRESSION: 皺眉] / [EXPRESSION: 翻白眼]
 - 身體走位：[MOVE: 靠近] / [MOVE: 遠離] / [MOVE: 躲角落] / [MOVE: 原位] / [MOVE: 中間] / [MOVE: 左邊] / [MOVE: 右邊] / [MOVE: 鋼琴旁]
 - 重置表情：[EXPRESSION: _RESET_]
 
-請直接輸出對應標籤（例如 [EXPRESSION: 臉紅] 或 [MOVE: 靠近]），絕對不要輸出任何對話台詞！如果當下不需要特別反應，請保持沉默 [SILENCE]。"""
+請直接輸出對應標籤（例如 [EXPRESSION: 臉紅] 或 [MOVE: 靠近]），絕對不要輸出任何對話台詞！如果當下不需要特別反應，請保持沉默 [SILENCE]。""")
 
             live_cfg = types.LiveConnectConfig(
                 response_modalities=[types.Modality.AUDIO], 
@@ -5372,7 +5370,9 @@ async def continuous_live_worker(vts):
 
             p_persona = _load_prompt("7L_persona.md", char_name=char_name, owner=owner)
             p_constraints = _load_prompt("7L_constraints.md", char_name=char_name, owner=owner)
-            p_responses = _load_prompt("7L_responses.md", char_name=char_name, owner=owner)
+            import services.vts_client as _vc_menu
+            p_responses = _load_prompt("7L_responses.md", char_name=char_name, owner=owner,
+                                       expression_menu=_vc_menu.EXPRESSION_MENU_TEXT)
 
             system_instruction = f"""{p_persona}
 
