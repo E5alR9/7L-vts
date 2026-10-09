@@ -106,10 +106,12 @@ ai-ide/
 # --- Local scratch models & datasets ---
 GPT-SoVITS/
 GPT_SoVITS/
+RVC-WebUI/
 curseforge/
 xiaoyi_dataset/
 finetune_data/
 songs_library/
+backup_before_revert_20261008/
+data_backup_before_sync/
 *.onnx
 *.bin
-data_backup_before_sync/

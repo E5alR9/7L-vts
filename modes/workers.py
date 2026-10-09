@@ -9,7 +9,7 @@
 """
 COMMON = [
     "tts_prewarm", "mic_volume_meter",
-    "chat_processor", "streamer_mind_loop", "background_mind_stream",
+    "chat_processor", "streamer_mind_loop",
     "anti_watermark", "cma_monitor", "speech_queue",
     "expression_keeper", "autonomous_wander",
     "piano_focus_udp", "piano_liveness_watchdog", "piano_auto_restore",
@@ -19,7 +19,8 @@ COMMON = [
 
 COMPANION_ONLY = [
     "mic_worker", "text_file_listener", "console_keyboard",
-    "screen_capture", "peripheral_vision", "system_audio", "proactive",
+    "continuous_live_worker", "instinct_live_worker",
+    "screen_capture", "peripheral_vision", "system_audio",
     "discord_runner", "sleep_mode",
 ]
 

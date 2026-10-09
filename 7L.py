@@ -1447,12 +1447,13 @@ def convert_to_gemini_native(messages):
 async def fetch_background_decision(messages, temperature=0.1, max_tokens=50):
     """
     專門負責後台『旁聽判定與意圖分析』。
-    優先順序：OpenRouter 免費池 -> Gemini 輕量防線 -> Groq 備援
+    優先順序：Groq 極速梯隊 -> OpenRouter 免費池（2026-10-09 起 Gemini 已移出：
+    背景記憶與純文字判定一律不佔 Gemini 額度；全滅回 None，呼叫端本來就處理 falsy）。
     強制低溫度與低 Token 消耗，追求極致速度。
     """
     global current_or_idx, OPENROUTER_KEY_COOLDOWNS
     global current_groq_idx, GROQ_KEY_COOLDOWNS
-    global current_gemini_idx, GEMINI_KEY_COOLDOWNS
+    global GEMINI_KEY_COOLDOWNS
     current_time = time.time()
     
     # 🧹 自動清理過期的模型鎖 (OpenRouter)
@@ -1490,15 +1491,9 @@ async def fetch_background_decision(messages, temperature=0.1, max_tokens=50):
     else:
         ordered_clients = []
 
-    available_gemini_keys = [(i, key) for i, key in enumerate(GEMINI_KEYS) if key]
-    if available_gemini_keys:
-        start_gemini_idx = current_gemini_idx % len(available_gemini_keys)
-        current_gemini_idx = (current_gemini_idx + 1) % len(available_gemini_keys)
-        ordered_gemini_keys = [available_gemini_keys[(start_gemini_idx + j) % len(available_gemini_keys)] for j in range(len(available_gemini_keys))]
-    else:
-        ordered_gemini_keys = []
+    # ⚠️ Gemini 輪詢序已移除（背景任務不佔 Gemini 額度；池內只剩 Groq → OpenRouter）
 
-    # 🛠️ 建立三軌混合後台模型池 (嚴格排序：OpenRouter 免費 -> Groq 極速 -> Gemini 保底)
+    # 🛠️ 建立背景模型池 (嚴格排序：Groq 極速 -> OpenRouter 免費；Gemini 已移出)
     BACKGROUND_POOLS = []
     
     # 🚀 【第一梯隊：Groq 火力全開極速防線 (速度最快、穩定度最高)】
@@ -1506,11 +1501,7 @@ async def fetch_background_decision(messages, temperature=0.1, max_tokens=50):
         for client in ordered_clients: 
             BACKGROUND_POOLS.append({"provider": "groq", "client": client, "model": model_name})
             
-    # 🧱 【第二梯隊：Gemini 全免費高效率輕量矩陣 (Google 官方直連，配額超大)】
-    for idx, key in ordered_gemini_keys: BACKGROUND_POOLS.append({"provider": "gemini", "key_idx": idx, "key": key, "model": "gemini-3.1-flash-lite"})
-    for idx, key in ordered_gemini_keys: BACKGROUND_POOLS.append({"provider": "gemini", "key_idx": idx, "key": key, "model": "gemini-2.5-flash-lite"})
-
-    # 🌟 【第三梯隊：OpenRouter 100% 全免費高強度小模型 (由於經常遇到全球免費池塞車，降級為最後備用)】
+    # 🌟 【第二梯隊：OpenRouter 100% 全免費高強度小模型（免費池塞車時才輪到）】
     for model_name in OPENROUTER_MODELS:
         for idx, key in ordered_or_keys:
             BACKGROUND_POOLS.append({"provider": "openrouter", "key_idx": idx, "key": key, "model": model_name})

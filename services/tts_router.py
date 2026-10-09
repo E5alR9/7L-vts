@@ -3,7 +3,8 @@ r"""
 
  目的：
    把直播主迴圈的語音合成，從「寫死單一本機 GPT-SoVITS 路徑的單一引擎」
-   改成可插拔的引擎鏈，預設走本地小模型 Kokoro-82M (ONNX，約 310MB)。
+   改成可插拔的引擎鏈（本機 Kokoro 引擎已移除，目前由 xiaoyi / cosyvoice /
+   cloud_gptsovits / edge / elevenlabs 組成，見 _ENGINES）。
 
  引擎優先序（可用環境變數覆寫）：
 
@@ -15,16 +16,14 @@ r"""
  介面：
    await get_tts_audio_bytes(text)  ->  WAV/MP3 bytes（與原 get_xiaoyi_audio_bytes 相容）
    get_active_engine()              ->  目前生效的引擎名稱（供儀表板/日誌）
-PROVIDER: LOCAL-kokoro/cosyvoice/xiaoyi＋CLOUD-edge/elevenlabs（見 docs/AI_SOURCES.md）
+PROVIDER: LOCAL-cosyvoice/xiaoyi＋CLOUD-edge/elevenlabs/cloud_gptsovits（見 docs/AI_SOURCES.md）
 """
 
 import os
 import re
 import io
 import time
-import asyncio
-import threading
-from typing import Optional, Tuple
+from typing import Optional
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -119,7 +118,7 @@ async def _synth_xiaoyi(text: str) -> bytes:
 
 # ── ElevenLabs（雲端精品 TTS）───────────────────────────────────────────────
 # 免費版每月 10,000 字元（≈10 分鐘語音），所以：
-#   1) 預設不啟用，要用請設 TTS_ENGINE=elevenlabs（建議 TTS_FALLBACK=kokoro,edge,xiaoyi）
+#   1) 預設不啟用，要用請設 TTS_ENGINE=elevenlabs（建議 TTS_FALLBACK=edge,xiaoyi）
 #   2) 內建額度守衛：每 10 分鐘查一次官方額度，用盡自動拋錯 → 引擎鏈降級回本地
 #   3) 模型先走最快的 flash（TTFB ~0.37s），失敗自動改試 multilingual_v2（品質最穩）
 ELEVEN_KEY = (os.getenv("ELEVENLABS_API_KEY") or "").strip()
@@ -210,8 +209,8 @@ async def _synth_elevenlabs(text: str) -> bytes:
 # ── CosyVoice3（本地精品 TTS，獨立 venv + localhost 服務）─────────────────────
 # 模型 Fun-CosyVoice3-0.5B（9.3GB、中文韻律開源第一梯隊），跑在
 #   venvs\cosyvoice\Scripts\python.exe services\cosyvoice_server.py --port 9881
-# 啟動約 25~60 秒；單句合成 RTF 約 1.4（比 Kokoro 慢、比 Qwen3-TTS 快）。
-# 服務沒開或逾時 → 拋錯讓引擎鏈降級 kokoro/edge（不中斷直播）。
+# 啟動約 25~60 秒；單句合成 RTF 約 1.4。
+# 服務沒開或逾時 → 拋錯讓引擎鏈降級 edge/xiaoyi（不中斷直播）。
 COSYVOICE_URL = (os.getenv("COSYVOICE_URL") or "http://127.0.0.1:9881").rstrip("/")
 COSYVOICE_TIMEOUT = float(os.getenv("COSYVOICE_TIMEOUT") or "60")
 
@@ -322,7 +321,6 @@ async def get_tts_audio_bytes(text: str) -> bytes:
         if fn is None:
             continue
         try:
-            t0 = time.time()
             data = await fn(text)
             if data and len(data) > 100:
                 if _active_engine != engine:

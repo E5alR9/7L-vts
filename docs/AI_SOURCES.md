@@ -8,6 +8,7 @@
 | 用途 | PROVIDER | 模型／後端 | key／env | 配額 | 備註 |
 |---|---|---|---|---|---|
 | 純文字快線（秒回／哨兵／審查／提煉／摘要） | GROQ | qwen3.8-27b → gpt-oss-120b → gpt-oss-20b → allam-2-7b（`core/groq_router.py` 梯隊） | `GROQ_API_KEYS`×30，`GROQ_REQUESTS_PER_MINUTE=20` | ITPM ~7000／org／model | 第一梯隊；`fetch_fast_text_reply` 主力 |
+| 背景純文字（定時提醒／搜尋提煉／鋼琴過場碎念） | GROQ | 同上梯隊（一律 `groq_chat`） | 同上 | 同上 | **2026-10-09 起全程零 Gemini**；失敗走本地離線摘要器／固定備援句／安靜不說話 |
 | 主腦深度推理 | GEMINI | 3.8-flash → 3.7 → 3.6 → 3.5 → 3-flash-preview → lite 系（`core/llm_engine.py`，pro-preview 已因 0 配額踢除） | `GEMINI_API_KEYS`×35，分池（觀眾／心流／視覺／主腦） | 旗艦 RPD 20／天／key；lite RPM 15／RPD 500 | 高頻一律 lite |
 | Live 全雙工（觀眾回覆／心流串流） | GEMINI-LIVE | **gemini-3.8-live**（舊 3.1-preview 已遷移，表上消失） | 同上（動態跨池備援） | RPM／RPD Unlimited，TPM 65K | 7x24 成立 |
 | 視覺看圖（餘光／截圖／抽幀） | GEMINI-VISION | 3.1-flash-lite → 3.6-flash（`get_lightweight_gemini_vision`） | KEYS_VISION（keys 12:18） | lite RPD 500 | 黑屏檢測防幻覺 |
@@ -35,6 +36,8 @@
 | 上下文組裝（規劃） | LOCAL | 對標 groq-router：fold 摘要＋recent-2＋向量 top-k（0.15＋60％門檻、上限 4 段、時間序）＋ITPM 收斂器 | 解 Groq 7K ITPM |
 | 點播看全片 | LOCAL＋GEMINI-VISION＋GROQ | `services/video_watch.py`（captions→音軌轉錄→抽幀看圖→Groq 摘要→記憶＋看板，source=`video_watch`） | 單片上限 `VIDEO_WATCH_MAX_MIN`（預設 30 分） |
 | 聯網搜尋 | TAVILY／LOCAL-SCRAPE | `tavily`×10 key（⚠️ 額度已爆）／`search_google` 無 API 爬蟲 | Tavily 爆時自動退爬蟲 |
+| 每日日記濃縮 | GROQ | `update_daily_diary` 走 `groq_chat`；**Groq 全滅就跳過該輪**（不拿 Gemini 兜底） | 2026-10-09 |
+| 點歌意圖 JSON 解析 | GROQ-primary | `pe.resolve_piano_intent_by_ai` 走 `groq_chat`（temp 0.1）；Gemini 高 IQ 梯隊僅 Groq 全滅時兜底 | 2026-10-09 |
 | 雲同步（刪除候選） | FIRESTORE | `core/db.py`，全呼叫點 `if db is not None`＋本地 JSON 備援 | 拔掉只失多機同步；且 db.py 吃 google-auth |
 
 ## 直播輸入（零 AI，純通道）
@@ -53,3 +56,7 @@
 | `scratch/correct_chunk.py`（3144 行） | 舊碼墳場，零引用 | 2026-09-29 |
 | `gemini-3.1-pro-preview`（4 處梯隊） | 配額 0／0／0 | 2026-09-29 |
 | `gemini-3.1-flash-live-preview`（11 處） | Legacy，配額表消失 → `gemini-3.8-live` | 2026-09-29 |
+| 日記濃縮的 Gemini fallback | 背景記憶不佔 Gemini 額度 → Groq 專責，失敗跳過 | 2026-10-09 |
+| 搜尋提煉的 Gemini Flash Lite 層 | 純文字提煉 → Groq 梯隊 → 本機離線摘要器 | 2026-10-09 |
+| 定時提醒口語的 `fetch_ai_response` | 背景純文字 → `groq_chat`，失敗走固定備援句 | 2026-10-09 |
+| 鋼琴過場碎念的 Gemini 呼叫 | 背景純文字 → `groq_chat`，失敗就安靜 | 2026-10-09 |

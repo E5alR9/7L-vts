@@ -216,14 +216,6 @@ def update_settings(updates: Dict[str, str], path: str = None) -> Tuple[List[str
     with open(path, "r", encoding="utf-8") as f:
         original = f.read()
 
-    # ✏️ 動 .env 前先備份：控制台可編輯 → 必須可回滾。單檔輪替（.env.backup = 上一版）。
-    #    （tests 有守：備份內容 = 寫入前的舊值）
-    try:
-        import shutil
-        shutil.copy2(path, path + ".backup")
-    except Exception:
-        pass
-
     newline = "\r\n" if original.count("\r\n") > original.count("\n") // 2 else "\n"
     lines = original.replace("\r\n", "\n").split("\n")
     entries = _split_entries(lines)

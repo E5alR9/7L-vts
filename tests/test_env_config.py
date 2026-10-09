@@ -147,17 +147,11 @@ def test_quoting_for_special_values(tmp_path):
     assert ec.read_env_file(p)["TWITCH_CHANNELS"] == "plain,id"
 
 
-def test_backup_created_with_previous_content_before_write(tmp_path):
-    """控制台改 .env 前必須先備份（.env.backup = 寫入前的舊內容）"""
-    p = _write(tmp_path)                      # 內容 = SAMPLE_ENV（TTS_ENGINE=kokoro）
-    backup = p + ".backup"
-    if os.path.exists(backup):
-        os.remove(backup)
-    ec.update_settings({"TTS_ENGINE": "cosyvoice"}, path=p)
-    assert os.path.exists(backup), "未建立 .env.backup"
-    old = open(backup, encoding="utf-8").read()
-    assert "TTS_ENGINE=kokoro" in old          # 備份是「改之前的」舊值
-    assert "gsk_ccc333" in old                 # 多行金鑰也完整備份
-    # 備份不被 git 追蹤（間接驗證：檔名在 .gitignore 清單）
+def test_env_backup_not_tracked_by_git(tmp_path):
+    """.env 類檔案（含任何自動產生的衍生檔）永不入庫。"""
     gi = open(os.path.join(str(ROOT), ".gitignore"), encoding="utf-8").read()
-    assert ".env.backup" in gi
+    assert ".env*" in gi
+    import subprocess
+    tracked = subprocess.run(["git", "ls-files", ".env"], cwd=str(ROOT),
+                             capture_output=True, text=True).stdout
+    assert ".env" not in tracked.split()

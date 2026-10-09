@@ -747,8 +747,7 @@ GENAI_PROACTIVE_TOOLS = build_genai_declarations(is_proactive=True)
 async def summarize_search_to_speech(query: str, search_raw: str, user_role_name: str = "老爸") -> str:
     """PROVIDER: GROQ（core.groq_router.groq_chat 純文字提煉；見 docs/AI_SOURCES.md）"""
     """將搜尋到的原始資料，以 7L 招牌自然口語（1~3 句，親切隨性）進行提煉整理。
-    具備多模型與多金鑰自動容災（Gemini Flash Lite -> Groq LLaMA -> 本機提煉器），絕不直接傾倒原文！"""
-    global CURRENT_GEMINI_KEY_STEP
+    容災序（全程零 Gemini）：groq_chat 梯隊 -> Groq 快答梯隊 -> 本機離線摘要器，絕不直接傾倒原文！"""
     if not search_raw or "搜尋無結果" in search_raw:
         return f"{user_role_name}，我幫你查了一下，但目前網路上沒有找到相關的資料耶。"
 
@@ -756,7 +755,7 @@ async def summarize_search_to_speech(query: str, search_raw: str, user_role_name
     clean_search = re.sub(r'https?://\S+', '', search_raw)
     clean_search = re.sub(r'\s{2,}', ' ', clean_search).strip()[:1500]
 
-    #  第 0 防線：Groq 極速提煉（第一梯隊，實測 0.4s 級；失敗或無結果才交給下方 Gemini）
+    #  第 1 防線：Groq 極速提煉（groq_chat 梯隊，實測 0.4s 級；失敗或無結果才交給下方 Groq 快答梯隊）
     try:
         from core.groq_router import groq_chat
         g_resp = await groq_chat(
@@ -773,46 +772,7 @@ async def summarize_search_to_speech(query: str, search_raw: str, user_role_name
     except Exception:
         pass
 
-    # 1. 第一防線：極速、高可用性的 Gemini Flash Lite 模型提煉 (抗 503、0.8s 響應)
-    lite_models = list(GEMINI_MODELS)
-    if GEMINI_KEYS:
-        for k_offset in [0, 1]:
-            target_k_idx = get_pingpong_alternating_index(len(GEMINI_KEYS), CURRENT_GEMINI_KEY_STEP + k_offset)
-            CURRENT_GEMINI_KEY_STEP += 1
-            client = genai.Client(api_key=GEMINI_KEYS[target_k_idx])
-            for m_name in lite_models:
-                try:
-                    prompt = f"""妳是 7L，正在直播中與{user_role_name}聊天。
-【任務】：剛才針對「{query}」查詢到的最新情報如下：
-\"\"\"
-{clean_search}
-\"\"\"
-請以妳招牌親切、自然隨性的口吻，用 1~3 句俐落短句（40~80字以內）直接對{user_role_name}提煉並說明重點。
- 嚴格規範：
-- 請將資訊轉化為流暢的對話口語，不要直接照抄條列清單、網址或網頁標題。
-- 像真人日常說話一樣自然流暢，直接講出核心意思。
-- 請使用純文字進行對話。"""
-                    resp = await asyncio.wait_for(
-                        client.aio.models.generate_content(
-                            model=m_name,
-                            contents=prompt,
-                            config=types.GenerateContentConfig(
-                                temperature=0.75,
-                                max_output_tokens=500,
-                                safety_settings=UNRESTRICTED_SAFETY_SETTINGS
-                            )
-                        ),
-                        timeout=4.5
-                    )
-                    if resp and resp.text and resp.text.strip():
-                        ans = resp.text.strip()
-                        ans = re.sub(r'\[[A-Z_]+(?::\s*[^\]]+)?\]', '', ans).strip()
-                        if ans and not ans.startswith("(") and len(ans) > 5:
-                            return ans
-                except Exception:
-                    continue
-
-    # 2. 第二防線：Groq 超極速模型 (0.3s 提煉)
+    # 2. 第二防線：Groq 快答梯隊 (0.3s 提煉)
     if GROQ_CLIENTS:
         groq_models_to_try = [
             'qwen/qwen3.8-27b',
@@ -2912,7 +2872,7 @@ def extract_text_from_content(content):
     return ""
 
 async def update_daily_diary(channel_id, recent_chat):
-    """PROVIDER: GEMINI（日記濃縮走 fetch_ai_response；向量已刪；見 docs/AI_SOURCES.md）"""
+    """PROVIDER: GROQ（日記濃縮走 groq_chat；失敗跳過、不動 Gemini；見 docs/AI_SOURCES.md）"""
     tz = ZoneInfo("Asia/Taipei")
     today_str = datetime.now(tz).strftime("%Y-%m-%d")
     chat_text = "\n".join([f"{msg['role']}: {extract_text_from_content(msg['content'])}" for msg in recent_chat if extract_text_from_content(msg['content']).strip()])
@@ -2948,38 +2908,20 @@ async def update_daily_diary(channel_id, recent_chat):
     
     messages = [{"role": "user", "content": diary_prompt}]
     updated_summary = None
-    
-    # 嘗試使用 Groq 模型進行記憶整理，節省 Gemini 額度
-    if GROQ_CLIENTS:
-        groq_models_to_try = [
-            'qwen/qwen3.8-27b',
-            'openai/gpt-oss-120b',
-            'openai/gpt-oss-20b'
-        ]
-        for g_client in GROQ_CLIENTS[:2]:
-            for g_model in groq_models_to_try:
-                try:
-                    g_resp = await asyncio.wait_for(
-                        g_client.chat.completions.create(
-                            model=g_model,
-                            messages=messages,
-                            max_tokens=300,
-                            temperature=0.7
-                        ),
-                        timeout=8.0
-                    )
-                    if g_resp.choices and g_resp.choices[0].message.content:
-                        updated_summary = g_resp.choices[0].message.content.strip()
-                        break
-                except Exception:
-                    continue
-            if updated_summary:
-                break
-                
+
+    #  背景記憶一律走 Groq 專責線（groq_chat 內建 4 模型 × N 金鑰梯隊＋RPM 限流＋冷卻），
+    #    絕不動 Gemini 額度；Groq 全滅就跳過這一輪（下一輪對話會自然補寫），不拿 Gemini 兜底。
+    try:
+        from core.groq_router import groq_chat
+        g_resp = await groq_chat(messages, temperature=0.7, max_tokens=300, timeout=8.0)
+        if g_resp and g_resp.text:
+            updated_summary = g_resp.text.strip()
+    except Exception as e:
+        log_print(f"⚠️ [每日日記 Groq 整合異常]: {e}")
+
     if not updated_summary:
-        resp = await fetch_ai_response(messages, is_proactive=True)
-        if resp:
-            updated_summary = resp[0]
+        log_print("⚠️ [每日日記] Groq 無回應，跳過本輪日記整合（依規定不動 Gemini 額度）。")
+        return
     
     if updated_summary and "沉默" not in updated_summary:
         diary_payload = {
@@ -4723,8 +4665,12 @@ async def live_timer_sensor_worker(vts, input_queue):
                     ]
                     
                     try:
-                        resp = await fetch_ai_response(reminder_messages, is_proactive=True)
-                        raw_reply = resp[0] if resp else ""
+                        #  背景純文字（定時提醒口語）走 Groq，不佔 Gemini 額度；失敗直接走下方固定備援句
+                        from core.groq_router import groq_chat
+                        g_resp = await groq_chat(reminder_messages, temperature=0.85, max_tokens=220, timeout=6.0)
+                        raw_reply = (g_resp.text if g_resp and g_resp.text else "").strip()
+                        if not raw_reply:
+                            raise RuntimeError("Groq 無回應，改用固定備援提醒句")
                         spoken = await execute_actions(vts, raw_reply, input_queue, caller_target="dad", caller_user=caller)
                         clean_spoken = spoken.strip(" *'\"-.,!?。，！？\n\r") if spoken else ""
                         

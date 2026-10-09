@@ -1052,13 +1052,6 @@ def play_piano_note(char_or_chord):
             SOUND_ENGINE.note_on(midi, 105)
             update_piano_focus_notes([midi])
 
-def precise_sleep(duration_sec):
-    if duration_sec <= 0: return
-    target = time.perf_counter() + duration_sec
-    remain = target - time.perf_counter()
-    if remain > 0.004: time.sleep(remain - 0.003)
-    while time.perf_counter() < target: pass
-
 def parse_vp_sheet(sheet_text: str, base_bpm=160, note_mode="16th"):
     beat_sec = 60.0 / max(40.0, float(base_bpm))
     if note_mode == "16th":
@@ -1561,6 +1554,34 @@ async def resolve_piano_intent_by_ai(
   "search_online_query": "" // 僅當 is_song_request 為 true 且本地無此曲時填寫精準搜尋詞，非點歌【絕對填空字串】
 }}"""
 
+    #  純文字意圖解析 → Groq 第一梯隊（groq_chat 內建模型×金鑰輪替）；不佔 Gemini 額度，
+    #    只有 Groq 全滅才交給下方 Gemini 高 IQ 梯隊兜底（保住點歌命中率）。
+    try:
+        from core.groq_router import groq_chat
+        g_resp = await groq_chat(
+            [{"role": "user", "content": prompt}],
+            temperature=0.1, max_tokens=400, timeout=5.0,
+        )
+        if g_resp and g_resp.text:
+            txt = g_resp.text.strip()
+            m_json = re.search(r'\{.*\}', txt, re.S)
+            data = json.loads(m_json.group(0) if m_json else txt)
+            if isinstance(data, dict):
+                data["_from_ai"] = True
+                data["_provider"] = "groq"
+                try:
+                    import opencc
+                    converter = opencc.OpenCC('s2twp')
+                    if data.get("song_title"):
+                        data["song_title"] = converter.convert(data["song_title"])
+                    if data.get("search_query"):
+                        data["search_query"] = converter.convert(data["search_query"])
+                except Exception:
+                    pass
+                return data
+    except Exception:
+        pass
+
     active_keys = get_piano_gemini_keys()
     if active_keys:
         # 👑 倒序高智商模型梯隊：3.8 ➔ 3.7 ➔ 3.6 ➔ 3.5 ➔ 3.1-pro ➔ 3-flash ➔ 3.5-flash-lite
@@ -1785,28 +1806,24 @@ async def generate_dynamic_piano_chatter(song_title: str, target: str = "dad", r
 - 若妳現在想安靜彈琴、不說話：請只輸出 `[SILENCE]`。
 直接輸出妳的決定："""
         
-        active_keys = get_piano_gemini_keys()
-        if active_keys:
-            target_k_idx = (main_obj.get_pingpong_alternating_index(len(active_keys), CURRENT_GEMINI_KEY_STEP) if hasattr(main_obj, 'get_pingpong_alternating_index') and main_obj.get_pingpong_alternating_index else 0)
-            client = genai.Client(api_key=active_keys[target_k_idx])
-            resp = await asyncio.wait_for(
-                client.aio.models.generate_content(
-                    model="gemini-2.5-flash",
-                    contents=prompt,
-                    config=types.GenerateContentConfig(
-                        temperature=0.9,
-                        max_output_tokens=60
-                    )
-                ),
-                timeout=2.5
+        #  過場碎念＝純文字背景任務 → Groq 秒答（不動 Gemini 額度）；失敗就安靜不說話
+        try:
+            from core.groq_router import groq_chat
+            g_resp = await groq_chat(
+                [{"role": "user", "content": prompt}],
+                temperature=0.9, max_tokens=60, timeout=3.0,
             )
-            if resp.text:
-                txt = resp.text.strip()
-                log_print(f"🤖 原始大腦輸出: {txt} (⚡ 鋼琴過場)")
+            if g_resp and g_resp.text:
+                txt = g_resp.text.strip()
+                log_print(f"🤖 原始大腦輸出: {txt} (⚡ 鋼琴過場/Groq)")
                 if "[SILENCE]" in txt or "[SKIP]" in txt or "[QUIET]" in txt:
                     return ""
                 clean = re.sub(r'\[[A-Z_]+(?::\s*[^\]]+)?\]', '', txt).strip(' "\'「」\n\r')
-                return clean
+                if clean:
+                    return clean
+        except Exception:
+            pass
+        return ""
     except Exception:
         pass
     return ""

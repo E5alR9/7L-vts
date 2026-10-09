@@ -66,7 +66,8 @@ def test_clean_text_japanese_skips_loanword_rewrite():
 
 # ── 引擎註冊表與降級鏈 ─────────────────────────────────────────────────────
 def test_engine_registry_contains_all_known_engines():
-    for eng in ("kokoro", "edge", "xiaoyi", "cosyvoice", "elevenlabs"):
+    # 與 services/tts_router._ENGINES 同步（kokoro 已於 0d0ab8d22 移除）
+    for eng in ("edge", "xiaoyi", "elevenlabs", "cosyvoice", "cloud_gptsovits"):
         assert eng in t._ENGINES, f"缺少引擎註冊: {eng}"
         assert callable(t._ENGINES[eng])
 

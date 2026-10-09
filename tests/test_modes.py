@@ -33,3 +33,20 @@ def test_startup_matches_plan():
     assert re.search(r"set_sleep_mode\(enable: bool\):[\s\S]{0,400}?is_vtuber\(\)", src)
     assert 'source == "owner_interject"' in src
     assert "operator_input_enabled" in src
+
+
+def test_disabled_workers_stay_out_of_manifest_and_startup():
+    """已停用 worker 不得出現：manifest 不列，啟動段不得有未註解的啟動行。"""
+    assert "background_mind_stream" not in COMMON
+    assert "proactive" not in COMPANION_ONLY
+    src = _startup_src()
+    assert re.search(r"^\s*asyncio\.create_task\((proactive_worker|background_mind_stream_worker)\(", src, re.M) is None
+
+
+def test_live_workers_gated_by_operator_channel():
+    """continuous/instinct Live 只活在操作者通道門內（vtuber 強制關）。"""
+    assert "continuous_live_worker" in COMPANION_ONLY
+    assert "instinct_live_worker" in COMPANION_ONLY
+    src = _startup_src()
+    assert "asyncio.create_task(continuous_live_worker(vts))" in src
+    assert "asyncio.create_task(instinct_live_worker())" in src
