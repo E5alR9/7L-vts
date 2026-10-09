@@ -601,6 +601,7 @@ SYSTEM_SETTING = f"""【角色設定】
 - 請使用「繁體中文」為主回答。
 - 盡量跟所有人良好相處
 7. 【表情符號反應 (Reaction)】：雖然台詞中嚴禁使用表情符號，但如果妳對使用者的訊息有強烈情緒，想在該則訊息底下「按表情符號反應」，可以在句尾偷偷加上隱藏代碼 `||REACT: 填入單個表情符號||` (例如 `||REACT: 🤣||` 或 `||REACT: ❤️||`)，系統會幫妳自動按下。
+8. 【傲嬌改口 (Edit Message)】：如果妳想表現出不小心說溜嘴、嘴硬改口，或者瞬間反悔的超級傲嬌感，可以使用代碼 `||EDIT_LATER: 改口後的台詞||`。例如妳輸出：「其實我也有一點點... ||EDIT_LATER: 咳咳！我什麼都沒說！你這笨蛋聽錯了！||」，系統會先發送前半句，1.5秒後瞬間把整句話改成後半句！這招非常適合用來掩飾害羞。
 """
 
 # ────────────────────────────────────────────────────────
@@ -634,6 +635,8 @@ def clean_bot_reply_tags(reply_str: str) -> str:
     reply_str = re.sub(r"\|\|NEW_NAME:[\s\S]*?\|\|", "", reply_str, flags=re.IGNORECASE)
     reply_str = re.sub(r"\|\|CONTINUE_MESSAGE:[\s\S]*?\|\|", "", reply_str, flags=re.IGNORECASE)
     reply_str = re.sub(r"\|\|NEW_IMPRESSION:[\s\S]*?\|\|", "", reply_str, flags=re.IGNORECASE)
+    reply_str = re.sub(r"\|\|REACT:[\s\S]*?\|\|", "", reply_str, flags=re.IGNORECASE)
+    reply_str = re.sub(r"\|\|EDIT_LATER:[\s\S]*?\|\|", "", reply_str, flags=re.IGNORECASE)
     return reply_str.strip()
 
 
@@ -1100,12 +1103,16 @@ async def on_message(message):
         continue_match = re.search(r"\|\|CONTINUE_MESSAGE:\s*([\s\S]*?)\s*\|\|", bot_reply, re.IGNORECASE)
         if continue_match:
             ai_next_sentence = continue_match.group(1).strip()
+            
+        edit_match = re.search(r"\|\|EDIT_LATER:\s*([\s\S]*?)\s*\|\|", bot_reply, re.IGNORECASE)
+        ai_edit_later = edit_match.group(1).strip() if edit_match else None
 
         # 🚨【核心安全鎖】前台輸出前，強制抹除所有潛意識標籤，拒絕穿幫
         bot_reply = re.sub(r"\|\|NEW_NAME:[\s\S]*?\|\|", "", bot_reply, flags=re.IGNORECASE).strip()
         bot_reply = re.sub(r"\|\|NEW_IMPRESSION:[\s\S]*?\|\|", "", bot_reply, flags=re.IGNORECASE).strip()
         bot_reply = re.sub(r"\|\|CONTINUE_MESSAGE:[\s\S]*?\|\|", "", bot_reply, flags=re.IGNORECASE).strip()
         bot_reply = re.sub(r"\|\|REACT:[\s\S]*?\|\|", "", bot_reply, flags=re.IGNORECASE).strip()
+        bot_reply = re.sub(r"\|\|EDIT_LATER:[\s\S]*?\|\|", "", bot_reply, flags=re.IGNORECASE).strip()
         if not bot_reply: bot_reply = "（默默看著你）"
 
         # ✨ 更新本地快取記憶
@@ -1116,7 +1123,16 @@ async def on_message(message):
         HIPPOCAMPUS_CACHE[channel_id] = live_history
 
         # 🚀 先讓 7L 直接秒回第一句！(System 1 反射神經)
-        await message.reply(bot_reply, allowed_mentions=smart_mentions)
+        sent_msg = await message.reply(bot_reply, allowed_mentions=smart_mentions)
+        
+        if ai_edit_later:
+            async def delayed_edit(msg, new_content):
+                await asyncio.sleep(1.5)
+                try:
+                    await msg.edit(content=new_content)
+                except Exception as e:
+                    print(f"【⚠️ 訊息編輯失敗】: {e}")
+            asyncio.create_task(delayed_edit(sent_msg, ai_edit_later))
 
         # ─── ⚡ 執行：由 AI 靈魂自行決定的下一句話 ───
         if ai_next_sentence and not message.author.bot:
@@ -1324,9 +1340,17 @@ async def on_message(message):
                             # 提取新暱稱與新印象 (✨ 雙重提取)
                             match3 = re.search(r"\|\|NEW_NAME:\s*([\s\S]*?)\s*\|\|", bot_reply, re.IGNORECASE)
                             imp_match3 = re.search(r"\|\|NEW_IMPRESSION:\s*([\s\S]*?)\s*\|\|", bot_reply, re.IGNORECASE)
+                            react_match3 = re.search(r"\|\|REACT:\s*(.*?)\s*\|\|", bot_reply, re.IGNORECASE)
                             
                             new_nickname3 = match3.group(1).strip() if match3 else None
                             new_impression3 = imp_match3.group(1).strip() if imp_match3 else None
+                            ai_reaction3 = react_match3.group(1).strip() if react_match3 else None
+                            
+                            if ai_reaction3:
+                                try:
+                                    await message.add_reaction(ai_reaction3)
+                                except Exception as e:
+                                    print(f"【⚠️ 增加表情反應失敗 (插話)】: {e}")
                             
                             if new_nickname3 or new_impression3:
                                 final_name3 = new_nickname3 if new_nickname3 and new_nickname3 != current_custom_name else None
@@ -1348,11 +1372,16 @@ async def on_message(message):
                             continue_match3 = re.search(r"\|\|CONTINUE_MESSAGE:\s*([\s\S]*?)\s*\|\|", bot_reply, re.IGNORECASE)
                             if continue_match3:
                                 ai_next_sentence3 = continue_match3.group(1).strip()
+                                
+                            edit_match3 = re.search(r"\|\|EDIT_LATER:\s*([\s\S]*?)\s*\|\|", bot_reply, re.IGNORECASE)
+                            ai_edit_later3 = edit_match3.group(1).strip() if edit_match3 else None
 
                             # 🚨【核心安全鎖】自主插話輸出前，全面雙重抹除所有標籤，拒絕露出馬腳
                             bot_reply = re.sub(r"\|\|NEW_NAME:[\s\S]*?\|\|", "", bot_reply, flags=re.IGNORECASE).strip()
                             bot_reply = re.sub(r"\|\|CONTINUE_MESSAGE:[\s\S]*?\|\|", "", bot_reply, flags=re.IGNORECASE).strip()
                             bot_reply = re.sub(r"\|\|NEW_IMPRESSION:[\s\S]*?\|\|", "", bot_reply, flags=re.IGNORECASE).strip()
+                            bot_reply = re.sub(r"\|\|REACT:[\s\S]*?\|\|", "", bot_reply, flags=re.IGNORECASE).strip()
+                            bot_reply = re.sub(r"\|\|EDIT_LATER:[\s\S]*?\|\|", "", bot_reply, flags=re.IGNORECASE).strip()
 
                             # 🛡️ 防呆：防止被抹成空字串
                             if not bot_reply: return
@@ -1365,7 +1394,16 @@ async def on_message(message):
                             if len(final_history) > 50: final_history = final_history[-50:]
                             HIPPOCAMPUS_CACHE[channel_id] = final_history
                             
-                            await message.channel.send(bot_reply, allowed_mentions=smart_mentions)
+                            sent_msg3 = await message.channel.send(bot_reply, allowed_mentions=smart_mentions)
+                            
+                            if ai_edit_later3:
+                                async def delayed_edit3(msg, new_content):
+                                    await asyncio.sleep(1.5)
+                                    try:
+                                        await msg.edit(content=new_content)
+                                    except Exception:
+                                        pass
+                                asyncio.create_task(delayed_edit3(sent_msg3, ai_edit_later3))
                             
                             # ✨ 執行插話時的自由意志連發：追加打字延遲與快取同步
                             if ai_next_sentence3:
