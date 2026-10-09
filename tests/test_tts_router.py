@@ -17,6 +17,9 @@ def test_detect_language_japanese():
     assert t.detect_language("カタカナです") == "ja"
     # 純漢字、無中文語氣詞 → 依假名比例規則仍可能 zh，只要求回合法值
     assert t.detect_language("東京タワー") in ("zh", "ja")
+    # 半形片假名（YT 歌名常見）必須算進假名：之前漏掉會誤判 zh
+    assert t.detect_language("ﾛﾝﾘｰﾕﾆﾊﾞｰｽ") == "ja"
+    assert t.detect_language("ﾊﾞｶ") == "ja"
 
 
 def test_detect_language_mixed_prefers_chinese_with_markers():
@@ -62,6 +65,44 @@ def test_clean_text_japanese_skips_loanword_rewrite():
     # 日文路徑不套中文外來語改寫表（回傳仍應含原文假名）
     out = t._clean_text("こんにちは[EXPRESSION: 開心]", "ja")
     assert "こんにちは" in out and "[EXPRESSION" not in out
+
+
+# ── 片假名→中文音譯（中文聲線用；2026-10-09 直播：片假名歌名被中文聲線唸爛）──
+def test_transliterate_kana_to_zh():
+    assert t.transliterate_kana_to_zh("ロンリーユニバース") == "羅恩利優尼巴蘇"
+    assert t.transliterate_kana_to_zh("バカ") == "巴卡"
+    assert t.transliterate_kana_to_zh("コーヒー") == "考希"
+    # 平假名同表、促音/長音丟掉
+    assert t.transliterate_kana_to_zh("ってみた") == "特米塔"
+    # 半形片假名（含浊点组合）
+    assert t.transliterate_kana_to_zh("ﾛﾝﾘｰ") == "羅恩利"
+    assert t.transliterate_kana_to_zh("ﾊﾞｶ") == "巴卡"
+    # 非假名原樣保留
+    assert t.transliterate_kana_to_zh("點這首「ロンリー」超好聽") == "點這首「羅恩利」超好聽"
+    assert t.transliterate_kana_to_zh("純中文沒有假名") == "純中文沒有假名"
+    assert t.transliterate_kana_to_zh("") == ""
+
+
+def test_clean_text_keeps_kana_on_both_paths():
+    # _clean_text 只清標籤/括號、不動假名：多語言 SoVITS 靠 auto 原生唸假名，
+    # 音譯只發生在 _synth_edge（純中文聲線）內部，不污染共享清洗路徑。
+    out = t._clean_text("點這首「ロンリーユニバース」超有品味[EXPRESSION: 開心]", "zh")
+    assert "ロンリーユニバース" in out and "超有品味" in out
+    assert "[EXPRESSION" not in out
+    out_ja = t._clean_text("こんにちは[EXPRESSION: 開心]", "ja")
+    assert "こんにちは" in out_ja
+
+
+def test_sovits_text_lang():
+    # GPT-SoVITS 語系：純日→ja、純中→zh，混合一律 auto（模型自己分段）
+    assert t.sovits_text_lang("こんにちは") == "ja"
+    assert t.sovits_text_lang("カタカナです") == "ja"
+    assert t.sovits_text_lang("你好嗎，今天天氣真好。") == "zh"
+    assert t.sovits_text_lang("") == "zh"
+    assert t.sovits_text_lang("點這首「ロンリーユニバース」超有品味") == "auto"
+    assert t.sovits_text_lang("接下來唱 Never Gonna Give You Up！") == "auto"
+    assert t.sovits_text_lang("Never Gonna Give You Up") == "auto"
+    assert t.sovits_text_lang("ﾛﾝﾘｰﾕﾆﾊﾞｰｽ") == "ja"
 
 
 # ── 引擎註冊表與降級鏈 ─────────────────────────────────────────────────────

@@ -3892,7 +3892,7 @@ async def play_voice_complete(text, target: str = "dad", raw_actions_text: str =
                             local_wav = await tts_router.get_tts_audio_bytes(c_dict["text"])
                             if local_wav and len(local_wav) > 100:
                                 cost = time.time() - t0
-                                _eng = tts_router.get_active_engine() or "kokoro"
+                                _eng = tts_router.get_active_engine() or "未定"
                                 _lang_code = tts_router.detect_language(c_dict["text"])
                                 _lang_str = "日語" if _lang_code == "ja" else "中文"
                                 part_file = os.path.join(base_proj_dir, f"temp_reply_{int(time.time()*1000)}_{random.randint(100,999)}_part{idx}{tts_router.file_extension(_eng)}")

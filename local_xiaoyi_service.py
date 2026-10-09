@@ -213,7 +213,8 @@ def synthesize_xiaoyi_bytes(text: str) -> bytes:
         try:
             #  智能全自動語言邊界判定 (精準區分「正統日語」vs「中文夾雜日文梗/外來語」)
             import re
-            num_kana = len(re.findall(r'[\u3040-\u309F\u30A0-\u30FF]', text))
+            # 半形片假名（U+FF61–FF9F，YT 歌名常見）也算假名——之前漏掉會誤鎖 zh
+            num_kana = len(re.findall(r'[\u3040-\u309F\u30A0-\u30FF\uFF61-\uFF9F]', text))
             num_hanzi = len(re.findall(r'[\u4E00-\u9FFF]', text))
             has_chinese_markers = bool(re.search(r'[的了嗎吧呢這那是在說妳你我他們著啦喔呀嘛欸咦啥誰怎麼盧搞弄為什麼]', text))
             

@@ -10,8 +10,10 @@ r"""
 
    TTS_FALLBACK=xiaoyi        原 GPT-SoVITS 曉伊（需本機存在 GPT-SoVITS 安裝）
 
- 語言自動判定：沿用原 local_xiaoyi_service 的假名/漢字啟發式，
-   中文夾日文梗（バカ → 八嘎）會先做音譯，再交給對應聲線。
+ 語言自動判定：假名/漢字/半形片假名啟發式（detect_language 只分 zh/ja 大方向）；
+    多語言 SoVITS（本地曉伊／雲端）一律傳 raw 假名＋text_language auto，由模型
+    自己分段唸——只有純中文聲線（edge HsiaoChen）才在合成前把假名音譯成中文
+    （transliterate_kana_to_zh，例：バカ → 巴卡）。
 
  介面：
    await get_tts_audio_bytes(text)  ->  WAV/MP3 bytes（與原 get_xiaoyi_audio_bytes 相容）
@@ -64,9 +66,132 @@ def _log(msg: str) -> None:
 
 RE_TAG = re.compile(r'\[[A-Z_]+(?::[^\]]*)?\]')
 
+# ── 片假名→中文音譯表（中文聲線唸日文梗用；例：バカ→巴卡）─────────────────
+# 只處理假名 run，其餘文字原樣保留。長音ー、小促音ッ直接丟掉（中文無此音），
+# 中黑點・轉頓號保留斷句，拗音（キャ等）合併成單字。
+_KANA_SMALL_VOWEL = {"ァ": "阿", "ィ": "伊", "ゥ": "烏", "ェ": "埃", "ォ": "奧",
+                     "ャ": "亞", "ュ": "優", "ョ": "約"}
+_KANA_BASE = {
+    "ア": "阿", "イ": "伊", "ウ": "烏", "エ": "艾", "オ": "奧",
+    "カ": "卡", "キ": "奇", "ク": "酷", "ケ": "克", "コ": "考",
+    "サ": "薩", "シ": "西", "ス": "蘇", "セ": "塞", "ソ": "索",
+    "タ": "塔", "チ": "奇", "ツ": "茨", "テ": "特", "ト": "托",
+    "ナ": "娜", "ニ": "尼", "ヌ": "努", "ネ": "內", "ノ": "諾",
+    "ハ": "哈", "ヒ": "希", "フ": "弗", "ヘ": "嘿", "ホ": "霍",
+    "マ": "馬", "ミ": "米", "ム": "姆", "メ": "梅", "モ": "莫",
+    "ヤ": "雅", "ユ": "優", "ヨ": "約",
+    "ラ": "拉", "リ": "利", "ル": "魯", "レ": "雷", "ロ": "羅",
+    "ワ": "瓦", "ヲ": "沃", "ン": "恩",
+    "ガ": "嘎", "ギ": "基", "グ": "咕", "ゲ": "格", "ゴ": "夠",
+    "ザ": "扎", "ジ": "吉", "ズ": "茲", "ゼ": "澤", "ゾ": "佐",
+    "ダ": "達", "ヂ": "吉", "ヅ": "茲", "デ": "得", "ド": "都",
+    "バ": "巴", "ビ": "比", "ブ": "布", "ベ": "貝", "ボ": "波",
+    "パ": "帕", "ピ": "皮", "プ": "普", "ペ": "佩", "ポ": "破",
+    "ヴ": "武",
+}
+_KANA_COMBO = {
+    "キャ": "卡", "キュ": "丘", "キョ": "喬",
+    "シャ": "沙", "シュ": "舒", "ショ": "肖", "シェ": "謝",
+    "チャ": "茶", "チュ": "丘", "チェ": "切", "チョ": "喬",
+    "ジャ": "爵", "ジュ": "朱", "ジョ": "佐", "ジェ": "傑",
+    "ギャ": "加",
+    "ファ": "法", "フィ": "菲", "フェ": "費", "フォ": "佛",
+    "ヴァ": "瓦", "ヴィ": "維", "ヴェ": "韋", "ヴォ": "沃",
+    "ウィ": "維", "ウェ": "韋", "ウォ": "沃", "イェ": "耶",
+    "ティ": "蒂", "ディ": "迪", "トゥ": "圖", "ドゥ": "杜",
+    "ツァ": "擦", "クァ": "夸", "グァ": "瓜",
+}
+_KANA_DROP = set("ッー・")
+_HALF_PUNCT = {"｡": "。", "､": "、", "｢": "「", "｣": "」", "･": "・"}
+_HALF_KANA = {
+    "ｱ": "ア", "ｲ": "イ", "ｳ": "ウ", "ｴ": "エ", "ｵ": "オ",
+    "ｶ": "カ", "ｷ": "キ", "ｸ": "ク", "ｹ": "ケ", "ｺ": "コ",
+    "ｻ": "サ", "ｼ": "シ", "ｽ": "ス", "ｾ": "セ", "ｿ": "ソ",
+    "ﾀ": "タ", "ﾁ": "チ", "ﾂ": "ツ", "ﾃ": "テ", "ﾄ": "ト",
+    "ﾅ": "ナ", "ﾆ": "ニ", "ﾇ": "ヌ", "ﾈ": "ネ", "ﾉ": "ノ",
+    "ﾊ": "ハ", "ﾋ": "ヒ", "ﾌ": "フ", "ﾍ": "ヘ", "ﾎ": "ホ",
+    "ﾏ": "マ", "ﾐ": "ミ", "ﾑ": "ム", "ﾒ": "メ", "ﾓ": "モ",
+    "ﾔ": "ヤ", "ﾕ": "ユ", "ﾖ": "ヨ",
+    "ﾗ": "ラ", "ﾘ": "リ", "ﾙ": "ル", "ﾚ": "レ", "ﾛ": "ロ",
+    "ﾜ": "ワ", "ｦ": "ヲ", "ﾝ": "ン",
+    "ｧ": "ァ", "ｨ": "ィ", "ｩ": "ゥ", "ｪ": "ェ", "ｫ": "ォ",
+    "ｬ": "ャ", "ｭ": "ュ", "ｮ": "ョ", "ｯ": "ッ", "ｰ": "ー",
+}
+_HALF_VOICED = {  # 半形浊点/半浊点组合（X + ﾞ/ﾟ）
+    "ｶﾞ": "ガ", "ｷﾞ": "ギ", "ｸﾞ": "グ", "ｹﾞ": "ゲ", "ｺﾞ": "ゴ",
+    "ｻﾞ": "ザ", "ｼﾞ": "ジ", "ｽﾞ": "ズ", "ｾﾞ": "ゼ", "ｿﾞ": "ゾ",
+    "ﾀﾞ": "ダ", "ﾁﾞ": "ヂ", "ﾂﾞ": "ヅ", "ﾃﾞ": "デ", "ﾄﾞ": "ド",
+    "ﾊﾞ": "バ", "ﾋﾞ": "ビ", "ﾌﾞ": "ブ", "ﾍﾞ": "ベ", "ﾎﾞ": "ボ",
+    "ﾊﾟ": "パ", "ﾋﾟ": "ピ", "ﾌﾟ": "プ", "ﾍﾟ": "ペ", "ﾎﾟ": "ポ",
+    "ｳﾞ": "ヴ",
+}
+
+
+def _fold_to_full_kata(text: str) -> str:
+    """平假名→片假名、半形→全形，統一成全形片假名再查表。"""
+    out = []
+    for ch in text:
+        o = ord(ch)
+        if 0x3041 <= o <= 0x3096:      # 平假名ぁ-ヶ → ァ-ヶ
+            out.append(chr(o + 0x60))
+        elif ch in _HALF_PUNCT:
+            out.append(_HALF_PUNCT[ch])
+        elif ch in _HALF_KANA:
+            out.append(_HALF_KANA[ch])
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
+def transliterate_kana_to_zh(text: str) -> str:
+    """把文字中的假名 run 音譯成中文（中文聲線用；非假名原樣保留）。
+
+    例：ロンリーユニバース → 羅恩利優尼巴斯；バカ → 巴卡。
+    日文路徑不要呼叫（Nanami 直接唸假名）。
+    """
+    if not text or not re.search(r'[\u3040-\u309F\u30A0-\u30FF\uFF61-\uFF9F]', text):
+        return text
+    # 半形浊点组合先合併（ﾊﾞ → バ），再整串 fold 成全形片假名（一對一，不改長度）
+    for half, full in _HALF_VOICED.items():
+        if half in text:
+            text = text.replace(half, full)
+    folded = _fold_to_full_kata(text)
+    out = []
+    i, n = 0, len(folded)
+    while i < n:
+        ch = folded[i]
+        two = folded[i:i + 2]
+        if two in _KANA_COMBO:
+            out.append(_KANA_COMBO[two])
+            i += 2
+        elif ch in _KANA_BASE:
+            out.append(_KANA_BASE[ch])
+            i += 1
+        elif ch in _KANA_SMALL_VOWEL:
+            out.append(_KANA_SMALL_VOWEL[ch])
+            i += 1
+        elif ch == "・":
+            out.append("、")
+            i += 1
+        elif ch in _KANA_DROP:
+            i += 1  # 促音ッ／長音ー／中黑點直接丟掉（中文無此音）
+        else:
+            out.append(ch)  # 漢字／拉丁／數字／標點原樣保留
+            i += 1
+    return "".join(out)
+
+
 def detect_language(text: str) -> str:
-    """回傳 'ja' 或 'zh'（沿用原假名/漢字啟發式，中文語境優先）"""
-    num_kana = len(re.findall(r'[\u3040-\u309F\u30A0-\u30FF]', text))
+    """回傳 'ja' 或 'zh'（假名/漢字啟發式，中文語境優先）。
+
+    2026-10-09 修正：
+    - 半形片假名（U+FF61–FF9F，YT 歌名常見）也計入假名——之前完全漏掉。
+    - 中日混合句仍判 zh（整句是中文），但中文路徑會先把假名音譯
+      （transliterate_kana_to_zh），所以聲線不會唸爛片假名。
+    - 全漢字日文（無假名）啟發式無解，維持 zh；純英文維持 zh（引擎鏈無 EN
+      聲線可接，接了也沒地方去——見 _ENGINES／EN_VOICE 仍是舊 kokoro 殘留）。
+    """
+    num_kana = len(re.findall(r'[\u3040-\u309F\u30A0-\u30FF\uFF61-\uFF9F]', text))
     num_hanzi = len(re.findall(r'[\u4E00-\u9FFF]', text))
     has_chinese_markers = bool(re.search(r'[的了嗎吧呢這那是在說妳你我他們著啦喔呀嘛欸咦啥誰怎麼盧搞弄為什麼]', text))
     if num_kana > 0:
@@ -79,6 +204,9 @@ def detect_language(text: str) -> str:
     return "zh"
 
 def _clean_text(text: str, lang: str) -> str:
+    # lang 參數保留（標示呼叫時的判定語境），目前不分支：假名一律原樣保留，
+    # 交給各引擎自己處理——多語言 SoVITS 用 auto 原生唸假名，edge 中文聲線
+    # 在 _synth_edge 內另行音譯（見 transliterate_kana_to_zh）。
     text = RE_TAG.sub('', text or "")
     text = re.sub(r'[\(（][^\)）]*[\)）]', '', text)
     text = re.sub(r'[⌒☆★♪♡♥✧✦๑•̀ㅂ•́و✧~～]+', '！', text)
@@ -91,10 +219,30 @@ def _clean_text(text: str, lang: str) -> str:
     return text
 
 
+def sovits_text_lang(text: str) -> str:
+    """GPT-SoVITS text_language：純日→ja，純中→zh，其餘混合→auto（模型自己分段）。
+
+    跟本地曉伊同一哲學（見 local_xiaoyi_service.synthesize_xiaoyi_bytes）：
+    模型是多語言的，不要硬鎖單一語系逼它唸錯另一種文字。
+    """
+    num_kana = len(re.findall(r'[\u3040-\u309F\u30A0-\u30FF\uFF61-\uFF9F]', text))
+    num_hanzi = len(re.findall(r'[\u4E00-\u9FFF]', text))
+    has_latin = bool(re.search(r'[A-Za-z]', text))
+    if num_kana > 0 and num_hanzi == 0 and not has_latin:
+        return "ja"
+    if num_kana == 0 and not has_latin:
+        return "zh"
+    return "auto"
+
+
 async def _synth_edge(text: str) -> bytes:
     """微軟 Edge-TTS 雲端合成（台灣腔女聲 / 日文聲線），回傳 MP3 bytes"""
     import edge_tts
     lang = detect_language(text)
+    if lang == "zh" and re.search(r'[\u3040-\u309F\u30A0-\u30FF\uFF61-\uFF9F]', text):
+        # HsiaoChen 是純中文聲線、假名會唸爛：先音譯成中文再唸。
+        # （多語言 SoVITS 不走這條，不受影響）
+        text = transliterate_kana_to_zh(text)
     voice = "ja-JP-NanamiNeural" if lang == "ja" else "zh-TW-HsiaoChenNeural"
     text = _clean_text(text, lang)
     if not text:
@@ -242,8 +390,9 @@ async def _synth_cloud_gptsovits(text: str) -> bytes:
     if not text:
         return b""
         
-    # GPT-SoVITS 的語系代碼通常為 "zh", "ja", "en" 等
-    req_lang = "zh" if lang != "ja" else "ja"
+    # GPT-SoVITS 的語系：純日→ja、純中→zh，混合一律 auto（模型自己分段唸）。
+    # 絕不能對混合句硬鎖 zh/ja，否則另一種文字會被唸爛。
+    req_lang = sovits_text_lang(text)
     
     # 這些是你原本給 GPT-SoVITS 的參考音訊與文字，需根據你的模型微調
     ref_audio = os.getenv("TTS_SOVITS_REF_AUDIO") or ""

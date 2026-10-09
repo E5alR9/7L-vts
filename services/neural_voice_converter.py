@@ -90,7 +90,7 @@ def convert_vocal_to_xiaoyi(
     """
     使用 7L 官方專屬之曉伊（Xiaoyi）甜美少女歌聲神經模型進行人聲置換
     - key: 音高微調偏移行 (例如 +1.0, -1.0)
-    - auto_pitch: 是否啟用樂句級男女聲基頻自動識別 (男聲自動+12半音升八度，女聲維持原調，男女混唱自適應)
+    - auto_pitch: 是否啟用整首統一音域判決 (整體偏低→全曲+12半音升八度，整體偏高→全曲維持原調，同首歌內絕不跳變)
     - model_name: 預設 xiaoyi (7L 專屬原聲模型)
     - f0_method: rmvpe (高精度神經音高追蹤)
     """
@@ -168,7 +168,7 @@ def convert_vocal_to_xiaoyi(
         
         if auto_pitch:
             rvc_key = f"auto{key:+0.1f}" if key != 0.0 else "auto"
-            pitch_mode_str = f"自適應男女聲智慧辨識" + (f" (偏移: {key:+0.1f})" if key != 0.0 else "")
+            pitch_mode_str = f"整首統一音域判決" + (f" (偏移: {key:+0.1f})" if key != 0.0 else "")
         else:
             rvc_key = key
             pitch_mode_str = f"固定 key={key:+0.1f}"

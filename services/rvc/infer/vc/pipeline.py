@@ -121,7 +121,7 @@ class Pipeline(object):
         except Exception:
             traceback.print_exc()
 
-        # 🎙️ 智慧音高與自適應男女聲升八度檢測
+        # 🎙️ 智慧音高與整首統一音域判決
         is_auto = False
         key_offset = 0.0
         if isinstance(f0_up_key, str) and "auto" in f0_up_key.lower():
@@ -155,14 +155,19 @@ class Pipeline(object):
 
     def compute_adaptive_phrase_keys(self, f0_interp, uv_mask, base_offset=0.0):
         """
-        樂句級男女聲基頻自動辨識與自適應升八度：
+        整首統一音域判決＋升八度（2026-10-09 修正直播事故）：
         - uv_mask: True 代表無聲/未發聲幀
-        - 依據發聲連通區與短停頓切分演唱樂句 (Phrases)
-        - 計算每個樂句基頻 (f0) 中位數：
-          * 若中位數 < 195Hz：判定為男聲樂句 -> 自動移調 +12 半音 (+1 個八度，進入 7L 甜美音域)
-          * 若中位數 >= 195Hz：判定為女聲樂句 -> 維持原調 0 半音 (保留自然甜美，避免花栗鼠尖叫)
+        - 依據發聲連通區與短停頓切分演唱樂句 (Phrases)，先掃完全部樂句，
+          以「發聲時長加權的低音占比」做整首統一判決（見 services/rvc_pitch.py）：
+          * 整體偏低（低音時長占比 >= 50%）-> 全曲統一 +12 半音（進入 7L 甜美音域）
+          * 整體偏高 -> 全曲維持原調 0 半音（連偏低的樂句也不動，絕不跳變）
+        - 舊邏輯是逐句各自判決，混合音域的歌會在樂句邊界忽高忽低，已廢除。
         - 句間無聲空隙進行平滑過渡，保證單次神經網絡合成零縫隙雜音
         """
+        try:
+            from services.rvc_pitch import decide_song_key_shift
+        except Exception:
+            from rvc_pitch import decide_song_key_shift
         n_frames = len(f0_interp)
         key_shifts = np.zeros(n_frames, dtype=np.float32)
 
@@ -182,6 +187,8 @@ class Pipeline(object):
         male_phrases = 0
         female_phrases = 0
 
+        # 第一段：只統計、不下判決（短於 5 幀的碎句不參與投票）
+        phrase_stats = []
         for s, e in zip(starts, ends):
             phrase_voiced = is_voiced[s:e]
             if not np.any(phrase_voiced):
@@ -190,13 +197,17 @@ class Pipeline(object):
             if len(phrase_f0) < 5:
                 continue
             med_f0 = float(np.median(phrase_f0))
-            # 判斷男女聲音域分界：195Hz (約 G3)
+            dur_sec = float(np.count_nonzero(phrase_voiced)) * 0.01
+            phrase_stats.append((med_f0, dur_sec))
             if med_f0 < 195.0:
-                key_shifts[s:e] = 12.0
                 male_phrases += 1
             else:
-                key_shifts[s:e] = 0.0
                 female_phrases += 1
+
+        # 第二段：整首統一判決，全曲同一個偏移
+        song_shift, low_ratio = decide_song_key_shift(phrase_stats)
+        for s, e in zip(starts, ends):
+            key_shifts[s:e] = song_shift
 
         # 句間無聲間隔平滑銜接
         if starts.size > 0:
@@ -211,9 +222,9 @@ class Pipeline(object):
                     key_shifts[mid:gap_e] = key_shifts[gap_e]
 
         print(
-            f"🎵 [RVC 音高智能調度] 檢測到 {len(starts)} 個樂句 | "
-            f"男聲: {male_phrases} 句 (自動+12半音升八度) | "
-            f"女聲: {female_phrases} 句 (維持原調0半音)"
+            f"🎵 [RVC 音高智能調度] 整體低音時長占比 {low_ratio:.0%} "
+            f"({len(phrase_stats)}樂句：偏低{male_phrases}/偏高{female_phrases}) → "
+            f"{'全曲統一+12半音升八度' if song_shift else '全曲維持原調'}"
             + (f" | 偏移: {base_offset:+0.1f}" if base_offset != 0 else "")
         )
         return key_shifts + base_offset

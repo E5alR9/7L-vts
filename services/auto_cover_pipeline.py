@@ -148,16 +148,16 @@ def separate_stems_gpu(input_wav: str, song_name: str) -> tuple[str, str]:
 def pitch_shift_vocal_to_female(vocal_in: str, vocal_out: str, semitones: float = 0.0, auto_pitch: bool = True) -> bool:
     """
     7L 官方專屬歌聲音色：曉伊（Xiaoyi）甜美少女原生音色
-    - auto_pitch=True (預設): 啟用樂句級男女聲基頻自動辨識
-      * 男聲樂句 (Median f0 < 195Hz) → 自動升八度 +12 半音 (進入 7L 甜美音域)
-      * 女聲樂句 (Median f0 >= 195Hz) → 維持原調 0 半音 (自然甜美不尖叫)
-      * 男女混唱 → 逐句獨立自適應，完全解決男女混唱兩難問題！
+    - auto_pitch=True (預設): 啟用整首統一音域判決（先掃完全部樂句）
+      * 整體偏低（低音發聲時長占比 >= 50%）→ 全曲統一 +12 半音 (進入 7L 甜美音域)
+      * 整體偏高 → 全曲維持原調 0 半音 (自然甜美不尖叫，連偏低樂句也不動)
+      * 同首歌內永遠只有一個偏移值，絕不在樂句邊界忽高忽低
     - semitones: 額外偏移量 (一般保持 0.0)
     - 採用官方 ContentVec + RMVPE 高精度聲學神經引擎
     """
     try:
         from services.neural_voice_converter import convert_vocal_to_xiaoyi
-        mode_str = "自適應男女聲智慧辨識" if auto_pitch else f"固定 key={semitones:+0.1f}"
+        mode_str = "整首統一音域判決" if auto_pitch else f"固定 key={semitones:+0.1f}"
         print(f"👑 [7L 專屬曉伊原聲音色轉換] 啟用曉伊原生歌聲神經轉換 ({mode_str})...")
         ok = convert_vocal_to_xiaoyi(vocal_in, vocal_out, key=semitones, 
             model_pth=r"C:\Users\qiwai\RVC-WebUI\assets\weights\7L_v2.pth",
@@ -430,7 +430,7 @@ async def prepare_cover_song(song_name: str):
         if not play_vocal:
             vocal_raw = os.path.join(CACHE_DIR, f"{safe_name}_vocals.wav")
             if os.path.exists(vocal_raw) and os.path.exists(cached_inst) and os.path.getsize(vocal_raw) > 100000:
-                print(f"⚡ [人聲伴奏已分離] 直接啟動 7L 曉伊 RVC 少女歌聲置換 (自適應男女聲音高): 《{song_name}》...")
+                print(f"⚡ [人聲伴奏已分離] 直接啟動 7L 曉伊 RVC 少女歌聲置換 (整首統一音域判決): 《{song_name}》...")
                 rvc_ok = await asyncio.to_thread(pitch_shift_vocal_to_female, vocal_raw, cached_vocal, 0.0)
                 if rvc_ok and os.path.exists(cached_vocal) and os.path.getsize(cached_vocal) > 10000:
                     play_vocal = cached_vocal
@@ -475,7 +475,7 @@ async def prepare_cover_song(song_name: str):
             })
         except Exception: pass
 
-        # 步驟 3: RVC 原生少女歌聲轉換 (自適應男女聲智慧升八度：男聲+12半音，女聲0半音，男女混唱逐句自適應)
+        # 步驟 3: RVC 原生少女歌聲轉換 (整首統一音域：整體偏低全曲+12半音，整體偏高全曲維持原調)
         trans_vocal = os.path.join(CACHE_DIR, f"{safe_name}_7l_vocal.wav")
         rvc_ok = await asyncio.to_thread(pitch_shift_vocal_to_female, vocal_wav, trans_vocal, 0.0)
         if not rvc_ok or not os.path.exists(trans_vocal) or os.path.getsize(trans_vocal) < 10000:
