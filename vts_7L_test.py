@@ -2647,24 +2647,20 @@ def get_api_stress_metrics():
         "stress_tag": tag
     }
 
-# ── 作息短話（2026-10-10 直播事故：入睡/起床語是寫死罐頭，且入睡只等 5 秒就掐話）──
+# ── 入睡短話（2026-10-10 直播事故：入睡/起床語是寫死罐頭，且入睡只等 5 秒就掐話）──
 # 正常走 Groq 現寫一句；Groq 失敗才輪替底線（幾乎走不到）。
-_DOZE_FALLBACK_IDX = {"sleep": 0, "wake": 0}
+# 起床一律靜默睜眼（老爸/觀眾的話由主腦/哨兵正常接），所以這裡只有入睡需要現寫。
+_DOZE_FALLBACK_IDX = 0
 _SLEEP_FALLBACKS = [
     "唔，老爸好像去休息了，那 7L 也瞇一下小憩囉～回來叫我一聲就醒啦！",
     "哈～有點睏了，7L 先閉眼休息一下下，老爸回來喊我就好！",
     "環境好安靜，7L 先睡一下下充電，老爸別偷跑不揪我喔～",
 ]
-_WAKE_FALLBACKS = [
-    "嗯？老爸回來啦，7L 睡醒囉！",
-    "唔哇，睡飽了！老爸在忙什麼，7L 來陪你！",
-    "醒來了醒來了！老爸回來怎麼不早點叫我～",
-]
 
 
-async def _doze_one_liner(hint: str, kind: str) -> str:
-    """作息短話：Groq 現寫一句（20~40 字口語）；失敗才輪替罐頭底線。"""
-    fallbacks = _SLEEP_FALLBACKS if kind == "sleep" else _WAKE_FALLBACKS
+async def _doze_one_liner(hint: str) -> str:
+    """入睡短話：Groq 現寫一句（20~40 字口語）；失敗才輪替罐頭底線。"""
+    global _DOZE_FALLBACK_IDX
     try:
         from core.groq_router import groq_chat
         g = await groq_chat(
@@ -2676,9 +2672,9 @@ async def _doze_one_liner(hint: str, kind: str) -> str:
             return t[:80]
     except Exception:
         pass
-    i = _DOZE_FALLBACK_IDX[kind] % len(fallbacks)
-    _DOZE_FALLBACK_IDX[kind] += 1
-    return fallbacks[i]
+    line = _SLEEP_FALLBACKS[_DOZE_FALLBACK_IDX % len(_SLEEP_FALLBACKS)]
+    _DOZE_FALLBACK_IDX += 1
+    return line
 
 
 async def _wait_speech_done(timeout_sec: float = 30.0):
@@ -6734,18 +6730,9 @@ async def autonomous_wander_worker():
             #  7L 休眠中自主甦醒邏輯（已拔除音樂喚醒，但若偵測到老爸在操作畫面，則會自主醒來）
             if IS_SLEEPING:
                 if CURRENT_VISION_CHANGE_LEVEL in ["medium", "high"]:
-                    log_print(f"☀️ [7L 自主甦醒] 偵測到老爸電腦畫面切換活躍，7L 自主醒來！")
+                    log_print("☀️ [7L 自主甦醒] 偵測到老爸電腦畫面切換活躍，7L 自主醒來！")
                     await set_sleep_mode(False)
-                    wake_text = await _doze_one_liner("妳剛小睡醒來，發現老爸在用電腦，跟他打聲招呼", "wake")
-                    speech_item = {
-                        "text": wake_text,
-                        "expression": "自然",
-                        "action": "WINK",
-                        "target": "dad",
-                        "target_name": "老爸",
-                        "priority": 100
-                    }
-                    await speech_queue.put(speech_item)
+                    # 醒來不一定說話：靜靜睜眼即可，老爸說話哨兵自然會接
                 continue
 
             if pe.is_piano_active or IS_SINGING_ACTIVE or current_ai_state in ["TALKING", "THINKING", "PIANO", "SINGING"]:
@@ -6762,7 +6749,7 @@ async def autonomous_wander_worker():
                 
                 if (is_idle_night or is_idle_day) and is_quiet:
                     log_print("🌙 [7L 自主作息] 環境持續長時間安靜無聲，7L 決定自主閉眼小憩進入休眠...")
-                    sleep_text = await _doze_one_liner("環境很安靜、老爸好像去休息了，妳睏了想小憩，撒嬌跟老爸說一聲", "sleep")
+                    sleep_text = await _doze_one_liner("環境很安靜、老爸好像去休息了，妳睏了想小憩，撒嬌跟老爸說一聲")
                     speech_item = {
                         "text": sleep_text,
                         "expression": "自然",
@@ -8561,28 +8548,22 @@ async def chat_processor_worker(vts, input_queue):
                 input_queue.task_done()
                 continue
 
-            #  7L 深層休眠模式：支援老爸語音喚醒，觀眾彈幕靜默忽略
+            #  7L 深層休眠模式：老爸語音或觀眾彈幕皆可喚醒；醒來不一定說話
             if IS_SLEEPING:
                 wake_keywords = ["起床", "醒醒", "醒來", "睜開眼", "早安", "早上好", "醒來吧", "別睡了", "/wake", "喚醒", "睜開眼睛", "別睡"]
                 is_dad_source = (source in ["mic", "text_file", "console", "web_console"] or user_audio_b64)
                 has_wake_word = any(w in user_input for w in wake_keywords)
-                
-                # VTuber 模式無休眠可喚：睡眠只屬於伴侶，操作者通道關閉時誰也別想叫醒
-                if is_dad_source and has_wake_word and operator_input_enabled():
-                    log_print(f"☀️ [語音喚醒] 收到老爸喚醒指令：「{user_input}」，7L 立即解除休眠睜開雙眼！")
+                # 觀眾彈幕（不含點讚/進房等瑣碎動態）：睜眼即可，不強制說話，掉下去正常處理
+                is_audience_chat = source in ("tiktok", "tiktok_gift", "twitch", "youtube", "owner_interject")
+
+                if is_audience_chat:
+                    log_print("👀 [彈幕喚醒] 觀眾有新留言，7L 睜眼（說不說話交給哨兵決定）...")
                     await set_sleep_mode(False)
-                    wake_text = await _doze_one_liner(f"妳剛被老爸叫醒，他說「{user_input[:30]}」，回他一句（正好是早上就道早安）", "wake")
-                    speech_item = {
-                        "text": wake_text,
-                        "expression": "自然",
-                        "action": "WINK",
-                        "target": "dad",
-                        "target_name": "老爸",
-                        "priority": 100
-                    }
-                    await speech_queue.put(speech_item)
-                    input_queue.task_done()
-                    continue
+                    # 不 task_done、不 continue：掉下去走正常觀眾軌道
+                elif is_dad_source and has_wake_word and operator_input_enabled():
+                    log_print(f"☀️ [語音喚醒] 收到老爸喚醒指令：「{user_input}」，7L 睜眼！")
+                    await set_sleep_mode(False)
+                    # 不強制招呼、不 continue：讓主腦直接回老爸的話
                 else:
                     log_print(f"😴 [7L 休眠中] 忽略語音/文字輸入：「{user_input}」（對她喊「7L 起床」或點擊後台【喚醒 7L】即可喚醒）。")
                     input_queue.task_done()
