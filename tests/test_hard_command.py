@@ -167,6 +167,19 @@ def test_cpu_ignores_expression_only_songs():
     assert parse_hard_command("唱晴天")[0] == "auto_sing_song"
 
 
+def test_japanese_titles_hit():
+    """2026-10-10 直播事故：「唱 インフェルノシティ」全片假名被判無內容而漏接。"""
+    tool, args = parse_hard_command("唱 インフェルノシティ")
+    assert tool == "auto_sing_song"
+    assert args == {"song_name": "インフェルノシティ"}
+    assert parse_hard_command("唱 ロンリーユニバース") == (
+        "auto_sing_song", {"song_name": "ロンリーユニバース"})
+    assert parse_hard_command("唱 幽霊東京") == (
+        "auto_sing_song", {"song_name": "幽霊東京"})
+    assert parse_hard_command("唱pretender") == (
+        "auto_sing_song", {"song_name": "pretender"})
+
+
 # --- 表情不歸 CPU（紙條分支保留給 A 架構 NV 用）---
 def test_expression_slip_forbids_repeat():
     s = build_slip_text("trigger_vts_expression", {"expression_name": "暈"}, "老爸")
