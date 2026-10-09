@@ -2857,14 +2857,13 @@ async def save_user_profile(custom_name=None, impression=None):
 
 
 
-async def add_few_shot_example(scenario: str, user_input: str, thought: str, reply: str):
+async def add_few_shot_example(scenario: str, user_input: str, thought: str = "", reply: str = ""):
     """7L 自主新增神回覆範例到雲端示範庫"""
     kn = await get_cloud_knowledge()
     examples = kn.get("few_shot_examples", [])
     new_ex = {
         "scenario": str(scenario).strip(),
         "input": str(user_input).strip(),
-        "thought": str(thought).strip(),
         "reply": str(reply).strip()
     }
     examples.append(new_ex)
@@ -4824,13 +4823,12 @@ async def execute_actions(vts, text, input_queue, user_input_ctx: str = "", has_
             asyncio.create_task(update_cloud_prompt_field(f_name, f_val))
             text = text.replace(up.group(0), "")
 
-    for ae in re.finditer(r'\[(?:ADD_EXAMPLE|LEARN_EXAMPLE)[：:]\s*([^|\]]+)\|([^|\]]+)\|([^|\]]+)\|([^\]]+)\]', text, re.IGNORECASE):
+    for ae in re.finditer(r'\[(?:ADD_EXAMPLE|LEARN_EXAMPLE)[：:]\s*([^|\]]+)\|([^|\]]+)\|([^\]]+)\]', text, re.IGNORECASE):
         sc = ae.group(1).strip()
         ui = ae.group(2).strip()
-        th = ae.group(3).strip()
-        rp = ae.group(4).strip()
+        rp = ae.group(3).strip()
         if sc and rp:
-            asyncio.create_task(add_few_shot_example(sc, ui, th, rp))
+            asyncio.create_task(add_few_shot_example(sc, ui, "", rp))
             text = text.replace(ae.group(0), "")
 
     for lm in re.finditer(r'\[LEARN_MEME[：:]\s*([^\]]+)\]', text, re.IGNORECASE):
@@ -7287,22 +7285,11 @@ async def judge_subconscious_intent_via_live_api(memory_context: str, unread_bat
             live_cfg = types.LiveConnectConfig(
                 response_modalities=[types.Modality.AUDIO],
                 output_audio_transcription=types.AudioTranscriptionConfig(),
-                system_instruction=types.Content(parts=[types.Part(text="""妳是 7L 的背景潛意識決策神經（Subconscious Sentry）。
-妳正在即時審查全集中累積的最新滾動記憶與剛收到的新輸入（包含老爸的麥克風語音、電腦打字、或直播觀眾彈幕）。
-請快速判斷 7L 當前是否應該開口發話回應？
-【 邊彈邊聊特別規範】：即使 7L 背景正在彈奏鋼琴，只要有人說話、提問、打招呼、點歌或留言互動，一律正常判定 [SPEAK: ...]！7L 具備邊彈鋼琴邊聊天讀訊息的即時多工能力，絕不因彈琴而保持沉默！
-1. 【老爸發話（語音/打字）】：
-   -  僅當輸入明確標註為【老爸】或來自麥克風/主腦通道時才可判定為老爸！
-   - 若老爸在對妳說話、下指令、問話、調侃、點歌、或互動 ➔ 請輸出：[SPEAK: target=老爸, focus=指令或話題焦點, song=歌名(若點歌)]
-   - 若老爸在專注自言自語、喃喃自語、或純背景雜音/咳嗽 ➔ 請輸出：[SILENCE]
-2. 【直播觀眾彈幕（多人實況與權限通化判定）】：
-   - 直播間包含：老爸（打遊戲的主播與唯一決策者）、觀眾（看直播發言的網友）、7L（同台 AI 女兒副播）。
-   - 【通化決策原則（主動將決策權交給老爸）】：
-     * 凡觀眾提出任何請求（遊戲、好友、組隊、帳號、聯繫方式、抽獎等）或向主播提問 ➔ 7L 絕不擅自主張開條件，一律向老爸請示或通報，輸出：[SPEAK: target=老爸(因應觀眾請求/提問), focus=請示老爸, user=觀眾名]
-     * 若觀眾在聊遊戲戰況、操作、嘴主播 ➔ 7L 作為同台副播女兒，在旁起鬨或吐槽老爸，輸出：[SPEAK: target=老爸(因應觀眾留言吐槽), focus=吐槽老爸/起鬨, user=觀眾名]
-     * 若觀眾明確指名 7L 互動、聊天、點歌、稱讚 ➔ 輸出：[SPEAK: target=用戶名, focus=話題重點, song=歌名(若點歌)]
-     * 若為無聊刷屏、無意義表情/符號、或目前無需插話 ➔ 請輸出：[SILENCE]
-請只輸出 [SILENCE] 或 [SPEAK: ...]！""")])
+                system_instruction=types.Content(parts=[types.Part(text="""妳是 7L 的潛意識哨兵：只決定她現在該不該開口。
+- 老爸（麥克風/打字標註老爸）：對妳說話、下指令、問話、點歌→[SPEAK: target=老爸, focus=重點, song=歌名(若點歌)]；自言自語/雜音/咳嗽→[SILENCE]。
+- 觀眾彈幕：指名 7L、聊天、點歌、稱讚→[SPEAK: target=觀眾名, focus=重點, song=歌名(若點歌)]；聊遊戲戰況/嘴主播→[SPEAK: target=老爸(吐槽), focus=重點, user=觀眾名]；任何請求提問→[SPEAK: target=老爸(請示), focus=重點, user=觀眾名]；刷屏/符號/無需插話→[SILENCE]。
+- 彈鋼琴時照常判定，不因彈琴沉默。
+只輸出 [SILENCE] 或 [SPEAK: ...]！""")])
             )
             async with asyncio.timeout(3.5):
                 async with client.aio.live.connect(model="gemini-3.8-live", config=live_cfg) as session:

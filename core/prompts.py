@@ -897,10 +897,10 @@ class PromptTemplateEngine:
         if conversation_style:
             lines.append(f"{conversation_style}")
 
-        #  3. 懂梗庫 (雲端動態)
+        #  3. 懂梗庫 (雲端動態，只取前 10：多了模型記不住也學不像)
         if memes:
             lines.append(" 【當前掌握的流行語與網路梗（秒懂對方的梗與潛台詞）】：")
-            lines.append("、".join(memes[:35]))
+            lines.append("、".join(memes[:10]))
 
         #  4. 神回覆 Few-Shot 範例示範庫 (雲端動態)
         if few_shot_exs:
@@ -908,7 +908,6 @@ class PromptTemplateEngine:
             for ex in few_shot_exs[:6]:
                 sc = ex.get("scenario", "日常")
                 inp = ex.get("input", "")
-                th = ex.get("thought", "")
                 rep = ex.get("reply", "")
                 if inp and rep:
                     lines.append(f"- 對方（{sc}）：「{inp}」 ➔ `{rep}`")
@@ -930,7 +929,7 @@ class PromptTemplateEngine:
         if banned:
             lines.append(f" 【請避免使用的客服腔與詞彙】：{'、'.join(banned)}")
 
-        lines.append(" 【提示詞雲端自我演進指南】：若在對話中學到新梗、新事實、或想調整世界觀/說話風格/案例，可在回覆句尾附上 `[LEARN_MEME: 梗（含義）]`、`[LEARN_FACT: 事實]`、`[UPDATE_PROMPT: 欄位名|新內容]` 或 `[ADD_EXAMPLE: 情境|對方說|心想|回覆]`，系統將自動寫入雲端 Firestore 永久大腦！")
+        lines.append(" 【提示詞雲端自我演進指南】：若在對話中學到新梗、新事實、或想調整世界觀/說話風格/案例，可在回覆句尾附上 `[LEARN_MEME: 梗（含義）]`、`[LEARN_FACT: 事實]`、`[UPDATE_PROMPT: 欄位名|新內容]` 或 `[ADD_EXAMPLE: 情境|對方說|回覆]`，系統將自動寫入雲端 Firestore 永久大腦！")
         return "\n\n".join(lines)
 
     @classmethod
