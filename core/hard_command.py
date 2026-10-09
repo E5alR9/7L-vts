@@ -49,8 +49,11 @@ _BAD_START = re.compile(
     r'^(?:幾|什|啥|哪|誰|怎|為何|是否|嗎|呢|了|完|得|過|的|著|吧|啊|呀|嘿|喂|欸|喔)'
 )
 
-# 候選歌名必須含「實字」：中英數字＋漢字＋日文假名（平/片/半形，2026-10-10 直播事故：「唱 インフェルノシティ」全片假名被判無內容而漏接）
-_HAS_CONTENT = re.compile(r'[A-Za-z0-9\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uff61-\uff9f]')
+def _has_content_char(t: str) -> bool:
+    """候選歌名含任一 Unicode 字母或數字即算實字。
+    2026-10-10：不再逐區段列舉（中日韓泰俄阿…全支援），純標點/空白才算無內容。
+    """
+    return any(ch.isalpha() or ch.isdigit() for ch in t)
 
 # 通用／非具名稱呼：這些不算「具體的某個人」，下游看到它們必須繼續當未知處理，
 # 絕不能拿來覆寫掉已知的真名（見 piano_engine 隊列去重邏輯）。
@@ -116,7 +119,7 @@ def _title_ok(t: str) -> bool:
         return False
     if _BAD_START.search(t):
         return False
-    if not _HAS_CONTENT.search(t):
+    if not _has_content_char(t):
         return False
     return True
 

@@ -5225,6 +5225,8 @@ async def live_code_tool_task(session, vts):
             log_print(f"⚠️ [程式專家] 無法傳送 fallback: {inner_e}")
 
 LIVE_CONTEXT_MEMORY = []
+# 主腦上次調用工具的時間戳（紙條看門狗用：送出 20 秒還沒動靜＝她沒理會）
+LAST_BRAIN_TOOL_TS = 0.0
 
 GLOBAL_LIVE_SESSION = None
 INSTINCT_LIVE_SESSION = None
@@ -5322,6 +5324,20 @@ async def instinct_live_worker():
             INSTINCT_LIVE_SESSION = None
             log_print(f"⚠️ [本能大腦] 連線中斷或重啟中: {e}")
             await asyncio.sleep(3)
+
+async def _slip_watchdog(prompt: str, sent_ts: float, timeout: float = 20.0):
+    """紙條看門狗（2026-10-10：紙條只管送不管腦理不理，「唱 インフェルノシティ」就這樣丟了）。
+
+    動作類紙條送出後 timeout 秒，主腦一次工具都沒調＝她沒理會（session 僵住、
+    或當閒聊回掉），打一條警告讓人知道，而不是靜默丟失。
+    """
+    await asyncio.sleep(timeout)
+    try:
+        if globals().get("LAST_BRAIN_TOOL_TS", 0.0) < sent_ts:
+            log_print(f"⚠️ [紙條無回應] 主腦 {timeout:.0f} 秒沒理會紙條（{prompt[:40]}…）。"
+                      f"可能 session 僵住或她當閒聊回掉；CPU 有直接執行的不受影響。")
+    except Exception:
+        pass
 
 async def continuous_live_worker(vts):
     """真・雙向串流 Live 大腦核心"""
@@ -5506,6 +5522,8 @@ async def continuous_live_worker(vts):
                                             fn_args = getattr(part.function_call, 'args', {}) or {}
                                             fn_call_id = getattr(part.function_call, 'id', None)
                                             log_print(f"🤖 [Live 主腦決策] 呼叫工具: {fn_name}({fn_args})")
+                                            global LAST_BRAIN_TOOL_TS
+                                            LAST_BRAIN_TOOL_TS = time.time()
                                             
                                             if fn_name == "invoke_subagent":
                                                 # 來幾個跑幾個、互不堵塞：每通呼叫獨立背景任務，
@@ -5626,13 +5644,17 @@ async def continuous_live_worker(vts):
                                 async with ws_send_lock:
                                     await session.send_realtime_input(text=prompt)
                                     import time
-                                    LIVE_CONTEXT_MEMORY.append((time.time(), prompt))
+                                    sent_ts = time.time()
+                                    LIVE_CONTEXT_MEMORY.append((sent_ts, prompt))
                                     if len(LIVE_CONTEXT_MEMORY) > 10:
                                         LIVE_CONTEXT_MEMORY.pop(0)
                                     try:
-                                        RECENT_SLIPS.append((time.time(), prompt))
+                                        RECENT_SLIPS.append((sent_ts, prompt))
                                     except Exception:
                                         pass
+                                    # 動作類紙條（點歌/搜尋/表情）主腦可能已讀不理，掛看門狗
+                                    if re.search(r'唱|彈|點歌|搜尋|表情', prompt):
+                                        asyncio.create_task(_slip_watchdog(prompt, sent_ts))
                             except Exception as inner_e:
                                 log_print(f"⚠️ [黑板同步] 發送失敗 ({inner_e})，訊息已退回佇列等待重連...")
                                 # 把剛剛拿出來但沒送成功的紙條塞回佇列的最前面

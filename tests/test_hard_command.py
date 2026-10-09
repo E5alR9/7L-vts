@@ -178,6 +178,19 @@ def test_japanese_titles_hit():
         "auto_sing_song", {"song_name": "幽霊東京"})
     assert parse_hard_command("唱pretender") == (
         "auto_sing_song", {"song_name": "pretender"})
+    # 全語言：韓文/俄文/泰文/阿拉伯文都攔，純標點才放行
+    assert parse_hard_command("唱 Dynamite") == (
+        "auto_sing_song", {"song_name": "Dynamite"})
+    assert parse_hard_command("唱 blueseoul") == (
+        "auto_sing_song", {"song_name": "blueseoul"})
+    tool, args = parse_hard_command("唱 Катюша")
+    assert tool == "auto_sing_song" and args["song_name"] == "Катюша"
+    tool, args = parse_hard_command("唱 봄날")
+    assert tool == "auto_sing_song" and args["song_name"] == "봄날"
+    tool, args = parse_hard_command("唱 ชีวิต")
+    assert tool == "auto_sing_song" and args["song_name"] == "ชีวิต"
+    assert parse_hard_command("唱 ？！") == (None, {})
+    assert parse_hard_command("唱 。。。") == (None, {})
 
 
 # --- 表情不歸 CPU（紙條分支保留給 A 架構 NV 用）---
