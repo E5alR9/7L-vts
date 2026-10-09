@@ -101,7 +101,9 @@ def _take_candidate(rest: str) -> Optional[str]:
             if ch in '」』"\'”':
                 return s[1:i]
         s = s[1:]
-    m = re.match(r'([^，。！？!?、；;：:\]]+)', s)
+    m = re.match(r'([^，。！？!?、；;：\]]+)', s)
+    # ⚠️ 斷句集刻意不含半形冒號：歌名常有冒號（5:20am、Relation），切掉會把歌名切爛；
+    # 全形：保留（中文解說分隔符，如「唱 晴天：超好聽」取冒號前）。
     return m.group(1) if m else None
 
 
@@ -178,6 +180,31 @@ def parse_hard_command(text: Optional[str]) -> Tuple[Optional[str], Dict]:
     if song:
         return "pe.play_virtual_piano", {"song_name": song}
     return None, {}
+
+
+_SLIP_PREFIX_RE = re.compile(r'^\[[^\]]*\]\s*[^：:]*[：:]\s*')
+
+def parse_slip_for_song(prompt: Optional[str]):
+    """從紙條還原點歌指令（斷線救援用）：剝掉紙條前綴後走 CPU 拆解。
+
+    背景：紙條送達後 session 若立刻死亡，主腦永遠看不到它（佇列只重發
+    「發送失敗」的，不重發「送達了但腦沒處理」的）。2026-10-09 直播事故：
+    「唱 5:20am」的紙條就這樣丟了。
+    只認點歌（回 (tool, args)），其餘一律 (None, {})——含剝不出原文的、
+    系統紙條（CPU/謝幕/失敗通知，點歌動詞都在非祈使位置自然落榜）。
+    """
+    text = (prompt or "").strip()
+    if not text:
+        return None, {}
+    msg = _SLIP_PREFIX_RE.sub('', text, count=1)
+    if not msg or msg == text:
+        return None, {}
+    tool, args = parse_hard_command(msg)
+    if tool not in ("auto_sing_song", "sing_song"):
+        return None, {}
+    if not (args or {}).get("song_name"):
+        return None, {}
+    return tool, args
 
 
 def build_slip_text(fn_name: str, fn_args: Dict, requester_name: str,

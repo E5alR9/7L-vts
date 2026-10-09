@@ -154,16 +154,27 @@ def pitch_shift_vocal_to_female(vocal_in: str, vocal_out: str, semitones: float 
       * 同首歌內永遠只有一個偏移值，絕不在樂句邊界忽高忽低
     - semitones: 額外偏移量 (一般保持 0.0)
     - 採用官方 ContentVec + RMVPE 高精度聲學神經引擎
+    （註：2026-10-09 曾試過高音三明治［f0 降調＋post-DSP 拉回］，盲聽證明
+    post-DSP 本身就會花栗鼠，已整段移除；詳見 git 歷史。）
     """
     try:
         from services.neural_voice_converter import convert_vocal_to_xiaoyi
+        _MODEL_PTH = r"C:\Users\qiwai\RVC-WebUI\assets\weights\7L_v2.pth"
+        _INDEX_FILE = r"C:\Users\qiwai\RVC-WebUI\assets\indices\7L_v2_added_IVF256_Flat_nprobe_1_7L_v2_v2.index"
+
+        def _valid(path):
+            return bool(path) and os.path.exists(path) and os.path.getsize(path) > 10000
+
+        def _run_convert(v_in, v_out, _key, _auto):
+            return convert_vocal_to_xiaoyi(
+                v_in, v_out, key=_key,
+                model_pth=_MODEL_PTH, index_file=_INDEX_FILE,
+                index_rate=0.88, auto_pitch=_auto)
+
         mode_str = "整首統一音域判決" if auto_pitch else f"固定 key={semitones:+0.1f}"
         print(f"👑 [7L 專屬曉伊原聲音色轉換] 啟用曉伊原生歌聲神經轉換 ({mode_str})...")
-        ok = convert_vocal_to_xiaoyi(vocal_in, vocal_out, key=semitones, 
-            model_pth=r"C:\Users\qiwai\RVC-WebUI\assets\weights\7L_v2.pth",
-            index_file=r"C:\Users\qiwai\RVC-WebUI\assets\indices\7L_v2_added_IVF256_Flat_nprobe_1_7L_v2_v2.index",
-            index_rate=0.88, auto_pitch=auto_pitch)
-        if ok and os.path.exists(vocal_out) and os.path.getsize(vocal_out) > 10000:
+        ok = _run_convert(vocal_in, vocal_out, semitones, auto_pitch)
+        if ok and _valid(vocal_out):
             print("🎉 [7L 曉伊原聲翻唱成功] 成功統一 7L 專屬甜妹歌聲！")
             return True
         else:
@@ -178,7 +189,7 @@ _IS_PRODUCING_COVER = False
 IS_SINGING_ACTIVE = False
 
 # —— 點歌排隊（2026-10-09：台上有人在唱就排隊＋背景 RVC 照做，不再直接丟掉）——
-#  parade: 請求進 SONG_REQUEST_QUEUE → 背景一次只做一首準備（GPU 安全）→
+# 流程：請求進 SONG_REQUEST_QUEUE → 背景一次只做一首準備（GPU 安全）→
 #  備好進 READY_SONGS → 舞台空了就開唱 → 每首結束遞謝幕紙條 → 下一首。
 SONG_REQUEST_QUEUE = deque()   # 待準備：{"title", "requester"}
 READY_SONGS = deque()          # 已備好待播：{"title", "vocal", "inst", "requester", "gen"}
@@ -187,6 +198,7 @@ _ACTIVE_TITLES = set()         # 準備中＋備好＋演唱中的去重鍵（�
 _PIPELINE_GEN = 0              # 世代計數：stop_singing() 遞增，遲到的背景任務自動丟棄
 _ORCH_TASK = None
 _PREPARE_TASK = None
+_PLAY_TASK = None
 
 def get_core_vts():
     """動態取得當前運行的主核心模組，杜絕重複 import 導致 .env 與全域狀態衝突"""
@@ -253,6 +265,10 @@ def _dedupe_key(title: str) -> str:
     """去重鍵：用實際快取檔名歸一化（同檔＝同首歌，連「晴天」vs「晴天！」這種都算同一首）"""
     return get_safe_filename((title or "").strip()).casefold()
 
+def is_song_active(song_name: str) -> bool:
+    """這首歌是否已在唱／排隊／準備中（斷線救援用，避免重複排入）。"""
+    return _dedupe_key(song_name) in _ACTIVE_TITLES
+
 def _stage_busy() -> bool:
     """舞台是否有人在唱（含主核心同步過來的狀態）"""
     if IS_SINGING_ACTIVE:
@@ -315,23 +331,26 @@ def request_cover_song(song_name: str, requester: str = "") -> str:
     return f"《{title}》已排入點歌隊列{tail}，背景 RVC 會接著做、唱完手上這首就輪到它！"
 
 async def _sing_orchestrator():
-    """隊列調度：一次只做一首背景準備（GPU 安全），備好＋舞台空了就開唱，全空就收工。"""
-    global _ORCH_TASK, _PREPARE_TASK, _IS_PRODUCING_COVER
+    """隊列調度：一次只做一首背景準備（GPU 安全），備好＋舞台空了就開唱，全空就收工。
+    播放本身也是背景任務——迴圈全程每 0.5 秒轉一圈，台上唱歌時照樣開新的背景準備。"""
+    global _ORCH_TASK, _PREPARE_TASK, _PLAY_TASK, _IS_PRODUCING_COVER
     _IS_PRODUCING_COVER = True
     try:
         while True:
-            # 1. 有備好的歌且舞台空了 → 開唱（await 期間背景準備可並行）
-            if READY_SONGS and not _stage_busy():
+            play_busy = _PLAY_TASK is not None and not _PLAY_TASK.done()
+            # 1. 有備好的歌、舞台空了、且沒有播放任務在跑 → 開唱（不 await，做成背景任務）
+            if READY_SONGS and not _stage_busy() and not play_busy:
                 item = READY_SONGS.popleft()
-                await play_prepared_song(item["title"], item["vocal"], item["inst"], item["gen"])
-                continue
+                _PLAY_TASK = asyncio.create_task(
+                    play_prepared_song(item["title"], item["vocal"], item["inst"], item["gen"]))
             # 2. 有待準備且沒有準備任務在跑 → 開一個背景準備（唱歌中也能 RVC）
             if SONG_REQUEST_QUEUE and (_PREPARE_TASK is None or _PREPARE_TASK.done()):
                 item = SONG_REQUEST_QUEUE.popleft()
                 _PREPARE_TASK = asyncio.create_task(_prepare_worker(item, _PIPELINE_GEN))
             # 3. 全空且舞台空 → 收工（下次點歌再啟動，不留殭屍任務）
             prep_busy = _PREPARE_TASK is not None and not _PREPARE_TASK.done()
-            if not SONG_REQUEST_QUEUE and not READY_SONGS and not _stage_busy() and not prep_busy:
+            play_busy = _PLAY_TASK is not None and not _PLAY_TASK.done()
+            if not SONG_REQUEST_QUEUE and not READY_SONGS and not _stage_busy() and not prep_busy and not play_busy:
                 break
             await asyncio.sleep(0.5)
     finally:

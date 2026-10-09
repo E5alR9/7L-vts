@@ -66,7 +66,7 @@ from services.piano_engine import is_piano_active
 from services.tiktok_listener import tiktok_live_worker
 from services.twitch_listener import twitch_live_worker
 from services.youtube_live_listener import youtube_live_worker
-from services.auto_cover_pipeline import produce_and_sing_cover, stop_singing, request_cover_song
+from services.auto_cover_pipeline import produce_and_sing_cover, stop_singing, request_cover_song, is_song_active
 import services.web_dashboard as web_dash
 from PIL import BmpImagePlugin
 from PIL import Image, ImageDraw, ImageGrab, ImageChops
@@ -566,7 +566,8 @@ from core.utils import (
     record_interaction_tick, get_silence_ticks, get_uptime_ticks, format_ticks_to_human,
     speech_allowed, operator_input_enabled
 )
-from core.hard_command import parse_hard_command, build_slip_text, display_requester
+from core.hard_command import parse_hard_command, build_slip_text, display_requester, parse_slip_for_song
+from core.subagent_router import resolve_subagent_chain
 from core.db import *
 from core.live_timer_sensor import live_timer_hub
 import services.piano_engine as pe
@@ -2718,6 +2719,12 @@ notification_expire_time = 0.0
 active_timers = set()
 speech_queue = asyncio.Queue()  
 LIVE_API_SYSTEM_PROMPT_QUEUE = asyncio.Queue()
+# 🛟 斷線救援：已送達紙條的案底（(時間, 全文)，只留最近 30 張）。
+# 佇列只重發「發送失敗」的；「送達後 session 立刻死亡、腦沒處理」的靠重連掃這裡撿回。
+RECENT_SLIPS = deque(maxlen=30)
+RESCUE_WINDOW_SEC = 120.0
+# 進行中的子智能體任務（防 GC、手動盤點用；開幾個跑幾個，不設上限）
+_RUNNING_SUBAGENT_TASKS = set()
 pygame.mixer.init()
 
 #  真實音訊波形對嘴中樞 (RMS 包絡提取與物理開閉濾波)
@@ -5458,6 +5465,12 @@ async def continuous_live_worker(vts):
                 log_print(f"✅ 已成功連線至 Live API！模型: {live_m} (通道 G{current_k_idx}) 麥克風持續收音中...")
                 if recent_ctx and recent_ctx.strip():
                     log_print(f"🧠 [記憶恢復] 已向新連線的系統提示中注入最新對話歷史記憶。")
+                # 🛟 斷線救援：上個 session 吞掉的點歌紙條，在這裡撿回來
+                # （只救確定無人認領的點歌；去重＋120 秒案底保證不重複執行）
+                try:
+                    asyncio.create_task(_rescue_missed_song_requests())
+                except Exception:
+                    pass
                 
                 p = pyaudio.PyAudio()
                 stream = p.open(format=FORMAT, channels=CHANNELS, rate=RATE, input=True, frames_per_buffer=CHUNK)
@@ -5510,6 +5523,48 @@ async def continuous_live_worker(vts):
                     chunk_buffer = ""
                     turn_buffer = ""
                     user_transcription_buffer = ""
+
+                    async def _handle_invoke_subagent(_fn_name, _fn_call_id, _task_ins):
+                        """單個子智能體任務全流程（CPU→NV→回報），獨立背景執行、互不堵塞。
+                        主腦一次開多通就同時跑多個（NV 內建 20s/30s 超時，不設上限）。"""
+                        try:
+                            if _task_ins:
+                                # 等 CPU 拆解回執再回話：命中才說啟動，沒命中就讓主腦直接回
+                                # ⚠️ requester 傳空字串：task_ins 是主腦自己寫的指令，
+                                # 點歌人不一定是老爸（可能是轉述觀眾點的），紙條走中性文案
+                                try:
+                                    _hit, _tname, _targs = await background_tool_executor(_task_ins, target="dad", requester_name="")
+                                except Exception as _be:
+                                    log_print(f"⚠️ [子智能體執行異常]: {_be}")
+                                    _hit, _tname, _targs = False, "", {}
+                                if _hit:
+                                    _result_text = f"子智能體已在背景啟動（{_tname} {_targs}），請妳立刻用口語回應，告訴對方妳正在準備了。"
+                                else:
+                                    # CPU 沒命中 → NV 解讀（A 鏈第二棒）
+                                    try:
+                                        _k2, _t2 = await nv_interpret_task(_task_ins, target="dad", requester_name="")
+                                        if _k2 in ("tool", "advice"):
+                                            _result_text = _t2
+                                        else:
+                                            _result_text = "該任務無需後台執行，請妳直接用口語回覆即可。"
+                                    except Exception as _be2:
+                                        log_print(f"⚠️ [NV 解讀異常]: {_be2}")
+                                        _result_text = "後台執行異常，請妳直接用口語回覆即可。"
+                            else:
+                                _result_text = "任務指示為空，請妳直接用口語回覆即可。"
+                            _fr = {"name": _fn_name, "response": {"result": _result_text}}
+                            if _fn_call_id:
+                                _fr["id"] = _fn_call_id
+                            try:
+                                async with ws_send_lock:
+                                    await session.send_tool_response(
+                                        function_responses=[types.FunctionResponse(**_fr)]
+                                    )
+                            except Exception as _se:
+                                log_print(f"⚠️ [子智能體回報失敗]: {_se}")
+                        except Exception as _e:
+                            log_print(f"⚠️ [子智能體任務異常]: {_e}")
+
                     try:
                         async for resp in session.receive():
                             c = resp.server_content
@@ -5523,41 +5578,25 @@ async def continuous_live_worker(vts):
                                             log_print(f"🤖 [Live 主腦決策] 呼叫工具: {fn_name}({fn_args})")
                                             
                                             if fn_name == "invoke_subagent":
-                                                task_ins = fn_args.get("task_instruction", "")
-                                                if task_ins:
-                                                    # 等 CPU 拆解回執再回話：命中才說啟動，沒命中就讓主腦直接回
-                                                    # ⚠️ requester 傳空字串：task_ins 是主腦自己寫的指令，
-                                                    # 點歌人不一定是老爸（可能是轉述觀眾點的），紙條走中性文案
-                                                    try:
-                                                        _hit, _tname, _targs = await background_tool_executor(task_ins, target="dad", requester_name="")
-                                                    except Exception as _be:
-                                                        log_print(f"⚠️ [子智能體執行異常]: {_be}")
-                                                        _hit, _tname, _targs = False, "", {}
-                                                    if _hit:
-                                                        _result_text = f"子智能體已在背景啟動（{_tname} {_targs}），請妳立刻用口語回應，告訴對方妳正在準備了。"
-                                                    else:
-                                                        # CPU 沒命中 → NV 解讀（A 鏈第二棒）
-                                                        try:
-                                                            _k2, _t2 = await nv_interpret_task(task_ins, target="dad", requester_name="")
-                                                            if _k2 in ("tool", "advice"):
-                                                                _result_text = _t2
-                                                            else:
-                                                                _result_text = "該任務無需後台執行，請妳直接用口語回覆即可。"
-                                                        except Exception as _be2:
-                                                            log_print(f"⚠️ [NV 解讀異常]: {_be2}")
-                                                            _result_text = "後台執行異常，請妳直接用口語回覆即可。"
-                                                else:
-                                                    _result_text = "任務指示為空，請妳直接用口語回覆即可。"
-                                            
-                                            # 立刻回傳以解除主腦堵塞，讓她可以繼續講話
-                                            _fr_kwargs = {"name": fn_name, "response": {"result": _result_text if fn_name == "invoke_subagent" else "子智能體已在背景啟動！請妳立刻用口語回應，告訴對方妳正在準備了。"}}
-                                            if fn_call_id:
-                                                _fr_kwargs["id"] = fn_call_id
-                                            asyncio.create_task(session.send_tool_response(
-                                                function_responses=[
-                                                    types.FunctionResponse(**_fr_kwargs)
-                                                ]
-                                            ))
+                                                # 來幾個跑幾個、互不堵塞：每通呼叫獨立背景任務，
+                                                # 開多少量由主腦自己決定（不設上限，同時回報各做各的）。
+                                                _sub_t = asyncio.create_task(
+                                                    _handle_invoke_subagent(
+                                                        fn_name, fn_call_id,
+                                                        fn_args.get("task_instruction", "")))
+                                                _RUNNING_SUBAGENT_TASKS.add(_sub_t)
+                                                _sub_t.add_done_callback(_RUNNING_SUBAGENT_TASKS.discard)
+                                            else:
+                                                # 非子智能體工具（目前 LIVE_API_TOOLS 只有 invoke_subagent，此分支備而不用）
+                                                # 立刻回傳以解除主腦堵塞，讓她可以繼續講話
+                                                _fr_kwargs = {"name": fn_name, "response": {"result": "子智能體已在背景啟動！請妳立刻用口語回應，告訴對方妳正在準備了。"}}
+                                                if fn_call_id:
+                                                    _fr_kwargs["id"] = fn_call_id
+                                                asyncio.create_task(session.send_tool_response(
+                                                    function_responses=[
+                                                        types.FunctionResponse(**_fr_kwargs)
+                                                    ]
+                                                ))
 
                                 if getattr(c, 'interrupted', False):
                                     log_print("🛑 [Live 大腦] 偵測到新對話/環境指令打斷，清空舊語音佇列！")
@@ -5654,6 +5693,10 @@ async def continuous_live_worker(vts):
                                     LIVE_CONTEXT_MEMORY.append((time.time(), prompt))
                                     if len(LIVE_CONTEXT_MEMORY) > 10:
                                         LIVE_CONTEXT_MEMORY.pop(0)
+                                    try:
+                                        RECENT_SLIPS.append((time.time(), prompt))
+                                    except Exception:
+                                        pass
                             except Exception as inner_e:
                                 log_print(f"⚠️ [黑板同步] 發送失敗 ({inner_e})，訊息已退回佇列等待重連...")
                                 # 把剛剛拿出來但沒送成功的紙條塞回佇列的最前面
@@ -7675,57 +7718,209 @@ def _extract_think_reply(text: str):
     return think, reply
 
 
+_SUBAGENT_GEMINI_TOOL_TIMEOUT = 12.0
+_SUBAGENT_GEMINI_TOOL_ATTEMPTS = 2
+_SUBAGENT_GEMINI_THINK_TIMEOUT = 20.0
+_SUBAGENT_GEMINI_THINK_ATTEMPTS = 2
+
+
+def _subagent_gemini_pairs(models, attempts):
+    """子智能體 Gemini 梯隊：隨機打散 key，(key, model) 輪著試，最多 attempts 組。"""
+    import random as _r
+    keys = [k for k in GEMINI_KEYS if k]
+    models = [m for m in (models or []) if m]
+    if not keys or not models or attempts <= 0:
+        return
+    order = keys[:]
+    _r.shuffle(order)
+    for i in range(attempts):
+        yield order[i % len(order)], models[i % len(models)]
+
+
+async def _nv_tool_pass(task_ins, target, requester_name, system_instruction_text):
+    """NV 第一棒「工具判定」（temp 0 + tools）：命中回 (fn, args)，乾淨無調用回 (None, None)，報錯上拋。"""
+    if not NV_KEYS:
+        raise RuntimeError("無 NV 金鑰")
+    import random
+    from openai import AsyncOpenAI
+    import core.groq_router as gr
+    nv_key = random.choice(NV_KEYS) # 隨機抽一把來做負載平衡
+    nv_client = AsyncOpenAI(api_key=nv_key, base_url="https://integrate.api.nvidia.com/v1")
+    openai_tools = gr.to_openai_tools(GENAI_TOOLS)
+    # NVIDIA 不允許函數名稱包含點號 (.)，先 wire
+    for wt in openai_tools:
+        wt["function"]["name"] = gr._wire_name(wt["function"]["name"])
+    nv_resp = await asyncio.wait_for(nv_client.chat.completions.create(
+        model="nvidia/nemotron-3-super-120b-a12b",
+        messages=[
+            {"role": "system", "content": system_instruction_text},
+            {"role": "user", "content": task_ins}
+        ],
+        tools=openai_tools,
+        temperature=0.0
+    ), timeout=20.0)
+    choice = nv_resp.choices[0]
+    if not choice.message.tool_calls:
+        return None, None
+    tc = choice.message.tool_calls[0]
+    fn_name = tc.function.name
+    # 反向還原 openai wire 名稱 (pe_play_virtual_piano -> pe.play_virtual_piano)：
+    # 用 INTERACTIONS_TOOLS 建表比對，逐字 replace 會把底線全炸成點
+    import json
+    fn_args = json.loads(tc.function.arguments) if isinstance(tc.function.arguments, str) else tc.function.arguments
+    try:
+        _rev = {gr._wire_name(t.get("name", "")): t.get("name", "")
+                for t in INTERACTIONS_TOOLS if isinstance(t, dict) and t.get("name")}
+        if fn_name in _rev:
+            fn_name = _rev[fn_name]
+    except Exception:
+        pass
+    log_print(f"🛠️ [NV 解讀觸發] {fn_name}({fn_args})")
+    return fn_name, fn_args
+
+
+async def _nv_think_pass(task_ins, target, requester_name, system_instruction_text):
+    """NV 第二棒「深度思考」（temp 0.8、無 tools）：回 ("advice", text) 或 ("miss", "")，報錯上拋。"""
+    if not NV_KEYS:
+        return "miss", ""
+    import random
+    from openai import AsyncOpenAI
+    nv_key = random.choice(NV_KEYS)
+    nv_client = AsyncOpenAI(api_key=nv_key, base_url="https://integrate.api.nvidia.com/v1")
+    # 強制先寫思考步驟再給結論（step-by-step 推理顯著提升複雜問題正確率）：
+    # 不掛 tools（掛著它只會想著調用，不會好好想），temp 0.8 保證想得開
+    log_print("🧠 [NV 深思] 第一棒無工具調用，轉深度思考模式重想一次...")
+    think_resp = await asyncio.wait_for(nv_client.chat.completions.create(
+        model="nvidia/nemotron-3-super-120b-a12b",
+        messages=[
+            {"role": "system", "content": system_instruction_text + "\n（深度思考模式：先在 [THINK]...[/THINK] 裡一步一步寫出你的思考步驟（分析意圖、拆解問題、檢查歧義），再在 [REPLY]...[/REPLY] 裡給出最終結論。結論要簡潔、直接可用。不要呼叫任何工具，必須輸出文字。）"},
+            {"role": "user", "content": task_ins}
+        ],
+        temperature=0.8
+    ), timeout=30.0)
+    think_choice = think_resp.choices[0]
+    think_raw = (getattr(think_choice.message, "content", "") or "").strip()
+    think_steps, final_reply = _extract_think_reply(think_raw)
+    if think_steps:
+        log_print(f"🧠 [NV 深思步驟] {think_steps[:120]}")
+    if final_reply:
+        log_print(f"💡 [NV 深思] {final_reply[:80]}")
+        return "advice", f"[{requester_name}剛才的話題，副腦深度思考後的見解（轉述用，不要照唸）：{final_reply}]"
+    return "miss", ""
+
+
+async def _gemini_tool_pass(task_ins, target, requester_name, system_instruction_text):
+    """Gemini 第一棒「工具判定」（temp 0 + tools，lite 梯隊吃量）：命中回 (fn, args)，
+    乾淨無調用回 (None, None)，梯隊全滅報錯上拋。"""
+    pairs = list(_subagent_gemini_pairs(STREAMER_MIND_MODELS, _SUBAGENT_GEMINI_TOOL_ATTEMPTS))
+    if not pairs:
+        raise RuntimeError("無可用 Gemini 金鑰")
+    last_err = None
+    for gkey, gmodel in pairs:
+        try:
+            client = genai.Client(api_key=gkey)
+            cfg = types.GenerateContentConfig(
+                temperature=0.0,
+                tools=GENAI_TOOLS,
+                safety_settings=UNRESTRICTED_SAFETY_SETTINGS,
+                system_instruction=system_instruction_text,
+            )
+            resp = await asyncio.wait_for(client.aio.models.generate_content(
+                model=gmodel,
+                contents=[types.Content(role="user", parts=[types.Part.from_text(text=task_ins)])],
+                config=cfg,
+            ), timeout=_SUBAGENT_GEMINI_TOOL_TIMEOUT)
+            calls = list(getattr(resp, "function_calls", None) or [])
+            if not calls:
+                return None, None
+            fc = calls[0]
+            fn_name = (getattr(fc, "name", "") or "").strip()
+            fn_args = getattr(fc, "args", {}) or {}
+            if not fn_name:
+                return None, None
+            if not isinstance(fn_args, dict):
+                fn_args = {}
+            log_print(f"🛠️ [Gemini 解讀觸發] {fn_name}({fn_args})")
+            return fn_name, fn_args
+        except Exception as e:
+            last_err = e
+            log_print(f"⚠️ [Gemini 工具判定失敗 ({gmodel})]: {str(e)[:80]}")
+            continue
+    raise last_err if last_err is not None else RuntimeError("Gemini 工具判定梯隊全滅")
+
+
+async def _gemini_think_pass(task_ins, target, requester_name, system_instruction_text):
+    """Gemini 第二棒「深度思考」（temp 0.8、無 tools）：回 ("advice", text) 或 ("miss", "")，報錯上拋。"""
+    pairs = list(_subagent_gemini_pairs(HIGH_IQ_GEMINI_MODELS, _SUBAGENT_GEMINI_THINK_ATTEMPTS))
+    if not pairs:
+        return "miss", ""
+    last_err = None
+    for gkey, gmodel in pairs:
+        try:
+            client = genai.Client(api_key=gkey)
+            cfg = types.GenerateContentConfig(
+                temperature=0.8,
+                safety_settings=UNRESTRICTED_SAFETY_SETTINGS,
+                system_instruction=system_instruction_text + "\n（深度思考模式：先在 [THINK]...[/THINK] 裡一步一步寫出你的思考步驟（分析意圖、拆解問題、檢查歧義），再在 [REPLY]...[/REPLY] 裡給出最終結論。結論要簡潔、直接可用。不要呼叫任何工具，必須輸出文字。）",
+            )
+            resp = await asyncio.wait_for(client.aio.models.generate_content(
+                model=gmodel,
+                contents=[types.Content(role="user", parts=[types.Part.from_text(text=task_ins)])],
+                config=cfg,
+            ), timeout=_SUBAGENT_GEMINI_THINK_TIMEOUT)
+            think_raw = (getattr(resp, "text", "") or "").strip()
+            think_steps, final_reply = _extract_think_reply(think_raw)
+            if think_steps:
+                log_print(f"🧠 [Gemini 深思步驟] {think_steps[:120]}")
+            if final_reply:
+                log_print(f"💡 [Gemini 深思] {final_reply[:80]}")
+                return "advice", f"[{requester_name}剛才的話題，副腦深度思考後的見解（轉述用，不要照唸）：{final_reply}]"
+            return "miss", ""
+        except Exception as e:
+            last_err = e
+            log_print(f"⚠️ [Gemini 深思失敗 ({gmodel})]: {str(e)[:80]}")
+            continue
+    raise last_err if last_err is not None else RuntimeError("Gemini 深思梯隊全滅")
+
+
 async def nv_interpret_task(task_ins: str, target: str = "dad", requester_name: str = ""):
-    """A 架構子智能體（NV Nemotron 專用）：副腦兩棒制——
+    """A 架構子智能體（副腦兩棒制，用腦可配）：
     第一棒「工具判定」（temp 0 + tools）：是硬指令就派發；
     第二棒「深度思考」（temp 0.8、無 tools）：第一棒沒叫工具時，讓副腦真正當大腦想一次。
+    用腦順序看環境變數 SUBAGENT_BRAIN（熱切換免重啟，預設 auto；見 core/subagent_router.py）：
+      auto   = Gemini 工具判定 → NV 深度思考（Gemini 吃量，NV 專做聰明活）
+      nv     = 全走 NV（舊行為，不碰 Gemini 一滴）
+      gemini = 全走 Gemini（不碰 NV 一滴，NV 額度全留）
+    乾淨無調用就信任它、不問下一棒；報錯才換下一棒。單腦模式報錯即收工（沿用舊語義）。
     回傳 (kind, instruction_text)，kind ∈ {"tool","advice","miss"}：
       - "tool"：已派發執行，附带口頭答應指示（搜尋類會等結果＋摘要）。
       - "advice"：副腦思考後的見解，轉述用。
-      - "miss"：無 keys／超時／空回應，调用方讓主腦直接回。
+      - "miss"：無可用腦／超時／空回應，调用方讓主腦直接回。
     只在 Live invoke_subagent 且 CPU 未命中時進入；B 架構永遠不碰這裡。"""
-    import random
     if not task_ins or not task_ins.strip():
         return "miss", ""
-    if not NV_KEYS:
-        log_print("⚠️ [NV 解讀] 無 NV 金鑰，跳過。")
-        return "miss", ""
     try:
-        from openai import AsyncOpenAI
-        import core.groq_router as gr
-        nv_key = random.choice(NV_KEYS) # 隨機抽一把來做負載平衡
-        nv_client = AsyncOpenAI(api_key=nv_key, base_url="https://integrate.api.nvidia.com/v1")
-        openai_tools = gr.to_openai_tools(GENAI_TOOLS)
-        # NVIDIA 不允許函數名稱包含點號 (.)，先 wire
-        for wt in openai_tools:
-            wt["function"]["name"] = gr._wire_name(wt["function"]["name"])
+        chain = resolve_subagent_chain()
+        if not chain:
+            return "miss", ""
         system_instruction_text = load_prompt("7L_subagent.md")
-        nv_resp = await asyncio.wait_for(nv_client.chat.completions.create(
-            model="nvidia/nemotron-3-super-120b-a12b",
-            messages=[
-                {"role": "system", "content": system_instruction_text},
-                {"role": "user", "content": task_ins}
-            ],
-            tools=openai_tools,
-            temperature=0.0
-        ), timeout=20.0)
-
-        choice = nv_resp.choices[0]
-        if choice.message.tool_calls:
-            tc = choice.message.tool_calls[0]
-            fn_name = tc.function.name
-            # 反向還原 openai wire 名稱 (pe_play_virtual_piano -> pe.play_virtual_piano)：
-            # 用 INTERACTIONS_TOOLS 建表比對，逐字 replace 會把底線全炸成點
-            import json
-            fn_args = json.loads(tc.function.arguments) if isinstance(tc.function.arguments, str) else tc.function.arguments
+        # —— 第一棒：工具判定（按鏈順序）——
+        fn_name, fn_args = None, {}
+        for _brain in chain:
             try:
-                _rev = {gr._wire_name(t.get("name", "")): t.get("name", "")
-                        for t in INTERACTIONS_TOOLS if isinstance(t, dict) and t.get("name")}
-                if fn_name in _rev:
-                    fn_name = _rev[fn_name]
-            except Exception:
-                pass
-            log_print(f"🛠️ [NV 解讀觸發] {fn_name}({fn_args})")
+                if _brain == "gemini":
+                    fn_name, fn_args = await _gemini_tool_pass(task_ins, target, requester_name, system_instruction_text)
+                else:
+                    fn_name, fn_args = await _nv_tool_pass(task_ins, target, requester_name, system_instruction_text)
+            except Exception as _be:
+                log_print(f"⚠️ [子智能體工具判定異常({_brain})，換下一棒]: {_be}")
+                if len(chain) == 1:
+                    return "miss", ""  # 單腦模式：報錯即收工（沿用舊語義）
+                continue
+            if fn_name:
+                break
+            break  # 乾淨無調用：信任它，不問下一棒（省一顆腦的額度與延遲）
+        if fn_name:
             if fn_name == "search_google":
                 # 資訊型工具：等結果、摘要後再回報（fire-and-forget 會把答案弄丟）
                 try:
@@ -7737,33 +7932,77 @@ async def nv_interpret_task(task_ins: str, target: str = "dad", requester_name: 
             asyncio.create_task(execute_tool_dispatch(fn_name, fn_args, caller_target=target, caller_user=requester_name))
             # ⚠️ 同 CPU 路徑：唱歌/彈琴紙條必須寫明演唱者是 7L 本人，避免主腦說成「老爸唱的」
             return "tool", build_slip_text(fn_name, fn_args, requester_name, via="")
-        # —— 第二棒：深度思考（第一棒沒叫工具，代表不是硬指令而是需要想的東西）——
-        # 強制先寫思考步驟再給結論（step-by-step 推理顯著提升複雜問題正確率）：
-        # 不掛 tools（掛著它只會想著調用，不會好好想），temp 0.8 保證想得開
-        log_print("🧠 [NV 深思] 第一棒無工具調用，轉深度思考模式重想一次...")
-        think_resp = await asyncio.wait_for(nv_client.chat.completions.create(
-            model="nvidia/nemotron-3-super-120b-a12b",
-            messages=[
-                {"role": "system", "content": system_instruction_text + "\n（深度思考模式：先在 [THINK]...[/THINK] 裡一步一步寫出你的思考步驟（分析意圖、拆解問題、檢查歧義），再在 [REPLY]...[/REPLY] 裡給出最終結論。結論要簡潔、直接可用。不要呼叫任何工具，必須輸出文字。）"},
-                {"role": "user", "content": task_ins}
-            ],
-            temperature=0.8
-        ), timeout=30.0)
-        think_choice = think_resp.choices[0]
-        think_raw = (getattr(think_choice.message, "content", "") or "").strip()
-        think_steps, final_reply = _extract_think_reply(think_raw)
-        if think_steps:
-            log_print(f"🧠 [NV 深思步驟] {think_steps[:120]}")
-        if final_reply:
-            log_print(f"💡 [NV 深思] {final_reply[:80]}")
-            return "advice", f"[{requester_name}剛才的話題，副腦深度思考後的見解（轉述用，不要照唸）：{final_reply}]"
-        return "miss", ""
-    except (asyncio.TimeoutError, TimeoutError):
-        log_print("⚠️ [NV 解讀超時 (Timeout)]")
+        # —— 第二棒：深度思考（第一棒乾淨無調用才到這裡；聰明的活優先給 NV）——
+        if chain == ["gemini", "nv"]:
+            think_order = ["nv", "gemini"]
+        else:
+            think_order = list(chain)
+        for _brain in think_order:
+            try:
+                if _brain == "gemini":
+                    _k, _t = await _gemini_think_pass(task_ins, target, requester_name, system_instruction_text)
+                else:
+                    _k, _t = await _nv_think_pass(task_ins, target, requester_name, system_instruction_text)
+            except Exception as _be2:
+                log_print(f"⚠️ [子智能體深思異常({_brain})，換下一位]: {_be2}")
+                continue
+            if _k in ("tool", "advice"):
+                return _k, _t
         return "miss", ""
     except Exception as e:
-        log_print(f"⚠️ [NV 解讀失敗]: {repr(e)}")
+        log_print(f"⚠️ [子智能體解讀失敗]: {repr(e)}")
         return "miss", ""
+
+
+async def _rescue_missed_song_requests():
+    """斷線重連後，把最近送達、但沒人認領的點歌撿回來（只救點歌）。
+
+    背景：紙條送達後 session 若立刻死亡，主腦永遠看不到它——佇列只重發
+    「發送失敗」的，不重發「送達了但腦沒處理」的。2026-10-09 直播事故：
+    「唱 5:20am」的紙條就這樣丟了，主腦沒接、NV 沒跑、歌沒唱。
+    安全設計：
+    - 只認點歌（parse_slip_for_song），聊天/系統紙條一律不碰；
+    - 已在唱／排隊／準備中（is_song_active）直接跳過，絕不唱兩次；
+    - 只看 120 秒內的案底，舊的當沒發生；
+    - 直接進排隊＋補一張中性紙條，不經主腦判斷（主腦已經掉過一次鏈了）。
+    """
+    try:
+        import time as _t
+        now = _t.time()
+        rescued = 0
+        for ts, prompt in list(RECENT_SLIPS):
+            if now - ts > RESCUE_WINDOW_SEC:
+                continue
+            try:
+                tool, args = parse_slip_for_song(prompt)
+            except Exception:
+                continue
+            if not tool:
+                continue
+            song = (args or {}).get("song_name", "")
+            if not song:
+                continue
+            try:
+                if is_song_active(song):
+                    continue
+            except Exception:
+                pass
+            log_print(f"🛟 [斷線救援] 撿回無人認領的點歌《{song}》，直接排入隊列。")
+            try:
+                request_cover_song(song, "")
+            except Exception as _re:
+                log_print(f"⚠️ [斷線救援] 排入失敗: {_re}")
+                continue
+            try:
+                LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait(
+                    build_slip_text("auto_sing_song", {"song_name": song}, ""))
+            except Exception:
+                pass
+            rescued += 1
+        if rescued:
+            log_print(f"🛟 [斷線救援] 共撿回 {rescued} 首點歌。")
+    except Exception as e:
+        log_print(f"⚠️ [斷線救援異常]: {e}")
 
 
 async def background_tool_executor(user_text: str, target: str = "dad", requester_name: str = ""):

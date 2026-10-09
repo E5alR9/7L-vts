@@ -3,7 +3,7 @@
 from conftest import ROOT  # noqa: F401
 from core.hard_command import (
     extract_sing_song, extract_piano_song, parse_hard_command, build_slip_text,
-    display_requester,
+    display_requester, parse_slip_for_song,
 )
 
 # --- 真實直播誤觸案例：一律不得攔截 ---
@@ -50,6 +50,11 @@ TRUE_POSITIVES = [
     ("彈一首 夢中的婚禮", "pe.play_virtual_piano", "夢中的婚禮"),
     ("彈鋼琴 月光奏鳴曲", "pe.play_virtual_piano", "月光奏鳴曲"),
     ("點歌 Never Gonna Give You Up", "auto_sing_song", "Never Gonna Give You Up"),
+    # 歌名含半形冒號：斷句集不可切它（2026-10-09 直播漏判「唱 5:20am」）
+    ("唱 5:20am", "auto_sing_song", "5:20am"),
+    ("點歌 10:35", "auto_sing_song", "10:35"),
+    # 全形冒號是中文解說分隔符：取冒號前
+    ("唱 晴天：超好聽", "auto_sing_song", "晴天"),
 ]
 
 
@@ -122,3 +127,31 @@ def test_display_requester_never_defaults_to_dad():
     # 通用稱呼不算具名：audience 頻道一律收斂成大家
     assert display_requester("點播的人", "audience") == "大家"
     assert display_requester("大家", "dad") == "點播的人"
+
+
+def test_parse_slip_for_song_rescues_missed_requests():
+    """斷線救援：紙條送達後 session 死亡，主腦沒看到——重連後從紙條還原點歌。
+    2026-10-09 真實事故：「唱 5:20am」紙條送達→G3 斷線→歌沒了。"""
+    tool, args = parse_slip_for_song("[文字輸入] 老爸 (在直播間留言)：唱 5:20am")
+    assert tool == "auto_sing_song"
+    assert args == {"song_name": "5:20am"}
+
+    tool, args = parse_slip_for_song("[黑板同步] TikTok 觀眾 RC_全台小刀第42名 對妳說：唱 不再曼波")
+    assert tool == "auto_sing_song"
+    assert args == {"song_name": "不再曼波"}
+
+    # 系統紙條（CPU 命中／謝幕／失敗通知）一律不認：點歌動詞都在非祈使位置
+    assert parse_slip_for_song(
+        build_slip_text("auto_sing_song", {"song_name": "晴天"}, "老爸")) == (None, {})
+    assert parse_slip_for_song(
+        "[系統提示：妳剛才演唱完畢了歌曲《晴天》，請自然地向老爸與觀眾謝幕！]"
+    ) == (None, {})
+    assert parse_slip_for_song(
+        "[系統提示：剛才點的《晴天》背景準備失敗，請自然地跟大家說這首先跳過！]"
+    ) == (None, {})
+    # 環境／閒聊紙條不認
+    assert parse_slip_for_song("[環境動態] 電腦畫面剛剛發生變化：右下角跳出通知") == (None, {})
+    assert parse_slip_for_song("") == (None, {})
+    assert parse_slip_for_song(None) == (None, {})
+    # 彈琴不救（只救點歌；鋼琴短、腦通常當場反應）
+    assert parse_slip_for_song("[文字輸入] 老爸：彈 月光") == (None, {})
