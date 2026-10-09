@@ -427,10 +427,17 @@ async def play_cover_audio(vocal_path: str, song_name: str, inst_path: str = Non
             setattr(core_vts, "IS_MP3_PLAYING", True)
             setattr(core_vts, "current_ai_state", "SINGING")
             
-            # 🎤 唱歌自動拿出麥克風
+            # 🎤 唱歌自動拿出麥克風 (不重置其他表情，單獨開關麥克風)
             import services.vts_client as vc
             if vc.GLOBAL_VTS:
-                asyncio.create_task(vc.trigger_vts_expression("麥克風"))
+                async def _toggle_mic(active=True):
+                    try:
+                        await asyncio.wait_for(vc.GLOBAL_VTS.request({
+                            "apiName": "VTubeStudioPublicAPI", "apiVersion": "1.0", "requestID": "ToggleMic",
+                            "messageType": "ExpressionActivationRequest", "data": {"expressionFile": "话筒.exp3.json", "active": active}
+                        }), timeout=0.5)
+                    except Exception: pass
+                asyncio.create_task(_toggle_mic(True))
 
         inst_info = " + 獨立伴奏雙軌同步" if snd_inst else " (純人聲清唱)"
         print(f"🎤 [7L 舞台開唱] 正在演唱《{song_name}》（7L 甜妹主唱{inst_info}）！")
@@ -454,11 +461,18 @@ async def play_cover_audio(vocal_path: str, song_name: str, inst_path: str = Non
         except Exception:
             pass
             
-        # 唱歌結束自動收起麥克風，恢復預設狀態
+        # 唱歌結束自動收起麥克風 (不重置其他表情)
         if core_vts:
             import services.vts_client as vc
             if vc.GLOBAL_VTS:
-                asyncio.create_task(vc.trigger_vts_expression("_RESET_"))
+                async def _toggle_mic_off():
+                    try:
+                        await asyncio.wait_for(vc.GLOBAL_VTS.request({
+                            "apiName": "VTubeStudioPublicAPI", "apiVersion": "1.0", "requestID": "ToggleMic",
+                            "messageType": "ExpressionActivationRequest", "data": {"expressionFile": "话筒.exp3.json", "active": False}
+                        }), timeout=0.5)
+                    except Exception: pass
+                asyncio.create_task(_toggle_mic_off())
         core_vts = get_core_vts()
         if core_vts:
             setattr(core_vts, "IS_SINGING_ACTIVE", False)

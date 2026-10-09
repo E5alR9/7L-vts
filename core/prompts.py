@@ -692,6 +692,9 @@ class TextCleanEngine:
         t = re.sub(r'。{2,}', '，', t)
         t = re.sub(r'…+', '，', t)
         
+        # 移除驚嘆號 (! / ！) 避免 TTS 直接消失 (替換為句號以保留斷句，避免英文字母黏連)
+        t = t.replace('!', '。').replace('！', '。')
+        
         t = cls.natural_clause_segmentation(t)
         #  日語原生支援：若包含日文平假名/片假名，保留原生正統日文字串交由本機 RTX 3080 Ti GPT-SoVITS (pyopenjtalk) 發音
         #  徹底停用舊版 Edge-TTS 的假音標置換 (如 歐托桑/knee/搭一 soo kee)，並避開中文破音字替換以免破壞日文漢字

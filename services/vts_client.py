@@ -802,6 +802,7 @@ async def set_vts_expression(vts, exp_tag, is_instinct=False):
                 target_filenames.add(found)
 
         if not target_filenames:
+            log_print(f"⚠️ [Live2D 表情] 未知表情標籤：「{clean_tag}」，已忽略（請確認模型內有對應 .exp3.json 或在 VTS_EXPRESSION_MAP 新增映射）")
             return
 
         prev_exp = CURRENT_ACTIVE_EXP

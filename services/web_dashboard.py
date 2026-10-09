@@ -453,22 +453,42 @@ DEFAULT_TOOLS_CATALOG = [
 # 最近廣播的事件緩存（讓剛開啟網頁的使用者能立即看到最近彈幕與發言）
 RECENT_EVENTS = []
 
+def _safe_json_value(v):
+    """遞歸過濾掉 coroutine / 不可序列化的物件，替換為安全字串"""
+    if asyncio.iscoroutine(v):
+        v.close()  # 防止 RuntimeWarning: coroutine was never awaited
+        return "<coroutine: not serializable>"
+    if isinstance(v, dict):
+        return {kk: _safe_json_value(vv) for kk, vv in v.items()}
+    if isinstance(v, (list, tuple)):
+        return [_safe_json_value(i) for i in v]
+    try:
+        json.dumps(v)
+        return v
+    except (TypeError, ValueError):
+        return str(v)
+
 def broadcast_event(event_type: str, data: Dict[str, Any]):
     """向所有已連接的瀏覽器用戶端即時推送事件（支援跨線程調用）"""
     global RECENT_EVENTS, MAIN_EVENT_LOOP
+    # 🛡️ 防止 coroutine / 不可序列化物件污染 RECENT_EVENTS
+    safe_data = _safe_json_value(data) if isinstance(data, dict) else data
     payload = {
         "type": event_type,
         "timestamp": time.time(),
-        "data": data
+        "data": safe_data
     }
+    try:
+        msg = json.dumps(payload, ensure_ascii=False)
+    except (TypeError, ValueError):
+        # 無法序列化，跳過不 append 到 RECENT_EVENTS，避免污染
+        return
     RECENT_EVENTS.append(payload)
     if len(RECENT_EVENTS) > 60:
         RECENT_EVENTS.pop(0)
 
     if not CONNECTED_CLIENTS:
         return
-
-    msg = json.dumps(payload, ensure_ascii=False)
     
     def _send_all():
         for ws in list(CONNECTED_CLIENTS):
@@ -515,13 +535,32 @@ async def ws_handler(request):
     # 首次連線發送初始狀態包 (包含完整 300 句全景記憶時間線)
     try:
         initial_state = await get_full_telemetry(include_full_memory=True)
-        await ws.send_str(json.dumps({
-            "type": "init",
-            "timestamp": time.time(),
-            "data": initial_state,
-            "recent_events": RECENT_EVENTS[-20:],
-            "tool_history": TOOL_HISTORY[:40]
-        }, ensure_ascii=False))
+        # 🛡️ 過濾掉 RECENT_EVENTS 裡因 bug 殘留的不可序列化條目
+        safe_recent = []
+        for ev in RECENT_EVENTS[-20:]:
+            try:
+                json.dumps(ev, ensure_ascii=False)
+                safe_recent.append(ev)
+            except (TypeError, ValueError):
+                pass
+        try:
+            await ws.send_str(json.dumps({
+                "type": "init",
+                "timestamp": time.time(),
+                "data": initial_state,
+                "recent_events": safe_recent,
+                "tool_history": TOOL_HISTORY[:40]
+            }, ensure_ascii=False))
+        except (TypeError, ValueError) as je:
+            # 如果 initial_state 或 TOOL_HISTORY 仍有問題，發送一個最簡版 init
+            print(f"⚠️ [Web後台 init 序列化失敗，發送精簡版]: {je}")
+            await ws.send_str(json.dumps({
+                "type": "init",
+                "timestamp": time.time(),
+                "data": {},
+                "recent_events": [],
+                "tool_history": []
+            }, ensure_ascii=False))
 
         async for msg in ws:
             if msg.type == web.WSMsgType.TEXT:
@@ -544,7 +583,10 @@ async def ws_handler(request):
                         enable = data.get("enable")
                         if SET_MIC_CALLBACK:
                             new_state = SET_MIC_CALLBACK(enable)
-                            broadcast_event("mic_changed", {"is_mic_enabled": new_state})
+                            # 🐛 修復：SET_MIC_CALLBACK (_set_mic) 是 async def，必須 await
+                            if asyncio.iscoroutine(new_state):
+                                new_state = await new_state
+                            broadcast_event("mic_changed", {"is_mic_enabled": bool(new_state)})
                     elif action == "set_sleep":
                         enable = bool(data.get("enable", True))
                         if SET_SLEEP_CALLBACK:
@@ -897,8 +939,11 @@ async def api_toggle_mic(request):
         enable = body.get("enable", None)
         if SET_MIC_CALLBACK:
             new_state = SET_MIC_CALLBACK(enable)
-            broadcast_event("mic_changed", {"is_mic_enabled": new_state})
-            return web.json_response({"ok": True, "is_mic_enabled": new_state})
+            # 🐛 修復：SET_MIC_CALLBACK (_set_mic) 是 async def，必須 await
+            if asyncio.iscoroutine(new_state):
+                new_state = await new_state
+            broadcast_event("mic_changed", {"is_mic_enabled": bool(new_state)})
+            return web.json_response({"ok": True, "is_mic_enabled": bool(new_state)})
         return web.json_response({"ok": False, "error": "麥克風控制器未就緒"}, status=503)
     except Exception as e:
         return web.json_response({"ok": False, "error": str(e)}, status=500)
