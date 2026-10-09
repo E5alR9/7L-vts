@@ -1890,7 +1890,7 @@ async def call_gemini_live_audience_reply(vts, input_queue, audience_user: str, 
             id_display = f"{v_display_name} ( 老爸幕後操作)"
             v_info = "【 幕後最高管理員】：面前的訊息是「老爸」直接使用主播/管理員帳號在聊天室打字！"
             speaker_role_prompt = """【 對話對象】：這是妳的「老爸」在幕後透過主播帳號打字！
--  請親切稱呼老爸！
+-  平常叫他名字，撒嬌可以叫老爸！
 -  若老爸在文字中給妳下達指令（如點歌、換表情、講話、調整動作），請 100% 優先執行！
 -  若老爸只是在聊天室打字發公告/引導觀眾，妳可以簡短可愛地附和（如「對呀老爸說得對」）或輸出 [PASS] 讓文字公告顯示！"""
         else:
@@ -1904,7 +1904,7 @@ async def call_gemini_live_audience_reply(vts, input_queue, audience_user: str, 
                 v_info = f"【新進觀眾】：{id_display}（目前尚未記錄特殊關係，可稱呼他「{v_display_name}」）。"
 
             # 動態加載外部 prompt 檔案
-            speaker_role_prompt = load_prompt("7L_audience.md", id_display=id_display, v_info=v_info, v_call_name=(v_call or v_display_name))
+            speaker_role_prompt = load_prompt("7L_audience.md", id_display=id_display, v_info=v_info, v_call_name=(v_call or v_display_name), v_unique_id=v_unique_id)
 
         #  當前即時鋼琴狀態感知
         if pe.is_piano_active and pe.current_piano_song_title:
