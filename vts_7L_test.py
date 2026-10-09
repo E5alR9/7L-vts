@@ -5119,6 +5119,14 @@ def check_immediate_shutdown(text: str) -> bool:
 
     return False
 
+_TOOL_TAG_RE = re.compile(r'\[TOOL:[^\]]*\]')
+
+def _clean_result_for_brain(text: str) -> str:
+    """副腦回報清洗（2026-10-10：結果/fallback 裡的 [TOOL:*] 若被主腦 echo，
+    會重新觸發搜網/視覺副腦造成迴圈。注入前先拔掉。）"""
+    return _TOOL_TAG_RE.sub('', text or "")
+
+
 async def live_vision_tool_task(session, vts):
     """背景視覺打工人：使用現有 fetch_ai_response 備援機制分析截圖"""
     try:
@@ -5134,10 +5142,10 @@ async def live_vision_tool_task(session, vts):
             raise Exception("視覺模型未回傳任何內容或請求失敗")
         reply_text = resp[0]
         log_print(f"👁️ [視覺大腦回報] 分析完成: {reply_text[:50]}...")
-        await session.send_realtime_input(text=f"[系統提示：視覺大腦回報畫面內容] {reply_text}")
+        await session.send_realtime_input(text=f"[系統提示：視覺大腦回報畫面內容] {_clean_result_for_brain(reply_text)}")
     except Exception as e:
         log_print(f"❌ [視覺大腦錯誤] {e}")
-        fallback_prompt = "[系統提示：呼叫 [TOOL:VISION] 失敗（遇到 API 限流）。請發揮傲嬌本性抱怨暫時看不到畫面，並叫老爸直接把畫面內容唸給妳聽！請發揮創意，用不同的說法。]"
+        fallback_prompt = "[系統提示：視覺功能暫時失敗（遇到 API 限流）。請發揮傲嬌本性抱怨暫時看不到畫面，並叫老爸直接把畫面內容唸給妳聽！請發揮創意，用不同的說法。]"
         try:
             await session.send_realtime_input(text=fallback_prompt)
         except Exception as inner_e:
@@ -5170,10 +5178,10 @@ async def live_mirror_tool_task(session, vts):
             raise Exception("視覺模型未回傳")
         reply_text = resp[0]
         log_print(f"🪞 [鏡子回報] {reply_text[:50]}...")
-        await session.send_realtime_input(text=f"[系統提示：鏡子裡映出的妳長這樣，請自然地把這段觀察說出來：] {reply_text}")
+        await session.send_realtime_input(text=f"[系統提示：鏡子裡映出的妳長這樣，請自然地把這段觀察說出來：] {_clean_result_for_brain(reply_text)}")
     except Exception as e:
         log_print(f"❌ [鏡子錯誤] {e}")
-        fallback_prompt = "[系統提示：呼叫 [TOOL:MIRROR] 失敗。請依憑身為高智商 AI 的設定，自信地用言語描述自己的外貌，並找個藉口說鏡子碎了或起霧了！請每次換個說法。]"
+        fallback_prompt = "[系統提示：鏡子功能暫時失敗。請依憑身為高智商 AI 的設定，自信地用言語描述自己的外貌，並找個藉口說鏡子碎了或起霧了！請每次換個說法。]"
         try:
             await session.send_realtime_input(text=fallback_prompt)
         except Exception as inner_e:
@@ -5188,12 +5196,12 @@ async def live_search_tool_task(session, query):
             if res and isinstance(res, dict):
                 results_text = "\\n".join([f"- {r.get('title', '')}: {r.get('content', '')}" for r in res.get('results', [])[:3]])
                 log_print(f"🌐 [搜網專家回報] 找到 {len(res.get('results', []))} 筆結果。")
-                await session.send_realtime_input(text=f"[系統提示：搜網專家回報搜尋結果，請自然地把這段資料告訴老爸（不要全唸，要口語化提煉）：]\\n{results_text}")
+                await session.send_realtime_input(text=f"[系統提示：搜網專家回報搜尋結果，請自然地把這段資料告訴老爸（不要全唸，要口語化提煉）：]\\n{_clean_result_for_brain(results_text)}")
                 return
         raise Exception("Tavily 搜尋客戶端未初始化或搜尋無結果")
     except Exception as e:
         log_print(f"❌ [搜網錯誤] {e}")
-        fallback_prompt = "[系統提示：呼叫 [TOOL:SEARCH] 失敗。請自然地告訴老爸妳現在連不上外網，然後直接憑妳豐富的內建記憶回答他的問題！請發揮創意。]"
+        fallback_prompt = "[系統提示：搜尋功能暫時失敗。請自然地告訴老爸妳現在連不上外網，然後直接憑妳豐富的內建記憶回答他的問題！請發揮創意。]"
         try:
             await session.send_realtime_input(text=fallback_prompt)
         except Exception as inner_e:
@@ -5215,10 +5223,10 @@ async def live_code_tool_task(session, vts):
             raise Exception("視覺模型未回傳任何內容或請求失敗")
         reply_text = resp[0]
         log_print(f"💻 [程式專家回報] 分析完成: {reply_text[:50]}...")
-        await session.send_realtime_input(text=f"[系統提示：程式專家幫妳看完了畫面上的 Code，這是專家的分析結論，請用妳的傲嬌口語轉述給老爸：] {reply_text}")
+        await session.send_realtime_input(text=f"[系統提示：程式專家幫妳看完了畫面上的 Code，這是專家的分析結論，請用妳的傲嬌口語轉述給老爸：] {_clean_result_for_brain(reply_text)}")
     except Exception as e:
         log_print(f"❌ [程式專家錯誤] {e}")
-        fallback_prompt = "[系統提示：呼叫 [TOOL:CODE] 失敗。請發揮傲嬌屬性抱怨不想看密密麻麻的程式碼，叫老爸自己把有 Bug 的那幾行唸給妳聽，妳親自幫他修！請每次換個說法。]"
+        fallback_prompt = "[系統提示：程式分析功能暫時失敗。請發揮傲嬌屬性抱怨不想看密密麻麻的程式碼，叫老爸自己把有 Bug 的那幾行唸給妳聽，妳親自幫他修！請每次換個說法。]"
         try:
             await session.send_realtime_input(text=fallback_prompt)
         except Exception as inner_e:
@@ -7623,6 +7631,14 @@ async def streamer_mind_loop_worker(vts, input_queue):
                 
         except Exception as e:
             log_print(f"⚠️ [主播記憶腦袋協程異常]: {e}")
+            # 批次狀態回滾：處理中途炸掉時把 processing 退回 unread，
+            # 否則這 5 條永遠卡死、靜默丟失（board 滿 200 才會被擠掉）。
+            try:
+                for m in locals().get("batch_to_process", []):
+                    if isinstance(m, dict) and m.get("status") == "processing":
+                        m["status"] = "unread"
+            except Exception:
+                pass
             await asyncio.sleep(1.0)
 
 
