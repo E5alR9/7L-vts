@@ -2647,6 +2647,54 @@ def get_api_stress_metrics():
         "stress_tag": tag
     }
 
+# ── 作息短話（2026-10-10 直播事故：入睡/起床語是寫死罐頭，且入睡只等 5 秒就掐話）──
+# 正常走 Groq 現寫一句；Groq 失敗才輪替底線（幾乎走不到）。
+_DOZE_FALLBACK_IDX = {"sleep": 0, "wake": 0}
+_SLEEP_FALLBACKS = [
+    "唔，老爸好像去休息了，那 7L 也瞇一下小憩囉～回來叫我一聲就醒啦！",
+    "哈～有點睏了，7L 先閉眼休息一下下，老爸回來喊我就好！",
+    "環境好安靜，7L 先睡一下下充電，老爸別偷跑不揪我喔～",
+]
+_WAKE_FALLBACKS = [
+    "嗯？老爸回來啦，7L 睡醒囉！",
+    "唔哇，睡飽了！老爸在忙什麼，7L 來陪你！",
+    "醒來了醒來了！老爸回來怎麼不早點叫我～",
+]
+
+
+async def _doze_one_liner(hint: str, kind: str) -> str:
+    """作息短話：Groq 現寫一句（20~40 字口語）；失敗才輪替罐頭底線。"""
+    fallbacks = _SLEEP_FALLBACKS if kind == "sleep" else _WAKE_FALLBACKS
+    try:
+        from core.groq_router import groq_chat
+        g = await groq_chat(
+            [{"role": "system", "content": "妳是 7L，傲嬌可愛的 AI 女兒主播。只回一句 20~40 字、有標點的口語短話，不要任何標籤。"},
+             {"role": "user", "content": hint}],
+            temperature=0.9, max_tokens=80, timeout=6.0)
+        t = (g.text or "").strip() if g else ""
+        if len(t) >= 6:
+            return t[:80]
+    except Exception:
+        pass
+    i = _DOZE_FALLBACK_IDX[kind] % len(fallbacks)
+    _DOZE_FALLBACK_IDX[kind] += 1
+    return fallbacks[i]
+
+
+async def _wait_speech_done(timeout_sec: float = 30.0):
+    """等語音佇列播完（佇列空＋無播放中任務）；超時放行，避免卡死。"""
+    for _ in range(int(timeout_sec * 2)):
+        task = globals().get("CURRENT_PLAYING_VOICE_TASK")
+        playing = bool(task and not task.done())
+        try:
+            empty = speech_queue.empty()
+        except Exception:
+            empty = True
+        if empty and not playing:
+            return
+        await asyncio.sleep(0.5)
+
+
 async def set_sleep_mode(enable: bool):
     global IS_SLEEPING, current_ai_status_str, current_ai_state
     if enable:
@@ -6688,7 +6736,7 @@ async def autonomous_wander_worker():
                 if CURRENT_VISION_CHANGE_LEVEL in ["medium", "high"]:
                     log_print(f"☀️ [7L 自主甦醒] 偵測到老爸電腦畫面切換活躍，7L 自主醒來！")
                     await set_sleep_mode(False)
-                    wake_text = "嗯... 老爸回來啦？看你在用電腦，7L 睡醒囉！"
+                    wake_text = await _doze_one_liner("妳剛小睡醒來，發現老爸在用電腦，跟他打聲招呼", "wake")
                     speech_item = {
                         "text": wake_text,
                         "expression": "自然",
@@ -6714,8 +6762,9 @@ async def autonomous_wander_worker():
                 
                 if (is_idle_night or is_idle_day) and is_quiet:
                     log_print("🌙 [7L 自主作息] 環境持續長時間安靜無聲，7L 決定自主閉眼小憩進入休眠...")
+                    sleep_text = await _doze_one_liner("環境很安靜、老爸好像去休息了，妳睏了想小憩，撒嬌跟老爸說一聲", "sleep")
                     speech_item = {
-                        "text": "唔... 老爸好像去休息了呢，那 7L 也先瞇一下小憩囉～老爸回來叫我一聲我就醒啦！",
+                        "text": sleep_text,
                         "expression": "自然",
                         "action": "",
                         "target": "dad",
@@ -6723,7 +6772,9 @@ async def autonomous_wander_worker():
                         "priority": 100
                     }
                     await speech_queue.put(speech_item)
-                    await asyncio.sleep(5.0)
+                    # 等這句播完再睡（不掐自己的話；30 秒還沒播完就照睡，保底）
+                    await _wait_speech_done(timeout_sec=30.0)
+                    await asyncio.sleep(0.5)
                     await set_sleep_mode(True)
                     continue
             
