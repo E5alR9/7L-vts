@@ -929,7 +929,10 @@ class PromptTemplateEngine:
         if banned:
             lines.append(f" 【請避免使用的客服腔與詞彙】：{'、'.join(banned)}")
 
-        lines.append(" 【提示詞雲端自我演進指南】：若在對話中學到新梗、新事實、或想調整世界觀/說話風格/案例，可在回覆句尾附上 `[LEARN_MEME: 梗（含義）]`、`[LEARN_FACT: 事實]`、`[UPDATE_PROMPT: 欄位名|新內容]` 或 `[ADD_EXAMPLE: 情境|對方說|回覆]`，系統將自動寫入雲端 Firestore 永久大腦！")
+        # 8. 演進指南（降頻：knowledge 已有內容＝她會玩了，就別每輪再教一次格式）
+        has_evolved = bool(memes or facts or few_shot_exs or rules)
+        if not has_evolved:
+            lines.append(" 【提示詞雲端自我演進指南】：若在對話中學到新梗、新事實、或想調整世界觀/說話風格/案例，可在回覆句尾附上 `[LEARN_MEME: 梗（含義）]`、`[LEARN_FACT: 事實]`、`[UPDATE_PROMPT: 欄位名|新內容]` 或 `[ADD_EXAMPLE: 情境|對方說|回覆]`，系統將自動寫入雲端 Firestore 永久大腦！")
         return "\n\n".join(lines)
 
     @classmethod
