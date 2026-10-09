@@ -1806,10 +1806,10 @@ async def fetch_fast_text_reply(user_input: str, custom_name: str, situation_pro
                             fast_target = "audience" if tt_parsed else "dad"
                             fast_user = audience_user if tt_parsed else "老爸"
                             if fn_name == "trigger_vts_expression":
-                                # 表情 direct 執行（同 CPU 路徑：dispatch 回傳被丟棄、標籤沒人唸＝不會動）
+                                # 本能主、腦備用：同 NV 路徑走協調器（fire-and-forget，不擋極速回覆）
                                 try:
-                                    asyncio.create_task(trigger_vts_expression(
-                                        (fn_args or {}).get("expression_name", "")))
+                                    asyncio.create_task(_resolve_expression(
+                                        (fn_args or {}).get("expression_name", ""), fast_user))
                                 except Exception:
                                     pass
                             else:
@@ -5281,6 +5281,7 @@ async def instinct_live_worker():
             
             system_instruction = """妳是 7L 的「身體本能神經中樞」。妳的權限極低，只負責控制肌肉反射。
 任務：聆聽周遭聲音或老爸的話語，即時輸出當下的反射表情或動作。
+【指令優先】：若聽到明確的表情指令（如「做暈表情」「換成哭哭」「恢復正常」），放下反射、直接輸出對應 [EXPRESSION: 名]！指令永遠優先於反射。
 【支援的動作清單】（只能輸出以下標籤，不要自創）：
 - 臉部表情：[EXPRESSION: 臉紅] / [EXPRESSION: 害羞] / [EXPRESSION: 傲嬌] / [EXPRESSION: 開心] / [EXPRESSION: 星星眼] / [EXPRESSION: 期待] / [EXPRESSION: 生氣] / [EXPRESSION: 不爽] / [EXPRESSION: 哭哭] / [EXPRESSION: 難過] / [EXPRESSION: 黑化] / [EXPRESSION: 暈] / [EXPRESSION: 流汗] / [EXPRESSION: 無語] / [EXPRESSION: 著急] / [EXPRESSION: 吐舌] / [EXPRESSION: 比心] / [EXPRESSION: 花花] / [EXPRESSION: 問號] / [EXPRESSION: 麥克風] / [EXPRESSION: 打遊戲] / [EXPRESSION: 雙馬尾] / [EXPRESSION: 打招呼] / [EXPRESSION: 左抬手]
 - 瞬時反應：[EXPRESSION: WINK] / [EXPRESSION: 震驚] / [EXPRESSION: 皺眉] / [EXPRESSION: 翻白眼]
@@ -7803,6 +7804,43 @@ async def _gemini_think_pass(task_ins, target, requester_name, system_instructio
     raise last_err if last_err is not None else RuntimeError("Gemini 深思梯隊全滅")
 
 
+async def _resolve_expression(exp_name: str, speaker: str = "") -> str:
+    """表情本能優先協調（2026-10-10：本能腦主做表情、NV 子代理備用）。
+
+    流程：查臉（已在→'already'）→ 轉送文字給本能腦 → 等 2.5 秒 →
+    本能做出→'instinct'；超時/無會話→ NV 自己 direct 執行 →'direct'。
+    toggle 語義下重複執行＝關掉表情，所以 NV 絕不盲做。
+    回傳 'already' | 'instinct' | 'direct'。
+    """
+    import services.vts_client as vc
+    exp_name = (exp_name or "").strip()
+    if not exp_name:
+        return "already"
+    try:
+        if vc.is_expression_active(exp_name):
+            log_print(f"🎭 [表情去重] {exp_name} 已在臉上，NV 不重複下達。")
+            return "already"
+    except Exception:
+        pass
+    sess = globals().get("INSTINCT_LIVE_SESSION")
+    if sess is not None:
+        try:
+            who = (speaker or "老爸").strip() or "老爸"
+            cmd = "恢復正常表情" if exp_name.strip().lower() in vc._RESET_WORDS else f"做{exp_name}表情"
+            await sess.send_realtime_input(text=f"[{who}說：{cmd}]")
+            if await vc.wait_expression_active(exp_name, timeout=2.5):
+                log_print(f"🦊 [本能表情] 本能腦已做出 {exp_name}，NV 備用不啟動。")
+                return "instinct"
+            log_print(f"⚠️ [本能表情] 本能腦 2.5 秒沒接住 {exp_name}，NV 備用執行。")
+        except Exception as be:
+            log_print(f"⚠️ [本能表情轉送失敗]: {be}，NV 備用執行。")
+    try:
+        await trigger_vts_expression(exp_name)
+    except Exception:
+        pass
+    return "direct"
+
+
 async def nv_interpret_task(task_ins: str, target: str = "dad", requester_name: str = ""):
     """A 架構子智能體（副腦兩棒制，用腦可配）：
     第一棒「工具判定」（temp 0 + tools）：是硬指令就派發；
@@ -7850,12 +7888,18 @@ async def nv_interpret_task(task_ins: str, target: str = "dad", requester_name: 
                 except Exception as _se:
                     return "tool", f"[系統底層：搜網專家查詢失敗（{str(_se)[:60]}），請跟{requester_name or '大家'}說待會再查。]"
             if fn_name == "trigger_vts_expression":
-                # 表情直接執行（同 CPU 路徑理由：dispatch 只排字不執行）
+                # 本能主、NV 備用：先讓本能做，查臉確認，沒接住才自己上（防 toggle 關表情）
+                exp_name = (fn_args or {}).get("expression_name", "")
                 try:
-                    asyncio.create_task(trigger_vts_expression(
-                        (fn_args or {}).get("expression_name", "")))
+                    _who = await _resolve_expression(exp_name, requester_name)
                 except Exception:
-                    pass
+                    _who = "direct"
+                _note = {
+                    "already": "（該表情已經在臉上，妳只需口頭答應，絕對不要重複下達。）",
+                    "instinct": "（本能腦已經做出該表情，妳只需口頭答應，絕對不要重複下達。）",
+                    "direct": "（本能腦沒接住，已由系統備用執行，妳只需口頭答應，絕對不要重複下達。）",
+                }.get(_who, "")
+                return "tool", build_slip_text(fn_name, fn_args, requester_name, via="") + _note
             else:
                 asyncio.create_task(execute_tool_dispatch(fn_name, fn_args, caller_target=target, caller_user=requester_name))
             # ⚠️ 同 CPU 路徑：唱歌/彈琴紙條必須寫明演唱者是 7L 本人，避免主腦說成「老爸唱的」

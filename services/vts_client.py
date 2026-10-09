@@ -846,6 +846,69 @@ async def trigger_vts_expression(expression_name: str, is_instinct: bool = False
             return f"已成功切換 Live2D 模型表情至：{clean_name}"
     return f"已記錄表情切換：{clean_name}"
 
+# ── 表情去重查詢（2026-10-10：本能腦主做表情、NV 子代理備用）──
+# toggle 語義：同檔已在臉上時再下一次＝關掉。NV 動手前必須先查臉，
+# 本能已經做了就閉嘴，否則會把剛開的表情關掉。
+_RESET_WORDS = {"_reset_", "_reset", "預設", "重置", "關閉", "正常",
+                "恢復", "無", "取消", "reset", "default", "none", "close", "off", "0"}
+_WINK_WORDS = ("wink", "眨眼", "單眼", "眨單眼", "单眼", "眨单眼")
+_SHOCK_WORDS = ("shock", "surprise", "驚訝", "惊讶", "震驚", "震惊", "瞳孔", "縮小", "缩小", "嚇到", "吓到", "恐懼", "害怕")
+_FROWN_WORDS = ("frown", "皺眉", "皱眉", "八字眉", "困擾", "困扰", "委屈")
+_EYEROLL_WORDS = ("eye_roll", "白眼", "翻白眼", "鄙視", "不屑", "無語")
+
+
+def _expression_targets(expression_name: str):
+    """把表情名正規化成 (files, timer_kind, is_reset)，與 set_vts_expression 同一套關鍵字。"""
+    clean = str(expression_name or "").strip().replace("[", "").replace("]", "") \
+        .replace("EXPRESSION:", "").replace("EXPRESSION：", "").strip().lower()
+    if not clean:
+        return set(), None, False
+    if clean in _RESET_WORDS:
+        return set(), None, True
+    for kind, words in (("wink", _WINK_WORDS), ("shock", _SHOCK_WORDS),
+                        ("frown", _FROWN_WORDS), ("eye_roll", _EYEROLL_WORDS)):
+        if any(k in clean for k in words):
+            return set(), kind, False
+    found = VTS_EXPRESSION_MAP.get(clean)
+    if not found:
+        for k, v in VTS_EXPRESSION_MAP.items():
+            if k in clean or clean in k:
+                found = v
+                break
+    return ({found} if found else set()), None, False
+
+
+def is_expression_active(expression_name: str) -> bool:
+    """查臉：該表情是否已經在臉上（檔案在 CURRENT_ACTIVE_EXPS 或計時器未過期；重置＝臉上沒東西）。"""
+    import time as _time
+    files, kind, is_reset = _expression_targets(expression_name)
+    now = _time.time()
+    try:
+        active = set(CURRENT_ACTIVE_EXPS)
+    except NameError:
+        active = set()
+    if is_reset:
+        timers = [globals().get(t, 0.0) for t in
+                  ("wink_timer", "shock_timer", "frown_timer", "eye_roll_timer")]
+        return (not active) and all((t or 0.0) <= now for t in timers)
+    if kind:
+        return (globals().get(f"{kind}_timer", 0.0) or 0.0) > now
+    return bool(files) and bool(files & active)
+
+
+async def wait_expression_active(expression_name: str, timeout: float = 2.5) -> bool:
+    """等臉：輪詢 is_expression_active，最多等 timeout 秒（給本能腦一個 Live turn 的時間）。"""
+    import asyncio as _aio
+    import time as _time
+    if is_expression_active(expression_name):
+        return True
+    deadline = _time.time() + max(0.0, timeout)
+    while _time.time() < deadline:
+        await _aio.sleep(0.3)
+        if is_expression_active(expression_name):
+            return True
+    return False
+
 # ── 高階動作封裝 (High-Level Actions) ───────────────────────────────────────────
 async def trigger_wink(side=None, is_instinct=False):
     """觸發眨眼放電"""
