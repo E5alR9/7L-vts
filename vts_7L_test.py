@@ -8571,8 +8571,9 @@ async def chat_processor_worker(vts, input_queue):
                 if is_dad_source and has_wake_word and operator_input_enabled():
                     log_print(f"☀️ [語音喚醒] 收到老爸喚醒指令：「{user_input}」，7L 立即解除休眠睜開雙眼！")
                     await set_sleep_mode(False)
+                    wake_text = await _doze_one_liner(f"妳剛被老爸叫醒，他說「{user_input[:30]}」，回他一句（正好是早上就道早安）", "wake")
                     speech_item = {
-                        "text": "嗯～老爸早安！我醒來了，隨時聽你差遣喔！",
+                        "text": wake_text,
                         "expression": "自然",
                         "action": "WINK",
                         "target": "dad",
