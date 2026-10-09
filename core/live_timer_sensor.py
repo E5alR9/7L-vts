@@ -18,16 +18,16 @@ class LiveTimerSensorHub:
         self.timers: Dict[str, Dict[str, Any]] = {}
         self._counter: int = 0
 
-    def add_timer(self, seconds: int, message: str = "", source: str = "老爸口語/指令", caller_user: str = "老爸") -> Dict[str, Any]:
+    def add_timer(self, seconds: int, message: str = "", source: str = "代碼指令/標籤", caller_user: str = "") -> Dict[str, Any]:
         """新增一個定時感測任務 (單位: 秒數 / Ticks)"""
         self._counter += 1
         task_id = f"timer_{int(time.time())}_{self._counter}"
         now = time.time()
         
-        clean_msg = message.strip() if message else "提醒老爸時間到了"
+        clean_msg = message.strip() if message else "提醒時間到了"
         clean_msg = re.sub(r'^(?:叫我|提醒我|叫醒我|跟我說|通知我|喊我)', '', clean_msg).strip()
         if not clean_msg:
-            clean_msg = "時間到了，來看看老爸"
+            clean_msg = "時間到了"
 
         timer_item = {
             "task_id": task_id,
@@ -143,7 +143,7 @@ class LiveTimerSensorHub:
                 sec = int(val)
 
             # 清理 extra 作為提醒內容
-            reminder_action = extra if extra else "時間到了，叫老爸"
+            reminder_action = extra if extra else "時間到了"
             return sec, reminder_action
 
         # 模式 2: 定時/計時/鬧鐘 [TIMER: 300|喝水] 或 倒數 X 秒/分

@@ -25,6 +25,7 @@ from google import genai
 from google.genai import types
 import services.vts_client as vc
 from services.vts_client import move_vts_spatial, set_vts_expression
+from core.hard_command import display_requester
 
 import __main__
 
@@ -1772,15 +1773,17 @@ def clean_song_title_for_speech(raw_title: str) -> str:
     t = t.replace('[', '').replace(']', '')
     return t or raw_title
 
-async def generate_dynamic_piano_chatter(song_title: str, target: str = "dad", requester_name: str = "老爸", is_radio: bool = True) -> str:
+async def generate_dynamic_piano_chatter(song_title: str, target: str = "dad", requester_name: str = "", is_radio: bool = True) -> str:
     """由 AI 大腦即時自主動態生成過場/切歌/彈琴台詞 (支援對象感知，100% 自由意志決定說話或安靜沉醉，零固定罐頭句與數學機率)"""
     try:
         user_prof = await main_obj.get_user_profile()
         c_name = user_prof.get("custom_name", main_obj.DEFAULT_USER_TITLE)
         song_title = clean_song_title_for_speech(song_title)
-        
+
+        # ⚠️ 點歌人不一定是老爸：有誰寫誰，未知走中性，絕不預設老爸
+        requester_name = display_requester(requester_name, target)
         # 🛑 觀眾頻道請勿稱呼為「老爸」
-        if target == "audience" and requester_name in ["老爸", "老爸（主播）", ""]:
+        if target == "audience" and requester_name in ["老爸", "老爸（主播）"]:
             requester_name = "大家"
         
         if is_radio:
@@ -1795,7 +1798,7 @@ async def generate_dynamic_piano_chatter(song_title: str, target: str = "dad", r
                 mode_desc = f"為觀眾【{requester_name}】演奏點播的《{song_title}》"
                 audience_prompt = f"點歌的觀眾【{requester_name}】以及直播間的大家"
             else:
-                mode_desc = f"為老爸彈奏《{song_title}》"
+                mode_desc = f"為【{requester_name}】彈奏點播的《{song_title}》"
                 audience_prompt = f"老爸（{c_name}）"
 
         prompt = f"""妳是 7L，正坐在 88 鍵鋼琴前彈奏鋼琴。
@@ -1980,8 +1983,8 @@ async def play_piano_worker(song_title: str, sheet_text: str, bpm: int, mode: st
                 song_title = clean_song_title_for_speech(req_item.get("title", ""))
                 midi_file = req_item.get("midi_path", "")
                 req_target = req_item.get("target") or ("audience" if get_current_speaking_target() == "audience" else "dad")
-                req_user = req_item.get("requester") or ("大家" if req_target == "audience" else "老爸")
-                if req_target == "audience" and req_user in ["老爸", "老爸（主播）", ""]:
+                req_user = display_requester(req_item.get("requester"), req_target)
+                if req_target == "audience" and req_user in ["老爸", "老爸（主播）"]:
                     req_user = "直播間觀眾"
                 sheet_text = ""
                 current_piano_song_title = song_title
@@ -2115,8 +2118,8 @@ async def play_virtual_piano(song_name: str = "", custom_sheet: str = "", auto_r
 
     if not target:
         target = "audience" if get_current_speaking_target() == "audience" else "dad"
-    if not requester_name:
-        requester_name = "大家" if target == "audience" else "老爸"
+    # ⚠️ 點歌人不一定是老爸：有誰寫誰，未知走中性（display_requester），絕不預設老爸
+    requester_name = display_requester(requester_name, target)
     
     target_title = song_name if song_name else "鋼琴名曲"
     target_midi = midi_file if (midi_file and os.path.exists(midi_file)) else None
@@ -2225,9 +2228,10 @@ async def play_virtual_piano(song_name: str = "", custom_sheet: str = "", auto_r
             clean_target_song = clean_song_title_for_speech(ai_intent.get("song_title") or clean_q)
             
             # 防重複排隊檢查：若隊列中已預約此曲，更新點歌人（若有更具體名稱）並返回，不重複排入
+            # ⚠️ 中性稱呼（點播的人等）絕不能覆寫掉已知的真名
             for it in PIANO_REQUEST_QUEUE:
                 if it.get("title") == clean_target_song or (clean_target_song.lower() in it.get("title", "").lower()) or (it.get("title", "").lower() in clean_target_song.lower()):
-                    if requester_name and requester_name not in ["老爸", "大家", "直播間觀眾"] and it.get("requester") in ["老爸", "大家", "直播間觀眾"]:
+                    if requester_name and requester_name not in ["老爸", "大家", "直播間觀眾", "點播的人", "點歌的人", "觀眾"] and it.get("requester") in ["老爸", "大家", "直播間觀眾", "點播的人", "點歌的人", "觀眾"]:
                         it["requester"] = requester_name
                         it["target"] = target
                     log_print(f"🎵 [鋼琴點歌排隊] 《{clean_target_song}》已在待播隊列中，不重複排入。")
@@ -2653,8 +2657,8 @@ async def compose_and_play_original_piano(theme_or_title: str = "", mood_or_styl
     
     if not target:
         target = "audience" if get_current_speaking_target() == "audience" else "dad"
-    if not requester_name:
-        requester_name = "大家" if target == "audience" else "老爸"
+    # ⚠️ 點歌人不一定是老爸：有誰寫誰，未知走中性（display_requester），絕不預設老爸
+    requester_name = display_requester(requester_name, target)
 
     clean_theme = (theme_or_title or "即興心境").strip()
     clean_mood = (mood_or_style or "治癒抒情").strip()

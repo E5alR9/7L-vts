@@ -16,6 +16,7 @@ import subprocess
 import shutil
 import time
 import pygame
+from collections import deque
 
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
@@ -176,14 +177,34 @@ def pitch_shift_vocal_to_female(vocal_in: str, vocal_out: str, semitones: float 
 _IS_PRODUCING_COVER = False
 IS_SINGING_ACTIVE = False
 
+# —— 點歌排隊（2026-10-09：台上有人在唱就排隊＋背景 RVC 照做，不再直接丟掉）——
+#  parade: 請求進 SONG_REQUEST_QUEUE → 背景一次只做一首準備（GPU 安全）→
+#  備好進 READY_SONGS → 舞台空了就開唱 → 每首結束遞謝幕紙條 → 下一首。
+SONG_REQUEST_QUEUE = deque()   # 待準備：{"title", "requester"}
+READY_SONGS = deque()          # 已備好待播：{"title", "vocal", "inst", "requester", "gen"}
+MAX_PENDING_SONGS = 5          # 待播上限（防彈幕洗版；備好＋在唱的不計）
+_ACTIVE_TITLES = set()         # 準備中＋備好＋演唱中的去重鍵（見 _dedupe_key）
+_PIPELINE_GEN = 0              # 世代計數：stop_singing() 遞增，遲到的背景任務自動丟棄
+_ORCH_TASK = None
+_PREPARE_TASK = None
+
 def get_core_vts():
     """動態取得當前運行的主核心模組，杜絕重複 import 導致 .env 與全域狀態衝突"""
     return sys.modules.get("vts_7L_test") or sys.modules.get("__main__")
 
 def stop_singing():
     """立即中斷當前 7L 翻唱演奏並恢復狀態"""
-    global IS_SINGING_ACTIVE
+    global IS_SINGING_ACTIVE, _PIPELINE_GEN
     IS_SINGING_ACTIVE = False
+    # 停止＝整個不唱了：待播＋備好全部清空，世代遞增讓遲到的背景準備自動丟棄
+    _PIPELINE_GEN += 1
+    n_q = len(SONG_REQUEST_QUEUE)
+    n_r = len(READY_SONGS)
+    SONG_REQUEST_QUEUE.clear()
+    READY_SONGS.clear()
+    _ACTIVE_TITLES.clear()
+    if n_q or n_r:
+        print(f"🧹 [翻唱隊列] 已清空待播 {n_q} 首＋備好待播 {n_r} 首。")
     try:
         if pygame.mixer.get_init():
             pygame.mixer.Channel(6).stop()
@@ -228,25 +249,154 @@ async def wait_for_intro_speech_complete():
         else:
             break
 
-async def produce_and_sing_cover(song_name: str) -> str:
+def _dedupe_key(title: str) -> str:
+    """去重鍵：用實際快取檔名歸一化（同檔＝同首歌，連「晴天」vs「晴天！」這種都算同一首）"""
+    return get_safe_filename((title or "").strip()).casefold()
+
+def _stage_busy() -> bool:
+    """舞台是否有人在唱（含主核心同步過來的狀態）"""
+    if IS_SINGING_ACTIVE:
+        return True
+    core_vts = get_core_vts()
+    if core_vts:
+        if getattr(core_vts, "IS_SINGING_ACTIVE", False):
+            return True
+        if getattr(core_vts, "current_ai_state", "") == "SINGING":
+            return True
+    return False
+
+def _send_brain_slip(text: str) -> bool:
+    """給 Live 主腦遞紙條（跟本檔謝幕紙條同通道）。"""
+    try:
+        from vts_7L_test import GLOBAL_LIVE_SESSION
+        if GLOBAL_LIVE_SESSION:
+            asyncio.create_task(GLOBAL_LIVE_SESSION.send_realtime_input(text=text))
+            return True
+    except Exception as e:
+        print(f"⚠️ [翻唱引擎] 紙條傳送失敗 ({e})")
+    return False
+
+def _ensure_orchestrator():
+    """確保調度協程活著（同步、可重複呼叫；無 event loop 時靜默跳過等下次請求）。"""
+    global _ORCH_TASK
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    if _ORCH_TASK is None or _ORCH_TASK.done():
+        _ORCH_TASK = loop.create_task(_sing_orchestrator())
+
+def request_cover_song(song_name: str, requester: str = "") -> str:
+    """點歌入口（同步、零等待）：有誰寫誰 requester。回傳給大腦看的狀態文字。
+
+    - 台上沒人＋沒在準備 → 立刻開工，回「準備好就開唱」
+    - 台上有人／準備中 → 排入隊列，背景 RVC 照做，回排隊位置
+    - 重複／隊列滿 → 誠實回報，不再無聲丟掉
     """
-    全自動雙軌即時舞台總控流程：
-    1. 查快取 (若已有 7L 純歌聲 7l_vocal.wav 與純伴奏 instrumental.wav 則秒開唱)
-    2. 若已有人聲與伴奏分軌但未 RVC，直接極速 12s 置換 7L 甜妹聲線開唱
-    3. 若無分軌，下載 YouTube 高音質音軌並以 Demucs GPU 拆解人聲與伴奏
-    4. 7L 官方曉伊 (Xiaoyi) 神經聲帶音色轉換
-    5. 雙軌獨立同步放音（軌道 6: 7L 純歌聲對嘴 + 軌道 7: 純伴奏立體聲，零混音延遲與零伴奏干擾對嘴）
-    6. 演唱完畢後自動向 speech_queue 發送謝幕詞
-    """
-    global _IS_PRODUCING_COVER
-    if _IS_PRODUCING_COVER:
-        print(f"⚠️ [翻唱流水線] 當前已有歌曲正在處理中，略過雙軌並發重複調用！")
-        return f"老爸，我已經在準備為大家唱這首歌囉！"
+    title = re.sub(r'^(?:song_name\s*=\s*)?[\'"]?', '', (song_name or "").strip())
+    title = re.sub(r'[\'"]?$', '', title.strip()).strip().strip('「」『』')
+    if not title:
+        return "這首歌名是空的，跳過囉！"
+    key = _dedupe_key(title)
+    if key in _ACTIVE_TITLES:
+        return f"《{title}》已經在唱／排隊／準備中了，不重複排入！"
+    if len(SONG_REQUEST_QUEUE) >= MAX_PENDING_SONGS:
+        return f"點歌隊列滿了（最多 {MAX_PENDING_SONGS} 首待播），等唱完幾首再點！"
+    idle = ((_ORCH_TASK is None or _ORCH_TASK.done())
+            and not READY_SONGS and not _stage_busy()
+            and (_PREPARE_TASK is None or _PREPARE_TASK.done()))
+    SONG_REQUEST_QUEUE.append({"title": title, "requester": (requester or "").strip()})
+    _ACTIVE_TITLES.add(key)
+    _ensure_orchestrator()
+    if idle:
+        return f"已排程 7L 本人演唱《{title}》（點歌人只是點歌，唱歌的是 7L），背景準備好就開唱！"
+    ahead = len(READY_SONGS) + len(SONG_REQUEST_QUEUE) - 1
+    tail = "（下一首就輪到它）" if ahead <= 0 else f"（前面還有 {ahead} 首）"
+    return f"《{title}》已排入點歌隊列{tail}，背景 RVC 會接著做、唱完手上這首就輪到它！"
+
+async def _sing_orchestrator():
+    """隊列調度：一次只做一首背景準備（GPU 安全），備好＋舞台空了就開唱，全空就收工。"""
+    global _ORCH_TASK, _PREPARE_TASK, _IS_PRODUCING_COVER
     _IS_PRODUCING_COVER = True
     try:
-        # 清理歌名引數中的多餘字樣
-        song_name = re.sub(r'^(?:song_name\s*=\s*)?[\'"]?', '', song_name.strip())
-        song_name = re.sub(r'[\'"]?$', '', song_name.strip()).strip()
+        while True:
+            # 1. 有備好的歌且舞台空了 → 開唱（await 期間背景準備可並行）
+            if READY_SONGS and not _stage_busy():
+                item = READY_SONGS.popleft()
+                await play_prepared_song(item["title"], item["vocal"], item["inst"], item["gen"])
+                continue
+            # 2. 有待準備且沒有準備任務在跑 → 開一個背景準備（唱歌中也能 RVC）
+            if SONG_REQUEST_QUEUE and (_PREPARE_TASK is None or _PREPARE_TASK.done()):
+                item = SONG_REQUEST_QUEUE.popleft()
+                _PREPARE_TASK = asyncio.create_task(_prepare_worker(item, _PIPELINE_GEN))
+            # 3. 全空且舞台空 → 收工（下次點歌再啟動，不留殭屍任務）
+            prep_busy = _PREPARE_TASK is not None and not _PREPARE_TASK.done()
+            if not SONG_REQUEST_QUEUE and not READY_SONGS and not _stage_busy() and not prep_busy:
+                break
+            await asyncio.sleep(0.5)
+    finally:
+        _ORCH_TASK = None
+        _IS_PRODUCING_COVER = False
+
+async def _prepare_worker(item, gen: int):
+    """背景準備一首歌（下載→分離→RVC）：成功進 READY，失敗遞紙條，全程不擋台上演唱。"""
+    title = item["title"]
+    try:
+        vocal, inst = await prepare_cover_song(title)
+        if gen != _PIPELINE_GEN:
+            print(f"🛑 [翻唱隊列] 《{title}》準備完成但已被停止，丟棄不上台。")
+            return
+        if vocal:
+            READY_SONGS.append({"title": title, "vocal": vocal, "inst": inst,
+                                "requester": item.get("requester", ""), "gen": gen})
+            print(f"✅ [翻唱隊列] 《{title}》背景準備完成，已排入待播！")
+        else:
+            _ACTIVE_TITLES.discard(_dedupe_key(title))
+            _send_brain_slip(f"[系統提示：剛才點的《{title}》背景準備失敗（下載／分離／轉換卡住），請自然地跟大家說這首先跳過、可以再點別首！]")
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:
+        print(f"❌ [翻唱準備異常] 《{title}》: {e}")
+        _ACTIVE_TITLES.discard(_dedupe_key(title))
+        if gen == _PIPELINE_GEN:
+            _send_brain_slip(f"[系統提示：剛才點的《{title}》背景準備失敗（下載／分離／轉換卡住），請自然地跟大家說這首先跳過、可以再點別首！]")
+
+async def play_prepared_song(title: str, vocal_path: str, inst_path: str, gen: int) -> str:
+    """播一首備好的歌：等開場白 → 世代檢查 → 開唱 → 謝幕紙條（含隊列深度）。"""
+    key = _dedupe_key(title)
+    try:
+        await wait_for_intro_speech_complete()
+        if gen != _PIPELINE_GEN:
+            print(f"🛑 [翻唱隊列] 《{title}》開唱前已被停止，跳過。")
+            return f"《{title}》已停止，不開唱。"
+        await play_cover_audio(vocal_path, title, inst_path=inst_path)
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:
+        print(f"❌ [翻唱開唱異常] 《{title}》: {e}")
+        return f"《{title}》開唱失敗，跳過。"
+    finally:
+        _ACTIVE_TITLES.discard(key)
+    if gen != _PIPELINE_GEN:
+        return f"《{title}》已停止。"
+    depth = len(SONG_REQUEST_QUEUE) + len(READY_SONGS)
+    tail = f"後面還有 {depth} 首在排隊，再接著唱！" if depth > 0 else ""
+    _send_brain_slip(f"[系統提示：妳剛才演唱完畢了歌曲《{title}》，請自然地向老爸與觀眾謝幕，可以順便問問他們覺得好不好聽！{tail}]")
+    print(f"🚨 [翻唱引擎] 已將謝幕指示塞給 Live 主腦，由主腦動態接管發言！")
+    return f"謝謝大家～剛才唱給大家的是 7L 的翻唱歌曲《{title}》！希望老爸喜歡～"
+
+async def produce_and_sing_cover(song_name: str, requester: str = "") -> str:
+    """點歌入口（相容舊名）：一律進隊列；台上有人就排隊＋背景 RVC 照做，不再丟掉。"""
+    return request_cover_song(song_name, requester)
+async def prepare_cover_song(song_name: str):
+    """背景準備一首歌（查快取→下載→分離→RVC），成功回 (vocal, inst)，失敗回 (None, None)。
+    只做準備、不開唱；開唱由 play_prepared_song 經調度器執行。"""
+    # 清理歌名引數中的多餘字樣（request_cover_song 已清過，這裡防直接調用）
+    song_name = re.sub(r'^(?:song_name\s*=\s*)?[\'"]?', '', (song_name or "").strip())
+    song_name = re.sub(r'[\'"]?$', '', song_name.strip()).strip().strip('「」『』')
+    if not song_name:
+        return None, None
+    try:
 
         safe_name = get_safe_filename(song_name)
         cached_vocal = os.path.join(CACHE_DIR, f"{safe_name}_7l_vocal.wav")
@@ -285,24 +435,11 @@ async def produce_and_sing_cover(song_name: str) -> str:
                 if rvc_ok and os.path.exists(cached_vocal) and os.path.getsize(cached_vocal) > 10000:
                     play_vocal = cached_vocal
 
-        # 若命中快取或已極速轉換完畢，立即開唱！
+        # 若命中快取或已極速轉換完畢，直接回傳備好路徑（開唱由調度器執行）
         if play_vocal:
             play_inst = cached_inst if (os.path.exists(cached_inst) and os.path.getsize(cached_inst) > 100000) else None
             print(f"💾 [7L 專屬翻唱庫] 命中已就緒之獨立人聲與伴奏: 《{song_name}》 (雙軌同步即時放音)")
-            # 等候 7L 當前開場白講完
-            await wait_for_intro_speech_complete()
-            await play_cover_audio(play_vocal, song_name, inst_path=play_inst)
-            
-            # 演唱完畢後，化作紙條塞給 Live 主腦，由主腦動態謝幕（不再使用罐頭回覆）
-            try:
-                from vts_7L_test import GLOBAL_LIVE_SESSION
-                if GLOBAL_LIVE_SESSION:
-                    slip_text = f"[系統提示：妳剛才演唱完畢了歌曲《{song_name}》，請自然地向老爸與觀眾謝幕，可以順便問問他們覺得好不好聽！]"
-                    print(f"🚨 [翻唱引擎] 已將謝幕指示塞給 Live 主腦，由主腦動態接管發言！")
-                    asyncio.create_task(GLOBAL_LIVE_SESSION.send_realtime_input(text=slip_text))
-            except Exception as e:
-                print(f"⚠️ [翻唱引擎] 轉交謝幕紙條失敗 ({e})")
-            return f"謝謝大家～剛才為老爸帶來的是翻唱歌曲《{song_name}》！希望老爸喜歡～"
+            return play_vocal, play_inst
 
         print(f"🚀 [7L 全自動翻唱引擎啟動] 目標曲目: 《{song_name}》")
         try:
@@ -320,7 +457,8 @@ async def produce_and_sing_cover(song_name: str) -> str:
             try:
                 web_dash.broadcast_event("tts_progress", {"active": False, "stage": "下載失敗", "percent": 0})
             except Exception: pass
-            return f"老爸，在 YouTube 找《{song_name}》時麥克風卡了一下，待會再試試！"
+            print(f"❌ [翻唱準備失敗] 在 YouTube 找不到《{song_name}》可用的高音質音軌。")
+            return None, None
 
         try:
             web_dash.broadcast_event("tts_progress", {
@@ -342,27 +480,12 @@ async def produce_and_sing_cover(song_name: str) -> str:
         rvc_ok = await asyncio.to_thread(pitch_shift_vocal_to_female, vocal_wav, trans_vocal, 0.0)
         if not rvc_ok or not os.path.exists(trans_vocal) or os.path.getsize(trans_vocal) < 10000:
             print("❌ [翻唱管線中斷] RVC 神經歌聲置換未成功，終止播放避免直出原唱！")
-            return f"老爸，7L 剛才嗓子被電阻卡了一下，沒能成功換上我的聲線，待會再為大家唱這首喔！"
+            return None, None
 
-        # 步驟 4: 等候 7L 當前開場白講完，無縫銜接開唱
-        await wait_for_intro_speech_complete()
-
-        # 步驟 5: 本地雙軌獨立同步放音（軌道 6: 7L 歌聲 + 軌道 7: 純伴奏，免去合成 MP3 延遲）
-        await play_cover_audio(trans_vocal, song_name, inst_path=inst_wav)
-
-        # 步驟 6: 演唱完畢後，化作紙條塞給 Live 主腦，由主腦動態謝幕（不再使用罐頭回覆）
-        try:
-            from vts_7L_test import GLOBAL_LIVE_SESSION
-            if GLOBAL_LIVE_SESSION:
-                slip_text = f"[系統提示：妳剛才演唱完畢了歌曲《{song_name}》，請自然地向老爸與觀眾謝幕，可以順便問問他們覺得好不好聽！]"
-                print(f"🚨 [翻唱引擎] 已將謝幕指示塞給 Live 主腦，由主腦動態接管發言！")
-                asyncio.create_task(GLOBAL_LIVE_SESSION.send_realtime_input(text=slip_text))
-        except Exception as e:
-            print(f"⚠️ [翻唱引擎] 轉交謝幕紙條失敗 ({e})")
-
-        return f"剛才播放了《{song_name}》。"
-    finally:
-        _IS_PRODUCING_COVER = False
+        return trans_vocal, inst_wav
+    except Exception as e:
+        print(f"❌ [翻唱準備異常] 《{song_name}》: {e}")
+        return None, None
 
 async def play_cover_audio(vocal_path: str, song_name: str, inst_path: str = None):
     """
@@ -486,5 +609,13 @@ async def play_cover_audio(vocal_path: str, song_name: str, inst_path: str = Non
 if __name__ == "__main__":
     async def test():
         res = await produce_and_sing_cover("Never Gonna Give You Up")
-        print("結果:", res)
+        print("點歌結果:", res)
+        # 等背景隊列排空（準備＋演唱跑完才結束）
+        for _ in range(3600):
+            if (not SONG_REQUEST_QUEUE and not READY_SONGS and not _stage_busy()
+                    and (_ORCH_TASK is None or _ORCH_TASK.done())
+                    and (_PREPARE_TASK is None or _PREPARE_TASK.done())):
+                break
+            await asyncio.sleep(1)
+        print("隊列已排空。")
     asyncio.run(test())

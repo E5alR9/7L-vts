@@ -66,7 +66,7 @@ from services.piano_engine import is_piano_active
 from services.tiktok_listener import tiktok_live_worker
 from services.twitch_listener import twitch_live_worker
 from services.youtube_live_listener import youtube_live_worker
-from services.auto_cover_pipeline import produce_and_sing_cover, stop_singing
+from services.auto_cover_pipeline import produce_and_sing_cover, stop_singing, request_cover_song
 import services.web_dashboard as web_dash
 from PIL import BmpImagePlugin
 from PIL import Image, ImageDraw, ImageGrab, ImageChops
@@ -566,6 +566,7 @@ from core.utils import (
     record_interaction_tick, get_silence_ticks, get_uptime_ticks, format_ticks_to_human,
     speech_allowed, operator_input_enabled
 )
+from core.hard_command import parse_hard_command, build_slip_text, display_requester
 from core.db import *
 from core.live_timer_sensor import live_timer_hub
 import services.piano_engine as pe
@@ -744,12 +745,16 @@ GENAI_TOOLS = build_genai_declarations(is_proactive=False)
 
 GENAI_PROACTIVE_TOOLS = build_genai_declarations(is_proactive=True)
 
-async def summarize_search_to_speech(query: str, search_raw: str, user_role_name: str = "老爸") -> str:
+async def summarize_search_to_speech(query: str, search_raw: str, user_role_name: str = "") -> str:
     """PROVIDER: GROQ（core.groq_router.groq_chat 純文字提煉；見 docs/AI_SOURCES.md）"""
     """將搜尋到的原始資料，以 7L 招牌自然口語（1~3 句，親切隨性）進行提煉整理。
     容災序（全程零 Gemini）：groq_chat 梯隊 -> Groq 快答梯隊 -> 本機離線摘要器，絕不直接傾倒原文！"""
+    # ⚠️ 收聽人不一定是老爸：未知走中性（有誰寫誰，沒人可寫就不加稱呼）
+    _who = (user_role_name or "").strip()
+    _voc = f"{_who}，" if _who else ""
+    _prompt_who = _who or "大家"
     if not search_raw or "搜尋無結果" in search_raw:
-        return f"{user_role_name}，我幫你查了一下，但目前網路上沒有找到相關的資料耶。"
+        return f"{_voc}我幫你查了一下，但目前網路上沒有找到相關的資料耶。"
 
     # 清理搜尋字串，避免傳入過大 token
     clean_search = re.sub(r'https?://\S+', '', search_raw)
@@ -761,7 +766,7 @@ async def summarize_search_to_speech(query: str, search_raw: str, user_role_name
         g_resp = await groq_chat(
             [
                 {"role": "system", "content": "妳是虛擬主播 7L，負責把搜尋原始資料轉成自然口語。請將清單或網頁標題轉換為重點說明，並使用純文字對話。"},
-                {"role": "user", "content": f"查詢：{query}\n\n搜尋原始資料：\n{clean_search}\n\n請以親切隨性的口吻，用 1~3 句俐落短句（40~80 字以內）對{user_role_name}提煉並說明重點。"},
+                {"role": "user", "content": f"查詢：{query}\n\n搜尋原始資料：\n{clean_search}\n\n請以親切隨性的口吻，用 1~3 句俐落短句（40~80 字以內）對{_prompt_who}提煉並說明重點。"},
             ],
             temperature=0.75, max_tokens=500, timeout=4.5,
         )
@@ -786,7 +791,7 @@ async def summarize_search_to_speech(query: str, search_raw: str, user_role_name
                         g_client.chat.completions.create(
                             model=g_model,
                             messages=[
-                                {"role": "system", "content": f"妳是 7L，正在直播中與{user_role_name}對話。請以親切隨性口吻（1~2句短句）提煉搜尋重點回答{user_role_name}，請將清單內容轉為口語，並使用純文字對話。"},
+                                {"role": "system", "content": f"妳是 7L，正在直播中與{_prompt_who}對話。請以親切隨性口吻（1~2句短句）提煉搜尋重點回答{_prompt_who}，請將清單內容轉為口語，並使用純文字對話。"},
                                 {"role": "user", "content": f"查詢問題: {query}\n搜尋內容: {clean_search[:800]}"}
                             ],
                             max_tokens=120,
@@ -818,8 +823,8 @@ async def summarize_search_to_speech(query: str, search_raw: str, user_role_name
         summary_core = "，".join(snippets)
         if len(summary_core) > 90:
             summary_core = summary_core[:85] + "等等"
-        return f"{user_role_name}，我幫你查到囉！大致上來說，{summary_core}。詳細內容我待會再幫你細看喔！"
-    return f"{user_role_name}，我剛剛幫你查了，但搜尋到的內容有點繁雜，我待會再仔細整理跟你說！"
+        return f"{_voc}我幫你查到囉！大致上來說，{summary_core}。詳細內容我待會再幫你細看喔！"
+    return f"{_voc}我剛剛幫你查了，但搜尋到的內容有點繁雜，我待會再仔細整理跟你說！"
 
 #  觀眾側（caller_target="audience"）避免呼叫的破壞性工具：防直播間彈幕 prompt injection
 _AUDIENCE_DENIED_TOOLS = frozenset({
@@ -874,7 +879,8 @@ async def execute_tool_dispatch(fn_name: str, fn_args: dict, caller_target: str 
         a_radio = fn_args.get("auto_radio_mode", False)
         f_online = fn_args.get("force_online", False)
         req_t = caller_target or ("audience" if CURRENT_SPEAKING_TARGET == "audience" else "dad")
-        req_u = caller_user or ("大家 / 直播觀眾" if req_t == "audience" else "老爸")
+        # ⚠️ 點歌人不一定是老爸：未知走中性（display_requester），絕不預設老爸
+        req_u = display_requester(caller_user, req_t)
         p_res = await pe.play_virtual_piano(s_name, c_sheet, auto_radio_mode=a_radio, force_online=f_online, requester_name=req_u, target=req_t, is_direct_song_name=True)
         #  絕不將內部系統提示拼入 extracted_text 作為語音口語！
         if p_res and "[EXPRESSION:" in p_res:
@@ -944,7 +950,7 @@ async def execute_tool_dispatch(fn_name: str, fn_args: dict, caller_target: str 
         theme = fn_args.get("theme_or_title", "")
         mood = fn_args.get("mood_or_style", "")
         req_t = caller_target or ("audience" if CURRENT_SPEAKING_TARGET == "audience" else "dad")
-        req_u = caller_user or ("大家 / 直播觀眾" if req_t == "audience" else "老爸")
+        req_u = display_requester(caller_user, req_t)
         cp_res = await pe.compose_and_play_original_piano(theme, mood, requester_name=req_u, target=req_t)
         if cp_res and "[EXPRESSION:" in cp_res:
             extracted_text += f" {cp_res}"
@@ -981,9 +987,8 @@ async def execute_tool_dispatch(fn_name: str, fn_args: dict, caller_target: str 
         await pe.stop_virtual_piano()
     elif fn_name in ["auto_sing_song", "sing_song"]:
         s_name = fn_args.get("song_name", "")
-        #  異步背景執行 7L 翻唱管線：讓 7L 先開口講出回應台詞，音軌與神經聲線準備完成後無縫開唱！
-        asyncio.create_task(produce_and_sing_cover(s_name))
-        return f"已為老爸排程翻唱《{s_name}》，準備完成後立即開唱！"
+        #  點歌進隊列（同步、零等待）：台上有歌就排隊＋背景 RVC 照做，不再直接丟掉
+        return request_cover_song(s_name, caller_user)
     elif fn_name in ["stop_singing_song", "stop_singing", "stop_cover"]:
         stop_singing()
         return "已成功停止唱歌"
@@ -1002,7 +1007,7 @@ async def execute_tool_dispatch(fn_name: str, fn_args: dict, caller_target: str 
     elif fn_name in ["set_timer", "pe.set_timer"]:
         sec = int(fn_args.get("seconds", 60))
         msg = fn_args.get("message", "提醒時間到")
-        asyncio.create_task(set_timer(sec, msg, GLOBAL_INPUT_QUEUE or input_queue))
+        asyncio.create_task(set_timer(sec, msg, GLOBAL_INPUT_QUEUE or input_queue, caller_user=caller_user))
     elif fn_name == "control_microphone":
         is_en = fn_args.get("is_enabled", True)
         control_microphone(is_en)
@@ -4606,9 +4611,10 @@ def get_system_performance():
     except Exception as e:
         return f"無法讀取系統狀態: {e}"
 
-async def set_timer(seconds: int, message: str, target_queue: Optional[asyncio.Queue] = None):
+async def set_timer(seconds: int, message: str, target_queue: Optional[asyncio.Queue] = None, caller_user: str = ""):
     """設定定時感測提醒 (已全面升級至 API Live 定時感測中樞)"""
-    live_timer_hub.add_timer(seconds, message, source="代碼指令/標籤")
+    # ⚠️ 定時人不一定是老爸：caller 原樣透傳，未知就空著，提醒文案走中性
+    live_timer_hub.add_timer(seconds, message, source="代碼指令/標籤", caller_user=caller_user or "")
     try:
         web_dash.broadcast_event("timer_added", live_timer_hub.get_sensor_summary())
     except Exception:
@@ -4633,8 +4639,9 @@ async def live_timer_sensor_worker(vts, input_queue):
                 rem = task["target_time"] - now
                 if rem <= 0:
                     task["status"] = "triggered"
-                    task_msg = task.get("message", "提醒老爸")
-                    caller = task.get("caller_user", "老爸")
+                    task_msg = task.get("message", "提醒時間到了")
+                    # ⚠️ 定時人不一定是老爸：記錄誰寫誰，未知就中性，絕不預設老爸
+                    caller = task.get("caller_user") or ""
                     log_print(f"⏰ [API Live 定時感測到期] 任務 {tid}（{task_msg}）到期！正在呼叫主力大腦生成自然提醒口語...")
                     
                     del live_timer_hub.timers[tid]
@@ -4657,11 +4664,11 @@ async def live_timer_sensor_worker(vts, input_queue):
                         {"role": "system", "content": PromptTemplateEngine.HARD_TECHNICAL_RULES},
                         {"role": "user", "content": f"""時間：{get_current_time_string()}
 【 API Live 定時感測到期提醒】：
-老爸剛才交代妳的時間提醒到了！
+{caller or '你'}剛才交代的時間提醒到了！
 - 預定提醒事項：『{task_msg}』
 - 當前現場環境：{fg_hint} {music_hint}
 
-請妳依循妳的人設性格，主動開口提醒老爸時間到了！（直接給出一兩句自然生動的發言，可附帶 [EXPRESSION: 瞇眼/笑/WINK] 表情與 [SPEED:...] 語調標籤，請務必發出聲音提醒！）"""}
+請妳依循妳的人設性格，主動開口提醒{caller or '你'}時間到了！（直接給出一兩句自然生動的發言，可附帶 [EXPRESSION: 瞇眼/笑/WINK] 表情與 [SPEED:...] 語調標籤，請務必發出聲音提醒！）"""}
                     ]
                     
                     try:
@@ -4675,7 +4682,10 @@ async def live_timer_sensor_worker(vts, input_queue):
                         clean_spoken = spoken.strip(" *'\"-.,!?。，！？\n\r") if spoken else ""
                         
                         if not clean_spoken:
-                            clean_spoken = f"老爸～剛才說好的「{task_msg}」時間到了喔！快起來休息一下～"
+                            if caller:
+                                clean_spoken = f"{caller}～剛才說好的「{task_msg}」時間到了喔！快起來休息一下～"
+                            else:
+                                clean_spoken = f"你～剛才說好的「{task_msg}」時間到了喔！"
                             
                         await asyncio.to_thread(update_subtitle, clean_spoken)
                         record_bot_message(clean_spoken)
@@ -4694,7 +4704,10 @@ async def live_timer_sensor_worker(vts, input_queue):
                             pass
                     except Exception as err:
                         log_print(f"❌ [定時感測喚醒模型發言異常]: {err}")
-                        fallback_msg = f"老爸！時間到囉～剛才說好的「{task_msg}」要記得喔！"
+                        if caller:
+                            fallback_msg = f"{caller}！時間到囉～剛才說好的「{task_msg}」要記得喔！"
+                        else:
+                            fallback_msg = f"時間到囉～剛才說好的「{task_msg}」要記得喔！"
                         await asyncio.to_thread(update_subtitle, fallback_msg)
                         await speech_queue.put({"text": fallback_msg, "target": "dad"})
                         touch_interaction()
@@ -4828,7 +4841,7 @@ async def execute_actions(vts, text, input_queue, user_input_ctx: str = "", has_
         t_sec = int(tm.group(1))
         t_msg = tm.group(2).strip() or "計時時間到"
         log_print(f"⏱️ [計時器啟動] 設定 {t_sec} 秒後提醒: 「{t_msg}」")
-        asyncio.create_task(set_timer(t_sec, t_msg, input_queue))
+        asyncio.create_task(set_timer(t_sec, t_msg, input_queue, caller_user=caller_user))
         text = text.replace(tm.group(0), "")
 
     #  檢測 7L 自我插話標籤 [INTERRUPT_SELF] / [CUT_IN] / [插話] / [中斷]
@@ -4858,13 +4871,13 @@ async def execute_actions(vts, text, input_queue, user_input_ctx: str = "", has_
         (r'(?:pe\.)?list_piano_sheets\(\s*\)', lambda m: pe.list_piano_sheets()),
         (r'\[?(?:stop_singing|stop_singing_song|stop_cover)(?:\(\s*\))?\]?', lambda m: stop_singing()),
         (r'\[(?:STOP_SINGING|STOP_COVER|停止唱歌|停止翻唱)\]', lambda m: stop_singing()),
-        (r'\[?(?:TOOL:[A-Z_]*:?\s*)?(?:pe\.)?(?:auto_sing(?:_song|_sing)?|sing_song|SING_AI)\(\s*(?:song_name\s*=\s*)?[\'"]?([^\'")\]]+)[\'"]?(?:[^)]*)\)\]?', lambda m: produce_and_sing_cover(re.sub(r'^(?:song_name\s*=\s*)?[\'"]?', '', m.group(1)).strip().rstrip('\'"'))),
-        (r'\[?(?:TOOL:[A-Z_]*:?\s*)?(?:AUTO_SING_SONG|SING_SONG|AUTO_SING|SING_AI|SING|翻唱|唱歌)[：:]\s*([^\]]+)\]?', lambda m: produce_and_sing_cover(re.sub(r'^(?:song_name\s*=\s*)?[\'"]?', '', m.group(1)).strip().rstrip('\'"'))),
-        (r'\[(?:TOOL:\s*)?(?:AUTO_SING_SONG|SING_SONG|AUTO_SING|SING_AI|SING|翻唱|唱歌)\]\s*([^\[\]\n]+)', lambda m: produce_and_sing_cover(m.group(1).strip().rstrip('\'"'))),
+        (r'\[?(?:TOOL:[A-Z_]*:?\s*)?(?:pe\.)?(?:auto_sing(?:_song|_sing)?|sing_song|SING_AI)\(\s*(?:song_name\s*=\s*)?[\'"]?([^\'")\]]+)[\'"]?(?:[^)]*)\)\]?', lambda m: produce_and_sing_cover(re.sub(r'^(?:song_name\s*=\s*)?[\'"]?', '', m.group(1)).strip().rstrip('\'"'), caller_user)),
+        (r'\[?(?:TOOL:[A-Z_]*:?\s*)?(?:AUTO_SING_SONG|SING_SONG|AUTO_SING|SING_AI|SING|翻唱|唱歌)[：:]\s*([^\]]+)\]?', lambda m: produce_and_sing_cover(re.sub(r'^(?:song_name\s*=\s*)?[\'"]?', '', m.group(1)).strip().rstrip('\'"'), caller_user)),
+        (r'\[(?:TOOL:\s*)?(?:AUTO_SING_SONG|SING_SONG|AUTO_SING|SING_AI|SING|翻唱|唱歌)\]\s*([^\[\]\n]+)', lambda m: produce_and_sing_cover(m.group(1).strip().rstrip('\'"'), caller_user)),
         (r'\[(?:PLAY_PIANO|PLAY_VIRTUAL_PIANO|彈琴|點歌)[：:]\s*([^\]]+)\]', lambda m: pe.play_virtual_piano(
             song_name=m.group(1).strip(),
             target=(caller_target or ("audience" if CURRENT_SPEAKING_TARGET == "audience" else "dad")),
-            requester_name=(caller_user or ("老爸" if (caller_target == "dad" or CURRENT_SPEAKING_TARGET != "audience") else "大家")),
+            requester_name=display_requester(caller_user, (caller_target or ("audience" if CURRENT_SPEAKING_TARGET == "audience" else "dad"))),
             is_direct_song_name=True
         )),
         (r'\[?(?:pe\.)?play_virtual_piano\s*\([^)]*\)\]?', lambda m: pe.play_virtual_piano(
@@ -4875,14 +4888,14 @@ async def execute_actions(vts, text, input_queue, user_input_ctx: str = "", has_
             ), 
             force_online=bool(re.search(r'force_online\s*=\s*True', m.group(0), re.I)), 
             target=(caller_target or ("audience" if CURRENT_SPEAKING_TARGET == "audience" else "dad")),
-            requester_name=(caller_user or ("老爸" if (caller_target == "dad" or CURRENT_SPEAKING_TARGET != "audience") else "大家")),
+            requester_name=display_requester(caller_user, (caller_target or ("audience" if CURRENT_SPEAKING_TARGET == "audience" else "dad"))),
             is_direct_song_name=True
         )),
         (r'(?:pe\.)?compose_and_play_original_piano\((?:[^)]*)\)', lambda m: pe.compose_and_play_original_piano(
             theme_or_title=(re.search(r'(?:theme_or_title|theme|title)\s*=\s*[\'"]([^\'"]+)[\'"]', m.group(0)).group(1) if re.search(r'(?:theme_or_title|theme|title)\s*=\s*[\'"]([^\'"]+)[\'"]', m.group(0)) else ""), 
             mood_or_style=(re.search(r'(?:mood_or_style|mood|style)\s*=\s*[\'"]([^\'"]+)[\'"]', m.group(0)).group(1) if re.search(r'(?:mood_or_style|mood|style)\s*=\s*[\'"]([^\'"]+)[\'"]', m.group(0)) else ""), 
             target=(caller_target or ("audience" if CURRENT_SPEAKING_TARGET == "audience" else "dad")),
-            requester_name=(caller_user or ("老爸" if (caller_target == "dad" or CURRENT_SPEAKING_TARGET != "audience") else "大家"))
+            requester_name=display_requester(caller_user, (caller_target or ("audience" if CURRENT_SPEAKING_TARGET == "audience" else "dad")))
         )),
         (r'(?:pe\.)?mashup_virtual_piano\((?:[^)]*)\)', lambda m: pe.mashup_virtual_piano(*(re.findall(r'[\'"]([^\'"]+)[\'"]', m.group(0))))),
         (r'(?:pe\.)?insert_virtual_piano\(\s*(?:song_name\s*=\s*)?[\'"]([^\'"]+)[\'"](?:[^)]*)\)', lambda m: pe.insert_virtual_piano(song_name=m.group(1))),
@@ -4895,7 +4908,8 @@ async def execute_actions(vts, text, input_queue, user_input_ctx: str = "", has_
         (r'(?:pe\.)?set_timer\((?:[^)]*)\)', lambda m: set_timer(
             int(re.search(r'\b(\d+)\b', m.group(0)).group(1)) if re.search(r'\b(\d+)\b', m.group(0)) else 60,
             (re.findall(r'[\'"]([^\'"]+)[\'"]', m.group(0))[0] if re.findall(r'[\'"]([^\'"]+)[\'"]', m.group(0)) else "鬧鐘時間到"),
-            input_queue
+            input_queue,
+            caller_user=caller_user
         )),
         (r'search_google\(\s*(?:query\s*=\s*)?[\'"]([^\'"]+)[\'"]\s*\)', lambda m: asyncio.to_thread(search_google, m.group(1))),
         (r'update_cloud_knowledge\((?:[^)]*)\)', lambda m: update_cloud_prompt_field(
@@ -5326,9 +5340,10 @@ async def instinct_live_worker():
             
             system_instruction = """妳是 7L 的「身體本能神經中樞」。妳的權限極低，只負責控制肌肉反射。
 任務：聆聽周遭聲音或老爸的話語，即時輸出當下的反射表情或動作。
-【支援的動作清單】：
-- 臉部表情：[EXPRESSION: 臉紅] / [EXPRESSION: 生氣] / [EXPRESSION: 星星眼] / [EXPRESSION: 震驚] / [EXPRESSION: WINK] / [EXPRESSION: 傲嬌]
-- 身體動作：[MOVE: 靠近] / [MOVE: 躲角落] / [MOVE: 原位]
+【支援的動作清單】（只能輸出以下標籤，不要自創）：
+- 臉部表情：[EXPRESSION: 臉紅] / [EXPRESSION: 害羞] / [EXPRESSION: 傲嬌] / [EXPRESSION: 開心] / [EXPRESSION: 星星眼] / [EXPRESSION: 期待] / [EXPRESSION: 生氣] / [EXPRESSION: 不爽] / [EXPRESSION: 哭哭] / [EXPRESSION: 難過] / [EXPRESSION: 黑化] / [EXPRESSION: 暈] / [EXPRESSION: 流汗] / [EXPRESSION: 無語] / [EXPRESSION: 著急] / [EXPRESSION: 吐舌] / [EXPRESSION: 比心] / [EXPRESSION: 花花] / [EXPRESSION: 問號] / [EXPRESSION: 麥克風] / [EXPRESSION: 打遊戲] / [EXPRESSION: 雙馬尾] / [EXPRESSION: 打招呼] / [EXPRESSION: 左抬手]
+- 瞬時反應：[EXPRESSION: WINK] / [EXPRESSION: 震驚] / [EXPRESSION: 皺眉] / [EXPRESSION: 翻白眼]
+- 身體走位：[MOVE: 靠近] / [MOVE: 遠離] / [MOVE: 躲角落] / [MOVE: 原位] / [MOVE: 中間] / [MOVE: 左邊] / [MOVE: 右邊] / [MOVE: 鋼琴旁]
 - 重置表情：[EXPRESSION: _RESET_]
 
 請直接輸出對應標籤（例如 [EXPRESSION: 臉紅] 或 [MOVE: 靠近]），絕對不要輸出任何對話台詞！如果當下不需要特別反應，請保持沉默 [SILENCE]。"""
@@ -5511,29 +5526,31 @@ async def continuous_live_worker(vts):
                                                 task_ins = fn_args.get("task_instruction", "")
                                                 if task_ins:
                                                     # 等 CPU 拆解回執再回話：命中才說啟動，沒命中就讓主腦直接回
+                                                    # ⚠️ requester 傳空字串：task_ins 是主腦自己寫的指令，
+                                                    # 點歌人不一定是老爸（可能是轉述觀眾點的），紙條走中性文案
                                                     try:
-                                                        _hit, _tname, _targs = await background_tool_executor(task_ins, target="dad", requester_name=owner)
+                                                        _hit, _tname, _targs = await background_tool_executor(task_ins, target="dad", requester_name="")
                                                     except Exception as _be:
                                                         log_print(f"⚠️ [子智能體執行異常]: {_be}")
                                                         _hit, _tname, _targs = False, "", {}
                                                     if _hit:
-                                                        _result_text = f"子智能體已在背景啟動（{_tname} {_targs}），請妳立刻用口語回答老爸，告訴他妳正在準備了。"
+                                                        _result_text = f"子智能體已在背景啟動（{_tname} {_targs}），請妳立刻用口語回應，告訴對方妳正在準備了。"
                                                     else:
                                                         # CPU 沒命中 → NV 解讀（A 鏈第二棒）
                                                         try:
-                                                            _k2, _t2 = await nv_interpret_task(task_ins, target="dad", requester_name=owner)
+                                                            _k2, _t2 = await nv_interpret_task(task_ins, target="dad", requester_name="")
                                                             if _k2 in ("tool", "advice"):
                                                                 _result_text = _t2
                                                             else:
-                                                                _result_text = "該任務無需後台執行，請妳直接用口語回覆老爸即可。"
+                                                                _result_text = "該任務無需後台執行，請妳直接用口語回覆即可。"
                                                         except Exception as _be2:
                                                             log_print(f"⚠️ [NV 解讀異常]: {_be2}")
-                                                            _result_text = "後台執行異常，請妳直接用口語回覆老爸即可。"
+                                                            _result_text = "後台執行異常，請妳直接用口語回覆即可。"
                                                 else:
-                                                    _result_text = "任務指示為空，請妳直接用口語回覆老爸即可。"
+                                                    _result_text = "任務指示為空，請妳直接用口語回覆即可。"
                                             
                                             # 立刻回傳以解除主腦堵塞，讓她可以繼續講話
-                                            _fr_kwargs = {"name": fn_name, "response": {"result": _result_text if fn_name == "invoke_subagent" else "子智能體已在背景啟動！請妳立刻用口語回答老爸，告訴他妳正在準備了。"}}
+                                            _fr_kwargs = {"name": fn_name, "response": {"result": _result_text if fn_name == "invoke_subagent" else "子智能體已在背景啟動！請妳立刻用口語回應，告訴對方妳正在準備了。"}}
                                             if fn_call_id:
                                                 _fr_kwargs["id"] = fn_call_id
                                             asyncio.create_task(session.send_tool_response(
@@ -6207,8 +6224,8 @@ async def system_audio_worker():
 
                     #  若 7L 自身正在唱歌，電腦聲音為 7L 歌聲，略過 STT 與音樂猜測，防止自己被自己打斷
                     if IS_SINGING_ACTIVE or current_ai_state == "SINGING":
-                        current_system_audio_context = "7L 正在為老爸翻唱歌曲（Live2D 舞台開唱中）"
-                        LATEST_SYSTEM_MUSIC_INFO = "7L 翻唱歌曲"
+                        current_system_audio_context = "7L 本人正在演唱翻唱歌曲（Live2D 舞台開唱中；演唱者是 7L，不是老爸也不是觀眾）"
+                        LATEST_SYSTEM_MUSIC_INFO = "7L 本人翻唱歌曲"
                         LATEST_SYSTEM_MUSIC_TIME = time.time()
                         realtime_task_mgr.update_audio_context(current_system_audio_context)
                         await asyncio.sleep(0.08)
@@ -7658,7 +7675,7 @@ def _extract_think_reply(text: str):
     return think, reply
 
 
-async def nv_interpret_task(task_ins: str, target: str = "dad", requester_name: str = "老爸"):
+async def nv_interpret_task(task_ins: str, target: str = "dad", requester_name: str = ""):
     """A 架構子智能體（NV Nemotron 專用）：副腦兩棒制——
     第一棒「工具判定」（temp 0 + tools）：是硬指令就派發；
     第二棒「深度思考」（temp 0.8、無 tools）：第一棒沒叫工具時，讓副腦真正當大腦想一次。
@@ -7714,11 +7731,12 @@ async def nv_interpret_task(task_ins: str, target: str = "dad", requester_name: 
                 try:
                     _res = await execute_tool_dispatch(fn_name, fn_args, caller_target=target, caller_user=requester_name)
                     _sum = await summarize_search_to_speech(fn_args.get("query", ""), _res, user_role_name=requester_name)
-                    return "tool", f"[系統底層：搜網專家回報（轉述給{requester_name}聽，不要照唸）：{_sum}]"
+                    return "tool", f"[系統底層：搜網專家回報（轉述給{requester_name or '大家'}聽，不要照唸）：{_sum}]"
                 except Exception as _se:
-                    return "tool", f"[系統底層：搜網專家查詢失敗（{str(_se)[:60]}），請跟{requester_name}說待會再查。]"
+                    return "tool", f"[系統底層：搜網專家查詢失敗（{str(_se)[:60]}），請跟{requester_name or '大家'}說待會再查。]"
             asyncio.create_task(execute_tool_dispatch(fn_name, fn_args, caller_target=target, caller_user=requester_name))
-            return "tool", f"[系統底層：已成功幫{requester_name}執行了 {fn_name} 指令，參數：{fn_args}。請妳現在只需要負責口頭答應、順著話題接話即可，程式指令已在背景執行。]"
+            # ⚠️ 同 CPU 路徑：唱歌/彈琴紙條必須寫明演唱者是 7L 本人，避免主腦說成「老爸唱的」
+            return "tool", build_slip_text(fn_name, fn_args, requester_name, via="")
         # —— 第二棒：深度思考（第一棒沒叫工具，代表不是硬指令而是需要想的東西）——
         # 強制先寫思考步驟再給結論（step-by-step 推理顯著提升複雜問題正確率）：
         # 不掛 tools（掛著它只會想著調用，不會好好想），temp 0.8 保證想得開
@@ -7748,7 +7766,7 @@ async def nv_interpret_task(task_ins: str, target: str = "dad", requester_name: 
         return "miss", ""
 
 
-async def background_tool_executor(user_text: str, target: str = "dad", requester_name: str = "老爸"):
+async def background_tool_executor(user_text: str, target: str = "dad", requester_name: str = ""):
     """
     B 架構：純 CPU 文字指令拆解器（零 API、零幻覺、零成本，永遠不碰 AI）。
     只認唱歌/鋼琴兩類硬指令並立即執行；其他一律交還。
@@ -7756,54 +7774,24 @@ async def background_tool_executor(user_text: str, target: str = "dad", requeste
     回傳 (是否命中, 工具名, 參數)，供調用方誠實回報。
     """
     try:
-        import re
-
         log_print(f"🤖 [CPU 拆解] 掃描指令: {user_text}")
-        
-        # 1. CPU 代碼硬體判斷 (極速、零成本、零幻覺)
-        import re
-        matched_tool = None
-        matched_args = {}
-        
-        # 唱歌指令
-        sing_match = re.search(r'(?:唱|點歌)[:：\s]*[「『"”](.*?)[」』"”]', user_text)
-        if not sing_match:
-            sing_match = re.search(r'(?:唱|點歌)[:：\s]*([^，。！\!\]]+)', user_text)
-            
-        if sing_match and not re.search(r'(?:不|別)唱', user_text):
-            song = sing_match.group(1).strip()
-            song = re.sub(r'[嗎啊吧呢喔哦]+$', '', song).strip()
-            invalid_songs = ["", "歌", "一首", "一首歌", "什麼", "啥", "首歌", "些什麼", "點什麼", "歌嗎", "歌啊"]
-            if song and song not in invalid_songs:
-                matched_tool = "auto_sing_song"
-                matched_args = {"song_name": song}
-                
-        # 鋼琴指令
-        if not matched_tool:
-            piano_match = re.search(r'(?:彈琴|彈鋼琴|彈)[:：\s]*[「『"”](.*?)[」』"”]', user_text)
-            if not piano_match:
-                piano_match = re.search(r'(?:彈琴|彈鋼琴|彈)[:：\s]*([^，。！\!\]]+)', user_text)
-                
-            if piano_match and not re.search(r'(?:不|別)彈', user_text):
-                song = piano_match.group(1).strip()
-                song = re.sub(r'[嗎啊吧呢喔哦]+$', '', song).strip()
-                invalid_piano_songs = ["", "琴", "鋼琴", "一首", "一首曲子", "曲子", "什麼", "啥", "琴嗎", "琴啊"]
-                if song and song not in invalid_piano_songs:
-                    matched_tool = "pe.play_virtual_piano"
-                    matched_args = {"song_name": song}
-                    
+
+        # 1. CPU 代碼硬體判斷 (極速、零成本、零幻覺)——三道閘門見 core/hard_command.py
+        #    2026-10-09：舊版只認關鍵字「唱」，把「你可以唱歌了？」抽成歌名「歌了？」、
+        #    「? 又我唱了????」抽成「了????」，兩次都真的開跑 YT-DLP。改走 parse_hard_command。
+        fn_name, fn_args = parse_hard_command(user_text)
+
         # 搜尋指令：CPU 層不處理（搜尋是資訊型工具、結果無處可去，只能燒 API；
         # 統一交給 AI 子智能體/主腦走 function calling＋摘要後再說話）
-                    
+
         # 執行配對到的指令（沒命中就直接返回；AI 解讀交給 A 架構）
         # 回傳 (是否命中, 工具名, 參數)，供 invoke_subagent handler 誠實回報
         slip_text = ""
-        if matched_tool:
-            log_print(f"⚡ [CPU 硬體直連] 成功攔截指令: {matched_tool}({matched_args})")
-            asyncio.create_task(execute_tool_dispatch(matched_tool, matched_args, caller_target=target, caller_user=requester_name))
-            fn_name = matched_tool
-            fn_args = matched_args
-            slip_text = f"[系統底層：已成功幫{requester_name}透過硬體直連執行了 {fn_name} 指令，參數：{fn_args}。請妳現在只需要負責口頭答應、順著話題接話即可，程式指令已在背景執行。]"
+        if fn_name:
+            log_print(f"⚡ [CPU 硬體直連] 成功攔截指令: {fn_name}({fn_args})")
+            asyncio.create_task(execute_tool_dispatch(fn_name, fn_args, caller_target=target, caller_user=requester_name))
+            # ⚠️ 紙條必須寫明「唱歌的是 7L 本人」，否則主腦會把點歌的人當成演唱者
+            slip_text = build_slip_text(fn_name, fn_args, requester_name)
         else:
             # CPU 沒命中就交還；AI 解讀一律走 A 架構（invoke_subagent → nv_interpret_task），這裡不燒 API
             log_print(f"🤖 [CPU 拆解] 無硬指令，交還主腦處理。")
@@ -9626,7 +9614,7 @@ async def main():
         elif tool_name == "set_timer":
             sec = int(args.get("seconds", 60))
             msg = args.get("message", "提醒時間到！")
-            asyncio.create_task(set_timer(sec, msg, input_queue))
+            asyncio.create_task(set_timer(sec, msg, input_queue, caller_user="老爸"))
             return f"已設定 {sec} 秒後鬧鐘提醒：「{msg}」"
         elif tool_name == "open_browser":
             url = args.get("url", "https://www.google.com")
@@ -9655,8 +9643,7 @@ async def main():
             return res or f"已生成 AI 插畫：「{p}」"
         elif tool_name in ["sing_song", "auto_sing_song"]:
             s = args.get("song_name", "")
-            asyncio.create_task(produce_and_sing_cover(s))
-            return f"已排程 AI 歌聲翻唱：《{s}》"
+            return request_cover_song(s, "老爸")
         elif tool_name in ["stop_singing_song", "stop_singing", "stop_cover"]:
             stop_singing()
             return "已停止唱歌"
