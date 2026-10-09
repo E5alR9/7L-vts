@@ -3,8 +3,8 @@
 from conftest import ROOT  # noqa: F401
 from core.hard_command import (
     extract_sing_song, extract_piano_song, parse_hard_command, build_slip_text,
-    display_requester, parse_slip_for_song, extract_expression,
-    strip_blob_noise, sanitize_search_query, _EXPRESSION_NAMES,
+    display_requester, parse_slip_for_song,
+    strip_blob_noise, sanitize_search_query,
 )
 
 # --- 真實直播誤觸案例：一律不得攔截 ---
@@ -158,41 +158,16 @@ def test_parse_slip_for_song_rescues_missed_requests():
     assert parse_slip_for_song("[文字輸入] 老爸：彈 月光") == (None, {})
 
 
-# --- 表情硬指令（2026-10-10 直播事故：「做暈表情」沒人執行還誤觸搜網）---
-def test_expression_hits():
-    assert extract_expression("做暈表情") == "暈"
-    assert extract_expression("幫我換成哭哭") == "哭哭"
-    assert extract_expression("來個WINK") == "WINK"
-    assert extract_expression("做翻白眼") == "翻白眼"
-    assert extract_expression("請恢復正常表情") == "_RESET_"
-    assert extract_expression("做個哭哭吧") == "哭哭"
-    assert extract_expression("你可以做暈表情嗎") == "暈"  # 祈使請求照樣接
-    assert extract_expression("換成哭哭") == "哭哭"  # 動詞交替長的在前，「換」不可搶「換成」
-    assert extract_expression("重置表情") == "_RESET_"  # 無動詞重置句
-    assert extract_expression("恢復正常") == "_RESET_"
-    tool, args = parse_hard_command("做暈表情")
-    assert tool == "trigger_vts_expression"
-    assert args == {"expression_name": "暈"}
+def test_cpu_ignores_expression_only_songs():
+    """CPU 只認點歌：表情一律放行交還主腦/A 架構（NV 接）。"""
+    assert parse_hard_command("做暈表情") == (None, {})
+    assert parse_hard_command("換成哭哭") == (None, {})
+    assert parse_hard_command("重置表情") == (None, {})
+    # 點歌照攔
+    assert parse_hard_command("唱晴天")[0] == "auto_sing_song"
 
 
-def test_expression_never_fires_on_prose_or_negation():
-    for t in ["別做暈表情", "不要換表情", "他唱歌很好聽", "做人要厚道",
-              "換新手機", "他做了個哭哭的表情真好笑", "唱", "做"]:
-        assert extract_expression(t) is None, f"誤觸：{t!r}"
-    assert parse_hard_command("他唱歌很好聽") == (None, {})
-
-
-def test_expression_whitelist_all_resolvable():
-    # 白名單每個詞都必須真能落地（查表或計時器），否則就是開空頭支票
-    from services.vts_client import VTS_EXPRESSION_MAP
-    timer_routes = ("WINK", "震驚", "皺眉", "翻白眼")
-    reset_routes = ("正常", "重置", "預設", "恢復", "_RESET_")
-    for name in _EXPRESSION_NAMES:
-        if name in reset_routes or any(k in name.upper() for k in ("WINK",)) or name in timer_routes:
-            continue
-        assert name in VTS_EXPRESSION_MAP, f"白名單落空：{name!r}"
-
-
+# --- 表情不歸 CPU（紙條分支保留給 A 架構 NV 用）---
 def test_expression_slip_forbids_repeat():
     s = build_slip_text("trigger_vts_expression", {"expression_name": "暈"}, "老爸")
     assert "做表情的是妳 7L 本人" in s

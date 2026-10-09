@@ -7956,16 +7956,8 @@ async def background_tool_executor(user_text: str, target: str = "dad", requeste
         slip_text = ""
         if fn_name:
             log_print(f"⚡ [CPU 硬體直連] 成功攔截指令: {fn_name}({fn_args})")
-            if fn_name == "trigger_vts_expression":
-                # 表情指令直接執行（execute_tool_dispatch 只會排字、不會執行；
-                # REST 路徑靠口語標籤執行，這裡走 direct 才會動）
-                try:
-                    asyncio.create_task(trigger_vts_expression(
-                        (fn_args or {}).get("expression_name", "")))
-                except Exception:
-                    pass
-            else:
-                asyncio.create_task(execute_tool_dispatch(fn_name, fn_args, caller_target=target, caller_user=requester_name))
+            # CPU 只認點歌：一律走背景執行＋紙條（表情不歸 CPU，交主腦/A 架構）
+            asyncio.create_task(execute_tool_dispatch(fn_name, fn_args, caller_target=target, caller_user=requester_name))
             # ⚠️ 紙條必須寫明「唱歌的是 7L 本人」，否則主腦會把點歌的人當成演唱者
             slip_text = build_slip_text(fn_name, fn_args, requester_name)
         else:

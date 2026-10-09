@@ -171,8 +171,8 @@ def extract_piano_song(text: Optional[str]) -> Optional[str]:
 def parse_hard_command(text: Optional[str]) -> Tuple[Optional[str], Dict]:
     """B 架構入口：把純文字拆成 (工具名, 參數)。
 
+    只認點歌（唱歌/彈琴）。表情不歸 CPU（交還主腦/A 架構，避免誤觸搶戲）。
     回 (None, {}) 代表無硬指令，交還主腦（絕不在此呼叫任何 API）。
-    順序：唱歌 → 彈琴 → 表情（表情用白名單制，不可能誤觸）。
     """
     song = extract_sing_song(text)
     if song:
@@ -180,65 +180,12 @@ def parse_hard_command(text: Optional[str]) -> Tuple[Optional[str], Dict]:
     song = extract_piano_song(text)
     if song:
         return "pe.play_virtual_piano", {"song_name": song}
-    exp = extract_expression(text)
-    if exp:
-        return "trigger_vts_expression", {"expression_name": exp}
     return None, {}
 
 
-# —— 表情硬指令（2026-10-10 直播事故：「做暈表情」CPU 不認、主腦亂回還誤觸搜網）——
-# 白名單制：只有「祈使動詞＋已知表情名」才攔；其他一律交還主腦。
-# 名單刻意只收「查表命中字」，不攤別名（別名是程式端匹配的事；
-# prompt 側也只給一檔一名，避免注意力被幾十個別名綁架）。
-# 交替順序長的在前：短的會先搶（換搶換成、切換搶切換成），導致後面多出「成」字
-_EXPRESSION_VERBS = ("切換成", "切換", "換成", "換", "擺一個", "擺出",
-                     "表演一個", "表演", "來一個", "來個",
-                     "做", "作", "給我")
-_EXPRESSION_NAMES = (
-    "臉紅", "害羞", "傲嬌", "開心", "笑", "微笑", "星星眼", "期待",
-    "生氣", "不爽", "哭哭", "哭", "難過", "黑化", "暈", "暈暈",
-    "流汗", "無語", "著急", "吐舌", "比心", "花花", "問號",
-    "打遊戲", "雙馬尾", "打招呼", "左抬手", "右抬手",
-    "WINK", "震驚", "皺眉", "翻白眼", "白眼",
-    "正常", "重置", "預設", "恢復",
-)
 # 唱歌/麥克風/話筒刻意排除：麥克風由翻唱管線自動管理，手動會打架
+# （_RESET_NAMES 給 build_slip_text 表情紙條用；表情本體走主腦/A 架構，不歸 CPU）
 _RESET_NAMES = {"正常", "重置", "預設", "恢復", "_RESET_"}
-_EXPRESSION_VERB_RE = re.compile("(?:{})".format("|".join(_EXPRESSION_VERBS)))
-_EXPRESSION_FILLER_RE = re.compile(r'^(?:一下|一個|個|下|表情|臉|神態)')
-_EXPRESSION_TAIL_RE = re.compile(r'^(?:表情|臉|一下)?[嗎吧呢啊呀啦嘛喔哦？?！!。，,、；;：:\s]*$')
-_EXPRESSION_NEG_RE = re.compile(r'(?:不|別|勿|不要|別再|禁止)\s*$')
-
-
-def extract_expression(text: Optional[str]) -> Optional[str]:
-    """從純文字抽出表情指令，回表情名（重置類回 "_RESET_"）；不是就回 None。"""
-    if not text:
-        return None
-    s = text.strip()
-    # 無動詞重置句（重置表情／恢復正常／請重置）：整句只允許重置詞＋禮貌＋語氣
-    if re.fullmatch(r'(?=.*(?:正常|重置|預設|恢復|_RESET_))(?:請|幫我|麻煩|正常|重置|預設|恢復|_RESET_|表情|臉|的|一下|吧|嗎|啊|呀|喔|哦|？|\?|！|!|，|。|\s)+', s):
-        return "_RESET_"
-    names = sorted(_EXPRESSION_NAMES, key=len, reverse=True)
-    for m in _EXPRESSION_VERB_RE.finditer(text):
-        # 閘門 A：句首門（跟唱歌/彈琴同一套）
-        if not _LEAD_OK.match(text[:m.start()]):
-            continue
-        # 否定句不攔（不要做／別換）
-        if _EXPRESSION_NEG_RE.search(text[:m.start()].rstrip()[-4:]):
-            continue
-        rest = text[m.end():]
-        for _ in range(2):  # 剝分隔符＋量詞殼（做：個／做一下／做個哭哭）
-            rest = _LEAD_MEASURE.sub('', rest)
-            rest = _EXPRESSION_FILLER_RE.sub('', rest)
-        if not rest:
-            continue
-        up = rest.upper()
-        for name in names:
-            if up.startswith(name.upper()):
-                tail = rest[len(name):]
-                if _EXPRESSION_TAIL_RE.match(tail):
-                    return "_RESET_" if name in _RESET_NAMES else name
-    return None
 
 
 # —— 搜尋消毒（2026-10-10 直播事故：腦輸出幾 MB base64 音訊被當搜尋關鍵字）——
