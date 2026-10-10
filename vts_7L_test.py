@@ -5125,6 +5125,49 @@ async def _slip_watchdog(prompt: str, sent_ts: float, timeout: float = 20.0):
     except Exception:
         pass
 
+
+def _rotate_live_key(k_idx: int, m_idx: int, n_keys: int, n_models: int):
+    """鑰匙矩陣前進一步（純函數）：key 用盡換下一個模型，模型也用盡就重頭。"""
+    k_idx += 1
+    if k_idx >= n_keys:
+        k_idx = 0
+        m_idx += 1
+        if m_idx >= n_models:
+            m_idx = 0
+    return k_idx, m_idx
+
+
+def _next_live_key(quota_hit: bool, clean_fails: int, k_idx: int, m_idx: int,
+                   n_keys: int, n_models: int):
+    """Live 斷線後鑰匙決策（純函數，2026-10-11：乾淨斷開≠鑰匙耗盡）。
+    - 配額超限（429/403/quota）→ 立刻輪轉；
+    - 乾淨斷開／GoAway（Google 會主動做負載關閉）→ 同一把重試，最多 3 次才輪轉。
+    回 (k_idx, m_idx, clean_fails, rotated, wait_sec)。"""
+    if quota_hit:
+        k_idx, m_idx = _rotate_live_key(k_idx, m_idx, n_keys, n_models)
+        return k_idx, m_idx, 0, True, 2
+    clean_fails += 1
+    if clean_fails > 3:
+        k_idx, m_idx = _rotate_live_key(k_idx, m_idx, n_keys, n_models)
+        return k_idx, m_idx, 0, True, 2
+    return k_idx, m_idx, clean_fails, False, min(2 * clean_fails, 8)
+
+
+def _split_fossil_batch(batch, now: float, max_age: float = 180.0, max_attempts: int = 5):
+    """哨兵化石過濾（純函數，2026-10-11）：放超過 max_age 秒、或重審 max_attempts 次
+    還沒講出去的看板訊息標 read 丟棄（話題過期，硬講只會讓主腦拿到幾分鐘前的焦點當機）。
+    回 (fresh, dropped)。"""
+    fresh, dropped = [], []
+    for m in batch or []:
+        age = now - m.get("time", now)
+        if age > max_age or m.get("attempts", 0) >= max_attempts:
+            m["status"] = "read"
+            dropped.append(m)
+        else:
+            fresh.append(m)
+    return fresh, dropped
+
+
 async def continuous_live_worker(vts):
     """真・雙向串流 Live 大腦核心"""
     global GLOBAL_LIVE_SESSION, LIVE_SESSION_ACTIVE
@@ -5147,6 +5190,7 @@ async def continuous_live_worker(vts):
     live_models = ["gemini-3.1-flash-live-preview", "gemini-3.8-live"]
     current_m_idx = 0
     current_k_idx = 0
+    clean_fail_count = 0  # 同鑰乾淨斷開連擊計數（>3 才輪轉，不燒鑰匙矩陣）
 
     while True:
         try:
@@ -5195,6 +5239,7 @@ async def continuous_live_worker(vts):
                 GLOBAL_LIVE_SESSION = session
                 LIVE_SESSION_ACTIVE = True
                 log_print(f"✅ 已成功連線至 Live API！模型: {live_m} (通道 G{current_k_idx}) 麥克風持續收音中...")
+                clean_fail_count = 0  # 連上即歸零：上輪是健康連線。
                 if recent_ctx and recent_ctx.strip():
                     log_print("🧠 [記憶恢復] 已向新連線的系統提示中注入最新對話歷史記憶。")
                 # 🛟 斷線救援：上個 session 吞掉的點歌紙條，在這裡撿回來
@@ -5490,23 +5535,31 @@ async def continuous_live_worker(vts):
         except Exception as e:
             LIVE_SESSION_ACTIVE = False
             err_str = str(e).lower()
-            if any(w in err_str for w in ["limit", "exceed", "quota", "403", "429"]):
+            _quota_hit = any(w in err_str for w in ["limit", "exceed", "quota", "403", "429"])
+            if _quota_hit:
                 log_print(f"⚠️ [Live 連線超限 429] 模型 {live_models[current_m_idx]} 通道 G{current_k_idx} 耗盡。")
             elif "goaway" in err_str or "1008" in err_str:
                 log_print(f"⏱️ [Live 週期重置] 模型 {live_models[current_m_idx]} 達到 15 分鐘安全連線上限 (GoAway)，準備無縫重連...")
             else:
                 log_print(f"❌ [Live 連線斷開] 模型 {live_models[current_m_idx]} 通道 G{current_k_idx} 遇阻: {e}")
+            #  2026-10-11：乾淨斷開≠鑰匙耗盡（Google 會主動做負載關閉）。
+            #  同一把連打 3 次才輪轉，不再 G2→G6 燒鑰匙矩陣；配額超限才立刻輪轉。
+            _prev_k, _prev_m = current_k_idx, current_m_idx
+            current_k_idx, current_m_idx, clean_fail_count, _rot, _wait = _next_live_key(
+                _quota_hit, clean_fail_count, current_k_idx, current_m_idx,
+                len(GEMINI_KEYS), len(live_models))
+            if _rot and not _quota_hit:
+                log_print(f"♻️ [Live 同鑰重試耗盡] G{_prev_k} 連掛多次，輪轉下一把。")
                 
-            current_k_idx += 1
-            if current_k_idx >= len(GEMINI_KEYS):
-                current_k_idx = 0
-                current_m_idx += 1
-                if current_m_idx >= len(live_models):
-                    current_m_idx = 0
+            if _rot:
+                if (current_k_idx, current_m_idx) == (0, 0) and (_prev_k, _prev_m) != (0, 0):
                     log_print("⚠️ 所有 Live API 模型與金鑰矩陣皆已輪詢過一輪，重頭開始！")
                     
-            log_print(f"🔄 嘗試切換重連... (下一目標: G{current_k_idx}, {live_models[current_m_idx]})")
-            await asyncio.sleep(2)
+            if _rot:
+                log_print(f"🔄 嘗試切換重連... (下一目標: G{current_k_idx}, {live_models[current_m_idx]})")
+            else:
+                log_print(f"🔄 [Live 同鑰重連] 第 {clean_fail_count}/3 次（目標不變: G{current_k_idx}, {live_models[current_m_idx]}）。")
+            await asyncio.sleep(_wait)
 
 async def mic_worker(recognizer, input_queue):
     global current_mic_action_str, LATEST_REALWORLD_SPEECH_TEXT, LATEST_REALWORLD_SPEECH_TIME
@@ -7148,6 +7201,14 @@ async def streamer_mind_loop_worker(vts, input_queue):
             batch_to_process = unread_items[-5:]
             for m in batch_to_process:
                 m["status"] = "processing"
+                m["attempts"] = m.get("attempts", 0) + 1
+            #  2026-10-11 化石過濾：中途炸掉會 rollback 回 unread，同一批無限重審、
+            #  紙條越放越舊，主腦拿到幾分鐘前的焦點直接當機（沒說話）。過期直接丟。
+            batch_to_process, _fossils = _split_fossil_batch(batch_to_process, time.time())
+            for _fm in _fossils:
+                log_print(f"🗑️ [哨兵化石丟棄] {_fm.get('user', '?')}：{(_fm.get('content', '') or '')[:30]}（話題過期不講）。")
+            if not batch_to_process:
+                continue
                 
             # 組合看板彈幕清單與認人資料
             board_lines = []
