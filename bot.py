@@ -48,8 +48,8 @@ MODEL_POOLS = [
     {"provider": "groq", "model": "openai/gpt-oss-120b"},                 #  120B 頂級推理旗艦 (自動輪詢所有金鑰)
     {"provider": "groq", "model": "qwen/qwen3.6-27b"},                    #  Qwen 3.6 極速推理
     {"provider": "groq", "model": "groq/compound"},                       #  Groq 複合多工代理大腦
-    {"provider": "gemini", "model": "gemini-3.7-flash"},                  #  Gemini 最新頂配旗艦大腦
-    {"provider": "gemini", "model": "gemini-3.5-flash"},                  #  Gemini 高智商均衡主力
+    {"provider": "gemini", "model": "gemini-3.8-flash"},                  #  Gemini 最新頂配旗艦大腦
+    {"provider": "gemini", "model": "gemini-3.6-flash"},                  #  Gemini 高智商均衡主力
     {"provider": "gemini", "model": "gemini-flash-latest"},               #  動態最新 Flash 指針
     {"provider": "openrouter", "model": "meta-llama/llama-3.3-70b-instruct:free"},
     {"provider": "openrouter", "model": "deepseek/deepseek-chat-v3:free"},

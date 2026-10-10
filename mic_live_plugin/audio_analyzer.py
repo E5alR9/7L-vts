@@ -186,7 +186,7 @@ class MicLiveAudioAnalyzer:
 
             # 🛡️ 階段 2：若 Live WebSocket 網路波動，自動平滑切換至極速 Flash Lite 模型保底
             prompt_text = f"本機 STT 快速草稿文字為: 「{stt_draft}」（僅供參考，請 100% 以音訊真實發音、語氣與情緒為準）。請自主思考、感知並輸出 JSON："
-            for model_name in ["gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-3-flash-preview", "gemini-3.6-flash", "gemini-3.7-flash"]:
+            for model_name in ["gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-3-flash-preview", "gemini-3.6-flash", "gemini-3.8-flash"]:
                 try:
                     cfg_kwargs = {
                         "system_instruction": system_instruction,

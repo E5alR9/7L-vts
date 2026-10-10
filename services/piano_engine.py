@@ -1656,7 +1656,7 @@ async def resolve_piano_intent_by_ai(
     active_keys = get_piano_gemini_keys()
     if active_keys:
         # 👑 倒序高智商模型梯隊：3.8 ➔ 3.7 ➔ 3.6 ➔ 3.5 ➔ 3.1-pro ➔ 3-flash ➔ 3.5-flash-lite
-        models = getattr(main_obj, 'HIGH_IQ_GEMINI_MODELS', None) or ["gemini-2.5-flash", "gemini-2.0-flash"]
+        models = getattr(main_obj, 'HIGH_IQ_GEMINI_MODELS', None) or ["gemini-3.6-flash", "gemini-3.8-flash"]
         dead = getattr(main_obj, 'DEAD_GEMINI_MODELS', None) or set()
         is_locked_fn = getattr(main_obj, 'is_model_locked', None)
         ring_fn = getattr(main_obj, 'get_pingpong_ring_indices', None)

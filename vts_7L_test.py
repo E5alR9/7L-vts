@@ -1490,7 +1490,7 @@ async def fetch_ai_response(messages, image_base64=None, audio_base64=None, is_p
             log_print(f"⚠️ [Groq 前鋒暫時失敗，交回 Gemini]: {str(_g_err)[:100]}")
 
     if is_mouth_stream:
-        g_model = "gemini-3.5-flash-lite" if not image_base64 and not audio_base64 else "gemini-3.5-flash"
+        g_model = "gemini-3.5-flash-lite" if not image_base64 and not audio_base64 else "gemini-3.6-flash"
         gen_config = types.GenerateContentConfig(temperature=0.85, safety_settings=UNRESTRICTED_SAFETY_SETTINGS)
         
         async def _stream_wrapper():
@@ -2160,11 +2160,9 @@ GEMINI_MODELS = [
     # 第一防線：極速秒回前鋒
     "gemini-3.5-flash-lite",
     "gemini-3.1-flash-lite",
-    
-    # 主力前沿模型 (聰明、高配額)
-    "gemini-3.5-flash",
+
+    # 主力前沿模型 (聰明、高配額；3.5/3.7 已棄用自動導向 3.6/3.8，直接打目標省一跳)
     "gemini-3.6-flash",
-    "gemini-3.7-flash",
     "gemini-3.8-flash"
 ]
 

@@ -135,9 +135,7 @@ def sort_keys_by_load(keys: List[str]) -> List[str]:
 STREAMER_MIND_MODELS = [
     "gemini-3.5-flash-lite",
     "gemini-3.1-flash-lite",
-    "gemini-3.5-flash",
     "gemini-3.6-flash",
-    "gemini-3.7-flash",
     "gemini-3.8-flash"
 ]
 
@@ -145,9 +143,7 @@ KEYS_VISION        = GEMINI_KEYS[12:18] if len(GEMINI_KEYS) >= 18 else GEMINI_KE
 
 HIGH_IQ_GEMINI_MODELS = [ 
     "gemini-3.8-flash",
-    "gemini-3.7-flash",
     "gemini-3.6-flash",
-    "gemini-3.5-flash",
     "gemini-3.5-flash-lite",
     "gemini-3.1-flash-lite"
 ]

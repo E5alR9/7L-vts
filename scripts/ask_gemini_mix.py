@@ -63,7 +63,7 @@ def main():
                 os.path.join(BASE, "data", "clip_B_render.wav"))
     code = open(os.path.join(BASE, "services", "soundfont.py"), encoding="utf-8").read()[:12000]
     last = ""
-    for model in ("gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-3.5-flash"):
+    for model in ("gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite"):
         for k in keys[:12]:
             try:
                 client = genai.Client(api_key=k)

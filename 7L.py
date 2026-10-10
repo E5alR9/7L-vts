@@ -49,11 +49,9 @@ GEMINI_MODELS = [
     'gemini-3.1-flash-lite',
     
     
-    # 主力前沿模型 (聰明、高配額)
+    # 主力前沿模型 (聰明、高配額；3.5/3.7 已棄用導向 3.6/3.8)
     'gemini-3.8-flash',
-    'gemini-3.7-flash',
     'gemini-3.6-flash',
-    'gemini-3.5-flash',
     
     
     # 其他特殊開源模型
