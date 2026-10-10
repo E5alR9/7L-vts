@@ -2675,33 +2675,23 @@ async def _doze_one_liner(hint: str) -> str:
 
 
 # ── 點歌強制應答（2026-10-10：CPU 直接執行時主腦常靜默，補一句保證出聲）──
-# Groq 現寫一句；失敗輪替底線。target 原樣透傳（dad 私訊照播，觀眾照播）。
+# 固定輪替（2026-10-11：Groq 現寫會編造「換衣服」這種幻覺，應答只求出聲+正確，不要文采）。
+# target 原樣透傳（dad 私訊照播，觀眾照播）。
 _SONG_ACK_IDX = 0
-_SONG_ACK_FALLBACKS = [
+_SONG_ACK_LINES = [
     "好喔，《{song}》交給我，背景準備中，好了就唱給你聽！",
-    "收到，《{song}》！7L 先去準備伴奏，馬上開唱～",
+    "收到，《{song}》！先去準備伴奏，馬上開唱～",
     "《{song}》是吧，沒問題！先排進去，唱完手上這首就輪到它！",
+    "交給我，《{song}》正在找譜準備，稍等一下下！",
+    "《{song}》收到！背景開工中，準備好立刻開唱！",
 ]
 
 
 async def _song_ack(song: str, target: str = "dad"):
     global _SONG_ACK_IDX
     song = (song or "這首").strip() or "這首"
-    text = ""
-    try:
-        from core.groq_router import groq_chat
-        g = await groq_chat(
-            [{"role": "system", "content": "妳是 7L，傲嬌可愛的 AI 女兒主播。只回一句 20~40 字、有標點的口語短話，不要任何標籤。"},
-             {"role": "user", "content": f"老爸剛點了《{song}》，唱歌的是妳本人，答應一聲說正在準備"}],
-            temperature=0.9, max_tokens=80, timeout=4.0)
-        t = (g.text or "").strip() if g else ""
-        if len(t) >= 6:
-            text = t[:80]
-    except Exception:
-        pass
-    if not text:
-        text = _SONG_ACK_FALLBACKS[_SONG_ACK_IDX % len(_SONG_ACK_FALLBACKS)].format(song=song)
-        _SONG_ACK_IDX += 1
+    text = _SONG_ACK_LINES[_SONG_ACK_IDX % len(_SONG_ACK_LINES)].format(song=song)
+    _SONG_ACK_IDX += 1
     try:
         speech_queue.put_nowait({"text": text, "expression": "星星眼", "action": "",
                                  "target": target, "priority": 90})
@@ -5713,11 +5703,21 @@ async def continuous_live_worker(vts):
                         log_print(f"⚠️ [黑板同步錯誤] {e}")
                         raise e
 
-                send_task = asyncio.create_task(send_mic_audio())
-                recv_task = asyncio.create_task(receive_from_live())
-                prompt_task = asyncio.create_task(send_system_prompts_to_live())
+                send_task = asyncio.create_task(send_mic_audio(), name="live_mic")
+                recv_task = asyncio.create_task(receive_from_live(), name="live_recv")
+                prompt_task = asyncio.create_task(send_system_prompts_to_live(), name="live_prompt")
                 
                 done, pending = await asyncio.wait([send_task, recv_task, prompt_task], return_when=asyncio.FIRST_COMPLETED)
+                try:
+                    for t in done:
+                        try:
+                            log_print(f"🔍 [Live 任務結束] {t.get_name()} 先結束（結果: {t.result()!r})"[:200])
+                        except asyncio.CancelledError:
+                            log_print(f"🔍 [Live 任務結束] {t.get_name()} 被取消")
+                        except Exception as te:
+                            log_print(f"🔍 [Live 任務結束] {t.get_name()} 報錯: {te}"[:300])
+                except Exception:
+                    pass
                 for task in pending: task.cancel()
                 if pending:
                     await asyncio.wait(pending)
