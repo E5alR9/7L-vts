@@ -4,7 +4,7 @@ from conftest import ROOT  # noqa: F401
 from core.hard_command import (
     extract_sing_song, extract_piano_song, parse_hard_command, parse_mixed_command,
     build_slip_text,
-    display_requester, parse_slip_for_song,
+    display_requester, parse_slip_for_song, rescue_claim, _RESCUED_SONG_TS,
     strip_blob_noise, sanitize_search_query,
 )
 
@@ -159,6 +159,33 @@ def test_parse_slip_for_song_rescues_missed_requests():
     assert parse_slip_for_song("[文字輸入] 老爸：彈 月光") == (None, {})
 
 
+def test_parse_slip_rejects_multiline_sentry_slips():
+    """2026-10-11 救援死亡循環：哨兵紙條夾帶多行 board_context，
+    曾抽出「3aя\\n請妳綜合上述留言」這種垃圾歌，失敗丟棄後無限重救（G0→G7）。"""
+    sentry = ("[系統提示：背景潛意識哨兵偵測到直播間最新動態！目標：Johnny，事件焦點：唱歌請求。"
+              "剛才收到的觀眾留言：\n"
+              "- [17:22:00] 【TikTok 直播觀眾「Johnny」】：唱3aя\n"
+              "請妳綜合上述留言，直接用語音開口回應！]")
+    assert parse_slip_for_song(sentry) == (None, {})
+    # 單行真點歌照救
+    assert parse_slip_for_song("[文字輸入] 老爸：唱3aя") == (
+        "auto_sing_song", {"song_name": "3aя"})
+
+
+def test_rescue_claim_blocks_repeat_loops():
+    """同首 120 秒內只救一次：失敗丟棄也不重救，斷線風暴不再循環。"""
+    _RESCUED_SONG_TS.clear()
+    try:
+        assert rescue_claim("3aя", now=1000.0) is True
+        assert rescue_claim("3aя", now=1050.0) is False
+        assert rescue_claim("3aя ", now=1050.0) is False  # 空白視為同首
+        assert rescue_claim("晴天", now=1050.0) is True  # 別首不受影響
+        assert rescue_claim("3aя", now=1000.0 + 121.0) is True  # 過窗口可再救
+        assert rescue_claim("", now=1000.0) is False
+    finally:
+        _RESCUED_SONG_TS.clear()
+
+
 def test_cpu_ignores_expression_only_songs():
     """CPU 只認點歌：表情一律放行交還主腦/A 架構（NV 接）。"""
     assert parse_hard_command("做暈表情") == (None, {})
@@ -169,7 +196,7 @@ def test_cpu_ignores_expression_only_songs():
 
 
 def test_japanese_titles_hit():
-    """2026-10-10 直播事故：「唱 インフェルノシティ」全片假名被判無內容而漏接。"""
+    """2026-10-10 直播事故：全片假名歌名被判無內容而漏接。"""
     tool, args = parse_hard_command("唱 インフェルノシティ")
     assert tool == "auto_sing_song"
     assert args == {"song_name": "インフェルノシティ"}

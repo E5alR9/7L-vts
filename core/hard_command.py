@@ -256,6 +256,24 @@ def sanitize_search_query(text: Optional[str], limit: int = 120) -> str:
 
 _SLIP_PREFIX_RE = re.compile(r'^\[[^\]]*\]\s*[^：:]*[：:]\s*')
 
+# 🛟 救援認領簿：歌名 -> 認領時間。同首窗口內只救一次——失敗丟棄也不重救，
+# 否則去重鍵消失後下次重連再救，斷線風暴時無限循環（2026-10-11「3aя\n請妳綜合上述留言」事件）。
+RESCUE_SONG_WINDOW_SEC = 120.0
+_RESCUED_SONG_TS = {}
+
+
+def rescue_claim(song: str, now=None, window: float = RESCUE_SONG_WINDOW_SEC) -> bool:
+    """救援認領：回 True 代表這次可以救（並記帳）；同首窗口內重複來直接擋掉。"""
+    import time as _t
+    now = now if now is not None else _t.time()
+    k = (song or "").strip().lower()
+    if not k:
+        return False
+    if now - _RESCUED_SONG_TS.get(k, 0.0) < window:
+        return False
+    _RESCUED_SONG_TS[k] = now
+    return True
+
 def parse_slip_for_song(prompt: Optional[str]):
     """從紙條還原點歌指令（斷線救援用）：剝掉紙條前綴後走 CPU 拆解。
 
@@ -270,6 +288,11 @@ def parse_slip_for_song(prompt: Optional[str]):
         return None, {}
     msg = _SLIP_PREFIX_RE.sub('', text, count=1)
     if not msg or msg == text:
+        return None, {}
+    # 2026-10-11 救援死亡循環：哨兵紙條夾帶多行 board_context（觀眾原文＋「請妳綜合上述留言…」），
+    # 剝一層後殘留換行，會抽出「歌名＋指令殘渣」這種垃圾歌（如「3aя\n請妳綜合上述留言」）；
+    # 失敗丟棄後去重失效，下次重連再救→無限循環。救援只認單行，直覺上點歌都是一句話。
+    if "\n" in msg or "\r" in msg:
         return None, {}
     tool, args = parse_hard_command(msg)
     if tool not in ("auto_sing_song", "sing_song"):

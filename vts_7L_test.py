@@ -566,7 +566,7 @@ from core.utils import (
     record_interaction_tick, get_silence_ticks, get_uptime_ticks, format_ticks_to_human,
     speech_allowed, operator_input_enabled
 )
-from core.hard_command import parse_hard_command, build_slip_text, display_requester, parse_slip_for_song, strip_blob_noise, sanitize_search_query
+from core.hard_command import parse_hard_command, build_slip_text, display_requester, parse_slip_for_song, strip_blob_noise, sanitize_search_query, rescue_claim
 from core.subagent_router import resolve_subagent_chain
 from core.db import *
 from core.live_timer_sensor import live_timer_hub
@@ -8119,6 +8119,8 @@ async def _rescue_missed_song_requests():
                     continue
             except Exception:
                 pass
+            if not rescue_claim(song, now):
+                continue
             log_print(f"🛟 [斷線救援] 撿回無人認領的點歌《{song}》，直接排入隊列。")
             try:
                 request_cover_song(song, "")
