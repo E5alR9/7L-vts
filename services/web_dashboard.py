@@ -6,7 +6,6 @@ import time
 import re
 from typing import Set, Dict, Any, Optional
 from aiohttp import web
-import services.tiktok_listener as tk_listener
 
 from datetime import datetime
 import logging
@@ -642,6 +641,7 @@ async def ws_handler(request):
 
 async def get_full_telemetry(include_full_memory: bool = False) -> Dict[str, Any]:
     """收集 7L 核心狀態與直播情報快照"""
+    import services.tiktok_listener as tk_listener  # 函數內引用：與 tiktok_listener 雙向依賴，頂層互引會炸
     core_state = {}
     if GET_SYSTEM_STATE_CALLBACK:
         try:

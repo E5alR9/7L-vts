@@ -195,24 +195,28 @@ async def update_cloud_prompt_field(field_name: str, content: str, action: str =
         memes = kn.get("memes_and_slang", [])
         if clean_val not in memes:
             memes.append(clean_val)
+            del memes[:-50]  # 上限 50，超了丟最舊（讀時只取前 10，存時不清會無限長大）
             kn["memes_and_slang"] = memes
             log_print(f"🧠 [7L 雲端認知演進] 7L 自主學會新梗：『{clean_val}』")
     elif clean_field in ["facts", "learned_facts", "知識", "事實"]:
         facts = kn.get("learned_facts", [])
         if clean_val not in facts:
             facts.append(clean_val)
+            del facts[:-100]
             kn["learned_facts"] = facts
             log_print(f"🧠 [7L 雲端認知演進] 7L 自主學會新事實：『{clean_val}』")
     elif clean_field in ["rules", "custom_rules", "規範", "原則"]:
         rules = kn.get("custom_rules", [])
         if clean_val not in rules:
             rules.append(clean_val)
+            del rules[:-20]
             kn["custom_rules"] = rules
             log_print(f"🧠 [7L 雲端心智更新] 7L 自主寫入新規範：『{clean_val}』")
     elif clean_field in ["banned", "banned_phrases", "禁用語"]:
         banned = kn.get("banned_phrases", [])
         if clean_val not in banned:
             banned.append(clean_val)
+            del banned[:-50]
             kn["banned_phrases"] = banned
             log_print(f"🧠 [7L 雲端禁用語更新] 7L 自主加入禁忌詞：『{clean_val}』")
     else:

@@ -98,7 +98,7 @@ import soundcard as sc
 import psutil
 import glob
 import difflib
-from typing import Optional, Dict, List, Tuple, Any, Union
+from typing import Optional, Any, Union
 import collections
 from collections import deque, defaultdict
 import shutil
@@ -1661,166 +1661,6 @@ async def fetch_ai_response(messages, image_base64=None, audio_base64=None, is_p
     log_print("⚠️ [大腦提示] 本輪所有 Gemini 通道皆繁忙/超時，為維持純淨發話，本輪靜默略過。")
     return ""
 
-async def fetch_fast_text_reply(user_input: str, custom_name: str, situation_prompt: str = "", history: Optional[List[Dict]] = None) -> Tuple[str, str, float]:
-    """PROVIDER: GROQ-primary（groq_chat 秒回；見 docs/AI_SOURCES.md）
-     【真人感即時第一反應 (Reflex)】：在收到訊息第一時間，由極速文字大腦 (Groq / Gemini Flash Lite) 毫秒級搶先開口！"""
-    start_t = time.time()
-    if not user_input or not user_input.strip():
-        return ("", "", 0.0)
-
-    clean_q = re.sub(r'\[[A-Z_]+(?::\s*[^\]]+)?\]', '', user_input).strip()
-    if not clean_q:
-        clean_q = user_input.strip()
-
-    #  提取最近對話歷史，確保反射神經具備完整的上下文記憶與連貫性！
-    recent_history_str = ""
-    if history:
-        recent_dialogs = []
-        for h in history[-6:]:
-            role = "老爸" if h.get("role") == "user" else "7L"
-            content = h.get("content", "")
-            if isinstance(content, list):
-                content = " ".join([p.get("text", "") for p in content if isinstance(p, dict) and p.get("type") == "text"])
-            clean_c = re.sub(r'\[[A-Z_]+(?::\s*[^\]]+)?\]', '', str(content)).strip()
-            clean_c = re.sub(r'（(?:情境|系統|Tavily).*?）', '', clean_c).strip()
-            if clean_c:
-                recent_dialogs.append(f"{role}：{clean_c}")
-        if recent_dialogs:
-            recent_history_str = "【最近對話歷史（請務必結合上下文連貫理解，絕不可斷章取義或裝作不知道）】：\n" + "\n".join(recent_dialogs) + "\n\n"
-
-    #  辨識當前說話對象（老爸 vs TikTok 觀眾）
-    tt_parsed = None
-    m_tt1 = re.search(r'【TikTok 直播觀眾\s*([^】]+)\s*(留言|送禮)】[：:]\s*(.*)', clean_q)
-    if m_tt1:
-        tt_parsed = (m_tt1.group(1).strip(), m_tt1.group(3).strip())
-    else:
-        m_tt2 = re.search(r'【TikTok (?:官方提問箱|直播動態)】：觀眾「([^」]+)」(.*)', clean_q)
-        if m_tt2:
-            tt_parsed = (m_tt2.group(1).strip(), m_tt2.group(2).strip())
-        elif "【TikTok" in clean_q:
-            tt_parsed = ("直播觀眾", clean_q)
-
-    if tt_parsed:
-        audience_user, audience_content = tt_parsed
-        v_prof = await get_viewer_profile(audience_user)
-        v_call = v_prof.get("call")
-        v_rel  = v_prof.get("relationship")
-        v_imp  = v_prof.get("impression")
-        if v_call or v_rel or v_imp:
-            id_parts = []
-            if v_rel:  id_parts.append(f"是{v_rel}")
-            if v_call: id_parts.append(f"妳稱呼他為「{v_call}」")
-            if v_imp:  id_parts.append(f"印象：{v_imp}")
-            identity_line = f"【已知身份】{audience_user}：{'，'.join(id_parts)}。請自然使用該稱呼！\n"
-        else:
-            identity_line = f"【觀眾】妳與 {audience_user} 正在互動！\n"
-        speaker_section = f"""【當前對象】：TikTok 直播觀眾「{v_call or audience_user}」
-{identity_line}【觀眾動態/留言】：『{audience_content}』"""
-    else:
-        speaker_section = f"""【當前對象】：老爸（稱呼：「{custom_name}」）\n【老爸剛才說的話】：「{clean_q}」"""
-
-    cloud_kn = await get_cloud_knowledge()
-    cloud_kn_prompt = PromptTemplateEngine.format_cloud_knowledge_prompt(cloud_kn, is_tiktok=bool(tt_parsed), current_custom_name=custom_name)
-    ck_sec = f"\n{cloud_kn_prompt}\n" if cloud_kn_prompt else ""
-    rag_sec = build_rag_section(clean_q)   #  本地 RAG 記憶檢索（離線、失敗自動略過）
-
-    prompt = f"""<system_root>
-{PromptTemplateEngine.HARD_TECHNICAL_RULES}
-</system_root>
-
-<runtime_state>
-時間：{get_current_time_string()}
-</runtime_state>
-
-<sensory_memory>
-{ck_sec}
-{rag_sec}
-{recent_history_str}
-</sensory_memory>
-
-<immediate_task>
-{situation_prompt}
-
-{speaker_section}
-</immediate_task>
-"""
-
-    # 0.  絕對第一優先：Groq 極速前鋒（實測 0.4s 級；純文字反射，工具一律走下方 Gemini）
-    #    Groq 不傳 tools（實戰工具調用不可靠）；視覺/音訊等多模態請求不會走到這裡
-    try:
-        from core.groq_router import groq_chat
-        g_resp = await groq_chat(
-            [{"role": "user", "content": prompt}],
-            temperature=0.75, max_tokens=500, timeout=4.0,
-        )
-        if g_resp and g_resp.text:
-            txt = (g_resp.text or "").strip()
-            if txt:
-                dur = time.time() - start_t
-                return (txt, f"Groq/{g_resp.model.split('/')[-1]}", dur)
-    except Exception:
-        pass
-
-    # 1.  絕對第一優先：Gemini 極速輕量前鋒矩陣 (高智商、自然口語、超大額度、具備完整工具調用能力)
-    #    GROQ_ONLY 降級模式時跳過（Gemini 全滅保直播不斷，只剩 Groq 前鋒）
-    from core.groq_router import groq_only as _groq_only
-    if GEMINI_KEYS and not _groq_only():
-        target_k_idx = get_pingpong_alternating_index(len(GEMINI_KEYS), CURRENT_GEMINI_KEY_STEP)
-        target_key = GEMINI_KEYS[target_k_idx]
-        try:
-            client = genai.Client(api_key=target_key)
-            fast_gemini_models = list(GEMINI_MODELS)
-            for m_name in fast_gemini_models:
-                try:
-                    async with track_key(target_key):
-                        resp = await asyncio.wait_for(
-                            client.aio.models.generate_content(
-                                model=m_name,
-                                contents=prompt,
-                                config=types.GenerateContentConfig(
-                                    temperature=0.75,
-                                    max_output_tokens=500,
-                                    tools=GENAI_TOOLS,
-                                    safety_settings=UNRESTRICTED_SAFETY_SETTINGS
-                                )
-                            ),
-                            timeout=2.4
-                        )
-                    txt = ""
-                    try:
-                        if resp.text:
-                            txt = resp.text.strip()
-                    except Exception:
-                        pass
-                        
-                    if hasattr(resp, 'function_calls') and resp.function_calls:
-                        for fc in resp.function_calls:
-                            fn_name = getattr(fc, 'name', '')
-                            fn_args = getattr(fc, 'args', {}) or {}
-                            log_print(f"🛠️ [極速大腦調用工具] {fn_name}({fn_args})")
-                            fast_target = "audience" if tt_parsed else "dad"
-                            fast_user = audience_user if tt_parsed else "老爸"
-                            if fn_name == "trigger_vts_expression":
-                                # 本能主、腦備用：同 NV 路徑走協調器（fire-and-forget，不擋極速回覆）
-                                try:
-                                    asyncio.create_task(_resolve_expression(
-                                        (fn_args or {}).get("expression_name", ""), fast_user))
-                                except Exception:
-                                    pass
-                            else:
-                                asyncio.create_task(execute_tool_dispatch(fn_name, fn_args, caller_target=fast_target, caller_user=fast_user))
-                            txt += f" [OUTCOME: {fn_name}({fn_args})] [HAD_TOOL_CALL]"
-                            
-                    if txt:
-                        dur = time.time() - start_t
-                        tag_name = m_name.replace("gemini-", "").replace("-preview", "")
-                        return (txt, f"Gemini/{tag_name}", dur)
-                except Exception:
-                    continue
-        except Exception:
-            pass
-
-    return ("", "", 0.0)
 
 
 async def call_gemini_live_audience_reply(vts, input_queue, audience_user: str, audience_content: str) -> bool:
@@ -2364,20 +2204,7 @@ def save_local_audio_clip(audio_base64: str) -> Optional[str]:
     except Exception:
         return None
 
-def get_recent_local_audio_clips(limit: int = 5) -> List[str]:
-    """取得本機最近幾筆有效錄音檔案路徑"""
-    all_audios = sorted(glob.glob(os.path.join(AUDIO_CACHE_DIR, "mic_*.wav")))
-    return all_audios[-limit:] if all_audios else []
 
-def load_audio_clip_base64(file_path: str) -> Optional[str]:
-    """從本機讀取錄音檔並轉為 Base64 字串供 Gemini 調用"""
-    if file_path and os.path.exists(file_path):
-        try:
-            with open(file_path, "rb") as f:
-                return base64.b64encode(f.read()).decode('utf-8')
-        except Exception:
-            pass
-    return None
 
 API_LOCKS_FILE = os.path.join(DATA_DIR, "api_locks_cache.json")
 API_LOCKS = {}
@@ -2733,14 +2560,14 @@ async def _mixed_piano_run(piano_title: str, sing_title: str, target: str, reque
                 if rv["sing"].is_set():
                     break
                 if not ac.is_song_active(sing_title) and not ac.cover_ready_or_playing(sing_title):
-                    log_print(f"⚠️ [混用會合] 翻唱掉隊（失敗/取消），鋼琴自己先彈。")
+                    log_print("⚠️ [混用會合] 翻唱掉隊（失敗/取消），鋼琴自己先彈。")
                     break
             except Exception:
                 break
             await asyncio.sleep(5.0)
             waited += 5.0
         else:
-            log_print(f"⚠️ [混用會合] 等翻唱超時，先開彈。")
+            log_print("⚠️ [混用會合] 等翻唱超時，先開彈。")
     except Exception as e:
         log_print(f"⚠️ [混用鋼琴異常]: {e}")
     try:
@@ -2952,20 +2779,6 @@ async def get_user_profile():
             
     return profile if profile else {"custom_name": DEFAULT_USER_TITLE, "impression": ""}
 
-async def save_user_profile(custom_name=None, impression=None):
-    profile = await get_user_profile()
-    if custom_name: profile["custom_name"] = custom_name
-    if impression: profile["impression"] = impression
-    
-    if db is not None:
-        try:
-            await db.collection("user_memory").document(DEFAULT_CHANNEL_ID).set(profile, merge=True)
-        except Exception: pass
-        
-    try:
-        with open(USER_PROFILE_FILE, "w", encoding="utf-8") as f:
-            json.dump(profile, f, ensure_ascii=False, indent=2)
-    except Exception: pass
 
 # ──  觀眾身份識別（Firebase viewer_profiles + 本地快取）──────────────────────
 
@@ -2985,6 +2798,7 @@ async def add_few_shot_example(scenario: str, user_input: str, thought: str = ""
         "reply": str(reply).strip()
     }
     examples.append(new_ex)
+    del examples[:-20]  # 上限 20，超了丟最舊（讀時只取前 6）
     kn["few_shot_examples"] = examples
     await save_cloud_knowledge(kn)
     log_print(f"🎯 [7L 雲端示範演進] 7L 自主新增神回覆案例：『{scenario} ➔ {reply}』")
@@ -3357,9 +3171,6 @@ def control_microphone(is_enabled: bool) -> str:
     return ""
 
 
-def search_internet(query):
-    """PROVIDER: LOCAL-SCRAPE（search_google 無 API；Tavily 另見 search 呼叫點；見 docs/AI_SOURCES.md）"""
-    return search_google(query)
 
 
 
@@ -3382,8 +3193,6 @@ def normalize_text_for_echo(t: str) -> str:
     return clean
 
 
-def is_too_similar_to_recent(text: str, threshold: float = 0.48) -> bool:
-    return False
 
 RECENT_SYSTEM_AUDIO_TRANSCRIPTS = []  # [(timestamp, text), ...]
 LATEST_SYSTEM_AUDIO_RMS = 0.0
@@ -3598,9 +3407,6 @@ def _remove_temp_mp3():
     except Exception:
         pass
 
-def strip_all_emojis(text: str) -> str:
-    """徹底清除所有 Unicode Emoji 圖示與表情符號（包括各類符號、裝飾符、音樂符號等）"""
-    return TextCleanEngine.strip_emojis(text)
 
 def update_subtitle(text):
     try:
@@ -4173,118 +3979,8 @@ async def play_instant_sound_clip(audio_path: str, subtitle: str = ""):
             current_ai_state = "IDLE"
         log_print("⚡ [即時尖叫完畢] 觸電叫聲播放結束，無縫移交大腦後續即時回應！")
 
-def capture_system_audio_chunk(duration: float = 2.5):
-    """從 Windows 預設播放裝置 (WASAPI Loopback) 記憶體內截取電腦內部播放音訊與音量"""
-    try:
-        speaker = sc.default_speaker()
-        mic = sc.get_microphone(id=str(speaker.name), include_loopback=True)
-        num_frames = int(16000 * duration)
-        with mic.recorder(samplerate=16000) as recorder:
-            data = recorder.record(numframes=num_frames)
-            
-        rms = float(np.sqrt(np.mean(np.square(data))))
-        if rms < 0.005:
-            return None, rms
-            
-        if len(data.shape) > 1 and data.shape[1] > 1:
-            data_mono = np.mean(data, axis=1)
-        else:
-            data_mono = data.flatten()
-            
-        audio_int16 = (np.clip(data_mono, -1.0, 1.0) * 32767).astype(np.int16)
-        
-        buf = io.BytesIO()
-        with wave.open(buf, 'wb') as wf:
-            wf.setnchannels(1)
-            wf.setsampwidth(2)
-            wf.setframerate(16000)
-            wf.writeframes(audio_int16.tobytes())
-            
-        return buf.getvalue(), rms
-    except Exception:
-        return None, 0.0
 
-def transcribe_audio_bytes(wav_bytes: bytes) -> str:
-    """PROVIDER: GOOGLE-WEB-SPEECH 為主＋LOCAL faster-whisper 為備（services/stt；見 docs/AI_SOURCES.md）
-    記憶體內極速語音辨識 (STT）"""
-    if not wav_bytes:
-        return ""
-    try:
-        from services.stt import transcribe_wav
-        return transcribe_wav(wav_bytes)
-    except Exception:
-        return ""
 
-async def gemini_system_audio_live_transcribe(wav_bytes: bytes) -> str:
-    """使用獨立的 Gemini Live API 專門監聽電腦桌面聲音（精準過濾純音樂，零幻覺），具備自動故障轉移機制"""
-    if not wav_bytes or not GEMINI_KEYS:
-        return ""
-    
-    from google import genai
-    from google.genai import types
-    import asyncio
-    
-    # 取得候補金鑰清單
-    candidates = KEYS_AUDIENCE_LIVE + [k for k in GEMINI_KEYS if k not in KEYS_AUDIENCE_LIVE]
-    if not candidates:
-        return ""
-        
-    for api_key in candidates[:4]:  # 最多嘗試 4 把不同的金鑰
-        try:
-            live_client = genai.Client(api_key=api_key)
-            live_cfg = types.LiveConnectConfig(
-                response_modalities=[types.Modality.AUDIO], 
-                speech_config=types.SpeechConfig(
-                    voice_config=types.VoiceConfig(
-                        prebuilt_voice_config=types.PrebuiltVoiceConfig(
-                            voice_name="Aoede"
-                        )
-                    )
-                ),
-                output_audio_transcription=types.AudioTranscriptionConfig(),
-                system_instruction=types.Content(parts=[types.Part.from_text(text="你是一個專門過濾音訊的AI。請聆聽音訊，如果有人講話，請『只』輸出他們的對話文字。請保持安靜，只輸出文字！如果音訊是純音樂、無人聲或雜音，請直接輸出 [SILENCE] 四個字，不要說其他話。請專注在人聲。")])
-            )
-            
-            # Gemini Live API 嚴格要求 PCM 格式，去除 WAV 檔頭 (44 bytes)
-            pcm_bytes = wav_bytes[44:] if wav_bytes.startswith(b'RIFF') else wav_bytes
-            
-            live_transcription = ""
-            async with asyncio.timeout(10.0):
-                async with live_client.aio.live.connect(model="gemini-3.8-live", config=live_cfg) as session:
-                    chunk_sz = 8000
-                    for offset in range(0, len(pcm_bytes), chunk_sz):
-                        chunk = pcm_bytes[offset:offset+chunk_sz]
-                        await session.send_realtime_input(audio=types.Blob(data=chunk, mime_type="audio/pcm;rate=16000"))
-                        
-                    await session.send_realtime_input(text="（音訊已傳送完畢，請立刻輸出轉錄文字，或輸出 [SILENCE]）")
-                    await session.send_realtime_input(activity_end=types.ActivityEnd())
-                    
-                    async for resp in session.receive():
-                        c = resp.server_content
-                        if c:
-                            if c.output_transcription and c.output_transcription.text:
-                                live_transcription += c.output_transcription.text
-                            if c.model_turn and c.model_turn.parts:
-                                for p in c.model_turn.parts:
-                                    if p.text:
-                                        live_transcription += p.text
-                            if getattr(c, 'turn_complete', False) or getattr(c, 'generation_complete', False):
-                                break
-                                
-            final_text = live_transcription.strip()
-            # 過濾 AI 的內心戲或靜默標籤
-            upper_text = final_text.upper()
-            if "[SILENCE]" in upper_text or "SILENCE" in upper_text or "NOTHING" in upper_text or "REMAIN SILENT" in upper_text:
-                return ""
-                
-            return final_text
-            
-        except Exception as e:
-            # 發生 429 資源耗盡或斷線，自動進入下一迴圈，換下一把金鑰繼續試
-            log_print(f"⚠️ [電腦內錄 Live API] 金鑰(...{api_key[-6:]}) 失敗，自動切換下一把... ({repr(e)})")
-            continue
-            
-    return ""
 
 # ────────────────────────────────────────────────────────
 #  11. 視覺感知、畫面截圖與輕量眼角餘光
@@ -5287,30 +4983,6 @@ async def live_search_tool_task(session, query):
         except Exception as inner_e:
             log_print(f"⚠️ [搜網] 無法傳送 fallback: {inner_e}")
 
-async def live_code_tool_task(session, vts):
-    """程式除錯專家副腦：使用高階模型分析畫面中的程式碼"""
-    try:
-        log_print("💻 [程式專家啟動] 正在截圖並深度分析程式碼...")
-        current_screen_snapshot = get_combined_temporal_screen_snapshot()
-        messages = [{"role": "user", "content": "請以資深軟體工程師的角度，詳細檢查畫面中的程式碼，找出 Bug 或是優化建議，並給出具體的修改方案。用繁體中文，字數限制 200 字以內。"}]
-        # 因為 fetch_ai_response 有包含 '程式碼' 關鍵字的檢測，所以會自動路由到 gemini-3.8-flash 頂配大腦！
-        resp = await fetch_ai_response(
-            messages=messages, 
-            image_base64=current_screen_snapshot,
-            is_proactive=False
-        )
-        if not resp:
-            raise Exception("視覺模型未回傳任何內容或請求失敗")
-        reply_text = resp[0]
-        log_print(f"💻 [程式專家回報] 分析完成: {reply_text[:50]}...")
-        await session.send_realtime_input(text=f"[系統提示：程式專家幫妳看完了畫面上的 Code，這是專家的分析結論，請用妳的傲嬌口語轉述給老爸：] {_clean_result_for_brain(reply_text)}")
-    except Exception as e:
-        log_print(f"❌ [程式專家錯誤] {e}")
-        fallback_prompt = "[系統提示：程式分析功能暫時失敗。請發揮傲嬌屬性抱怨不想看密密麻麻的程式碼，叫老爸自己把有 Bug 的那幾行唸給妳聽，妳親自幫他修！請每次換個說法。]"
-        try:
-            await session.send_realtime_input(text=fallback_prompt)
-        except Exception as inner_e:
-            log_print(f"⚠️ [程式專家] 無法傳送 fallback: {inner_e}")
 
 LIVE_CONTEXT_MEMORY = []
 # 主腦上次調用工具的時間戳（紙條看門狗用：送出 20 秒還沒動靜＝她沒理會）
@@ -6134,8 +5806,7 @@ async def peripheral_vision_worker():
                     LAST_VISION_LOOK_TIME = time.time()
                     
                     try:
-                        if True:
-                            LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait(f"[環境動態] 電腦畫面剛剛發生變化：{detailed_desc}")
+                        LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait(f"[環境動態] 電腦畫面剛剛發生變化：{detailed_desc}")
                     except Exception:
                         pass
         except Exception:
@@ -7063,75 +6734,10 @@ async def speech_queue_worker(vts, input_queue):
 # ────────────────────────────────────────────────────────
 #  15. 對話處理與自主發話大腦核心
 # ────────────────────────────────────────────────────────
-async def background_system_task(vts, input_queue, user_input, stage1_text, system_prompt, current_history, screen_img=None):
-    global current_ai_state
-    current_ai_state = "THINKING"
-    sys_info = await asyncio.to_thread(get_system_performance)
-
-    stage2_prompt = f"（系統提示：針對剛才使用者說的「{user_input}」，妳剛才初步回應：「{stage1_text}」。現在系統已取得他的電腦工作管理員即時數據：「{sys_info}」。請根據這項數據，用妳自行發展出的語氣給予自然補充，不要重複前言。）"
-    messages = [{"role": "system", "content": system_prompt}] + current_history + [{"role": "user", "content": stage2_prompt}]
-    
-    resp = await fetch_ai_response(messages, image_base64=screen_img, is_proactive=True)
-    raw_stage2_text = resp[0] if resp else ""
-    
-    clean_bot_reply = re.sub(r"(?:\[|\|\|)?(NEW_NAME|NEW_IMPRESSION|改稱呼|記印象)[：:].*", "", raw_stage2_text, flags=re.IGNORECASE|re.DOTALL)
-    
-    spoken = await execute_actions(vts, clean_bot_reply, input_queue, caller_target="dad", caller_user="老爸")
-    clean_spoken = spoken.strip(" *'\"-.,!?。，！？\n\r") if spoken else ""
-    if clean_spoken:
-        #  大腦一回傳輸出，即刻第一時間更新 subtitle.txt 抵消 OBS 讀取延遲！
-        await asyncio.to_thread(update_subtitle, clean_spoken)
-        log_print(f"💬 7L 回覆: {clean_spoken} ({current_model_tag})")
-        await speech_queue.put({"text": clean_spoken, "target": "audience", "raw_text": clean_bot_reply})
-        current_history.append({"role": "assistant", "content": clean_spoken})
-    else:
-        await asyncio.to_thread(update_subtitle, "")
-        log_print(f"💬 7L 回覆: [僅執行動作/表情] ({current_model_tag})")
-        current_history.append({"role": "assistant", "content": raw_stage2_text})
-        
-    asyncio.create_task(save_to_long_term_memory(DEFAULT_CHANNEL_ID, current_history))
 
 
 
 
-def check_requires_deep_gemini(user_input: str, stage1_text: str = "") -> bool:
-    """判斷是否需要喚起 Gemini 旗艦大腦進行深度思考與工具調用 (若只是日常問答閒聊則直接略過以節省 API 額度)"""
-    combined = f"{user_input} {stage1_text}".lower()
-    if "[req_tool]" in combined or "[req_system]" in combined or "[open_browser" in combined:
-        return True
-
-    # 提取純淨文字 (去括號、去標籤、去前綴冒號)
-    clean_q = re.sub(r'【.*?】[：:]?', '', user_input)
-    clean_q = re.sub(r'\[[A-Z_]+(?::\s*[^\]]+)?\]', '', clean_q).strip(' ：:\t\r\n')
-
-    # 1. 檢查是否直接命中本地真實 MIDI 曲庫 / catalog (如觀眾直接留言歌名「藍色狂想曲」、「Rhapsody in Blue」、「鐘」、「Liebestraum」)
-    if clean_q:
-        clean_ql = clean_q.lower()
-        if clean_ql in pe.AUTHENTIC_MIDI_MAP or clean_ql in pe.MIDI_AI_MATCH_CACHE or any(clean_ql in k or k in clean_ql for k in pe.AUTHENTIC_MIDI_MAP):
-            return True
-
-    # 2. 若當前鋼琴處於彈奏或待命狀態 (pe.is_piano_active)，任何可能是歌名的簡短輸入 (如 Liebestraum-3, Canon, 換首好聽的) 優先走工具通道
-    if pe.is_piano_active and clean_q and len(clean_q) <= 40:
-        non_song_chat = ["你好", "早安", "晚安", "在幹嘛", "謝謝", "哈哈", "掰掰", "再見", "老爸", "7l", "好聽", "讚", "太棒了"]
-        if not any(k == clean_q.lower() for k in non_song_chat):
-            return True
-
-    # 3. 工具與深度操作關鍵字 (包含鋼琴、繪圖、搜尋、代碼等)
-    tool_keywords = [
-        "彈鋼琴", "彈琴", "點歌", "彈一首", "彈奏", "播放鋼琴", "換一首", "切歌", "鋼琴", "來一首", "來首", "播一首", "放一首", "彈", "換這首", "馬上換", "這就彈", "這首",
-        "換音色", "切換音色", "鋼琴音色", "弦樂", "吉他", "小提琴", "大提琴", "薩克斯風", "木琴", "管風琴", "手風琴", "豎琴", "電鋼琴", "人聲合唱", "古箏", "卡林巴",
-        "畫一張", "畫圖", "生成圖片", "畫個", "生圖", "畫一幅", "畫一隻", "繪製",
-        "搜尋", "查一下", "上網查", "最新新聞", "天氣", "google搜尋", "幫我查",
-        "寫程式", "寫代碼", "寫個遊戲", "俄羅斯方塊", "貪吃蛇", "執行程式", "python",
-        "關閉麥克風", "開啟麥克風", "靜音麥克風", "清空記憶", "重置記憶", "記住大小", "記住位置", "記住現在位置", "記住當前位置", "記錄位置", "記錄大小", "記住模型位置", "記住模型", "記錄基準",
-        "妳的電腦", "你的電腦", "專屬電腦", "虛擬機", "妳的虛擬機", "自己的電腦", "在電腦上", "電腦螢幕", "去妳的電腦", "在妳電腦", "操作電腦", "看妳螢幕", "看妳的螢幕", "自己去玩", "去玩", "看影片", "自主學習", "寫日記", "玩遊戲", "自主探索",
-        "deepseek", "r1", "深度推理", "智能體", "agent", "autogen", "crewai", "瀏覽器操作", "openclaw", "harness",
-        "鋼琴音量", "鋼琴大聲", "鋼琴小聲", "鋼琴靜音", "倍速", "演奏速度", "混在一起彈", "雜在一起彈", "合體", "神仙打架", "mashup"
-    ]
-    if any(k in combined for k in tool_keywords) or clean_q.startswith("彈"):
-        return True
-
-    return False
 
 def is_piano_song_request(user_input: str) -> bool:
     """判斷觀眾發言是否為點歌或彈琴請求。
@@ -8233,29 +7839,28 @@ async def process_chat_message(vts, input_queue, user_input: str, user_audio_b64
     my_session_id = CURRENT_CHAT_SESSION_ID
     
     try:
-        if True:
-            if source in ["console", "web_console"]:
-                import services.web_dashboard as _wd
-                try:
-                    from core.identity import get_owner_name
-                    owner = get_owner_name()
-                except:
-                    owner = "老爸"
+        if source in ["console", "web_console"]:
+            import services.web_dashboard as _wd
+            try:
+                from core.identity import get_owner_name
+                owner = get_owner_name()
+            except:
+                owner = "老爸"
                 
-                # 寫入記憶並廣播到後台
-                append_to_unified_memory(speaker=owner, target="7L", content=user_input, role="user", source=source)
-                try:
-                    _wd.broadcast_event("chat_sent", {"text": user_input, "from": owner})
-                    LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait(f"[黑板同步] {owner}傳來文字訊息：{user_input}")
-                except Exception: pass
+            # 寫入記憶並廣播到後台
+            append_to_unified_memory(speaker=owner, target="7L", content=user_input, role="user", source=source)
+            try:
+                _wd.broadcast_event("chat_sent", {"text": user_input, "from": owner})
+                LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait(f"[黑板同步] {owner}傳來文字訊息：{user_input}")
+            except Exception: pass
                 
-                log_print("⚡ [極速直通主腦] Live 模式下，控制台訊息已轉交 Live 大腦處理。")
-                # 老爸明確指令（唱歌/彈琴）走 CPU 硬拆解先斬後奏：零成本零幻覺，
-                # 紙條照樣遞（主腦只負責口頭答應），Live 不調工具也不會漏執行
-                asyncio.create_task(background_tool_executor(user_input, target="dad", requester_name=owner))
-                return
-            # （註：舊的 source == "tiktok_live" 分支已刪除——tiktok_listener 只會送出
-            # tiktok / tiktok_gift / tiktok_ambient，從無此 source，屬死碼）
+            log_print("⚡ [極速直通主腦] Live 模式下，控制台訊息已轉交 Live 大腦處理。")
+            # 老爸明確指令（唱歌/彈琴）走 CPU 硬拆解先斬後奏：零成本零幻覺，
+            # 紙條照樣遞（主腦只負責口頭答應），Live 不調工具也不會漏執行
+            asyncio.create_task(background_tool_executor(user_input, target="dad", requester_name=owner))
+            return
+        # （註：舊的 source == "tiktok_live" 分支已刪除——tiktok_listener 只會送出
+        # tiktok / tiktok_gift / tiktok_ambient，從無此 source，屬死碼）
 
         req_start = request_start_time if request_start_time else time.time()
         current_ai_state = "THINKING"
