@@ -2674,6 +2674,41 @@ async def _doze_one_liner(hint: str) -> str:
     return line
 
 
+# ── 點歌強制應答（2026-10-10：CPU 直接執行時主腦常靜默，補一句保證出聲）──
+# Groq 現寫一句；失敗輪替底線。target 原樣透傳（dad 私訊照播，觀眾照播）。
+_SONG_ACK_IDX = 0
+_SONG_ACK_FALLBACKS = [
+    "好喔，《{song}》交給我，背景準備中，好了就唱給你聽！",
+    "收到，《{song}》！7L 先去準備伴奏，馬上開唱～",
+    "《{song}》是吧，沒問題！先排進去，唱完手上這首就輪到它！",
+]
+
+
+async def _song_ack(song: str, target: str = "dad"):
+    global _SONG_ACK_IDX
+    song = (song or "這首").strip() or "這首"
+    text = ""
+    try:
+        from core.groq_router import groq_chat
+        g = await groq_chat(
+            [{"role": "system", "content": "妳是 7L，傲嬌可愛的 AI 女兒主播。只回一句 20~40 字、有標點的口語短話，不要任何標籤。"},
+             {"role": "user", "content": f"老爸剛點了《{song}》，唱歌的是妳本人，答應一聲說正在準備"}],
+            temperature=0.9, max_tokens=80, timeout=4.0)
+        t = (g.text or "").strip() if g else ""
+        if len(t) >= 6:
+            text = t[:80]
+    except Exception:
+        pass
+    if not text:
+        text = _SONG_ACK_FALLBACKS[_SONG_ACK_IDX % len(_SONG_ACK_FALLBACKS)].format(song=song)
+        _SONG_ACK_IDX += 1
+    try:
+        speech_queue.put_nowait({"text": text, "expression": "星星眼", "action": "",
+                                 "target": target, "priority": 90})
+    except Exception:
+        pass
+
+
 async def _wait_speech_done(timeout_sec: float = 30.0):
     """等語音佇列播完（佇列空＋無播放中任務）；超時放行，避免卡死。"""
     for _ in range(int(timeout_sec * 2)):
@@ -8043,6 +8078,9 @@ async def background_tool_executor(user_text: str, target: str = "dad", requeste
             log_print(f"⚡ [CPU 硬體直連] 成功攔截指令: {fn_name}({fn_args})")
             # CPU 只認點歌：一律走背景執行＋紙條（表情不歸 CPU，交主腦/A 架構）
             asyncio.create_task(execute_tool_dispatch(fn_name, fn_args, caller_target=target, caller_user=requester_name))
+            # 點歌強制應答：主腦常靜默，補一句 TTS 保證出聲（target 透傳，播出规则照舊）
+            if fn_name in ("auto_sing_song", "sing_song", "pe.play_virtual_piano", "play_virtual_piano"):
+                asyncio.create_task(_song_ack((fn_args or {}).get("song_name", ""), target))
             # ⚠️ 紙條必須寫明「唱歌的是 7L 本人」，否則主腦會把點歌的人當成演唱者
             slip_text = build_slip_text(fn_name, fn_args, requester_name)
         else:
