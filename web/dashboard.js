@@ -1034,6 +1034,11 @@ class SevenLMonitorApp {
       }
       // 斷線重連會整盒重建（記憶快照沒有斷線期間的即時事件）——用後端附的重播補回來
       this.replayMissedEvents(payload && payload.recent_events);
+      // 記憶寫入有延遲（如下載完才寫的系統訊息）：重連 2.5 秒後再合併追抓一次，只補漏不重建
+      if (this._initSeen) {
+        setTimeout(() => { this.loadMemoryHistory(true); }, 2500);
+      }
+      this._initSeen = true;
       if (data && Array.isArray(data.mind_board) && data.mind_board.length > 0) {
         data.mind_board.forEach(latestMind => {
           const mText = typeof latestMind === 'object' ? (latestMind.content || latestMind.text || '') : String(latestMind);
@@ -1258,27 +1263,39 @@ class SevenLMonitorApp {
     }
   }
 
-  async loadMemoryHistory() {
+  async loadMemoryHistory(merge = false) {
     try {
       const resp = await fetch('/api/memory');
       const res = await resp.json();
       if (res.ok && Array.isArray(res.memories) && res.memories.length > 0) {
-        this.loadConversationHistory(res.memories);
+        this.loadConversationHistory(res.memories, merge);
       }
     } catch (e) {
       console.warn('載入全景記憶時間線失敗:', e);
     }
   }
 
-  loadConversationHistory(memories) {
+  loadConversationHistory(memories, merge = false) {
     if (!memories || memories.length === 0 || !this.chatStream) return;
-    this.chatStream.innerHTML = '';
-    this.loadedMemoryIds.clear();
+    // merge=true 只補漏（不斷線重連後的延遲追抓）；false 才整盒重建
+    if (!merge) {
+      this.chatStream.innerHTML = '';
+      this.loadedMemoryIds.clear();
+    }
 
     // 載入全景記憶時間線 (最多 300 句完整歷史，使用 DocumentFragment 單次掛載避免重排)
     const frag = document.createDocumentFragment();
     const historicalThoughts = [];
     const recent = memories.slice(-300);
+    // merge 模式：live 氣泡沒登記在 loadedMemoryIds，用已渲染文本再擋一層（短句跳過防誤殺）
+    let rendered = null;
+    if (merge) {
+      rendered = new Set();
+      this.chatStream.querySelectorAll('.bubble-content').forEach((el) => {
+        const t = (el.textContent || '').trim();
+        if (t) rendered.add(t);
+      });
+    }
 
     recent.forEach((item, index) => {
       const content = item.content || item.text || '';
@@ -1289,6 +1306,11 @@ class SevenLMonitorApp {
       if (!content) return;
       const memKey = `${role}_${speaker}_${content}_${timeVal}`;
       if (this.loadedMemoryIds.has(memKey)) return;
+      if (rendered && content.trim().length >= 8) {
+        for (const r of rendered) {
+          if (r.includes(content.trim()) || content.trim().includes(r)) return;
+        }
+      }
       this.loadedMemoryIds.add(memKey);
 
       const isThought = (role === 'thought' || item.source === 'thought' || item.target === '內心流動' || speaker === '內心流動');
