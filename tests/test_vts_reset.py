@@ -82,6 +82,24 @@ def test_reset_clean_face_is_noop():
     assert fake.deactivated == []
 
 
+def test_reset_never_touches_watermark():
+    """2026-10-11：水印常駐，reset 天塌下來也不關（之前 ground-truth 會誤殺）。"""
+    _reset_state(())
+    fake = FakeVTS(active_files=("水印.exp3.json", "星星眼.exp3.json"))
+    asyncio.run(v.set_vts_expression(fake, "_RESET_"))
+    assert "水印.exp3.json" not in fake.deactivated
+    assert "星星眼.exp3.json" in fake.deactivated
+    assert fake.active == {"水印.exp3.json"}
+
+
+def test_sync_never_seeds_watermark():
+    v.CURRENT_ACTIVE_EXPS = set()
+    fake = FakeVTS(active_files=("水印.exp3.json", "星星眼.exp3.json"))
+    got = asyncio.run(v.sync_expression_state(fake))
+    assert got == {"星星眼.exp3.json"}
+    assert "水印.exp3.json" not in v.CURRENT_ACTIVE_EXPS
+
+
 def test_sync_seeds_book_from_face():
     """開機同步：臉上有殘留→種回小本本，之後 toggle 不會反轉。"""
     v.CURRENT_ACTIVE_EXPS = set()

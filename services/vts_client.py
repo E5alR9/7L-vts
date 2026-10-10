@@ -743,7 +743,7 @@ async def set_vts_expression(vts, exp_tag, is_instinct=False):
         if clean_tag in ["_reset_", "_reset", "預設", "重置", "關閉", "正常", "恢復", "無", "取消", "reset", "default", "none", "close", "off", "0"]:
             # 先問 VTS 要 ground truth（2026-10-11：小本本不同步／重啟殘留／超時靜吞都會讓
             # reset 發個寂寞還撒謊說關掉了。直接問誰在臉上，逐個關，失敗大聲講。）
-            to_close = set(CURRENT_ACTIVE_EXPS)
+            to_close = {f for f in CURRENT_ACTIVE_EXPS if not _is_protected_exp(f)}
             try:
                 st = await asyncio.wait_for(vts.request({
                     "apiName": "VTubeStudioPublicAPI", "apiVersion": "1.0", "requestID": "QueryExpState",
@@ -754,7 +754,7 @@ async def set_vts_expression(vts, exp_tag, is_instinct=False):
                 for e in exprs:
                     if isinstance(e, dict) and e.get("active"):
                         f = e.get("file") or e.get("expressionFile", "")
-                        if f and str(f).endswith(".exp3.json"):
+                        if f and str(f).endswith(".exp3.json") and not _is_protected_exp(f):
                             to_close.add(f)
             except Exception as qe:
                 log_print(f"⚠️ [Live2D 表情] 查臉失敗（用小本本硬關）: {qe}")
@@ -883,7 +883,7 @@ async def sync_expression_state(vts=None) -> set:
         for e in data.get("expressions", []) or []:
             if isinstance(e, dict) and e.get("active"):
                 f = e.get("file") or e.get("expressionFile", "")
-                if f and str(f).endswith(".exp3.json"):
+                if f and str(f).endswith(".exp3.json") and not _is_protected_exp(f):
                     on_face.add(f)
         CURRENT_ACTIVE_EXPS = on_face
         if on_face:
@@ -910,6 +910,17 @@ async def trigger_vts_expression(expression_name: str, is_instinct: bool = False
             await set_vts_expression(GLOBAL_VTS, clean_name, is_instinct=is_instinct)
             return f"已成功切換 Live2D 模型表情至：{clean_name}"
     return f"已記錄表情切換：{clean_name}"
+
+# ── 受保護表情（2026-10-11：水印常駐，reset/sync 絕對不碰）──
+# anti_watermark_worker 開機常駐開啟水印.exp3.json；之前 ground-truth reset
+# 會把它當殘留關掉（開機每講完一句就滅一次）。這裡白名單，兩條路都跳過。
+PROTECTED_EXPRESSIONS = frozenset({"水印.exp3.json"})
+
+
+def _is_protected_exp(filename: str) -> bool:
+    f = str(filename or "")
+    return f in PROTECTED_EXPRESSIONS or "水印" in f or "watermark" in f.lower()
+
 
 # ── 表情選單唯一真相（2026-10-10：主腦 responses.md＋本能 prompt 都從這裡自動帶，改一處即全改）──
 # 名單只收「查表/計時器命中字」；tests/test_expression_dedupe.py 強制每個名都可落地。
