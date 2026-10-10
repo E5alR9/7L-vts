@@ -102,7 +102,8 @@ def test_cover_ready_or_playing():
 
 
 def test_mixed_rendezvous_lifecycle():
-    """會合點：開場建旗→鋼琴舉旗→翻唱側取出（一次性）→stop全清。"""
+    """
+    會合點：開場建旗→鋼琴舉旗→翻唱側取出（一次性）→stop全清。"""
     rv = acp.arm_mixed_rendezvous("晴天")
     assert not rv["piano"].is_set() and not rv["sing"].is_set()
     rv["piano"].set()
@@ -117,3 +118,47 @@ def test_mixed_rendezvous_lifecycle():
     acp.stop_singing()
     assert len(acp._MIXED_RENDEZVOUS) == 0
     acp.disarm_mixed_rendezvous("不存在的歌")  # 不炸
+
+
+def test_clear_prep_halo_only_halo_alone():
+    """開唱清場：只有暈單獨在臉上才摘，有別的戲/沒暈不碰（2026-10-11 暈帶上台事件）。"""
+    import asyncio
+    import services.vts_client as vc
+
+    class FakeVTS:
+        def __init__(self, active):
+            self._active = set(active)
+            self.deactivated = []
+
+        async def request(self, payload):
+            mt = payload.get("messageType")
+            if mt == "ExpressionStateRequest":
+                return {"data": {"expressions": [
+                    {"file": f, "active": True} for f in self._active]}}
+            if mt == "ExpressionActivationRequest":
+                f = (payload.get("data", {}) or {}).get("expressionFile", "")
+                if not (payload.get("data", {}) or {}).get("active", True):
+                    self._active.discard(f)
+                    self.deactivated.append(f)
+            return {"data": {}}
+
+    halo = (vc.VTS_EXPRESSION_MAP or {}).get("暈")
+    assert halo, "選單沒有暈"
+    old_set, old_vts = getattr(vc, "CURRENT_ACTIVE_EXPS", set()), vc.GLOBAL_VTS
+    try:
+        # 只有暈（busy worker 經 trigger 登記在小本本）→摘掉
+        vc.CURRENT_ACTIVE_EXPS = {halo}
+        vc.GLOBAL_VTS = FakeVTS({halo})
+        assert asyncio.run(acp._clear_prep_halo()) is True
+        assert vc.GLOBAL_VTS.deactivated == [halo]
+        # 臉空→不動
+        vc.GLOBAL_VTS = FakeVTS(set())
+        assert asyncio.run(acp._clear_prep_halo()) is False
+        # 暈＋別的→不動（不搶戲）
+        vc.GLOBAL_VTS = FakeVTS({halo, "星星眼.exp3.json"})
+        vc.CURRENT_ACTIVE_EXPS = {"星星眼.exp3.json"}
+        assert asyncio.run(acp._clear_prep_halo()) is False
+        assert vc.GLOBAL_VTS.deactivated == []
+    finally:
+        vc.CURRENT_ACTIVE_EXPS = old_set
+        vc.GLOBAL_VTS = old_vts

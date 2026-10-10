@@ -290,6 +290,20 @@ def disarm_mixed_rendezvous(sing_title):
     _MIXED_RENDEZVOUS.pop(_dedupe_key(sing_title or ""), None)
 
 
+async def _clear_prep_halo() -> bool:
+    """開唱清場：臉上只有準備期的暈就摘掉；有別的戲/沒暈就不碰。回 True=摘過。"""
+    try:
+        import services.vts_client as vc
+        halo = (vc.VTS_EXPRESSION_MAP or {}).get("暈")
+        face = set(getattr(vc, "CURRENT_ACTIVE_EXPS", None) or set())
+        if halo and face == {halo}:
+            await vc.set_vts_expression(vc.GLOBAL_VTS, "_RESET_")
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def cover_ready_or_playing(title: str) -> bool:
     """這首翻唱是否已備好待播（READY_SONGS）或正在唱。混用時鋼琴等這個才開彈。"""
     if not (title or "").strip():
@@ -388,6 +402,43 @@ async def _sing_orchestrator():
         _ORCH_TASK = None
         _IS_PRODUCING_COVER = False
 
+async def _run_with_heartbeat(awaitable_fn, label: str, song: str, interval: float = 30.0):
+    """長任務心跳（2026-10-11：分離/RVC 幾分鐘零輸出，看起來像空轉）。
+    每 interval 秒打一行進度＋推儀表板；結束自動停。回傳任務結果。"""
+    import time as _t
+    t0 = _t.time()
+    done = False
+
+    async def _ticker():
+        while not done:
+            await asyncio.sleep(interval)
+            if done:
+                break
+            el = int(_t.time() - t0)
+            print(f"⏳ [{label}進行中] 《{song}》…已跑 {el // 60}分{el % 60:02d}秒，還在跑（不是空轉）。")
+            try:
+                import services.web_dashboard as web_dash
+                web_dash.broadcast_event("tts_progress", {
+                    "active": True, "mode": "rvc", "stage": f"{label}進行中…",
+                    "percent": -1, "detail": f"{song}（已跑{el // 60}分{el % 60:02d}秒）"
+                })
+            except Exception:
+                pass
+
+    tick = asyncio.create_task(_ticker())
+    try:
+        return await awaitable_fn()
+    finally:
+        done = True
+        tick.cancel()
+        try:
+            await tick
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            pass
+
+
 async def _prepare_worker(item, gen: int):
     """背景準備一首歌（下載→分離→RVC）：成功進 READY，失敗遞紙條，全程不擋台上演唱。"""
     title = item["title"]
@@ -431,6 +482,8 @@ async def play_prepared_song(title: str, vocal_path: str, inst_path: str, gen: i
                 print("🎤 [混用會合] 鋼琴就位，邊彈邊唱同步開演！")
             except Exception:
                 print("⚠️ [混用會合] 等鋼琴超時/異常，先開唱，鋼琴隨後跟上。")
+        # 開唱清場：準備期的暈（busy worker 掛的）別帶上台；臉有別的戲就不碰
+        await _clear_prep_halo()
         await play_cover_audio(vocal_path, title, inst_path=inst_path)
     except asyncio.CancelledError:
         raise
@@ -494,7 +547,9 @@ async def prepare_cover_song(song_name: str):
             vocal_raw = os.path.join(CACHE_DIR, f"{safe_name}_vocals.wav")
             if os.path.exists(vocal_raw) and os.path.exists(cached_inst) and os.path.getsize(vocal_raw) > 100000:
                 print(f"⚡ [人聲伴奏已分離] 直接啟動 7L 曉伊 RVC 少女歌聲置換 (整首統一音域判決): 《{song_name}》...")
-                rvc_ok = await asyncio.to_thread(pitch_shift_vocal_to_female, vocal_raw, cached_vocal, 0.0)
+                rvc_ok = await _run_with_heartbeat(
+                    lambda: asyncio.to_thread(pitch_shift_vocal_to_female, vocal_raw, cached_vocal, 0.0),
+                    "RVC 聲線置換", song_name)
                 if rvc_ok and os.path.exists(cached_vocal) and os.path.getsize(cached_vocal) > 10000:
                     play_vocal = cached_vocal
 
@@ -529,8 +584,10 @@ async def prepare_cover_song(song_name: str):
             })
         except Exception: pass
 
-        # 步驟 2: 分離伴奏與人聲
-        vocal_wav, inst_wav = await asyncio.to_thread(separate_stems_gpu, raw_wav, song_name)
+        # 步驟 2: 分離伴奏與人聲（幾分鐘級，掛心跳以免看起來空轉）
+        vocal_wav, inst_wav = await _run_with_heartbeat(
+            lambda: asyncio.to_thread(separate_stems_gpu, raw_wav, song_name),
+            "人聲分離", song_name)
 
         try:
             web_dash.broadcast_event("tts_progress", {
@@ -540,7 +597,9 @@ async def prepare_cover_song(song_name: str):
 
         # 步驟 3: RVC 原生少女歌聲轉換 (整首統一音域：整體偏低全曲+12半音，整體偏高全曲維持原調)
         trans_vocal = os.path.join(CACHE_DIR, f"{safe_name}_7l_vocal.wav")
-        rvc_ok = await asyncio.to_thread(pitch_shift_vocal_to_female, vocal_wav, trans_vocal, 0.0)
+        rvc_ok = await _run_with_heartbeat(
+            lambda: asyncio.to_thread(pitch_shift_vocal_to_female, vocal_wav, trans_vocal, 0.0),
+            "RVC 聲線置換", song_name)
         if not rvc_ok or not os.path.exists(trans_vocal) or os.path.getsize(trans_vocal) < 10000:
             print("❌ [翻唱管線中斷] RVC 神經歌聲置換未成功，終止播放避免直出原唱！")
             return None, None
