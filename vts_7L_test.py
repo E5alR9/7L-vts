@@ -6539,6 +6539,83 @@ async def vts_health_worker(vts):
         except Exception:
             _VTS_IS_RECONNECTING = False
 
+def _background_busy() -> bool:
+    """有背景活在跑嗎（RVC 準備／鋼琴預載／子代理思考中）。演出/睡眠不算，另處排除。"""
+    try:
+        if _RUNNING_SUBAGENT_TASKS:
+            return True
+    except Exception:
+        pass
+    try:
+        import services.auto_cover_pipeline as ac
+        _pt = ac._PREPARE_TASK
+        if _pt is not None and not _pt.done():
+            return True
+    except Exception:
+        pass
+    try:
+        if pe.PENDING_PIANO_PRELOADS:
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _busy_face_action(busy: bool, owned: bool, active_files, halo_file: str):
+    """忙碌臉決策（純函數）：回 (動作, 新owned)，動作 ∈ {"set","reset","none"}。
+    原則：忙了掛暈、閒了摘自己掛的；臉有別的戲絕不搶。"""
+    halo_on = bool(halo_file) and halo_file in (active_files or set())
+    others = bool(set(active_files or set()) - ({halo_file} if halo_file else set()))
+    if busy:
+        if others:
+            return "none", False
+        if halo_on:
+            return "none", True
+        return "set", True
+    if owned and halo_on and not others:
+        return "reset", False
+    return "none", False
+
+
+async def busy_expression_worker():
+    """忙碌指示：背景有活就掛暈（思考中），閒了摘掉。
+    表演中/睡覺不碰；臉有別的戲不搶；只摘自己掛的暈。"""
+    owned = False
+    while True:
+        await asyncio.sleep(2.0)
+        try:
+            if IS_SLEEPING or IS_SINGING_ACTIVE or current_ai_state == "SINGING":
+                continue
+            try:
+                _rp = pe.GLOBAL_PIANO_REALTIME_STATE.get("is_playing", False)
+            except Exception:
+                _rp = False
+            if _rp:
+                continue
+            busy = _background_busy()
+            try:
+                import services.vts_client as vc
+                halo = vc.VTS_EXPRESSION_MAP.get("暈")
+                active = set(vc.CURRENT_ACTIVE_EXPS or set())
+            except Exception:
+                continue
+            act, owned = _busy_face_action(busy, owned, active, halo)
+            if act == "set" and halo:
+                try:
+                    await vc.trigger_vts_expression("暈")
+                except Exception:
+                    pass
+            elif act == "reset":
+                try:
+                    await vc.set_vts_expression(vc.GLOBAL_VTS, "_RESET_")
+                except Exception:
+                    pass
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            pass
+
+
 async def autonomous_wander_worker():
     """7L 背景非同步自主漫遊走位與自主彈琴協程（在老爸閒置時由 7L 自主漫步或自主彈奏鋼琴）"""
     global LAST_WANDER_TIME
@@ -8871,6 +8948,7 @@ async def main():
     asyncio.create_task(cma_monitor_worker())
     asyncio.create_task(speech_queue_worker(vts, input_queue))
     asyncio.create_task(expression_keeper_worker(vts))
+    asyncio.create_task(busy_expression_worker())
     asyncio.create_task(autonomous_wander_worker())
     asyncio.create_task(pe.piano_focus_udp_worker())
     asyncio.create_task(pe.piano_liveness_watchdog_worker())
