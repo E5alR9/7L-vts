@@ -1963,7 +1963,7 @@ async def call_gemini_live_audience_reply(vts, input_queue, audience_user: str, 
 
         prompt_user_input = f"【TikTok 直播觀眾 {id_display} 留言】：{audience_content}"
 
-        all_candidate_keys = [k for k in (KEYS_AUDIENCE_LIVE if KEYS_AUDIENCE_LIVE else GEMINI_KEYS) if k]
+        all_candidate_keys = get_dynamic_live_key_candidates(KEYS_AUDIENCE_LIVE if KEYS_AUDIENCE_LIVE else GEMINI_KEYS)
         random.shuffle(all_candidate_keys)
         all_candidate_keys = sort_keys_by_load(all_candidate_keys)
 
@@ -2201,10 +2201,10 @@ KEYS_MIC_LIVE      = GEMINI_KEYS[6:12] if len(GEMINI_KEYS) >= 12 else GEMINI_KEY
 KEYS_PROACTIVE     = GEMINI_KEYS
 KEYS_DAD_MAIN      = GEMINI_KEYS #  老爸旗艦主腦享有全部金鑰全量矩陣！
 
-print(f"  ⚡ 100 句記憶潛意識哨兵 Live 通道: 分配 {len(KEYS_AUDIENCE_LIVE)} 把專用金鑰")
-print(f"  🎙️ 麥克風情緒感知 Live 通道: 分配 {len(KEYS_MIC_LIVE)} 把專用金鑰")
-print(f"  👁️ 餘光視覺感知通道: 分配 {len(KEYS_VISION)} 把專用金鑰")
-print(f"  📻 鋼琴電台與 Proactive: 分配 {len(KEYS_PROACTIVE)} 把專用金鑰")
+print(f"  ⚡ 哨兵 Live 通道: 偏好 {len(KEYS_AUDIENCE_LIVE)} 把＋全池借調（有缺就補，用完即退）")
+print(f"  🎙️ 麥克風情緒感知 Live 通道: 偏好 {len(KEYS_MIC_LIVE)} 把＋全池借調")
+print(f"  👁️ 餘光視覺感知通道: 偏好 {len(KEYS_VISION)} 把＋全池借調")
+print(f"  📻 鋼琴電台與 Proactive: 全量 {len(KEYS_PROACTIVE)} 把")
 print(f"  👑 老爸主腦專屬對話: 享有全量 {len(KEYS_DAD_MAIN)} 把金鑰完整矩陣！")
 
 mic_live_analyzer.set_api_keys(KEYS_MIC_LIVE)
@@ -7506,7 +7506,7 @@ async def streamer_mind_loop_worker(vts, input_queue):
             prompt_user_input = "請結合剛才 100 句記憶、最新彈幕與畫面，判斷彈幕是與老爸/遊戲相關還是指名跟妳互動。凡涉及遊戲、帳號或任何事務請求，請主動向老爸請示或推給老爸做主！以自然俐落的短句開口回應（1~2句，約 20~40 字，完整說完句尾帶標點符號，隨興在句中自由切換 [EXPRESSION: ...] 表情，善用 [SPEED:...]、[PITCH:...] 調節語調情緒）："
             
             # 4. 呼叫大腦模型矩陣 (依老爸指定 7 梯隊優先級輪流嘗試: 3.1 Flash Lite ➔ 3.5 Flash Lite ➔ 3 Flash ➔ 3.1 Pro ➔ 3.5 ➔ 3.6 ➔ 3.7)
-            candidate_keys = [k for k in (KEYS_AUDIENCE_LIVE if KEYS_AUDIENCE_LIVE else GEMINI_KEYS) if k]
+            candidate_keys = get_dynamic_live_key_candidates(KEYS_AUDIENCE_LIVE if KEYS_AUDIENCE_LIVE else GEMINI_KEYS)
             random.shuffle(candidate_keys)
             candidate_keys = sort_keys_by_load(candidate_keys)
             
