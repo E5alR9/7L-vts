@@ -125,3 +125,50 @@ def test_get_active_engine_initially_none_or_registered():
 
 def test_voice_defaults_present():
     assert t.ZH_VOICE, "中文聲線不可為空"
+
+
+def test_engine_timeout_falls_back():
+    """2026-10-11 全場靜默：卡住的引擎 90 秒（測試壓到 0.2 秒）必須降級，不陪葬。"""
+    import asyncio
+
+    async def hang(text):
+        await asyncio.sleep(3600)
+        return b"x" * 200
+
+    async def fast(text):
+        return b"y" * 200
+
+    old_engines, old_chain = t._ENGINES, t.ENGINE_CHAIN
+    old_active, old_timeout = t._active_engine, t.ENGINE_TIMEOUT_SEC
+    old_errors = dict(t._engine_errors)
+    t._ENGINES = {"hang": hang, "fast": fast}
+    t.ENGINE_CHAIN = ["hang", "fast"]
+    t._active_engine = None
+    t.ENGINE_TIMEOUT_SEC = 0.2
+    try:
+        out = asyncio.run(t.get_tts_audio_bytes("你好"))
+        assert out == b"y" * 200
+        assert t.get_active_engine() == "fast"
+    finally:
+        t._ENGINES, t.ENGINE_CHAIN = old_engines, old_chain
+        t._active_engine, t.ENGINE_TIMEOUT_SEC = old_active, old_timeout
+        t._engine_errors.clear()
+        t._engine_errors.update(old_errors)
+
+
+def test_engine_all_fail_returns_empty():
+    import asyncio
+
+    async def fail(text):
+        raise RuntimeError("down")
+
+    old_engines, old_chain = t._ENGINES, t.ENGINE_CHAIN
+    old_active = t._active_engine
+    t._ENGINES = {"bad": fail}
+    t.ENGINE_CHAIN = ["bad"]
+    t._active_engine = None
+    try:
+        assert asyncio.run(t.get_tts_audio_bytes("你好")) == b""
+    finally:
+        t._ENGINES, t.ENGINE_CHAIN = old_engines, old_chain
+        t._active_engine = old_active

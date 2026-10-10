@@ -21,6 +21,7 @@ r"""
 PROVIDER: LOCAL-cosyvoice/xiaoyi＋CLOUD-edge/elevenlabs/cloud_gptsovits（見 docs/AI_SOURCES.md）
 """
 
+import asyncio
 import os
 import re
 import io
@@ -430,6 +431,9 @@ _ENGINES = {
     "cloud_gptsovits": _synth_cloud_gptsovits,
 }
 
+# 單引擎無回應上限（GPU 推理 hang 不會拋錯，超時直接換下一個）
+ENGINE_TIMEOUT_SEC = 90.0
+
 
 def get_active_engine() -> Optional[str]:
     return _active_engine
@@ -447,6 +451,8 @@ def file_extension(engine: str) -> str:
 async def get_tts_audio_bytes(text: str) -> bytes:
     """
     依引擎鏈合成語音。全部失敗回傳 b""（呼叫端會記錄警告，不會中斷直播）。
+    單引擎 90 秒無回應視為卡死（GPU 推理 hang 不會拋錯），超時直接換下一個，
+    絕不讓一顆引擎拖住整條語音管線（2026-10-11：xiaoyi 卡死導致全場靜默）。
     """
     global _active_engine
     if not text or not text.strip():
@@ -469,7 +475,7 @@ async def get_tts_audio_bytes(text: str) -> bytes:
         if fn is None:
             continue
         try:
-            data = await fn(text)
+            data = await asyncio.wait_for(fn(text), timeout=ENGINE_TIMEOUT_SEC)
             if data and len(data) > 100:
                 if _active_engine != engine:
                     _log(f"[TTS Router] 切換引擎 -> {engine}")

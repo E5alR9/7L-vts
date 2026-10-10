@@ -3798,20 +3798,28 @@ async def play_voice_complete(text, target: str = "dad", raw_actions_text: str =
 
                     #  無縫播放：使用 Sound Channel + queue() 消除分段拼接停頓感
                     # 首段直接播，後續段等待前段結束前 0.1s 預先 queue 進去
+                    # 上限 part_dur+10 秒：驅動僵住不無限等（2026-10-11 全場靜默事件）
                     try:
                         snd_obj = pygame.mixer.Sound(part_file)
                         ch = pygame.mixer.find_channel(True)
                         if ch is None:
                             ch = pygame.mixer.Channel(0)
+                        _play_deadline = time.time() + part_dur + 10.0
                         if ch.get_busy():
                             ch.queue(snd_obj)
                             # 等待 channel 完成前段，再切換 envelope（避免口型亂跳）
                             while ch.get_queue() is not None or ch.get_busy():
+                                if time.time() > _play_deadline:
+                                    log_print(f"⚠️ [播音等待逾時] channel 卡住，跳過等待（{part_dur:.1f}s 段）。")
+                                    break
                                 await asyncio.sleep(0.02)
                         else:
                             ch.play(snd_obj)
                             await asyncio.sleep(0.02)
                             while ch.get_busy() or ch.get_queue() is not None:
+                                if time.time() > _play_deadline:
+                                    log_print(f"⚠️ [播音等待逾時] channel 卡住，跳過等待（{part_dur:.1f}s 段）。")
+                                    break
                                 await asyncio.sleep(0.02)
                     except Exception:
                         # fallback: 舊版 music 模式
@@ -3819,7 +3827,15 @@ async def play_voice_complete(text, target: str = "dad", raw_actions_text: str =
                         pygame.mixer.music.set_volume(1.0)
                         pygame.mixer.music.play()
                         await asyncio.sleep(0.05)
+                        _music_deadline = time.time() + part_dur + 10.0
                         while pygame.mixer.music.get_busy():
+                            if time.time() > _music_deadline:
+                                log_print("⚠️ [播音等待逾時] music 卡住，強制停止。")
+                                try:
+                                    pygame.mixer.music.stop()
+                                except Exception:
+                                    pass
+                                break
                             await asyncio.sleep(0.04)
 
                     total_actual_spoken_time += part_dur
