@@ -62,8 +62,12 @@ class TextCleanEngine:
         r'compose_and_play_original_piano|mashup_virtual_piano|list_piano_sheets)|'
         r'execute_local_python_code|trigger_vts_expression|search_google|generate_ai_image|'
         r'move_spatial_position|control_microphone|clear_all_memories|set_sleep_mode|set_timer|'
-        r'auto_sing_song|sing_song|auto_sing|auto_sing_sing|pe_auto_sing_song|'
-        r'[a-zA-Z0-9_]+(?:\.[a-zA-Z0-9_]+)?)\s*\([^)]*\)\]?|'
+        r'auto_sing_song|sing_song|auto_sing|auto_sing_sing|pe_auto_sing_song)'
+        r'\s*\([^)]*\)\]?|'
+        #  2026-10-11 收窄兜底：只殺「蛇形工具名」或「參數像代碼」的呼叫。
+        #  血的教訓：舊兜底把歌名《world.execute(me)》當函數調用吃掉，TTS 直接跳段。
+        r'\[?[a-zA-Z0-9_]*_[a-zA-Z0-9_]*(?:\.[a-zA-Z0-9_]+)?\s*\([^)]*\)\]?|'
+        r'\[?[a-zA-Z0-9_]+(?:\.[a-zA-Z0-9_]+)?\s*\((?=[^)]*["\'{},=])[^)]*\)\]?|'
         r'\[?(?:TOOL:[a-zA-Z0-9_]*:?\s*)?[A-Z_]+[：:]\s*[^\]]+\]?|'
         r'\[TOOL:[a-zA-Z0-9_]+\]\s*[^\[\]\n]*',
         flags=re.IGNORECASE | re.DOTALL
@@ -743,6 +747,7 @@ class TextCleanEngine:
         if not text:
             return ""
         t = text.replace("《", "").replace("》", "")
+        t = t.replace(";", "，")  # SoVITS 前端靜默吞半形分號，轉逗號保留斷句（2026-10-11）
         if for_chinese:
             t = cls._TIME_RE.sub(cls._time_zh, t)
         return t

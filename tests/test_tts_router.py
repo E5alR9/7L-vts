@@ -235,3 +235,26 @@ def test_short_audio_falls_back():
         t._active_engine = old_active
         t._engine_errors.clear()
         t._engine_errors.update(old_errors)
+
+
+# ── 工具調用剝離 vs 歌名保留（2026-10-11：world.execute(me) 被當函數吃掉）─────
+def test_tool_call_strip_keeps_song_titles():
+    from core.prompts import TextCleanEngine as C
+    # 歌名／自然文本：有括號也必須留活口
+    out = C.clean_for_tts("好喔，Mili - world.execute(me);背景準備中，好了就唱給你聽。")
+    assert "world.execute(me)" in out, out
+    assert ";" not in out and "，" in out  # 半形分號轉逗號不斷句
+    assert "hello(world)" in C.clean_for_tts("唱hello(world)吧")
+    # 真洩漏照殺：具名工具／蛇形名／參數像代碼
+    assert "auto_sing_song" not in C.clean_for_tts("來一首auto_sing_song({'song_name': '晴天'})吧")
+    assert "play_virtual_piano" not in C.clean_for_tts("[play_virtual_piano(123)]走起")
+    assert "foo_bar" not in C.clean_for_tts("測試foo_bar(baz)結束")
+    assert "search_google" not in C.clean_for_tts("查一下search_google(周杰倫)看看")
+    assert "f(" not in C.clean_for_tts('看看f("x", y)是什麼')
+    assert "set(" not in C.clean_for_tts("跑set(x=1)試試")
+
+
+def test_semicolon_becomes_pause():
+    from core.prompts import TextCleanEngine as C
+    assert C.normalize_spoken_form("a;b") == "a，b"
+    assert C.normalize_spoken_form("好喔，Mili - world.execute(me);背景") == "好喔，Mili - world.execute(me)，背景"

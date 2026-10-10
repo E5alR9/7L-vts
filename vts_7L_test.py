@@ -8858,6 +8858,16 @@ async def main():
             _pipe = local_xiaoyi_service.init_gpt_sovits()
             if _pipe:
                 log_print("🟢 [GPT-SoVITS 預熱完成] 7L 本地顯卡語音引擎已就緒！")
+                #  2026-10-11：只載權重不夠——首次推理要編 CUDA kernel＋cudnn 調優，
+                #  開播第一句曾吃 82 秒還撞上 Roformer 載入。開機先真跑一句短的，
+                #  把首次成本付在後台，別付在直播中。
+                try:
+                    import time as _t
+                    _t0 = _t.time()
+                    local_xiaoyi_service.synthesize_xiaoyi_bytes("你好呀")
+                    log_print(f"🟢 [GPT-SoVITS 首推預熱完成] 首次推理 {_t.time() - _t0:.1f}s（開播不會再吃首推懲罰）。")
+                except Exception as _w_err:
+                    log_print(f"⚠️ [GPT-SoVITS 首推預熱失敗（權重正常，首句可能較慢）]: {_w_err}")
             else:
                 log_print("⚠️ [GPT-SoVITS 預熱失敗] 初始化回傳空管線，曉伊引擎停用（自動降級其他引擎）。")
         except Exception as e:
