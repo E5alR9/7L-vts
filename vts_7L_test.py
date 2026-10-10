@@ -6769,6 +6769,7 @@ async def vts_health_worker(vts):
                         _VTS_LAST_RECONNECT_TIME = time.time()
                         _VTS_LAST_AUTH_TIME = time.time()
                         log_print("✅ [系統通知] VTube Studio 重新連線與授權成功！身體控制權已恢復！")
+                        asyncio.create_task(vc.sync_expression_state(vts))
                     except Exception as reconn_err:
                         log_print(f"⚠️ [VTS 重連失敗]: {reconn_err}")
                     finally:
@@ -9060,6 +9061,7 @@ async def main():
             await vts.request_authenticate_token()
             await vts.write_token()
         await vts.request_authenticate()
+        await vc.sync_expression_state(vts)
         await set_vts_expression(vts, "_RESET_")
         print("✅ 成功連接到 VTube Studio！\n")
         

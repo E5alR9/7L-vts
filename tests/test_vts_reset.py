@@ -80,3 +80,24 @@ def test_reset_clean_face_is_noop():
     fake = FakeVTS(active_files=())
     asyncio.run(v.set_vts_expression(fake, "_RESET_"))
     assert fake.deactivated == []
+
+
+def test_sync_seeds_book_from_face():
+    """開機同步：臉上有殘留→種回小本本，之後 toggle 不會反轉。"""
+    v.CURRENT_ACTIVE_EXPS = set()
+    fake = FakeVTS(active_files=("星星眼.exp3.json",))
+    got = asyncio.run(v.sync_expression_state(fake))
+    assert got == {"星星眼.exp3.json"}
+    assert v.CURRENT_ACTIVE_EXPS == {"星星眼.exp3.json"}
+
+
+def test_sync_clean_face_stays_empty():
+    v.CURRENT_ACTIVE_EXPS = set()
+    fake = FakeVTS(active_files=())
+    assert asyncio.run(v.sync_expression_state(fake)) == set()
+
+
+def test_sync_failure_keeps_book():
+    v.CURRENT_ACTIVE_EXPS = {"黑臉.exp3.json"}
+    fake = FakeVTS(active_files=(), fail_query=True)
+    assert asyncio.run(v.sync_expression_state(fake)) == {"黑臉.exp3.json"}

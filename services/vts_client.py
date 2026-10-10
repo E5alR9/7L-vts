@@ -858,6 +858,44 @@ async def set_vts_expression(vts, exp_tag, is_instinct=False):
     except Exception as e:
         log_print(f"\n❌ [表情系統] 發生錯誤: {e}")
 
+async def sync_expression_state(vts=None) -> set:
+    """開機/重連同步（2026-10-11：VTS 重開時表情殘留臉上，小本本卻是空的→幽靈不同步）。
+
+    問 VTS 臉上誰在，種回 CURRENT_ACTIVE_EXPS 並打出來。只同步不動臉
+    （要清臉請調 set_vts_expression(_RESET_)）。查不到就保持現狀、不炸。
+    回傳同步後的集合。
+    """
+    global CURRENT_ACTIVE_EXPS
+    try:
+        CURRENT_ACTIVE_EXPS
+    except NameError:
+        CURRENT_ACTIVE_EXPS = set()
+    target = vts or globals().get("GLOBAL_VTS")
+    if target is None:
+        return set(CURRENT_ACTIVE_EXPS)
+    try:
+        st = await asyncio.wait_for(target.request({
+            "apiName": "VTubeStudioPublicAPI", "apiVersion": "1.0", "requestID": "SyncExpState",
+            "messageType": "ExpressionStateRequest", "data": {"details": True}
+        }), timeout=1.5)
+        data = (st or {}).get("data", {}) or {}
+        on_face = set()
+        for e in data.get("expressions", []) or []:
+            if isinstance(e, dict) and e.get("active"):
+                f = e.get("file") or e.get("expressionFile", "")
+                if f and str(f).endswith(".exp3.json"):
+                    on_face.add(f)
+        CURRENT_ACTIVE_EXPS = on_face
+        if on_face:
+            log_print(f"🔄 [Live2D 表情] 開機同步：臉上還掛著 {', '.join(sorted(on_face))}（已同步進小本本）")
+        else:
+            log_print("🔄 [Live2D 表情] 開機同步：臉上乾淨，與小本本一致")
+        return set(on_face)
+    except Exception as e:
+        log_print(f"⚠️ [Live2D 表情] 開機同步查不到（保持現狀）: {e}")
+        return set(CURRENT_ACTIVE_EXPS)
+
+
 async def trigger_vts_expression(expression_name: str, is_instinct: bool = False) -> str:
     """切換 7L (Live2D 模型) 的臉部表情以表達情感或關閉表情。"""
     global GLOBAL_VTS
