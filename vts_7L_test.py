@@ -6701,22 +6701,34 @@ async def expression_keeper_worker(vts):
         except Exception:
             pass
 
-async def anti_watermark_worker(vts):
+WATERMARK_REASSERT_SEC = 60.0  # 水印守護間隔：每分鐘重申一次常駐（冪等，開著再開一次無害）
+
+
+async def anti_watermark_worker(vts, interval: float = WATERMARK_REASSERT_SEC):
+    """水印常駐守護（真 daemon）：開機 2 秒先開一次，之後每 interval 重申。
+    2026-10-11：之前只跑一次就結束，誰關掉水印就永遠掉。改迴圈，失敗靜默等下輪。"""
     await asyncio.sleep(2.0)
-    try:
-        async with vc.vts_lock:
-            await asyncio.wait_for(vts.request({
-                "apiName": "VTubeStudioPublicAPI",
-                "apiVersion": "1.0",
-                "requestID": "ActivateWatermark",
-                "messageType": "ExpressionActivationRequest",
-                "data": {
-                    "expressionFile": "水印.exp3.json", 
-                    "active": True                     
-                }
-            }), timeout=1.0)
-    except Exception: 
-        pass
+    while True:
+        try:
+            async with vc.vts_lock:
+                await asyncio.wait_for(vts.request({
+                    "apiName": "VTubeStudioPublicAPI",
+                    "apiVersion": "1.0",
+                    "requestID": "ActivateWatermark",
+                    "messageType": "ExpressionActivationRequest",
+                    "data": {
+                        "expressionFile": "水印.exp3.json",
+                        "active": True
+                    }
+                }), timeout=1.0)
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            pass
+        try:
+            await asyncio.sleep(interval)
+        except asyncio.CancelledError:
+            break
 
 # ────────────────────────────────────────────────────────
 
