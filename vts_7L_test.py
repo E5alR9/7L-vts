@@ -5338,9 +5338,14 @@ async def _slip_watchdog(prompt: str, sent_ts: float, timeout: float = 20.0):
 
     動作類紙條送出後 timeout 秒，主腦一次工具都沒調＝她沒理會（session 僵住、
     或當閒聊回掉），打一條警告讓人知道，而不是靜默丟失。
+    例外：紙條裡的歌 CPU 已經在唱／排隊＝活幹完了，主腦回不回話無所謂，直接收工。
     """
     await asyncio.sleep(timeout)
     try:
+        tool, args = parse_slip_for_song(prompt)
+        if tool and is_song_active((args or {}).get("song_name", "")):
+            log_print(f"📎 [紙條備註] 《{(args or {}).get('song_name', '')}》CPU 已在背景執行，主腦回不回話無所謂，看門狗收工。")
+            return
         if globals().get("LAST_BRAIN_TOOL_TS", 0.0) < sent_ts:
             log_print(f"⚠️ [紙條無回應] 主腦 {timeout:.0f} 秒沒理會紙條（{prompt[:40]}…）。"
                       f"可能 session 僵住或她當閒聊回掉；CPU 有直接執行的不受影響。")
