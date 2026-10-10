@@ -8834,8 +8834,11 @@ async def main():
     def _prewarm_xiaoyi():
         try:
             import local_xiaoyi_service
-            local_xiaoyi_service.init_gpt_sovits()
-            log_print("🟢 [GPT-SoVITS 預熱完成] 7L 本地顯卡語音引擎已就緒！")
+            _pipe = local_xiaoyi_service.init_gpt_sovits()
+            if _pipe:
+                log_print("🟢 [GPT-SoVITS 預熱完成] 7L 本地顯卡語音引擎已就緒！")
+            else:
+                log_print("⚠️ [GPT-SoVITS 預熱失敗] 初始化回傳空管線，曉伊引擎停用（自動降級其他引擎）。")
         except Exception as e:
             log_print(f"⚠️ [GPT-SoVITS 預熱跳過]: {e}")
     asyncio.create_task(asyncio.to_thread(_prewarm_xiaoyi))
