@@ -1032,6 +1032,8 @@ class SevenLMonitorApp {
       if (data && Array.isArray(data.recent_memory)) {
         this.loadConversationHistory(data.recent_memory);
       }
+      // 斷線重連會整盒重建（記憶快照沒有斷線期間的即時事件）——用後端附的重播補回來
+      this.replayMissedEvents(payload && payload.recent_events);
       if (data && Array.isArray(data.mind_board) && data.mind_board.length > 0) {
         data.mind_board.forEach(latestMind => {
           const mText = typeof latestMind === 'object' ? (latestMind.content || latestMind.text || '') : String(latestMind);
@@ -1313,6 +1315,40 @@ class SevenLMonitorApp {
     this.chatStream.appendChild(frag);
     this.renderVisionHistory();
     this.chatStream.scrollTop = this.chatStream.scrollHeight;
+  }
+
+  // 斷線重播：init 整盒重建後，把斷線期間漏掉的即時事件補回來。
+  // 後端 init 附 recent_events（最近 20），但記憶快照沒有這些；用已渲染文字去重。
+  replayMissedEvents(events) {
+    if (!Array.isArray(events) || events.length === 0 || !this.chatStream) return;
+    const rendered = new Set();
+    this.chatStream.querySelectorAll('.bubble-content').forEach((el) => {
+      const t = (el.textContent || '').trim();
+      if (t) rendered.add(t);
+    });
+    const isNew = (txt) => {
+      const t = (txt || '').trim();
+      if (!t) return false;
+      for (const r of rendered) {
+        if (r.includes(t) || t.includes(r)) return false;
+      }
+      return true;
+    };
+    for (const ev of events) {
+      if (!ev || !ev.data) continue;
+      try {
+        if (ev.type === 'chat_sent' && isNew(ev.data.text)) {
+          this.handleServerMessage(ev);
+        } else if (ev.type === 'ai_speech' && isNew(ev.data.text)) {
+          this.handleServerMessage(ev);
+        } else if (ev.type === 'tiktok_comment' && isNew(ev.data.text)) {
+          this.handleServerMessage(ev);
+        } else if (ev.type === 'tiktok_gift') {
+          const g = `送出 ${ev.data.count} 個 ${ev.data.gift_name}`;
+          if (isNew(`${ev.data.user} ${g}`)) this.handleServerMessage(ev);
+        }
+      } catch (e) {}
+    }
   }
 
   updateTelemetry(data) {
