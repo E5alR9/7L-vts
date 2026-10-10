@@ -1992,40 +1992,41 @@ async def play_piano_worker(song_title: str, sheet_text: str, bpm: int, mode: st
                     ]
                     current_piano_process = subprocess.Popen(piano_cmd)
                 
-                # IPC 無回執驗證（2026-10-11：子進程初始化中/殭屍時指令靜默丟失，視窗開著但沒聲）。
-                # 8 秒無開彈回報＋心跳也不新鮮＝聾了：重啟視窗→重發一次→再無就大聲報修並放行（不抱 285 秒）。
-                if not await wait_piano_sounding(session_id, timeout=8.0):
+                # IPC 無回執驗證（2026-10-11：子進程初始化中/Tk僵住時指令靜默丟失，視窗開著但沒聲；
+                # 心跳是獨立線程發的，心跳活著≠Tk還活著。15 秒無開彈回報就重啟重發，再無就大聲報修並放行）。
+                if not await wait_piano_sounding(session_id, timeout=15.0):
                     if session_id == PIANO_SESSION_ID and is_piano_active:
                         try:
                             hb_age = time.time() - (LAST_PIANO_HEARTBEAT_TIME or 0.0)
                         except Exception:
                             hb_age = 999.0
-                        if hb_age > 8.0:
-                            log_print("❌ [鋼琴無聲警報] IPC 8 秒無播放回報且無心跳，子進程疑似殭屍，重啟視窗重發！")
-                            if await revive_piano_window():
-                                if len(tracks_payload) > 1:
-                                    send_piano_ipc_command({
-                                        "cmd": "play_simultaneous",
-                                        "tracks": tracks_payload,
-                                        "volume": GLOBAL_PIANO_VOLUME,
-                                        "speed": GLOBAL_PIANO_SPEED
-                                    })
-                                else:
-                                    send_piano_ipc_command({
-                                        "cmd": "play",
-                                        "title": song_title,
-                                        "midi_path": midi_file,
-                                        "volume": GLOBAL_PIANO_VOLUME,
-                                        "speed": GLOBAL_PIANO_SPEED
-                                    })
-                                if not await wait_piano_sounding(session_id, timeout=8.0):
-                                    log_print("❌ [鋼琴無聲] 重啟重發仍無播放回報！請檢查子進程音訊輸出（音效卡獨佔/驅動）。本次放行，不抱著等。")
-                                    is_piano_active = False
+                        if hb_age > 15.0:
+                            _why = "無心跳，子進程疑似全死"
+                        else:
+                            _why = "有心跳但不開彈，Tk 線程疑似僵住"
+                        log_print(f"❌ [鋼琴無聲警報] IPC 15 秒無播放回報（{_why}），重啟視窗重發！")
+                        if await revive_piano_window():
+                            if len(tracks_payload) > 1:
+                                send_piano_ipc_command({
+                                    "cmd": "play_simultaneous",
+                                    "tracks": tracks_payload,
+                                    "volume": GLOBAL_PIANO_VOLUME,
+                                    "speed": GLOBAL_PIANO_SPEED
+                                })
                             else:
-                                log_print("❌ [鋼琴無聲] 視窗重啟失敗，本次放行。")
+                                send_piano_ipc_command({
+                                    "cmd": "play",
+                                    "title": song_title,
+                                    "midi_path": midi_file,
+                                    "volume": GLOBAL_PIANO_VOLUME,
+                                    "speed": GLOBAL_PIANO_SPEED
+                                })
+                            if not await wait_piano_sounding(session_id, timeout=15.0):
+                                log_print("❌ [鋼琴無聲] 重啟重發仍無播放回報！請檢查子進程音訊輸出（音效卡獨佔/驅動）。本次放行，不抱著等。")
                                 is_piano_active = False
                         else:
-                            log_print("⚠️ [鋼琴無聲观察] 有心跳但 8 秒未開彈（可能還在載入），繼續正常等待迴圈。")
+                            log_print("❌ [鋼琴無聲] 視窗重啟失敗，本次放行。")
+                            is_piano_active = False
                 # 🎹 即時鋼琴狀態驅動等待迴圈（以 UDP 即時播放狀態為第一優先，時間為極端斷線保底）
                 song_start_time = time.time()
                 has_started_playing = False
