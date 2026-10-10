@@ -215,6 +215,7 @@ def stop_singing():
     SONG_REQUEST_QUEUE.clear()
     READY_SONGS.clear()
     _ACTIVE_TITLES.clear()
+    _MIXED_RENDEZVOUS.clear()
     if n_q or n_r:
         print(f"🧹 [翻唱隊列] 已清空待播 {n_q} 首＋備好待播 {n_r} 首。")
     try:
@@ -268,6 +269,36 @@ def _dedupe_key(title: str) -> str:
 def is_song_active(song_name: str) -> bool:
     """這首歌是否已在唱／排隊／準備中（斷線救援用，避免重複排入）。"""
     return _dedupe_key(song_name) in _ACTIVE_TITLES
+
+_NOW_PLAYING_TITLE = ""  # 台上正在唱的歌名（混用鋼琴同步用：備好或開唱才跟著彈）
+
+# ── 混用會合（2026-10-11：邊彈邊唱要互相等）──
+# 鋼琴先開＋譜到手舉 piano 旗；翻唱備好（要開唱了）舉 sing 旗；兩旗都舉才同時放。
+# 任一超時就自己先上，絕不綁架對方。stop_singing 全清。
+_MIXED_RENDEZVOUS = {}  # dedupe_key(sing_title) -> {"piano": Event, "sing": Event}
+_MIXED_SING_WAIT_SEC = 300.0  # 翻唱等鋼琴上限（譜搜尋再慢也夠了）
+
+
+def arm_mixed_rendezvous(sing_title):
+    """混用開場：建會合點回傳。重複點同首直接覆蓋（去重保證同時只有一單）。"""
+    rv = {"piano": asyncio.Event(), "sing": asyncio.Event()}
+    _MIXED_RENDEZVOUS[_dedupe_key(sing_title)] = rv
+    return rv
+
+
+def disarm_mixed_rendezvous(sing_title):
+    _MIXED_RENDEZVOUS.pop(_dedupe_key(sing_title or ""), None)
+
+
+def cover_ready_or_playing(title: str) -> bool:
+    """這首翻唱是否已備好待播（READY_SONGS）或正在唱。混用時鋼琴等這個才開彈。"""
+    if not (title or "").strip():
+        return False
+    key = _dedupe_key(title)
+    for it in list(READY_SONGS):
+        if _dedupe_key((it or {}).get("title", "")) == key:
+            return True
+    return bool(_NOW_PLAYING_TITLE) and _dedupe_key(_NOW_PLAYING_TITLE) == key
 
 def _stage_busy() -> bool:
     """舞台是否有人在唱（含主核心同步過來的狀態）"""
@@ -382,12 +413,24 @@ async def _prepare_worker(item, gen: int):
 
 async def play_prepared_song(title: str, vocal_path: str, inst_path: str, gen: int) -> str:
     """播一首備好的歌：等開場白 → 世代檢查 → 開唱 → 謝幕紙條（含隊列深度）。"""
+    global _NOW_PLAYING_TITLE
     key = _dedupe_key(title)
     try:
         await wait_for_intro_speech_complete()
         if gen != _PIPELINE_GEN:
             print(f"🛑 [翻唱隊列] 《{title}》開唱前已被停止，跳過。")
             return f"《{title}》已停止，不開唱。"
+        _NOW_PLAYING_TITLE = title
+        # 混用會合：麥克風就位舉旗，等鋼琴旗（300 秒不到就自己先唱，不綁架）
+        _rv = _MIXED_RENDEZVOUS.pop(key, None)
+        if _rv is not None:
+            _rv["sing"].set()
+            print(f"🎤 [混用會合] 《{title}》麥克風就位，等鋼琴就位會合（最多 {_MIXED_SING_WAIT_SEC:.0f} 秒）...")
+            try:
+                await asyncio.wait_for(_rv["piano"].wait(), timeout=_MIXED_SING_WAIT_SEC)
+                print("🎤 [混用會合] 鋼琴就位，邊彈邊唱同步開演！")
+            except Exception:
+                print("⚠️ [混用會合] 等鋼琴超時/異常，先開唱，鋼琴隨後跟上。")
         await play_cover_audio(vocal_path, title, inst_path=inst_path)
     except asyncio.CancelledError:
         raise
@@ -395,6 +438,7 @@ async def play_prepared_song(title: str, vocal_path: str, inst_path: str, gen: i
         print(f"❌ [翻唱開唱異常] 《{title}》: {e}")
         return f"《{title}》開唱失敗，跳過。"
     finally:
+        _NOW_PLAYING_TITLE = ""
         _ACTIVE_TITLES.discard(key)
     if gen != _PIPELINE_GEN:
         return f"《{title}》已停止。"

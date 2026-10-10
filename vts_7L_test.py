@@ -2697,9 +2697,59 @@ async def _song_ack(song: str, target: str = "dad"):
         pass
 
 
+MIXED_PIANO_WAIT_SEC = 900.0  # 混用鋼琴等翻唱上限（RVC 慢，給足；掉隊/超時就自己先彈）
+
+
+async def _mixed_piano_run(piano_title: str, sing_title: str, target: str, requester: str):
+    """混用鋼琴側（2026-10-11：先開著等，兩邊備好同時放）。
+
+    1. 立刻開鋼琴視窗（開啟要時間）＋找本地譜 → 舉 piano 旗
+    2. 等翻唱舉 sing 旗（備好要開唱了）；掉隊/超時就自己先彈，不乾等
+    3. 開彈（有譜直彈，沒譜走正常搜譜流程）
+    """
+    import services.auto_cover_pipeline as ac
+    rv = ac.arm_mixed_rendezvous(sing_title)
+    midi_file = ""
+    try:
+        try:
+            await pe.open_virtual_piano()
+        except Exception as oe:
+            log_print(f"⚠️ [混用鋼琴] 開視窗失敗照跑: {oe}")
+        try:
+            midi_file, _ = await pe.resolve_local_midi_file(piano_title)
+        except Exception:
+            midi_file = ""
+        rv["piano"].set()
+        log_print(f"🎹 [混用會合] 鋼琴就位（視窗開＋{'譜到手' if midi_file else '譜待搜'}），等麥克風就位...")
+        waited = 0.0
+        while waited < MIXED_PIANO_WAIT_SEC:
+            try:
+                if rv["sing"].is_set():
+                    break
+                if not ac.is_song_active(sing_title) and not ac.cover_ready_or_playing(sing_title):
+                    log_print(f"⚠️ [混用會合] 翻唱掉隊（失敗/取消），鋼琴自己先彈。")
+                    break
+            except Exception:
+                break
+            await asyncio.sleep(5.0)
+            waited += 5.0
+        else:
+            log_print(f"⚠️ [混用會合] 等翻唱超時，先開彈。")
+    except Exception as e:
+        log_print(f"⚠️ [混用鋼琴異常]: {e}")
+    try:
+        await pe.play_virtual_piano(piano_title, midi_file=midi_file or "",
+                                    requester_name=requester, target=target,
+                                    is_direct_song_name=True)
+    except Exception as e:
+        log_print(f"❌ [混用鋼琴開彈失敗]: {e}")
+
+
 async def _wait_speech_done(timeout_sec: float = 30.0):
     """等語音佇列播完（佇列空＋無播放中任務）；超時放行，避免卡死。"""
     for _ in range(int(timeout_sec * 2)):
+    
+    
         task = globals().get("CURRENT_PLAYING_VOICE_TASK")
         playing = bool(task and not task.done())
         try:
@@ -8113,9 +8163,15 @@ async def background_tool_executor(user_text: str, target: str = "dad", requeste
             except Exception:
                 _mixed = []
             if _mixed:
+                # 鋼琴走會合（先開等翻唱），唱歌走正常管線；兩張紙條照發
+                _sing_title = next((a.get("song_name", "") for t, a in _mixed if t in ("auto_sing_song", "sing_song")), "")
                 for _tool, _args in _mixed:
                     log_print(f"⚡ [CPU 硬體直連] 成功攔截混用指令: {_tool}({_args})")
-                    asyncio.create_task(execute_tool_dispatch(_tool, _args, caller_target=target, caller_user=requester_name))
+                    if _tool in ("pe.play_virtual_piano", "play_virtual_piano"):
+                        asyncio.create_task(_mixed_piano_run(
+                            _args.get("song_name", ""), _sing_title, target, requester_name))
+                    else:
+                        asyncio.create_task(execute_tool_dispatch(_tool, _args, caller_target=target, caller_user=requester_name))
                     _slip = build_slip_text(_tool, _args, requester_name)
                     if _slip and is_live_brain_active():
                         try:

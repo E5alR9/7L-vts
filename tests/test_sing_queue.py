@@ -10,6 +10,8 @@ def _clean_state():
     acp.SONG_REQUEST_QUEUE.clear()
     acp.READY_SONGS.clear()
     acp._ACTIVE_TITLES.clear()
+    acp._MIXED_RENDEZVOUS.clear()
+    acp._NOW_PLAYING_TITLE = ""
     acp._PIPELINE_GEN = 0
     acp._ORCH_TASK = None
     acp._PREPARE_TASK = None
@@ -18,6 +20,8 @@ def _clean_state():
     acp.SONG_REQUEST_QUEUE.clear()
     acp.READY_SONGS.clear()
     acp._ACTIVE_TITLES.clear()
+    acp._MIXED_RENDEZVOUS.clear()
+    acp._NOW_PLAYING_TITLE = ""
     acp.IS_SINGING_ACTIVE = False
 
 
@@ -76,3 +80,40 @@ def test_stop_clears_queues_and_bumps_gen():
     assert len(acp.READY_SONGS) == 0
     assert len(acp._ACTIVE_TITLES) == 0
     assert acp.IS_SINGING_ACTIVE is False
+
+
+def test_cover_ready_or_playing():
+    """混用會合判定：備好待播或正在唱才算數，排隊/準備中不算（鋼琴會等太早）。"""
+    assert not acp.cover_ready_or_playing("晴天")
+    assert not acp.cover_ready_or_playing("")
+    acp.request_cover_song("晴天", "老爸")  # 只進隊列＋準備中
+    assert not acp.cover_ready_or_playing("晴天")
+    acp.READY_SONGS.append({"title": "晴天", "vocal": "v", "inst": "i",
+                            "requester": "", "gen": 0})
+    assert acp.cover_ready_or_playing("晴天")
+    assert acp.cover_ready_or_playing("晴天 ")  # 空白模糊命中
+    acp.READY_SONGS.clear()
+    acp._NOW_PLAYING_TITLE = "晴天"
+    try:
+        assert acp.cover_ready_or_playing("晴天")
+        assert not acp.cover_ready_or_playing("月光")
+    finally:
+        acp._NOW_PLAYING_TITLE = ""
+
+
+def test_mixed_rendezvous_lifecycle():
+    """會合點：開場建旗→鋼琴舉旗→翻唱側取出（一次性）→stop全清。"""
+    rv = acp.arm_mixed_rendezvous("晴天")
+    assert not rv["piano"].is_set() and not rv["sing"].is_set()
+    rv["piano"].set()
+    rv["sing"].set()
+    # 模擬翻唱開唱時的取出（一次性，取走就沒了）
+    key = acp._dedupe_key("晴天")
+    got = acp._MIXED_RENDEZVOUS.pop(key, None)
+    assert got is rv
+    assert acp._MIXED_RENDEZVOUS.pop(key, None) is None
+    # stop 清場
+    acp.arm_mixed_rendezvous("月光")
+    acp.stop_singing()
+    assert len(acp._MIXED_RENDEZVOUS) == 0
+    acp.disarm_mixed_rendezvous("不存在的歌")  # 不炸
