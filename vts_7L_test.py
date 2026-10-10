@@ -1457,8 +1457,9 @@ async def fetch_ai_response(messages, image_base64=None, audio_base64=None, is_p
 
     #  第零防線：Groq 極速前鋒（純文字請求；實測 0.4s 級）
     #   有圖片/音訊的多模態請求直接跳過，交給 Gemini 視覺與音訊管線。
-    #   模型若想呼叫工具：工具照常背景派發，但只有當它同時產出口語台詞才採用，
-    #   否則回退到下方 Gemini 完整管線（含 Function Response 第二輪）。
+    #   Groq 不傳 tools（實戰證明它家工具調用不可靠：白燒 token 不說，
+    #   回來的 function_calls 還可能是幻覺，派發出去會誤觸真工具）。
+    #   要調工具一律走下方 Gemini 完整管線。
     if not is_mouth_stream and not image_base64 and not audio_base64:
         try:
             from core.groq_router import groq_chat, contents_to_messages
@@ -1466,15 +1467,11 @@ async def fetch_ai_response(messages, image_base64=None, audio_base64=None, is_p
             if g_msgs:
                 g_t0 = time.time()
                 g_resp = await groq_chat(
-                    g_msgs, tools=INTERACTIONS_TOOLS,
+                    g_msgs,
                     temperature=0.8, max_tokens=900, timeout=8.0,
                 )
-                if g_resp and (g_resp.text or g_resp.function_calls):
+                if g_resp and g_resp.text:
                     g_text = (g_resp.text or "").strip()
-                    if g_resp.function_calls:
-                        for g_fc in g_resp.function_calls:
-                            log_print(f"🛠️ [Groq 前鋒調用工具] {g_fc.name}({g_fc.args})")
-                            asyncio.create_task(execute_tool_dispatch(g_fc.name, g_fc.args, caller_target="dad", caller_user="老爸"))
                     if g_text:
                         g_dur = time.time() - g_t0
                         total_duration = time.time() - overall_start_time
@@ -1741,24 +1738,16 @@ async def fetch_fast_text_reply(user_input: str, custom_name: str, situation_pro
 </immediate_task>
 """
 
-    # 0.  絕對第一優先：Groq 極速前鋒（實測 0.4s 級；純文字 + 工具直答，失敗才交給 Gemini）
-    #    視覺/音訊等多模態請求不會走到這裡（本函式僅接收文字 prompt）
+    # 0.  絕對第一優先：Groq 極速前鋒（實測 0.4s 級；純文字反射，工具一律走下方 Gemini）
+    #    Groq 不傳 tools（實戰工具調用不可靠）；視覺/音訊等多模態請求不會走到這裡
     try:
         from core.groq_router import groq_chat
         g_resp = await groq_chat(
             [{"role": "user", "content": prompt}],
-            tools=INTERACTIONS_TOOLS,
             temperature=0.75, max_tokens=500, timeout=4.0,
         )
-        if g_resp and (g_resp.text or g_resp.function_calls):
+        if g_resp and g_resp.text:
             txt = (g_resp.text or "").strip()
-            if g_resp.function_calls:
-                fast_target = "audience" if tt_parsed else "dad"
-                fast_user = audience_user if tt_parsed else "老爸"
-                for fc in g_resp.function_calls:
-                    log_print(f"🛠️ [Groq 極速大腦調用工具] {fc.name}({fc.args})")
-                    asyncio.create_task(execute_tool_dispatch(fc.name, fc.args, caller_target=fast_target, caller_user=fast_user))
-                    txt += f" [OUTCOME: {fc.name}({fc.args})] [HAD_TOOL_CALL]"
             if txt:
                 dur = time.time() - start_t
                 return (txt, f"Groq/{g_resp.model.split('/')[-1]}", dur)
@@ -1980,7 +1969,6 @@ async def call_gemini_live_audience_reply(vts, input_queue, audience_user: str, 
             from core.groq_router import groq_chat
             g_resp = await groq_chat(
                 [{"role": "user", "content": f"{sys_instruction_with_100m}\n\n{prompt_user_input}"}],
-                tools=INTERACTIONS_TOOLS,
                 temperature=0.78, max_tokens=500, timeout=4.5,
             )
             if g_resp and g_resp.text and not g_resp.function_calls:
@@ -7536,7 +7524,6 @@ async def streamer_mind_loop_worker(vts, input_queue):
                 from core.groq_router import groq_chat
                 g_resp = await groq_chat(
                     [{"role": "user", "content": f"{sys_instruction}\n\n{prompt_user_input}"}],
-                    tools=INTERACTIONS_TOOLS,
                     temperature=0.78, max_tokens=500, timeout=4.5,
                 )
                 if g_resp and g_resp.text and not g_resp.function_calls:
