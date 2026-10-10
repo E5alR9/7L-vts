@@ -8081,6 +8081,32 @@ async def background_tool_executor(user_text: str, target: str = "dad", requeste
         # 執行配對到的指令（沒命中就直接返回；AI 解讀交給 A 架構）
         # 回傳 (是否命中, 工具名, 參數)，供 invoke_subagent handler 誠實回報
         slip_text = ""
+        # 混用優先（彈X加唱Y）：兩路都跑、兩張紙條；失敗退回單句
+        try:
+            from core.hard_command import parse_mixed_command as _parse_mixed
+        except Exception:
+            _parse_mixed = None
+        if _parse_mixed:
+            try:
+                _mixed = _parse_mixed(user_text)
+            except Exception:
+                _mixed = []
+            if _mixed:
+                for _tool, _args in _mixed:
+                    log_print(f"⚡ [CPU 硬體直連] 成功攔截混用指令: {_tool}({_args})")
+                    asyncio.create_task(execute_tool_dispatch(_tool, _args, caller_target=target, caller_user=requester_name))
+                    _slip = build_slip_text(_tool, _args, requester_name)
+                    if _slip and is_live_brain_active():
+                        try:
+                            LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait(_slip)
+                            log_print(f"📥 [黑板同步] 透過紙條傳送給 Live 大腦: {_slip[:60]}...")
+                        except Exception as _e:
+                            log_print(f"⚠️ [平行副腦紙條傳遞失敗]: {_e}")
+                _titles = "＋".join([a.get("song_name", "") for _, a in _mixed])
+                _same = len({a.get("song_name", "") for _, a in _mixed}) == 1
+                _ack_song = f"{_mixed[0][1].get('song_name', '')}（邊彈邊唱）" if _same else f"{_titles}（混用）"
+                asyncio.create_task(_song_ack(_ack_song, target))
+                return True, "mixed_play_sing", {"desc": _titles}
         if fn_name:
             log_print(f"⚡ [CPU 硬體直連] 成功攔截指令: {fn_name}({fn_args})")
             # CPU 只認點歌：一律走背景執行＋紙條（表情不歸 CPU，交主腦/A 架構）

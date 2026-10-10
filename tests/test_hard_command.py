@@ -2,7 +2,8 @@
 """core.hard_command — CPU 硬指令拆解精度（2026-10-09 直播誤觸回歸）"""
 from conftest import ROOT  # noqa: F401
 from core.hard_command import (
-    extract_sing_song, extract_piano_song, parse_hard_command, build_slip_text,
+    extract_sing_song, extract_piano_song, parse_hard_command, parse_mixed_command,
+    build_slip_text,
     display_requester, parse_slip_for_song,
     strip_blob_noise, sanitize_search_query,
 )
@@ -187,6 +188,25 @@ def test_japanese_titles_hit():
     assert tool == "auto_sing_song" and args["song_name"] == "Катюша"
     tool, args = parse_hard_command("唱 봄날")
     assert tool == "auto_sing_song" and args["song_name"] == "봄날"
+
+
+def test_mixed_play_sing():
+    """2026-10-11 直播事故：「彈晴天加唱晴天」被當成一首爛歌名拿去搜譜全滅。"""
+    mx = parse_mixed_command("彈晴天加唱晴天")
+    assert mx == [("pe.play_virtual_piano", {"song_name": "晴天"}),
+                  ("auto_sing_song", {"song_name": "晴天"})]
+    mx = parse_mixed_command("唱晴天加彈月光")
+    assert mx == [("auto_sing_song", {"song_name": "晴天"}),
+                  ("pe.play_virtual_piano", {"song_name": "月光"})]
+    # 非混用退回空（調用方走單句）
+    assert parse_mixed_command("彈 Hungarian Rhapsody No.2") == []
+    assert parse_mixed_command("唱晴天") == []
+    assert parse_mixed_command("他彈晴天加唱月光") == []  # 第三人稱不碰
+    assert parse_mixed_command("別彈晴天加唱月光") == []  # 否定不碰
+    assert parse_mixed_command("彈歌加唱舞") == []  # 兩邊有一邊不是歌名就整單退回
+    # 救援只救唱歌那路
+    assert parse_slip_for_song("[文字輸入] 老爸：彈晴天加唱晴天") == (
+        "auto_sing_song", {"song_name": "晴天"})
     tool, args = parse_hard_command("唱 ชีวิต")
     assert tool == "auto_sing_song" and args["song_name"] == "ชีวิต"
     assert parse_hard_command("唱 ？！") == (None, {})

@@ -172,10 +172,46 @@ def extract_piano_song(text: Optional[str]) -> Optional[str]:
     return _scan(text or "", _PIANO_KW, _NEG_PIANO)
 
 
+# 混用連接詞（彈X加唱Y / 唱X再彈Y）：兩邊都必須是乾淨歌名，否則退回單句拆解
+_MIXED_SEP = r'(?:加|和|跟|與|再|還有|、|＋|\+|;|；)'
+_MIXED_PATTERNS = [
+    (re.compile(r'彈(.+?)' + _MIXED_SEP + r'唱(.+)', re.DOTALL),
+     ("pe.play_virtual_piano", "auto_sing_song")),
+    (re.compile(r'唱(.+?)' + _MIXED_SEP + r'彈(.+)', re.DOTALL),
+     ("auto_sing_song", "pe.play_virtual_piano")),
+]
+
+
+def parse_mixed_command(text: Optional[str]) -> list:
+    """混用點歌拆解：「彈晴天加唱晴天」→ [(彈琴, 晴天), (唱歌, 晴天)]。
+
+    兩段都必須通過 _clean_title（寧可漏判不誤觸）；失敗回 []，調用方退回單句。
+    不含否定句（別彈別唱一律不碰）。
+    """
+    s = (text or "").strip()
+    if not s or _NEG_SING.search(s) or _NEG_PIANO.search(s):
+        return []
+    for pat, (tool1, tool2) in _MIXED_PATTERNS:
+        m = pat.search(s)
+        if not m:
+            continue
+        # 句首門：整句開頭必須是祈使（跟 _scan 同一套）
+        if not _LEAD_OK.match(s[:m.start()]):
+            continue
+        t1 = _clean_title(_take_candidate(m.group(1)))
+        t2 = _clean_title(_take_candidate(m.group(2)))
+        if not t1 or not t2:
+            continue
+        key1 = "song_name"
+        return [(tool1, {key1: t1}), (tool2, {key1: t2})]
+    return []
+
+
 def parse_hard_command(text: Optional[str]) -> Tuple[Optional[str], Dict]:
     """B 架構入口：把純文字拆成 (工具名, 參數)。
 
     只認點歌（唱歌/彈琴）。表情不歸 CPU（交還主腦/A 架構，避免誤觸搶戲）。
+    混用句（彈X加唱Y）走 parse_mixed_command，不在這裡處理。
     回 (None, {}) 代表無硬指令，交還主腦（絕不在此呼叫任何 API）。
     """
     song = extract_sing_song(text)
@@ -237,6 +273,10 @@ def parse_slip_for_song(prompt: Optional[str]):
         return None, {}
     tool, args = parse_hard_command(msg)
     if tool not in ("auto_sing_song", "sing_song"):
+        # 混用句（彈X加唱Y）：只救唱歌那路，鋼琴爛名不碰
+        for t, a in parse_mixed_command(msg):
+            if t in ("auto_sing_song", "sing_song") and (a or {}).get("song_name"):
+                return t, a
         return None, {}
     if not (args or {}).get("song_name"):
         return None, {}
