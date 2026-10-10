@@ -257,8 +257,9 @@ async def transcribe_song(url_or_id: str, title: str = "") -> dict:
     stem = await __import__("asyncio").to_thread(separate_vocals, audio)
     melody = await __import__("asyncio").to_thread(transcribe_melody, stem)
     chords = await __import__("asyncio").to_thread(detect_chords, audio)
+    import asyncio as _aio
     name = (title or f"score_{vid}").strip()
-    f = write_score_midi(name, melody, chords)
+    f = await _aio.to_thread(write_score_midi, name, melody, chords)
     if not f:
         return {"ok": False, "error": "出譜失敗"}
     log_print(f"🎧 [逆向譜面] 完成：{len(melody)} 音符＋{len(chords)} 和弦 → {os.path.basename(f)}")

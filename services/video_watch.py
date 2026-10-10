@@ -181,25 +181,28 @@ async def digest_video(video_id: str, requester: str) -> dict:
         if audio:
             try:
                 from services.stt import _transcribe_faster
-                text = await asyncio.to_thread(_transcribe_faster, open(audio, "rb").read())
+                # 讀檔＋轉錄整包扔線程池：open().read() 在 loop 線程會先卡住
+                text = await asyncio.to_thread(
+                    lambda p=audio: _transcribe_faster(open(p, "rb").read()))
                 src_note = "音軌轉錄"
             except Exception:
                 pass
     frames_desc = ""
     vpath = ""
-    for f in sorted(os.listdir(WATCH_DIR)):
-        if f.startswith(video_id) and f.endswith((".mp4", ".webm", ".mkv")):
-            vpath = os.path.join(WATCH_DIR, f)
-            break
-    if not vpath:
+    # 掃碟＋yt-dlp 下載（最長 900 秒）整包扔線程池，絕不能在 loop 線程跑
+    def _find_or_download():
+        for f in sorted(os.listdir(WATCH_DIR)):
+            if f.startswith(video_id) and f.endswith((".mp4", ".webm", ".mkv")):
+                return os.path.join(WATCH_DIR, f)
         out = os.path.join(WATCH_DIR, video_id)
         rc, _ = _run([sys.executable, "-m", "yt_dlp", "-f", "bv*[height<=480]+ba/b[height<=480]/b",
                       "--no-playlist", "-o", out, f"https://www.youtube.com/watch?v={video_id}"], timeout=900)
         if rc == 0:
             for f in sorted(os.listdir(WATCH_DIR)):
                 if f.startswith(video_id) and f.endswith((".mp4", ".webm", ".mkv")):
-                    vpath = os.path.join(WATCH_DIR, f)
-                    break
+                    return os.path.join(WATCH_DIR, f)
+        return ""
+    vpath = await asyncio.to_thread(_find_or_download)
     if vpath:
         frames = await asyncio.to_thread(extract_frames, video_id, vpath)
         if frames:
@@ -208,8 +211,12 @@ async def digest_video(video_id: str, requester: str) -> dict:
                 from vts_7L_test import get_lightweight_gemini_vision  # lazy：主程式才有
                 descs = []
                 for fp in frames[::max(1, len(frames) // 12)][:12]:
-                    with open(fp, "rb") as fh:
-                        b64 = base64.b64encode(fh.read()).decode()
+                    import base64 as _b64
+
+                    def _read_b64(p=fp):
+                        with open(p, "rb") as fh:
+                            return _b64.b64encode(fh.read()).decode()
+                    b64 = await asyncio.to_thread(_read_b64)
                     d = await get_lightweight_gemini_vision(b64)
                     if d:
                         descs.append(d)

@@ -146,9 +146,9 @@ async def build_pack(url_or_id: str) -> dict:
     if "vocals" in stems:
         slowed = await asyncio.to_thread(make_slowed, stems["vocals"], vid, 0.75)
     chords = await asyncio.to_thread(ats.detect_chords, audio, 4.0)
-    chord_txt = write_chords_txt(vid, chords)
+    chord_txt = await asyncio.to_thread(write_chords_txt, vid, chords)
     melody = await asyncio.to_thread(ats.transcribe_melody, stems.get("vocals", audio))
-    midi = ats.write_score_midi(f"{vid}_melody", melody, [])
+    midi = await asyncio.to_thread(ats.write_score_midi, f"{vid}_melody", melody, [])
     log_print(f"🎸 [扒帶包] 完成：{len(stems)} 軌＋卡拉＋降速＋{len(chords)} 和弦＋{len(melody)} 旋律音")
     return {"ok": True, "dir": pack_path(vid), "stems": sorted(stems),
             "karaoke": karaoke, "slowed": slowed, "chords_txt": chord_txt,
