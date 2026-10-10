@@ -239,15 +239,13 @@ def test_mixed_play_sing():
     assert tool == "auto_sing_song" and args["song_name"] == "ชีวิต"
     assert parse_hard_command("唱 ？！") == (None, {})
     assert parse_hard_command("唱 。。。") == (None, {})
-    # 句尾搭訕剝離（2026-10-11：唱放個大招給你看→放個大招）
+    # 句尾不剝（2026-10-11 教訓：真歌名就叫《放個大招給你看》；YT 模糊搜尋容忍多餘字，整串拿去搜）
     assert parse_hard_command("唱放個大招給你看") == (
-        "auto_sing_song", {"song_name": "放個大招"})
+        "auto_sing_song", {"song_name": "放個大招給你看"})
     assert parse_hard_command("唱晴天聽聽看") == (
-        "auto_sing_song", {"song_name": "晴天"})
+        "auto_sing_song", {"song_name": "晴天聽聽看"})
     assert parse_hard_command("彈月光給我聽") == (
-        "pe.play_virtual_piano", {"song_name": "月光"})
-    assert parse_hard_command("唱放個大招給你看看吧") == (
-        "auto_sing_song", {"song_name": "放個大招"})
+        "pe.play_virtual_piano", {"song_name": "月光給我聽"})
 
 
 # --- 表情不歸 CPU（紙條分支保留給 A 架構 NV 用）---

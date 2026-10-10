@@ -23,9 +23,8 @@ _TRAIL_JUNK = re.compile(r'[?？!！。，,、；;：:\s~～…]+$')
 _TRAIL_MODAL = re.compile(r'(?:嗎|嘛|啊|吧|呢|喔|哦|呀|啦|嘿|哟|哈|唄|噢|喲|唷)+$')
 # ⚠️ 體貌字（了/完/過）**常常就在歌名裡**（《沒離開過》《錯過》《散了》），
 # 而且字面上無法和「唱晴天了」區分——一律不剝，避免把真歌名削壞。
-# 句尾搭訕（給你看/聽聽看…）：點歌常夾著說話（唱放個大招給你看），歌名在前、搭訕在後。
-# 跟語氣詞同一手法：先試剝掉，不合格退回原文（真歌名萬一長這樣也不會被削壞）。
-_TRAIL_CHATTER = re.compile(r'(?:給你看|給我聽|給大家聽|給大家看看|聽聽看|聽一下|來聽聽|唱來聽聽|播來聽聽|表演一下|(?<=你看)看|(?<!你)看看|看一下)$')
+# （2026-10-11 教訓：曾試剝句尾搭訕「給你看」，結果真歌名就叫《放個大招給你看》；
+# CPU 無法區分搭訕和歌名，YT 模糊搜尋本來就容忍多餘字——寧可整串拿去搜，不要自作聰明削。）
 _LEAD_QUANTITY = re.compile(r'^(?:一首|兩首|三首|點一首|來一首)')
 _LEAD_MEASURE = re.compile(r'^[:：\s]+')
 
@@ -139,14 +138,7 @@ def _clean_title(raw: Optional[str]) -> Optional[str]:
     if _GENERIC.search(t0):
         return None
     base = _LEAD_QUANTITY.sub('', t0).strip()
-    # 搭訕可能疊兩層（給你看看吧→看看→給你看），迭代剝到不動為止，最多 3 輪
-    stripped = base
-    for _ in range(3):
-        ns = _TRAIL_CHATTER.sub('', _TRAIL_MODAL.sub('', stripped))
-        if ns == stripped:
-            break
-        stripped = ns
-    for cand in (stripped, _TRAIL_MODAL.sub('', base), base):
+    for cand in (_TRAIL_MODAL.sub('', base), base):
         if cand and _title_ok(cand):
             return cand
     return None
