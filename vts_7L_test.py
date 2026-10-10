@@ -8281,6 +8281,15 @@ async def execute_punish_action(reason: str = "", is_severe: bool = None):
         #  0 秒即時強制掐斷當前正在播出的任何長語音，清空排隊，讓位給秒級觸電反應！
         await interrupt_current_speech(clear_queue=True, reason="老爸電擊即時打斷")
 
+        #  唱歌中被電：當首停掉（被電到唱不下去），排隊保留；口型同步歸位給尖叫
+        try:
+            import services.auto_cover_pipeline as ac
+            if ac.IS_SINGING_ACTIVE:
+                ac.stop_current_song()
+                log_print("🛑 [電擊中斷] 演唱中被電擊，當首停止（排隊保留）。")
+        except Exception:
+            pass
+
         target_vts = vc.GLOBAL_VTS
         if target_vts:
             try:

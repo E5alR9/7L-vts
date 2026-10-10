@@ -236,6 +236,40 @@ def stop_singing():
         setattr(core_vts, "CURRENT_SPEECH_START_TIME", 0.0)
     print("🛑 [7L 翻唱] 已成功手動停止歌聲與伴奏播放。")
 
+
+def stop_current_song() -> bool:
+    """只停當首（電擊打斷用）：停音訊＋清口型＋放掉舞台，隊列保留下一首照排。
+    回 True=當時確實在唱。"""
+    global IS_SINGING_ACTIVE, _NOW_PLAYING_TITLE, _PLAY_TASK
+    was = bool(IS_SINGING_ACTIVE or _NOW_PLAYING_TITLE or
+               (_PLAY_TASK is not None and not _PLAY_TASK.done()))
+    if not was:
+        return False
+    try:
+        if _PLAY_TASK is not None and not _PLAY_TASK.done():
+            _PLAY_TASK.cancel()
+    except Exception:
+        pass
+    IS_SINGING_ACTIVE = False
+    _NOW_PLAYING_TITLE = ""
+    try:
+        if pygame.mixer.get_init():
+            pygame.mixer.Channel(6).stop()
+            pygame.mixer.Channel(7).stop()
+    except Exception:
+        pass
+    core_vts = get_core_vts()
+    if core_vts:
+        setattr(core_vts, "IS_SINGING_ACTIVE", False)
+        setattr(core_vts, "IS_MP3_PLAYING", False)
+        if getattr(core_vts, "current_ai_state", "") == "SINGING":
+            setattr(core_vts, "current_ai_state", "IDLE")
+        setattr(core_vts, "CURRENT_MOUTH_ENVELOPE", [])
+        setattr(core_vts, "CURRENT_SMOOTH_MOUTH", 0.0)
+        setattr(core_vts, "CURRENT_SPEECH_START_TIME", 0.0)
+    print("🛑 [7L 翻唱] 電擊打斷：當首停止（排隊保留）。")
+    return True
+
 async def wait_for_intro_speech_complete():
     """等候 7L 大腦完成開場白發話，再銜接翻唱開唱"""
     core_vts = get_core_vts()
