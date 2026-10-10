@@ -6562,7 +6562,8 @@ def _background_busy() -> bool:
 
 
 def _busy_face_action(busy: bool, owned: bool, active_files, halo_file: str):
-    """忙碌臉決策（純函數）：回 (動作, 新owned)，動作 ∈ {"set","reset","none"}。
+    """
+    忙碌臉決策（純函數）：回 (動作, 新owned)，動作 ∈ {"set","reset","none"}。
     原則：忙了掛暈、閒了摘自己掛的；臉有別的戲絕不搶。"""
     halo_on = bool(halo_file) and halo_file in (active_files or set())
     others = bool(set(active_files or set()) - ({halo_file} if halo_file else set()))
@@ -6577,10 +6578,21 @@ def _busy_face_action(busy: bool, owned: bool, active_files, halo_file: str):
     return "none", False
 
 
+def _grace_busy(busy: bool, busy_since, now: float, grace: float = 5.0):
+    """5 秒寬限（純函數）：活要連續忙滿 grace 秒才算真忙，短活閃一下不掛臉。
+    回 (effective_busy, new_busy_since)。"""
+    if busy:
+        if busy_since is None:
+            return False, now
+        return (now - busy_since) >= grace, busy_since
+    return False, None
+
+
 async def busy_expression_worker():
     """忙碌指示：背景有活就掛暈（思考中），閒了摘掉。
-    表演中/睡覺不碰；臉有別的戲不搶；只摘自己掛的暈。"""
+    表演中/睡覺不碰；臉有別的戲不搶；只摘自己掛的暈；活要連忙 5 秒才掛（防閃爍）。"""
     owned = False
+    busy_since = None
     while True:
         await asyncio.sleep(2.0)
         try:
@@ -6593,6 +6605,8 @@ async def busy_expression_worker():
             if _rp:
                 continue
             busy = _background_busy()
+            import time as _t
+            busy, busy_since = _grace_busy(busy, busy_since, _t.time())
             try:
                 import services.vts_client as vc
                 halo = vc.VTS_EXPRESSION_MAP.get("暈")
