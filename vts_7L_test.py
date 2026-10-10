@@ -583,6 +583,7 @@ from core.llm_engine import (
     GROQ_CLIENTS,
     DualHotStandbyLiveManager,
     get_dynamic_live_key_candidates,
+    track_key, sort_keys_by_load, key_load,
     UNRESTRICTED_SAFETY_SETTINGS
 )
 from core.memory import init_unified_memory, fetch_from_long_term_memory, save_to_long_term_memory, append_to_unified_memory, clear_all_memories, get_recent_100_memory_context, get_viewer_profile, save_viewer_profile, record_bot_message, get_cloud_knowledge, update_cloud_prompt_field, UNIFIED_LIVE_MEMORY, UNIFIED_DIALOGUE_MEMORY, TIKTOK_CHATROOM_MEMORY, STREAMER_MIND_BOARD, DEFAULT_CHANNEL_ID, save_cloud_knowledge, get_unified_memory_context, RECENT_BOT_MESSAGES, evaluate_memory_demand, MemoryDemandLevel, USER_PROFILE_FILE, MODE
@@ -694,6 +695,8 @@ def get_available_gemini_channels(limit=1, user_query="", has_image=False, is_pr
         valid_models = [m for m in GEMINI_MODELS if m not in DEAD_GEMINI_MODELS]
         
     ring_indices = get_pingpong_ring_indices(num_keys, CURRENT_GEMINI_KEY_STEP)
+    #  同斥分散：同一個 key 不被多工具同時打，空閒優先（只排序不阻擋，全忙照打）
+    ring_indices = sorted(ring_indices, key=lambda i: key_load(target_keys[i]))
     
     #  階梯升級輪派策略：依序為各階模型挑選最優可用金鑰，每次失敗或超時立即升級至下一階更高級模型！
     for m_idx, g_model in enumerate(valid_models):
@@ -1114,10 +1117,11 @@ async def get_lightweight_gemini_vision(image_base64: str, temporal_frames: list
             client = genai.Client(api_key=g_key)
             for model_name in GEMINI_MODELS:
                 try:
-                    resp = await asyncio.wait_for(
-                        client.aio.models.generate_content(
-                            model=model_name,
-                            contents=[types.Content(role="user", parts=all_parts)],
+                    async with track_key(g_key):
+                        resp = await asyncio.wait_for(
+                            client.aio.models.generate_content(
+                                model=model_name,
+                                contents=[types.Content(role="user", parts=all_parts)],
                             config=types.GenerateContentConfig(
                                 temperature=0.2,
                                 safety_settings=UNRESTRICTED_SAFETY_SETTINGS
@@ -1280,14 +1284,15 @@ async def fetch_ai_response(messages, image_base64=None, audio_base64=None, is_p
             gen_config = types.GenerateContentConfig(**config_kwargs)
 
             #  放寬單通道等待時間至 120 秒，讓 3.8 / 3.7-flash 深度思考、多模態與工具調用在背景充裕完成，絕不 premature timeout！
-            response = await asyncio.wait_for(
-                temp_google_client.aio.models.generate_content(
-                    model=g_model,
-                    contents=chat_contents,
-                    config=gen_config
-                ),
-                timeout=120.0
-            )
+            async with track_key(g_key):
+                response = await asyncio.wait_for(
+                    temp_google_client.aio.models.generate_content(
+                        model=g_model,
+                        contents=chat_contents,
+                        config=gen_config
+                    ),
+                    timeout=120.0
+                )
 
             had_tool_calls = False
             tool_results_map = {}
@@ -1354,17 +1359,18 @@ async def fetch_ai_response(messages, image_base64=None, audio_base64=None, is_p
                             ))
                         followup_contents.append(types.Content(role="user", parts=fn_resp_parts))
 
-                        stage2_resp = await asyncio.wait_for(
-                            temp_google_client.aio.models.generate_content(
-                                model=g_model,
-                                contents=followup_contents,
-                                config=types.GenerateContentConfig(
-                                    temperature=0.85,
-                                    safety_settings=UNRESTRICTED_SAFETY_SETTINGS
-                                )
-                            ),
-                            timeout=25.0
-                        )
+                        async with track_key(g_key):
+                            stage2_resp = await asyncio.wait_for(
+                                temp_google_client.aio.models.generate_content(
+                                    model=g_model,
+                                    contents=followup_contents,
+                                    config=types.GenerateContentConfig(
+                                        temperature=0.85,
+                                        safety_settings=UNRESTRICTED_SAFETY_SETTINGS
+                                    )
+                                ),
+                                timeout=25.0
+                            )
                         s2_speech = ""
                         s2_thought = ""
                         if stage2_resp and stage2_resp.candidates and stage2_resp.candidates[0].content and stage2_resp.candidates[0].content.parts:
@@ -1497,13 +1503,14 @@ async def fetch_ai_response(messages, image_base64=None, audio_base64=None, is_p
                 temp_client = genai.Client(api_key=g_key)
                 attempts += 1
                 try:
-                    stream = await temp_client.aio.models.generate_content_stream(
-                        model=g_model,
-                        contents=chat_contents,
-                        config=gen_config
-                    )
-                    async for chunk in stream:
-                        yield chunk
+                    async with track_key(g_key):
+                        stream = await temp_client.aio.models.generate_content_stream(
+                            model=g_model,
+                            contents=chat_contents,
+                            config=gen_config
+                        )
+                        async for chunk in stream:
+                            yield chunk
                     return  # 成功串流完畢則退出
                 except Exception as e:
                     err_str = str(e).lower()
@@ -1765,19 +1772,20 @@ async def fetch_fast_text_reply(user_input: str, custom_name: str, situation_pro
             fast_gemini_models = list(GEMINI_MODELS)
             for m_name in fast_gemini_models:
                 try:
-                    resp = await asyncio.wait_for(
-                        client.aio.models.generate_content(
-                            model=m_name,
-                            contents=prompt,
-                            config=types.GenerateContentConfig(
-                                temperature=0.75,
-                                max_output_tokens=500,
-                                tools=GENAI_TOOLS,
-                                safety_settings=UNRESTRICTED_SAFETY_SETTINGS
-                            )
-                        ),
-                        timeout=2.4
-                    )
+                    async with track_key(target_key):
+                        resp = await asyncio.wait_for(
+                            client.aio.models.generate_content(
+                                model=m_name,
+                                contents=prompt,
+                                config=types.GenerateContentConfig(
+                                    temperature=0.75,
+                                    max_output_tokens=500,
+                                    tools=GENAI_TOOLS,
+                                    safety_settings=UNRESTRICTED_SAFETY_SETTINGS
+                                )
+                            ),
+                            timeout=2.4
+                        )
                     txt = ""
                     try:
                         if resp.text:
@@ -1957,6 +1965,7 @@ async def call_gemini_live_audience_reply(vts, input_queue, audience_user: str, 
 
         all_candidate_keys = [k for k in (KEYS_AUDIENCE_LIVE if KEYS_AUDIENCE_LIVE else GEMINI_KEYS) if k]
         random.shuffle(all_candidate_keys)
+        all_candidate_keys = sort_keys_by_load(all_candidate_keys)
 
         full_reply = ""
         used_model_name = ""
@@ -1990,12 +1999,13 @@ async def call_gemini_live_audience_reply(vts, input_queue, audience_user: str, 
             client = genai.Client(api_key=g_key)
             for model_name in STREAMER_MIND_MODELS:
                 try:
-                    resp = await asyncio.wait_for(
-                        client.aio.models.generate_content(
-                            model=model_name,
-                            contents=[
-                                types.Content(role="user", parts=[types.Part(text=f"{sys_instruction_with_100m}\n\n{prompt_user_input}")])
-                            ],
+                    async with track_key(g_key):
+                        resp = await asyncio.wait_for(
+                            client.aio.models.generate_content(
+                                model=model_name,
+                                contents=[
+                                    types.Content(role="user", parts=[types.Part(text=f"{sys_instruction_with_100m}\n\n{prompt_user_input}")])
+                                ],
                             config=types.GenerateContentConfig(
                                 temperature=0.78,
                                 max_output_tokens=500,
@@ -3191,13 +3201,14 @@ async def generate_ai_image(prompt: str) -> str:
             
             for img_model in ["gemini-3.1-flash-lite-image", "gemini-3.1-flash-image", "gemini-3-pro-image"]:
                 try:
-                    res = await asyncio.wait_for(
-                        temp_client.aio.models.generate_content(
-                            model=img_model,
-                            contents=prompt
-                        ),
-                        timeout=8.0
-                    )
+                    async with track_key(g_key):
+                        res = await asyncio.wait_for(
+                            temp_client.aio.models.generate_content(
+                                model=img_model,
+                                contents=prompt
+                            ),
+                            timeout=8.0
+                        )
                     if res and res.candidates:
                         for cand in res.candidates:
                             if cand.content and cand.content.parts:
@@ -7497,6 +7508,7 @@ async def streamer_mind_loop_worker(vts, input_queue):
             # 4. 呼叫大腦模型矩陣 (依老爸指定 7 梯隊優先級輪流嘗試: 3.1 Flash Lite ➔ 3.5 Flash Lite ➔ 3 Flash ➔ 3.1 Pro ➔ 3.5 ➔ 3.6 ➔ 3.7)
             candidate_keys = [k for k in (KEYS_AUDIENCE_LIVE if KEYS_AUDIENCE_LIVE else GEMINI_KEYS) if k]
             random.shuffle(candidate_keys)
+            candidate_keys = sort_keys_by_load(candidate_keys)
             
             full_reply = ""
             used_model_name = ""
@@ -7544,12 +7556,13 @@ async def streamer_mind_loop_worker(vts, input_queue):
                 client = genai.Client(api_key=g_key)
                 for model_name in STREAMER_MIND_MODELS:
                     try:
-                        resp = await asyncio.wait_for(
-                            client.aio.models.generate_content(
-                                model=model_name,
-                                contents=[
-                                    types.Content(role="user", parts=[types.Part(text=f"{sys_instruction}\n\n{prompt_user_input}")])
-                                ],
+                        async with track_key(g_key):
+                            resp = await asyncio.wait_for(
+                                client.aio.models.generate_content(
+                                    model=model_name,
+                                    contents=[
+                                        types.Content(role="user", parts=[types.Part(text=f"{sys_instruction}\n\n{prompt_user_input}")])
+                                    ],
                                 config=types.GenerateContentConfig(
                                     temperature=0.78,
                                     max_output_tokens=500,
@@ -7707,14 +7720,15 @@ _SUBAGENT_GEMINI_THINK_ATTEMPTS = 2
 
 
 def _subagent_gemini_pairs(models, attempts):
-    """子智能體 Gemini 梯隊：隨機打散 key，(key, model) 輪著試，最多 attempts 組。"""
+    """子智能體 Gemini 梯隊：空閒優先（同負載隨機打散），(key, model) 輪著試，最多 attempts 組。"""
     import random as _r
     keys = [k for k in GEMINI_KEYS if k]
     models = [m for m in (models or []) if m]
     if not keys or not models or attempts <= 0:
         return
     order = keys[:]
-    _r.shuffle(order)
+    _r.shuffle(order)  # 先打散，同負載時保持隨機（防雷群同時擠同一把）
+    order = sort_keys_by_load(order)
     for i in range(attempts):
         yield order[i % len(order)], models[i % len(models)]
 
@@ -7726,21 +7740,24 @@ async def _nv_tool_pass(task_ins, target, requester_name, system_instruction_tex
     import random
     from openai import AsyncOpenAI
     import core.groq_router as gr
-    nv_key = random.choice(NV_KEYS) # 隨機抽一把來做負載平衡
+    nv_pool = [k for k in NV_KEYS if k]
+    random.shuffle(nv_pool)
+    nv_key = sort_keys_by_load(nv_pool)[0] # 空閒優先（NV 工具判定與深思共用 3 把，一樣互斥）
     nv_client = AsyncOpenAI(api_key=nv_key, base_url="https://integrate.api.nvidia.com/v1")
     openai_tools = gr.to_openai_tools(GENAI_TOOLS)
     # NVIDIA 不允許函數名稱包含點號 (.)，先 wire
     for wt in openai_tools:
         wt["function"]["name"] = gr._wire_name(wt["function"]["name"])
-    nv_resp = await asyncio.wait_for(nv_client.chat.completions.create(
-        model="nvidia/nemotron-3-super-120b-a12b",
-        messages=[
-            {"role": "system", "content": system_instruction_text},
-            {"role": "user", "content": task_ins}
-        ],
-        tools=openai_tools,
-        temperature=0.0
-    ), timeout=20.0)
+    async with track_key(nv_key):
+        nv_resp = await asyncio.wait_for(nv_client.chat.completions.create(
+            model="nvidia/nemotron-3-super-120b-a12b",
+            messages=[
+                {"role": "system", "content": system_instruction_text},
+                {"role": "user", "content": task_ins}
+            ],
+            tools=openai_tools,
+            temperature=0.0
+        ), timeout=20.0)
     choice = nv_resp.choices[0]
     if not choice.message.tool_calls:
         return None, None
@@ -7767,19 +7784,22 @@ async def _nv_think_pass(task_ins, target, requester_name, system_instruction_te
         return "miss", ""
     import random
     from openai import AsyncOpenAI
-    nv_key = random.choice(NV_KEYS)
+    nv_pool = [k for k in NV_KEYS if k]
+    random.shuffle(nv_pool)
+    nv_key = sort_keys_by_load(nv_pool)[0]
     nv_client = AsyncOpenAI(api_key=nv_key, base_url="https://integrate.api.nvidia.com/v1")
     # 強制先寫思考步驟再給結論（step-by-step 推理顯著提升複雜問題正確率）：
     # 不掛 tools（掛著它只會想著調用，不會好好想），temp 0.8 保證想得開
     log_print("🧠 [NV 深思] 第一棒無工具調用，轉深度思考模式重想一次...")
-    think_resp = await asyncio.wait_for(nv_client.chat.completions.create(
-        model="nvidia/nemotron-3-super-120b-a12b",
-        messages=[
-            {"role": "system", "content": system_instruction_text + "\n（深度思考模式：先在 [THINK]...[/THINK] 裡一步一步寫出你的思考步驟（分析意圖、拆解問題、檢查歧義），再在 [REPLY]...[/REPLY] 裡給出最終結論。結論要簡潔、直接可用。不要呼叫任何工具，必須輸出文字。）"},
-            {"role": "user", "content": task_ins}
-        ],
-        temperature=0.8
-    ), timeout=30.0)
+    async with track_key(nv_key):
+        think_resp = await asyncio.wait_for(nv_client.chat.completions.create(
+            model="nvidia/nemotron-3-super-120b-a12b",
+            messages=[
+                {"role": "system", "content": system_instruction_text + "\n（深度思考模式：先在 [THINK]...[/THINK] 裡一步一步寫出你的思考步驟（分析意圖、拆解問題、檢查歧義），再在 [REPLY]...[/REPLY] 裡給出最終結論。結論要簡潔、直接可用。不要呼叫任何工具，必須輸出文字。）"},
+                {"role": "user", "content": task_ins}
+            ],
+            temperature=0.8
+        ), timeout=30.0)
     think_choice = think_resp.choices[0]
     think_raw = (getattr(think_choice.message, "content", "") or "").strip()
     think_steps, final_reply = _extract_think_reply(think_raw)
@@ -7807,11 +7827,12 @@ async def _gemini_tool_pass(task_ins, target, requester_name, system_instruction
                 safety_settings=UNRESTRICTED_SAFETY_SETTINGS,
                 system_instruction=system_instruction_text,
             )
-            resp = await asyncio.wait_for(client.aio.models.generate_content(
-                model=gmodel,
-                contents=[types.Content(role="user", parts=[types.Part.from_text(text=task_ins)])],
-                config=cfg,
-            ), timeout=_SUBAGENT_GEMINI_TOOL_TIMEOUT)
+            async with track_key(gkey):
+                resp = await asyncio.wait_for(client.aio.models.generate_content(
+                    model=gmodel,
+                    contents=[types.Content(role="user", parts=[types.Part.from_text(text=task_ins)])],
+                    config=cfg,
+                ), timeout=_SUBAGENT_GEMINI_TOOL_TIMEOUT)
             calls = list(getattr(resp, "function_calls", None) or [])
             if not calls:
                 return None, None
@@ -7845,11 +7866,12 @@ async def _gemini_think_pass(task_ins, target, requester_name, system_instructio
                 safety_settings=UNRESTRICTED_SAFETY_SETTINGS,
                 system_instruction=system_instruction_text + "\n（深度思考模式：先在 [THINK]...[/THINK] 裡一步一步寫出你的思考步驟（分析意圖、拆解問題、檢查歧義），再在 [REPLY]...[/REPLY] 裡給出最終結論。結論要簡潔、直接可用。不要呼叫任何工具，必須輸出文字。）",
             )
-            resp = await asyncio.wait_for(client.aio.models.generate_content(
-                model=gmodel,
-                contents=[types.Content(role="user", parts=[types.Part.from_text(text=task_ins)])],
-                config=cfg,
-            ), timeout=_SUBAGENT_GEMINI_THINK_TIMEOUT)
+            async with track_key(gkey):
+                resp = await asyncio.wait_for(client.aio.models.generate_content(
+                    model=gmodel,
+                    contents=[types.Content(role="user", parts=[types.Part.from_text(text=task_ins)])],
+                    config=cfg,
+                ), timeout=_SUBAGENT_GEMINI_THINK_TIMEOUT)
             think_raw = (getattr(resp, "text", "") or "").strip()
             think_steps, final_reply = _extract_think_reply(think_raw)
             if think_steps:

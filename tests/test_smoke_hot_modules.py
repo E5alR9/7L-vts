@@ -59,6 +59,32 @@ def test_llm_engine_key_candidates_dedupe_and_keep_order():
     assert out.index("k1") < out.index("k2")
 
 
+def test_key_tracker_counts_and_releases():
+    """同 key 互斥追蹤：計數、釋放、異常也釋放、排序空閒優先。"""
+    import asyncio
+    from core import llm_engine as le
+
+    async def main():
+        assert le.key_load("K") == 0
+        async with le.track_key("K"):
+            assert le.key_load("K") == 1
+            async with le.track_key("K"):
+                assert le.key_load("K") == 2
+            assert le.key_load("K") == 1
+        assert le.key_load("K") == 0
+        try:
+            async with le.track_key("K"):
+                raise RuntimeError("boom")
+        except RuntimeError:
+            pass
+        assert le.key_load("K") == 0, "異常也必須釋放，否則 key 被BehindTheScenes永久封印"
+
+    asyncio.run(main())
+    # 排序：空閒優先；全忙不阻擋（照排）
+    ordered = le.sort_keys_by_load(["x", "y", "z"])
+    assert set(ordered) == {"x", "y", "z"}
+
+
 def test_piano_midi_to_freq_is_a440():
     from services.piano_engine import midi_to_freq
     assert midi_to_freq(69) == pytest.approx(440.0)

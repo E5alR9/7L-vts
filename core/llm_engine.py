@@ -2,8 +2,9 @@ import os
 import re
 import time
 import random
+import contextlib
 import groq
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, AsyncIterator
 from google.genai import types
 
 import core.websocket_patch  # 🔧 修復 Live API additional_headers 相容性
@@ -100,6 +101,36 @@ def get_dynamic_live_key_candidates(preferred_pool: List[str]) -> List[str]:
     return candidates
 
 DEAD_GEMINI_MODELS = set()
+
+# ── REST 金鑰同斥追蹤（2026-10-11：同一把 key 不被多個工具同時打，分散流量）──
+# 單 event loop 內 dict 操作原子性足夠；Live 長持會話不納入（只管 REST 一次性呼叫）。
+_KEY_INFLIGHT: Dict[str, int] = {}
+
+
+def key_load(key: str) -> int:
+    """該 key 當前正在跑的 REST 呼叫數。"""
+    return _KEY_INFLIGHT.get(key or "", 0)
+
+
+@contextlib.asynccontextmanager
+async def track_key(key: str) -> AsyncIterator[None]:
+    """包住一次 REST generate_content：計數＋1，結束（成功/失敗/取消）必 -1。"""
+    k = key or ""
+    _KEY_INFLIGHT[k] = _KEY_INFLIGHT.get(k, 0) + 1
+    try:
+        yield
+    finally:
+        left = _KEY_INFLIGHT.get(k, 1) - 1
+        if left <= 0:
+            _KEY_INFLIGHT.pop(k, None)
+        else:
+            _KEY_INFLIGHT[k] = left
+
+
+def sort_keys_by_load(keys: List[str]) -> List[str]:
+    """按負載排序（空閒優先，穩定排序保持原 ping-pong 順序語義）。
+    只排序、不阻擋：全忙時照樣打，不餓死。"""
+    return sorted(keys, key=lambda k: _KEY_INFLIGHT.get(k or "", 0))
 
 STREAMER_MIND_MODELS = [
     "gemini-3.5-flash-lite",
