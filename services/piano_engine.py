@@ -1747,6 +1747,30 @@ def is_midi_match_valid(query_title: str, matched_filename: str) -> bool:
     log_print(f"🛡️ [曲庫防呆攔截] 本地檔名《{matched_filename}》核心主名（{f_core or f_stem}）與點歌《{query_title}》（{q_core}）無實質相關（判定為狀態標籤噪聲弱匹配），已安全剔除，自動轉為線上抓譜！")
     return False
 
+def is_midi_playable(midi_path: str, min_sec: float = 10.0, min_notes: int = 20) -> bool:
+    """可播性下限（2026-10-11 logo 事件：91 bytes/0.4 秒的垃圾也敢拿去播）。
+    時長與有效音符雙門檻，不過就當沒這個檔（調用方轉線上搜）。"""
+    try:
+        import mido
+        if not midi_path or not os.path.exists(midi_path):
+            return False
+        if os.path.getsize(midi_path) < 200:
+            return False
+        mid = mido.MidiFile(midi_path)
+        if (mid.length or 0.0) < min_sec:
+            return False
+        notes = sum(1 for t in mid.tracks for m in t
+                    if m.type == "note_on" and getattr(m, "velocity", 0) > 0)
+        return notes >= min_notes
+    except Exception:
+        return False
+
+def _fetch_validated_midi(song_query: str) -> Optional[str]:
+    """線上抓譜＋標題驗證（2026-10-11 logo 事件）：標題不符的直接不要，往下一個來源掉。"""
+    return pianist_midi_engine.fetch_and_download_pianist_match(
+        song_query, MIDI_SHEETS_DIR,
+        validate=lambda t: is_midi_match_valid(song_query, t))
+
 async def match_midi_with_ai(song_query: str, available_files: list) -> str:
     """相容保留：透過 resolve_piano_intent_by_ai 取得匹配檔名"""
     res = await resolve_piano_intent_by_ai(song_query, available_files)
@@ -2375,7 +2399,7 @@ async def play_virtual_piano(song_name: str = "", custom_sheet: str = "", auto_r
                 async def preload_and_queue_worker(song_str: str, req_n: str, req_t: str, c_song: str):
                     try:
                         log_print(f"🌐 [點歌排隊線上搜譜] 正在異步背景搜尋預載《{song_str}》...")
-                        dl_p = await asyncio.to_thread(pianist_midi_engine.fetch_and_download_pianist_match, song_str, MIDI_SHEETS_DIR)
+                        dl_p = await asyncio.to_thread(_fetch_validated_midi, song_str)
                         if dl_p and os.path.exists(dl_p):
                             t_name = clean_song_title_for_speech(os.path.splitext(os.path.basename(dl_p))[0])
                             save_midi_catalog_entry(song_str, dl_p)
@@ -2450,6 +2474,10 @@ async def play_virtual_piano(song_name: str = "", custom_sheet: str = "", auto_r
             return f"（系統提示：妳目前正坐在鋼琴前專心為大家彈奏《{display_name}》。請不要中途切歌或插歌，請用自然、隨性的口語直接告知對方：『我現在正在彈《{display_name}》呢～等我這首彈完再點歌喔！』）"
 
     # ⚡ 若已有本機 MIDI 樂譜 ➔ 100% 絕對即刻開彈！
+    # 可播性下限：時長/音符不夠的垃圾檔視同沒有，轉線上搜（2026-10-11 logo 事件）
+    if target_midi and os.path.exists(target_midi) and not is_midi_playable(target_midi):
+        log_print(f"🛡️ [樂譜質檢拒收] 《{os.path.basename(target_midi)}》時長/音符不足，不播，轉線上搜譜！")
+        target_midi = None
     if target_midi and os.path.exists(target_midi):
         PIANO_SESSION_ID += 1
         session_id = PIANO_SESSION_ID
@@ -2498,7 +2526,7 @@ async def play_virtual_piano(song_name: str = "", custom_sheet: str = "", auto_r
         # 立即展現鋼琴與走位，讓等待過程有視覺回饋
         await open_virtual_piano()
         
-        dl_path = await asyncio.to_thread(pianist_midi_engine.fetch_and_download_pianist_match, song_q, MIDI_SHEETS_DIR)
+        dl_path = await asyncio.to_thread(_fetch_validated_midi, song_q)
         
         if sid != PIANO_SESSION_ID or not is_piano_active:
             log_print(f"🛑 [線上抓譜] 演奏已取消或切換至新曲目，終止本次抓譜接續。")

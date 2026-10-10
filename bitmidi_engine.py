@@ -126,12 +126,19 @@ def download_bitmidi_song(target_song: Dict[str, str], save_dir: str = "midi_she
         
     return None
 
-def fetch_and_download_first_match(query: str, save_dir: str = "midi_sheets") -> Optional[str]:
-    """一鍵搜尋並下載第一首匹配的歌曲（已過濾不相干垃圾檔案）"""
+def fetch_and_download_first_match(query: str, save_dir: str = "midi_sheets", validate=None) -> Optional[str]:
+    """一鍵搜尋並下載第一首匹配的歌曲（已過濾不相干垃圾檔案）。
+    validate: 可選 validate(title)->bool，額外再擋一層（2026-10-11）。"""
     results = search_bitmidi(query, max_results=3)
     if not results:
         return None
     for res in results:
+        if validate is not None:
+            try:
+                if not validate(res.get("title", "")):
+                    continue
+            except Exception:
+                pass
         saved = download_bitmidi_song(res, save_dir=save_dir)
         if saved:
             return saved

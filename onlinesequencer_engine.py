@@ -442,10 +442,12 @@ def search_onlinesequencer(query: str, max_results: int = 5) -> List[Dict[str, s
         return []
 
 
-def fetch_and_download_first_match(query: str, save_dir: str = "midi_sheets") -> Optional[str]:
+def fetch_and_download_first_match(query: str, save_dir: str = "midi_sheets", validate=None) -> Optional[str]:
     """
     搜尋 onlinesequencer.net 並下載第一個匹配結果的 MIDI。
     使用 Chrome CDP（可見視窗）繞過 Cloudflare。失敗返回 None。
+    validate: 可選函數 validate(title)->bool，標題不符直接跳過試下一個
+    （2026-10-11：盲拿第一個曾抓回 onlinesequencer.net logo 這種垃圾）。
     """
     print(f"[OnlineSequencer] 搜尋: {query}...")
 
@@ -474,6 +476,13 @@ def fetch_and_download_first_match(query: str, save_dir: str = "midi_sheets") ->
 
     os.makedirs(save_dir, exist_ok=True)
     for r in results:
+        if validate is not None:
+            try:
+                if not validate(r.get("title", "")):
+                    print(f"[OnlineSequencer] 跳過不相干結果: 《{r.get('title', '')}》")
+                    continue
+            except Exception:
+                pass
         midi_bytes = _cdp_download_midi(ws_url, r["seq_id"])
         if midi_bytes:
             safe = re.sub(r'[\\/*?"<>|]', "", r["title"]).strip() or f"oseq_{r['seq_id']}"

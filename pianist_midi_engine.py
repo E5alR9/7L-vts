@@ -101,7 +101,7 @@ def search_youtube_and_download_midi(song_name: str, output_dir: str = "midi_she
         
     return None
 
-def fetch_and_download_pianist_match(song_query: str, output_dir: str = "midi_sheets") -> Optional[str]:
+def fetch_and_download_pianist_match(song_query: str, output_dir: str = "midi_sheets", validate=None) -> Optional[str]:
     """ 【全球標準抓譜管線】：
     1.  若為 YouTube 網址 或 明確指定 YouTube：走 YouTube MP3 ➔ 線上 BearAudio 轉 MIDI
     2.  預設一般點歌（第一優先）：OnlineSequencer (先 Google 找 site:onlinesequencer.net 再下載純淨 88 鍵 MIDI)
@@ -137,14 +137,14 @@ def fetch_and_download_pianist_match(song_query: str, output_dir: str = "midi_sh
 
     # ──  預設模式（第一優先：OnlineSequencer 經由 Google 搜尋） ──
     print(f"🎹 [OnlineSequencer 搜尋 - 第一優先] 正在 Google/OnlineSequencer 搜尋《{clean_q}》...")
-    dl_p = onlinesequencer_engine.fetch_and_download_first_match(clean_q, output_dir)
+    dl_p = onlinesequencer_engine.fetch_and_download_first_match(clean_q, output_dir, validate=validate)
     if dl_p and os.path.exists(dl_p):
         print(f"✨ [OnlineSequencer 命中成功] 《{os.path.basename(dl_p)}》！")
         return dl_p
             
     # ──  預設模式第二優先：BitMidi ──
     print(f"🎵 [BitMidi 搜尋 - 第二優先] 正在向 BitMidi 搜尋《{clean_q}》...")
-    dl_p = bitmidi_engine.fetch_and_download_first_match(clean_q, output_dir)
+    dl_p = bitmidi_engine.fetch_and_download_first_match(clean_q, output_dir, validate=validate)
     if dl_p and os.path.exists(dl_p):
         print(f"✨ [BitMidi 收錄成功] 《{os.path.basename(dl_p)}》！")
         return dl_p
