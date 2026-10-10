@@ -741,16 +741,38 @@ async def set_vts_expression(vts, exp_tag, is_instinct=False):
     try:
         clean_tag = str(exp_tag).strip().replace("[", "").replace("]", "").replace("EXPRESSION:", "").replace("EXPRESSION：", "").strip().lower()
         if clean_tag in ["_reset_", "_reset", "預設", "重置", "關閉", "正常", "恢復", "無", "取消", "reset", "default", "none", "close", "off", "0"]:
-            if CURRENT_ACTIVE_EXPS:
+            # 先問 VTS 要 ground truth（2026-10-11：小本本不同步／重啟殘留／超時靜吞都會讓
+            # reset 發個寂寞還撒謊說關掉了。直接問誰在臉上，逐個關，失敗大聲講。）
+            to_close = set(CURRENT_ACTIVE_EXPS)
+            try:
+                st = await asyncio.wait_for(vts.request({
+                    "apiName": "VTubeStudioPublicAPI", "apiVersion": "1.0", "requestID": "QueryExpState",
+                    "messageType": "ExpressionStateRequest", "data": {"details": True}
+                }), timeout=1.5)
+                data = (st or {}).get("data", {}) or {}
+                exprs = data.get("expressions", []) or []
+                for e in exprs:
+                    if isinstance(e, dict) and e.get("active"):
+                        f = e.get("file") or e.get("expressionFile", "")
+                        if f and str(f).endswith(".exp3.json"):
+                            to_close.add(f)
+            except Exception as qe:
+                log_print(f"⚠️ [Live2D 表情] 查臉失敗（用小本本硬關）: {qe}")
+            failed = []
+            if to_close:
                 async with vts_lock:
-                    for exp in list(CURRENT_ACTIVE_EXPS):
+                    for exp in list(to_close):
                         try:
                             await asyncio.wait_for(vts.request({
                                 "apiName": "VTubeStudioPublicAPI", "apiVersion": "1.0", "requestID": "ResetExp",
                                 "messageType": "ExpressionActivationRequest", "data": {"expressionFile": exp, "active": False}
-                            }), timeout=0.2)
-                        except Exception: pass
-                    CURRENT_ACTIVE_EXPS.clear()
+                            }), timeout=1.0)
+                        except Exception as de:
+                            failed.append(exp)
+                            log_print(f"❌ [Live2D 表情] 關閉 {exp} 失敗: {de}")
+                CURRENT_ACTIVE_EXPS.clear()
+            elif CURRENT_ACTIVE_EXPS:
+                CURRENT_ACTIVE_EXPS.clear()
             elif CURRENT_ACTIVE_EXP:
                 async with vts_lock:
                     try:
@@ -765,7 +787,12 @@ async def set_vts_expression(vts, exp_tag, is_instinct=False):
             frown_timer = 0.0
             eye_roll_timer = 0.0
             is_tracking_mouse = True
-            log_print("✨ [Live2D 表情] 表情已重置為預設自然狀態 (單點關閉)")
+            if failed:
+                log_print(f"⚠️ [Live2D 表情] 重置未完成，還掛在臉上：{', '.join(failed)}（下次 reset 會重試）")
+            elif to_close:
+                log_print(f"✨ [Live2D 表情] 表情已重置為預設自然狀態（關閉 {len(to_close)} 個）")
+            else:
+                log_print("✨ [Live2D 表情] 臉上本來就乾淨，無需重置")
             return
 
         import re

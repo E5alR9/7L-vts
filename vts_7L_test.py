@@ -5368,8 +5368,14 @@ async def _slip_watchdog(prompt: str, sent_ts: float, timeout: float = 20.0):
     await asyncio.sleep(timeout)
     try:
         tool, args = parse_slip_for_song(prompt)
-        if tool and is_song_active((args or {}).get("song_name", "")):
-            log_print(f"📎 [紙條備註] 《{(args or {}).get('song_name', '')}》CPU 已在背景執行，主腦回不回話無所謂，看門狗收工。")
+        song = (args or {}).get("song_name", "") if tool else ""
+        if not song:
+            # 工具紙條沒有 ] 前綴走另一條：從《歌名》直接抽（CPU 執行紙條專用）
+            import re as _re
+            _m = _re.search(r'《([^》]+)》', prompt or "")
+            song = _m.group(1).strip() if _m else ""
+        if song and is_song_active(song):
+            log_print(f"📎 [紙條備註] 《{song}》CPU 已在背景執行，主腦回不回話無所謂，看門狗收工。")
             return
         if globals().get("LAST_BRAIN_TOOL_TS", 0.0) < sent_ts:
             log_print(f"⚠️ [紙條無回應] 主腦 {timeout:.0f} 秒沒理會紙條（{prompt[:40]}…）。"
