@@ -2715,6 +2715,12 @@ async def _mixed_piano_run(piano_title: str, sing_title: str, target: str, reque
             await pe.open_virtual_piano()
         except Exception as oe:
             log_print(f"⚠️ [混用鋼琴] 開視窗失敗照跑: {oe}")
+        # 等子進程就緒再往下走（載音色十幾秒，太早發 IPC 會靜默丟失；25 秒不到照跑不卡死）
+        try:
+            if not await pe.wait_piano_subprocess_ready(timeout=25.0):
+                log_print("⚠️ [混用鋼琴] 子進程 25 秒未就緒，照跑（播放端有無聲驗證兜底）。")
+        except Exception:
+            pass
         try:
             midi_file, _ = await pe.resolve_local_midi_file(piano_title)
         except Exception:

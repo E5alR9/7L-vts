@@ -776,6 +776,76 @@ def is_piano_window_alive() -> bool:
 
     return False
 
+
+async def wait_piano_subprocess_ready(timeout: float = 25.0) -> bool:
+    """等鋼琴子進程就緒（2026-10-11：子進程載音色要十幾秒，IPC 太早發會靜默丟失）。
+
+    以 UDP 心跳新鮮度為準（2 秒內有心跳＝監聽正常）；超時回 False（調用方照跑不卡死）。
+    """
+    import asyncio as _aio
+    import time as _t
+    deadline = _t.time() + max(0.0, timeout)
+    while _t.time() < deadline:
+        try:
+            if LAST_PIANO_HEARTBEAT_TIME > 0 and (_t.time() - LAST_PIANO_HEARTBEAT_TIME) < 2.0:
+                return True
+        except Exception:
+            pass
+        await _aio.sleep(0.5)
+    return False
+
+
+async def revive_piano_window() -> bool:
+    """殺掉重開鋼琴視窗（2026-10-11：IPC 發了 8 秒無播放回報＝子進程聾了）。
+
+    不檢查標題（殭屍視窗標題還在，會騙過 open_virtual_piano），直接殺 handle＋重 Popen。
+    回傳重開後 5 秒內是否有心跳。
+    """
+    global current_piano_process
+    try:
+        p = current_piano_process
+        if p is not None and p.poll() is None:
+            try:
+                p.kill()
+            except Exception:
+                pass
+    except Exception:
+        pass
+    current_piano_process = None
+    try:
+        current_piano_process = subprocess.Popen([
+            sys.executable,
+            get_piano_script_path(),
+            "--volume", str(GLOBAL_PIANO_VOLUME),
+            "--speed", str(GLOBAL_PIANO_SPEED),
+            "--ndi"
+        ])
+        log_print("🔄 [鋼琴重啟] 子進程無回應，已殺掉重開視窗。")
+    except Exception as e:
+        log_print(f"❌ [鋼琴重啟失敗]: {e}")
+        return False
+    return await wait_piano_subprocess_ready(timeout=15.0)
+
+
+async def wait_piano_sounding(session_id: int, timeout: float = 8.0) -> bool:
+    """等開彈回報（2026-10-11）：IPC 發出後等 is_playing 置位；被超車/關琴直接回 False。"""
+    import asyncio as _aio
+    import time as _t
+    deadline = _t.time() + max(0.0, timeout)
+    while _t.time() < deadline:
+        if session_id != PIANO_SESSION_ID or not is_piano_active:
+            return False
+        try:
+            if GLOBAL_PIANO_REALTIME_STATE.get("is_playing", False):
+                return True
+        except Exception:
+            pass
+        await _aio.sleep(0.25)
+    try:
+        return bool(GLOBAL_PIANO_REALTIME_STATE.get("is_playing", False))
+    except Exception:
+        return False
+
 def is_piano_active_and_alive() -> bool:
     """即時判定鋼琴是否真的在線活躍（必須同時滿足標記為 active 且近期有心跳或視窗/進程確實存活）"""
     global is_piano_active, LAST_PIANO_HEARTBEAT_TIME, current_piano_process
@@ -1922,6 +1992,40 @@ async def play_piano_worker(song_title: str, sheet_text: str, bpm: int, mode: st
                     ]
                     current_piano_process = subprocess.Popen(piano_cmd)
                 
+                # IPC 無回執驗證（2026-10-11：子進程初始化中/殭屍時指令靜默丟失，視窗開著但沒聲）。
+                # 8 秒無開彈回報＋心跳也不新鮮＝聾了：重啟視窗→重發一次→再無就大聲報修並放行（不抱 285 秒）。
+                if not await wait_piano_sounding(session_id, timeout=8.0):
+                    if session_id == PIANO_SESSION_ID and is_piano_active:
+                        try:
+                            hb_age = time.time() - (LAST_PIANO_HEARTBEAT_TIME or 0.0)
+                        except Exception:
+                            hb_age = 999.0
+                        if hb_age > 8.0:
+                            log_print("❌ [鋼琴無聲警報] IPC 8 秒無播放回報且無心跳，子進程疑似殭屍，重啟視窗重發！")
+                            if await revive_piano_window():
+                                if len(tracks_payload) > 1:
+                                    send_piano_ipc_command({
+                                        "cmd": "play_simultaneous",
+                                        "tracks": tracks_payload,
+                                        "volume": GLOBAL_PIANO_VOLUME,
+                                        "speed": GLOBAL_PIANO_SPEED
+                                    })
+                                else:
+                                    send_piano_ipc_command({
+                                        "cmd": "play",
+                                        "title": song_title,
+                                        "midi_path": midi_file,
+                                        "volume": GLOBAL_PIANO_VOLUME,
+                                        "speed": GLOBAL_PIANO_SPEED
+                                    })
+                                if not await wait_piano_sounding(session_id, timeout=8.0):
+                                    log_print("❌ [鋼琴無聲] 重啟重發仍無播放回報！請檢查子進程音訊輸出（音效卡獨佔/驅動）。本次放行，不抱著等。")
+                                    is_piano_active = False
+                            else:
+                                log_print("❌ [鋼琴無聲] 視窗重啟失敗，本次放行。")
+                                is_piano_active = False
+                        else:
+                            log_print("⚠️ [鋼琴無聲观察] 有心跳但 8 秒未開彈（可能還在載入），繼續正常等待迴圈。")
                 # 🎹 即時鋼琴狀態驅動等待迴圈（以 UDP 即時播放狀態為第一優先，時間為極端斷線保底）
                 song_start_time = time.time()
                 has_started_playing = False
