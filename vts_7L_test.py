@@ -4984,7 +4984,8 @@ async def live_search_tool_task(session, query):
     try:
         log_print(f"🌐 [搜網專家啟動] 正在背景搜尋關鍵字：{query}...")
         if 'tavily_client' in globals() and tavily_client:
-            res = tavily_client.search(query=query, topic="general", search_depth="basic")
+            # 同步 HTTP 必須扔線程池：在 event loop 裡直打會凍住麥克風/紙條幾秒
+            res = await asyncio.to_thread(tavily_client.search, query, "general", "basic")
             if res and isinstance(res, dict):
                 results_text = "\\n".join([f"- {r.get('title', '')}: {r.get('content', '')}" for r in res.get('results', [])[:3]])
                 log_print(f"🌐 [搜網專家回報] 找到 {len(res.get('results', []))} 筆結果。")
