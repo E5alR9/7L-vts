@@ -699,8 +699,52 @@ class TextCleanEngine:
         #  日語原生支援：若包含日文平假名/片假名，保留原生正統日文字串交由本機 RTX 3080 Ti GPT-SoVITS (pyopenjtalk) 發音
         #  徹底停用舊版 Edge-TTS 的假音標置換 (如 歐托桑/knee/搭一 soo kee)，並避開中文破音字替換以免破壞日文漢字
         has_japanese = bool(re.search(r'[\u3040-\u309F\u30A0-\u30FF]', t))
+        t = cls.normalize_spoken_form(t, for_chinese=not has_japanese)
         if apply_phonetics and not has_japanese:
             t = cls.fix_heteronyms_for_tts(t)
+        return t
+
+    _ZH_DIGITS = "零一二三四五六七八九"
+    _TIME_RE = re.compile(r'(\d{1,2})[：:](\d{2})\s*([AaPp][Mm])?')
+
+    @classmethod
+    def _num_zh(cls, n) -> str:
+        n = int(n)
+        if 0 <= n <= 9:
+            return cls._ZH_DIGITS[n]
+        if n == 10:
+            return "十"
+        if 11 <= n <= 19:
+            return "十" + cls._ZH_DIGITS[n - 10]
+        t, o = divmod(n, 10)
+        return cls._ZH_DIGITS[t] + "十" + (cls._ZH_DIGITS[o] if o else "")
+
+    @classmethod
+    def _time_zh(cls, m) -> str:
+        h, mi, ap = int(m.group(1)), int(m.group(2)), (m.group(3) or "").lower()
+        if not (0 <= h <= 23 and 0 <= mi <= 59):
+            return m.group(0)
+        if ap == "am":
+            pre = "凌晨" if h <= 4 else ("上午" if h <= 11 else "中午")
+        elif ap == "pm":
+            pre = "中午" if h == 12 else "下午"
+        else:
+            pre = ""
+        hh = "兩" if h == 2 else cls._num_zh(h)
+        if mi == 0:
+            return f"{pre}{hh}點整" if pre else f"{hh}點整"
+        mm = cls._ZH_DIGITS[0] + cls._num_zh(mi) if mi < 10 else cls._num_zh(mi)
+        return f"{pre}{hh}點{mm}分" if pre else f"{hh}點{mm}分"
+
+    @classmethod
+    def normalize_spoken_form(cls, text: str, for_chinese: bool = True) -> str:
+        """口語正規化（2026-10-11：SoVITS 前端遇到《5:20am》會丟中段）。
+        書名號永遠拔掉（無發音功能）；時間轉中文唸法（中文語境才轉，日文交給引擎）。"""
+        if not text:
+            return ""
+        t = text.replace("《", "").replace("》", "")
+        if for_chinese:
+            t = cls._TIME_RE.sub(cls._time_zh, t)
         return t
 
     _KAKASI_INST = None

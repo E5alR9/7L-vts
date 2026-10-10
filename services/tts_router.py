@@ -448,6 +448,18 @@ def file_extension(engine: str) -> str:
     return ".mp3" if engine in ("edge", "elevenlabs") else ".wav"
 
 
+def _wav_seconds(data: bytes, engine: str):
+    """wav 音訊實際秒數（2026-10-11：有聲但缺段也要抓出來；mp3 不解析回 None）。"""
+    if not data or file_extension(engine) != ".wav":
+        return None
+    try:
+        import wave
+        with wave.open(io.BytesIO(data), "rb") as w:
+            return w.getnframes() / float(w.getframerate() or 1)
+    except Exception:
+        return None
+
+
 async def get_tts_audio_bytes(text: str) -> bytes:
     """
     依引擎鏈合成語音。全部失敗回傳 b""（呼叫端會記錄警告，不會中斷直播）。
@@ -477,6 +489,12 @@ async def get_tts_audio_bytes(text: str) -> bytes:
         try:
             data = await asyncio.wait_for(fn(text), timeout=ENGINE_TIMEOUT_SEC)
             if data and len(data) > 100:
+                dur = _wav_seconds(data, engine)
+                if dur is not None and len(text.strip()) >= 10:
+                    expect = max(1.5, len(text.strip()) * 0.22)
+                    if dur < expect * 0.4:
+                        raise RuntimeError(
+                            f"音訊過短疑似缺段（{dur:.1f}s/預期{expect:.1f}s），換引擎")
                 if _active_engine != engine:
                     _log(f"[TTS Router] 切換引擎 -> {engine}")
                     _active_engine = engine
