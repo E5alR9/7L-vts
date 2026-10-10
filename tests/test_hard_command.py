@@ -218,7 +218,8 @@ def test_japanese_titles_hit():
 
 
 def test_mixed_play_sing():
-    """2026-10-11 直播事故：「彈晴天加唱晴天」被當成一首爛歌名拿去搜譜全滅。"""
+    """
+    2026-10-11 直播事故：「彈晴天加唱晴天」被當成一首爛歌名拿去搜譜全滅。"""
     mx = parse_mixed_command("彈晴天加唱晴天")
     assert mx == [("pe.play_virtual_piano", {"song_name": "晴天"}),
                   ("auto_sing_song", {"song_name": "晴天"})]
@@ -238,6 +239,15 @@ def test_mixed_play_sing():
     assert tool == "auto_sing_song" and args["song_name"] == "ชีวิต"
     assert parse_hard_command("唱 ？！") == (None, {})
     assert parse_hard_command("唱 。。。") == (None, {})
+    # 句尾搭訕剝離（2026-10-11：唱放個大招給你看→放個大招）
+    assert parse_hard_command("唱放個大招給你看") == (
+        "auto_sing_song", {"song_name": "放個大招"})
+    assert parse_hard_command("唱晴天聽聽看") == (
+        "auto_sing_song", {"song_name": "晴天"})
+    assert parse_hard_command("彈月光給我聽") == (
+        "pe.play_virtual_piano", {"song_name": "月光"})
+    assert parse_hard_command("唱放個大招給你看看吧") == (
+        "auto_sing_song", {"song_name": "放個大招"})
 
 
 # --- 表情不歸 CPU（紙條分支保留給 A 架構 NV 用）---
