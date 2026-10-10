@@ -101,9 +101,28 @@ def separate_stems_gpu(input_wav: str, song_name: str) -> tuple[str, str]:
         print(f"💾 [快取命中] 已存在人聲與伴奏分軌檔案！")
         return vocals_out, inst_out
 
-    print(f"⚡ [AI 人聲分離] 正在啟用 GPU 分離人聲與伴奏 (約需 5~15 秒)...")
+    print("⚡ [AI 人聲分離] Tier-1 Roformer GPU 分離（分鐘級，有進度＋心跳，不空轉）...")
     
-    # 嘗試呼叫 demucs 命令
+    # Tier-1: Mel-Roformer（品質最好；失敗自動降級，絕不卡住管線）
+    def _sep_progress(pct: int):
+        try:
+            import services.web_dashboard as web_dash
+            web_dash.broadcast_event("tts_progress", {
+                "active": True, "mode": "rvc", "stage": "Roformer GPU 拆解人聲與伴奏",
+                "percent": 30 + int(max(0, min(100, pct)) * 0.18), "detail": song_name})
+        except Exception:
+            pass
+
+    try:
+        from services.roformer_sep import separate_roformer
+        if separate_roformer(input_wav, vocals_out, inst_out,
+                             song_name=song_name, progress_cb=_sep_progress):
+            return vocals_out, inst_out
+        print("🔄 [Roformer 未成功，降級 Demucs]...")
+    except Exception as e:
+        print(f"⚠️ [Roformer 模組異常，降級 Demucs]: {e}")
+
+    # Tier-2: demucs 命令
     demucs_cmd = [
         sys.executable, "-m", "demucs",
         "--two-stems", "vocals",
@@ -133,7 +152,7 @@ def separate_stems_gpu(input_wav: str, song_name: str) -> tuple[str, str]:
     print(f"🔄 [備用分離] 使用專業立體聲中置通道演算法提取人聲與伴奏...")
     cmd_inst = [
         FFMPEG_EXE, "-y", "-i", input_wav,
-        "-af", "stereotools=mlev=0.01:slev=1.0",
+        "-af", "stereotools=mlev=0.015625:slev=1.0",
         "-ar", "44100", inst_out
     ]
     cmd_voc = [
@@ -614,7 +633,7 @@ async def prepare_cover_song(song_name: str):
 
         try:
             web_dash.broadcast_event("tts_progress", {
-                "active": True, "mode": "rvc", "stage": "Demucs GPU 拆解人聲與伴奏", "percent": 30, "detail": song_name
+                "active": True, "mode": "rvc", "stage": "Roformer GPU 拆解人聲與伴奏", "percent": 30, "detail": song_name
             })
         except Exception: pass
 
