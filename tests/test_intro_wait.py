@@ -53,3 +53,8 @@ def test_intro_wait_breaks_through_chatter(monkeypatch):
 def test_intro_wait_no_core_returns(monkeypatch):
     monkeypatch.setattr(acp, "get_core_vts", lambda: None)
     asyncio.run(acp.wait_for_intro_speech_complete(timeout=1.0))
+
+
+def test_intro_wait_default_timeout():
+    """開場等待預設 15 秒（應答約 6 秒，聊不停就硬開唱，不過度禮讓）。"""
+    assert acp.wait_for_intro_speech_complete.__defaults__ == (15.0,)

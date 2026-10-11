@@ -289,7 +289,12 @@ def stop_current_song() -> bool:
     except Exception:
         pass
     IS_SINGING_ACTIVE = False
+    _stopped_title = _NOW_PLAYING_TITLE
     _NOW_PLAYING_TITLE = ""
+    #  2026-10-11：電擊打斷要順手拆掉這首的混用會合，不然下次重點同首會撿到
+    #  上次沒等完的鋼琴旗，乾等 300 秒（_MIXED_SING_WAIT_SEC）才開唱。
+    if _stopped_title:
+        _MIXED_RENDEZVOUS.pop(_dedupe_key(_stopped_title), None)
     try:
         if pygame.mixer.get_init():
             pygame.mixer.Channel(6).stop()
@@ -308,10 +313,10 @@ def stop_current_song() -> bool:
     print("🛑 [7L 翻唱] 電擊打斷：當首停止（排隊保留）。")
     return True
 
-async def wait_for_intro_speech_complete(timeout: float = 45.0):
+async def wait_for_intro_speech_complete(timeout: float = 15.0):
     """等候 7L 大腦完成開場白發話，再銜接翻唱開唱。
     2026-10-11：步驟 3 原本無限等——直播間聊不停（Johnny 式連聊）歌就永遠開不了口。
-    上限兜底：聊太嗨就直接開唱，邊唱邊聊好過無聲沉默。」"""
+    上限兜底：開場應答約 6 秒，15 秒還在聊就直接開唱（邊唱邊聊好過乾等）。」"""
     core_vts = get_core_vts()
     if not core_vts:
         return

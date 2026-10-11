@@ -178,3 +178,14 @@ def test_stop_current_song_keeps_queue():
     assert acp.is_song_active("歌B")
     acp.stop_singing()
     assert acp.stop_current_song() is False
+
+
+def test_stop_current_song_disarms_rendezvous():
+    """電擊打斷混用歌：會合點一起拆，否則下次重點同首撿到屍體乾等 300 秒。"""
+    acp.IS_SINGING_ACTIVE = True
+    acp._NOW_PLAYING_TITLE = "混用歌"
+    acp.arm_mixed_rendezvous("混用歌")
+    assert acp._dedupe_key("混用歌") in acp._MIXED_RENDEZVOUS
+    assert acp.stop_current_song() is True
+    assert acp._dedupe_key("混用歌") not in acp._MIXED_RENDEZVOUS
+    acp.stop_singing()
