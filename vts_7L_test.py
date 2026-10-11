@@ -2695,6 +2695,31 @@ LIVE_API_SYSTEM_PROMPT_QUEUE = asyncio.Queue()
 # 佇列只重發「發送失敗」的；「送達後 session 立刻死亡、腦沒處理」的靠重連掃這裡撿回。
 RECENT_SLIPS = deque(maxlen=30)
 RESCUE_WINDOW_SEC = 120.0
+# 📄 紙條去重帳本：全文 sha1 → 送達時間（10 秒內一字不差直接丟）。
+_SLIP_LAST_TS = {}
+_SLIP_DEDUPE_SEC = 10.0
+_SLIP_LEDGER_MAX = 200
+
+
+def _slip_is_dupe(prompt: str, now: float) -> bool:
+    """紙條去重（2026-10-11）：一次點歌發三張同字紙條，自斷三次，應答活活被砍死。
+    10 秒內全文相同的紙條回 True（調用方跳過）；否則記帳回 False。記帳字典要清請直接 clear。"""
+    import hashlib
+    try:
+        key = hashlib.sha1((prompt or "").encode("utf-8")).hexdigest()
+    except Exception:
+        return False
+    if now - _SLIP_LAST_TS.get(key, 0.0) < _SLIP_DEDUPE_SEC:
+        return True
+    _SLIP_LAST_TS[key] = now
+    if len(_SLIP_LAST_TS) > _SLIP_LEDGER_MAX:
+        try:
+            drop = len(_SLIP_LAST_TS) - _SLIP_LEDGER_MAX
+            for k in [k for k, _ in sorted(_SLIP_LAST_TS.items(), key=lambda kv: kv[1])[:drop]]:
+                _SLIP_LAST_TS.pop(k, None)
+        except Exception:
+            pass
+    return False
 # 進行中的子智能體任務（防 GC、手動盤點用；開幾個跑幾個，不設上限）
 _RUNNING_SUBAGENT_TASKS = set()
 pygame.mixer.init()
@@ -3884,13 +3909,15 @@ async def play_voice_complete(text, target: str = "dad", raw_actions_text: str =
             timeline_cancel_event = asyncio.Event()
             timeline_task = None
             total_actual_spoken_time = 0.0
+            #  2026-10-11：收尾要用的名字必須在 try 之前綁好——取消若落在第一個
+            #  await 之前，finally 會 UnboundLocalError 把真正的死因蓋掉。
+            _used_speech_channels = []
+            _used_music_fallback = False
 
             try:
                 # 初始更新字幕
                 await asyncio.to_thread(update_subtitle, text)
                 first_chunk = True
-                _used_speech_channels = []
-                _used_music_fallback = False
 
                 while True:
                     item = await audio_stream_queue.get()
@@ -5600,6 +5627,12 @@ async def continuous_live_worker(vts):
                     try:
                         while True:
                             prompt = await LIVE_API_SYSTEM_PROMPT_QUEUE.get()
+                            try:
+                                if _slip_is_dupe(prompt, time.time()):
+                                    log_print("📄 [紙條去重] 10 秒內相同紙條已送過，跳過（一次點歌三張同字紙條會自斷風暴）。")
+                                    continue
+                            except Exception:
+                                pass
                             log_print(f"📥 [黑板同步] 透過紙條傳送給 Live 大腦: {prompt}")
                             try:
                                 async with ws_send_lock:
