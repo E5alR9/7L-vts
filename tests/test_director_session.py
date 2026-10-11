@@ -87,6 +87,8 @@ def _load(fx):
         "GEMINI_KEYS": ["K1", "K2", "K3"],
         "_DIRECTOR_STATE": {"session": None, "cm": None, "key_idx": 0},
         "_DIRECTOR_LOCK": asyncio.Lock(),
+        "_DIRECTOR_TIMELINE_CACHE": {},
+        "_DIRECTOR_CACHE_MAX": 200,
     }
     import re as _re
     ns["re"] = _re
@@ -95,6 +97,9 @@ def _load(fx):
         if isinstance(n, ast.AsyncFunctionDef) and n.name in (
                 "_director_ensure_session", "_director_drop_session",
                 "live_api_direct_sentence_emotions"):
+            exec(compile(ast.Module(body=[n], type_ignores=[]), "x", "exec"), ns)
+            funcs[n.name] = ns[n.name]
+        if isinstance(n, ast.FunctionDef) and n.name == "_director_cache_key":
             exec(compile(ast.Module(body=[n], type_ignores=[]), "x", "exec"), ns)
             funcs[n.name] = ns[n.name]
     # ensure 內調 drop：同命名空間已就位，無需重綁
@@ -161,3 +166,69 @@ def test_connect_failure_rotates_key():
     assert r != []
     assert fx["connects"] == 2  # K1 炸→K2 成
     assert ns["_DIRECTOR_STATE"]["key_idx"] == 2  # 下次從 K3 開始
+
+
+# ── 結果快取（2026-10-11：同文案只導一次，按時長縮放）──────────────────────
+def test_cache_key_ignores_duration():
+    funcs, _, _, _ = _load({"connects": 0})
+    k = funcs["_director_cache_key"]
+    assert k("  你好呀  ") == k("你好呀")
+    assert k("你好呀") != k("你不好呀")
+
+
+def test_repeat_text_served_from_cache_rescaled():
+    funcs, ns, fx, logs = _load({"connects": 0})
+    f = funcs["live_api_direct_sentence_emotions"]
+
+    async def go():
+        r1 = await f("同樣的話講兩次，表情要對上。", 4.0)
+        n_sent_after_first = len(fx["sessions"][0].sent)
+        r2 = await f("同樣的話講兩次，表情要對上。", 8.0)  # 時長翻倍
+        return r1, r2, n_sent_after_first
+
+    r1, r2, n_sent = asyncio.run(go())
+    assert r1 == [(0.0, "EXPRESSION", "臉紅"), (1.2, "EXPRESSION", "吐舌")]
+    assert r2 == [(0.0, "EXPRESSION", "臉紅"), (2.4, "EXPRESSION", "吐舌")]  # 按比例
+    assert fx["connects"] == 1
+    assert len(fx["sessions"][0].sent) == n_sent == 1  # 第二次沒問大腦
+
+
+def test_different_text_rederives_same_session():
+    funcs, ns, fx, logs = _load({"connects": 0})
+    f = funcs["live_api_direct_sentence_emotions"]
+
+    async def go():
+        await f("第一句不同的話。", 4.0)
+        return await f("第二句完全不同的話。", 4.0)
+
+    r = asyncio.run(go())
+    assert r != []
+    assert fx["connects"] == 1  # 同 session，不重連
+    assert len(fx["sessions"][0].sent) == 2  # 但問了兩次
+
+
+def test_empty_timeline_cached_too():
+    funcs, ns, fx, logs = _load({"connects": 0, "lines": []})
+    f = funcs["live_api_direct_sentence_emotions"]
+
+    async def go():
+        r1 = await f("大腦無感的一句話測試。", 4.0)
+        r2 = await f("大腦無感的一句話測試。", 4.0)
+        return r1, r2
+
+    r1, r2 = asyncio.run(go())
+    assert r1 == [] and r2 == []
+    assert len(fx["sessions"][0].sent) == 1  # 空結果也記住，不白問第二次
+
+
+def test_cache_evicts_oldest():
+    funcs, ns, fx, logs = _load({"connects": 0})
+    ns["_DIRECTOR_CACHE_MAX"] = 2
+    f = funcs["live_api_direct_sentence_emotions"]
+
+    async def go():
+        for i in range(3):
+            await f(f"第{i}句完全不同的話內容。", 4.0)
+
+    asyncio.run(go())
+    assert len(ns["_DIRECTOR_TIMELINE_CACHE"]) == 2

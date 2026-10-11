@@ -3594,6 +3594,14 @@ async def _director_drop_session():
 
 _DIRECTOR_STATE = {"session": None, "cm": None, "key_idx": 0}
 _DIRECTOR_LOCK = asyncio.Lock()  # 主 loop 單例：導演問答成對序列化，互不插話
+_DIRECTOR_TIMELINE_CACHE = {}  # 文案 sha1 → (推導時長, [(分比, kind, 值), ...])
+_DIRECTOR_CACHE_MAX = 200
+
+
+def _director_cache_key(clean_text: str) -> str:
+    """導演結果快取鍵（純函數）：只認文案字面，不認時長（時長只決定縮放）。"""
+    import hashlib
+    return hashlib.sha1((clean_text or "").strip().encode("utf-8")).hexdigest()
 
 
 async def live_api_direct_sentence_emotions(clean_text: str, total_duration: float) -> list:
@@ -3605,6 +3613,22 @@ async def live_api_direct_sentence_emotions(clean_text: str, total_duration: flo
     """
     if not clean_text or total_duration < 1.8 or len(clean_text.strip()) < 6:
         return []
+
+    #  2026-10-11 結果快取：同文案只導一次，時間戳按比例縮放。
+    #  只動表情層，合成層（整段 SoVITS）一個字沒碰——切短句三宗罪傳染不過來。
+    _ckey = _director_cache_key(clean_text)
+    _hit = _DIRECTOR_TIMELINE_CACHE.get(_ckey)
+    if _hit is not None:
+        _dur0, _fracs = _hit
+        if _dur0 > 0:
+            _rescaled = [(round(f * total_duration, 2), k, v) for f, k, v in _fracs
+                         if f * total_duration <= total_duration + 0.5]
+            if _rescaled or not _fracs:
+                del _DIRECTOR_TIMELINE_CACHE[_ckey]
+                _DIRECTOR_TIMELINE_CACHE[_ckey] = _hit
+                return _rescaled
+
+    output_text = ""
 
     output_text = ""
     async with _DIRECTOR_LOCK:
@@ -3637,6 +3661,10 @@ async def live_api_direct_sentence_emotions(clean_text: str, total_duration: flo
                 else:
                     parsed_timeline.append((f_sec, "EXPRESSION", act_val))
 
+    _DIRECTOR_TIMELINE_CACHE[_ckey] = (
+        total_duration, [(t / total_duration, k, v) for t, k, v in parsed_timeline])
+    while len(_DIRECTOR_TIMELINE_CACHE) > _DIRECTOR_CACHE_MAX:
+        _DIRECTOR_TIMELINE_CACHE.pop(next(iter(_DIRECTOR_TIMELINE_CACHE)))
     if parsed_timeline:
         log_print(f"⚡ [Live API 神態導演] 成功策劃句中動態表情流: {parsed_timeline}")
     return parsed_timeline
