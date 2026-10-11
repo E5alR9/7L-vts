@@ -45,6 +45,8 @@ class _WebLogStream:
         self.buffer = ""
         self.total_bert_steps = 1
         self.current_bert_step = 0
+        self._owner = None  # 進入 capture 的線程 id：只解析主人的輸出（2026-10-11）
+        self._real_out = None  # 原 stdout：別的線程（如 RVC）原樣放行，不攔截
 
     def _dispatch_progress(self, line: str):
         try:
@@ -71,15 +73,10 @@ class _WebLogStream:
                 if m:
                     tqdm_pct = int(m.group(1))
                     pct = 40 + int(tqdm_pct * 0.25)  # 40% ~ 65%
+                    # 2026-10-11：這裡只會收到主人（SoVITS）線程的輸出，
+                    # RVC 的 tqdm 連線程門都過不了。舊碼用 _IS_PRODUCING_COVER
+                    # 把 SoVITS 自己的 BERT 條硬標成 RVC，已刪除。
                     stage = "提取 BERT 特徵進度"
-                    
-                    try:
-                        import services.auto_cover_pipeline as acp
-                        if getattr(acp, "_IS_PRODUCING_COVER", False):
-                            stage = "提取 HuBERT/F0 特徵進度 (RVC)"
-                    except Exception:
-                        pass
-                        
                     detail = line
             elif "前端处理后的文本" in line or "前端處理後的文本" in line:
                 stage = "音素音律對齊"
@@ -109,6 +106,14 @@ class _WebLogStream:
     def write(self, s):
         if not s:
             return
+        #  2026-10-11：sys.stdout 是全進程共享的，RVC 在別的線程的 tqdm 也會寫進來。
+        #  非主人的輸出原樣放行到真終端，不解析、不廣播（否則 RVC 進度污染粉色 TTS 框）。
+        if self._owner is not None and threading.get_ident() != self._owner:
+            try:
+                (self._real_out or sys.__stdout__).write(s)
+            except Exception:
+                pass
+            return
         self.buffer += s
         while "\n" in self.buffer or "\r" in self.buffer:
             split_idx = min([i for i in [self.buffer.find("\n"), self.buffer.find("\r")] if i != -1])
@@ -135,10 +140,13 @@ class _WebLogStream:
 
 @contextmanager
 def capture_tts_output():
-    """將區塊內的 print/tqdm 導向 Web 後台，不印在控制台"""
+    """將區塊內的 print/tqdm 導向 Web 後台，不印在控制台。
+    2026-10-11：只認進入時的線程，別線程（RVC 背景任務）原樣放行真終端。"""
     old_out = sys.stdout
     old_err = sys.stderr
     redir = _WebLogStream()
+    redir._owner = threading.get_ident()
+    redir._real_out = old_out
     sys.stdout = redir
     sys.stderr = redir
     try:
