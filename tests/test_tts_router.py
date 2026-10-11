@@ -424,3 +424,20 @@ def test_xiaoyi_split_method_single_piece():
     """直播短句整段一坨（cut5 碎片會整片靜音）。"""
     import local_xiaoyi_service as _xs
     assert _xs.XIAOYI_SPLIT_METHOD == "cut0"
+
+
+# ── 斷句不斷詞（2026-10-11：好不好聽被切成好不好，聽）────────────────────────
+def test_clause_segmentation_keeps_words():
+    from core.prompts import TextCleanEngine as C
+    seg = C.natural_clause_segmentation
+    # 詞內疑問結構絕不斷開
+    assert seg("觀眾朋友們覺得好不好聽呀？") == "觀眾朋友們覺得好不好聽呀？"
+    assert seg("昨天那場表演真的好不好看都沒人說") == "昨天那場表演真的好不好看都沒人說"
+    assert seg("你到底對不對勁跟我說清楚") == "你到底對不對勁跟我說清楚"
+    assert seg("他是不是很久沒出現了") == "他是不是很久沒出現了"
+    # 剩下的真 tag 照樣斷（回歸）
+    assert seg("我覺得這樣對吧跟我說一聲") == "我覺得這樣對吧，跟我說一聲"
+    assert seg("觀眾說真的啦跟你講一下") == "觀眾說真的啦，跟你講一下"
+    # 整管：回報句不斷詞
+    out = C.clean_for_tts("呼～這首《world.execute(me);》老爸你還滿意嗎？觀眾朋友們覺得好不好聽呀？給點尖叫聲！")
+    assert "好不好聽呀" in out and "好不好，" not in out
