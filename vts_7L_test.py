@@ -9073,7 +9073,18 @@ async def discord_mic_off(ctx):
 # ────────────────────────────────────────────────────────
 async def main():
     """系統主進入點：協同啟動所有背景感知神經與對話處理協程"""
-    
+    #  2026-10-11 模組分身修復：本檔以 __main__ 執行，但服務層會 lazy
+    #  `from vts_7L_test import ...`（首個謝幕紙條就觸發），導致整檔被重跑一次、
+    #  所有全域（包絡/旗號/狀態）一分為二——唱歌包絡送到分身去，臉迴圈永遠讀到空嘴。
+    #  開機先把名字綁到 __main__，之後的 by-name import 全命中本體，不再分叉、不再重跑。
+    try:
+        import sys as _sys_alias
+        _m = _sys_alias.modules.get("__main__")
+        if _m is not None:
+            _sys_alias.modules.setdefault("vts_7L_test", _m)
+    except Exception:
+        pass
+
     # ── 🎙️ 聲紋強制綁定 (首次啟動檢查) ──
     import os
     if not os.path.exists(os.path.join("data", "dad_voiceprint.npy")):
