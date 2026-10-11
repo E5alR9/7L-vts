@@ -460,6 +460,87 @@ def _wav_seconds(data: bytes, engine: str):
         return None
 
 
+# ── 語句磁碟快取（2026-10-11：同樣的口頭禪別再花 3 秒合成一次）───────────────
+# 同文＋同引擎＋同語速命中約 50ms（測過：3.01s → 0.05s）。SoVITS 有採樣隨機性，
+# 快取等於把同一句的講法固定下來——對主播人設是加分（口頭禪每次同一個味道）。
+# 換聲線模型時 bump TTS_CACHE_VERSION，否則舊音色殘留。
+TTS_CACHE_VERSION = "v1"
+TTS_CACHE_DIR = os.getenv("TTS_CACHE_DIR") or os.path.join(BASE_DIR, "data", "tts_cache")
+TTS_CACHE_MAX_FILES = int(os.getenv("TTS_CACHE_MAX_FILES") or "500")
+TTS_CACHE_MAX_BYTES = int(os.getenv("TTS_CACHE_MAX_BYTES") or str(300 * 1024 * 1024))
+TTS_CACHE_DISABLE = os.getenv("TTS_CACHE_DISABLE") == "1"
+
+
+def _tts_cache_key(text: str, engine: str) -> str:
+    import hashlib
+    raw = f"{TTS_CACHE_VERSION}|{engine}|{TTS_SPEED}|{text.strip()}".encode("utf-8")
+    return hashlib.sha1(raw).hexdigest() + file_extension(engine)
+
+
+def _tts_cache_path(key: str) -> str:
+    return os.path.join(TTS_CACHE_DIR, key)
+
+
+def tts_cache_get(text: str, engine: str):
+    """命中回 bytes（附帶刷新 mtime 做 LRU）；未命中／停用回 None。純函數之外只碰快取目錄。"""
+    if TTS_CACHE_DISABLE:
+        return None
+    try:
+        p = _tts_cache_path(_tts_cache_key(text, engine))
+        if not os.path.exists(p) or os.path.getsize(p) <= 100:
+            return None
+        with open(p, "rb") as f:
+            data = f.read()
+        if len(data) <= 100:
+            return None
+        try:
+            os.utime(p, None)
+        except Exception:
+            pass
+        return data
+    except Exception:
+        return None
+
+
+def tts_cache_put(text: str, engine: str, data: bytes) -> None:
+    """只存通過時長守衛的完整音訊；寫完順手剪枝。失敗一律吞掉（快取絕不擋合成）。"""
+    if TTS_CACHE_DISABLE or not data or len(data) <= 100:
+        return
+    try:
+        os.makedirs(TTS_CACHE_DIR, exist_ok=True)
+        with open(_tts_cache_path(_tts_cache_key(text, engine)), "wb") as f:
+            f.write(data)
+        _tts_cache_prune()
+    except Exception:
+        pass
+
+
+def _tts_cache_prune() -> None:
+    try:
+        files = []
+        total = 0
+        for name in os.listdir(TTS_CACHE_DIR):
+            p = os.path.join(TTS_CACHE_DIR, name)
+            try:
+                st = os.stat(p)
+            except Exception:
+                continue
+            if not os.path.isfile(p):
+                continue
+            files.append((st.st_mtime, st.st_size, p))
+            total += st.st_size
+        files.sort()
+        while (len(files) > TTS_CACHE_MAX_FILES or total > TTS_CACHE_MAX_BYTES) and files:
+            _, sz, p = files.pop(0)
+            try:
+                os.remove(p)
+            except Exception:
+                pass
+            total -= sz
+    except Exception:
+        pass
+
+
 async def get_tts_audio_bytes(text: str) -> bytes:
     """
     依引擎鏈合成語音。全部失敗回傳 b""（呼叫端會記錄警告，不會中斷直播）。
@@ -487,6 +568,13 @@ async def get_tts_audio_bytes(text: str) -> bytes:
         if fn is None:
             continue
         try:
+            hit = tts_cache_get(text, engine)
+            if hit:
+                if _active_engine != engine:
+                    _log(f"[TTS Router] 切換引擎 -> {engine}")
+                    _active_engine = engine
+                _engine_errors.pop(engine, None)
+                return hit
             data = await asyncio.wait_for(fn(text), timeout=ENGINE_TIMEOUT_SEC)
             if data and len(data) > 100:
                 dur = _wav_seconds(data, engine)
@@ -499,6 +587,7 @@ async def get_tts_audio_bytes(text: str) -> bytes:
                     _log(f"[TTS Router] 切換引擎 -> {engine}")
                     _active_engine = engine
                 _engine_errors.pop(engine, None)
+                tts_cache_put(text, engine, data)
                 return data
             raise RuntimeError("回傳音訊為空")
         except Exception as e:

@@ -2726,6 +2726,19 @@ def extract_audio_mouth_envelope(sound_obj, fps=25) -> list:
         return []
 
 
+def _load_sound_with_envelope(part_file: str, text: str = ""):
+    """播音單次解碼（2026-10-11）：同一個 Sound 物件同時拿時長＋口型包絡＋播音，
+    不再 decode 兩次（舊碼 3767/3801 各 load 一次，磁碟＋解碼雙倍開銷）。
+    回 (snd_obj_or_None, dur, env)。"""
+    try:
+        snd_obj = pygame.mixer.Sound(part_file)
+        part_dur = snd_obj.get_length()
+        part_env = extract_audio_mouth_envelope(snd_obj, fps=25)
+        return snd_obj, part_dur, part_env
+    except Exception:
+        return None, max(0.5, len(text or "") * 0.22), []
+
+
 
 def is_system_overloaded():
     try:
@@ -3763,14 +3776,7 @@ async def play_voice_complete(text, target: str = "dad", raw_actions_text: str =
                         break
 
                     part_file = item["file"]
-                    try:
-                        snd = pygame.mixer.Sound(part_file)
-                        part_dur = snd.get_length()
-                        part_env = extract_audio_mouth_envelope(snd, fps=25)
-                        del snd
-                    except Exception:
-                        part_dur = max(0.5, len(item["text"]) * 0.22)
-                        part_env = []
+                    snd_obj, part_dur, part_env = _load_sound_with_envelope(part_file, item["text"])
 
                     CURRENT_MOUTH_ENVELOPE = part_env
                     CURRENT_SMOOTH_MOUTH = 0.0
@@ -3798,7 +3804,8 @@ async def play_voice_complete(text, target: str = "dad", raw_actions_text: str =
                     # 首段直接播，後續段等待前段結束前 0.1s 預先 queue 進去
                     # 上限 part_dur+10 秒：驅動僵住不無限等（2026-10-11 全場靜默事件）
                     try:
-                        snd_obj = pygame.mixer.Sound(part_file)
+                        if snd_obj is None:
+                            snd_obj = pygame.mixer.Sound(part_file)
                         ch = pygame.mixer.find_channel(True)
                         if ch is None:
                             ch = pygame.mixer.Channel(0)

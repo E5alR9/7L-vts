@@ -2,6 +2,7 @@
 """services/tts_router.py 純函式測試（不打語音合成）"""
 import asyncio
 import io
+import os
 
 from conftest import ROOT  # noqa: F401
 from services import tts_router as t
@@ -258,3 +259,68 @@ def test_semicolon_becomes_pause():
     from core.prompts import TextCleanEngine as C
     assert C.normalize_spoken_form("a;b") == "a，b"
     assert C.normalize_spoken_form("好喔，Mili - world.execute(me);背景") == "好喔，Mili - world.execute(me)，背景"
+
+
+# ── 語句磁碟快取（2026-10-11：口頭禪別再花 3 秒合成）─────────────────────────
+def test_tts_cache_key():
+    k1 = t._tts_cache_key("你好呀", "xiaoyi")
+    assert k1 == t._tts_cache_key("  你好呀  ", "xiaoyi")  # 前後空白同一句
+    assert k1 != t._tts_cache_key("你好呀", "edge")        # 引擎不同
+    assert k1 != t._tts_cache_key("你不好呀", "xiaoyi")    # 文案不同
+    assert k1.endswith(".wav") and t._tts_cache_key("hi", "edge").endswith(".mp3")
+
+
+def test_tts_cache_roundtrip(tmp_path, monkeypatch):
+    monkeypatch.setattr(t, "TTS_CACHE_DIR", str(tmp_path))
+    assert t.tts_cache_get("你好呀", "xiaoyi") is None
+    t.tts_cache_put("你好呀", "xiaoyi", b"x" * 5000)
+    assert t.tts_cache_get("你好呀", "xiaoyi") == b"x" * 5000
+    t.tts_cache_put("太短不存", "xiaoyi", b"tiny")
+    assert t.tts_cache_get("太短不存", "xiaoyi") is None
+
+
+def test_tts_cache_prune(tmp_path, monkeypatch):
+    monkeypatch.setattr(t, "TTS_CACHE_DIR", str(tmp_path))
+    monkeypatch.setattr(t, "TTS_CACHE_MAX_FILES", 3)
+    monkeypatch.setattr(t, "TTS_CACHE_MAX_BYTES", 10 ** 9)
+    import time as _time
+    for i in range(5):
+        t.tts_cache_put(f"句子{i}", "xiaoyi", bytes([i]) * 2000)
+        _time.sleep(0.02)
+    left = sorted(os.listdir(str(tmp_path)))
+    assert len(left) == 3  # 只留最新的 3 個
+
+
+def test_tts_cache_serves_repeat_without_resynth(tmp_path, monkeypatch):
+    """同一句第二次直接命中，合成函數只被調用一次。"""
+    import asyncio
+    calls = {"n": 0}
+
+    async def fake_engine(text):
+        calls["n"] += 1
+        import wave as _w
+        buf = io.BytesIO()
+        with _w.open(buf, "wb") as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(24000)
+            w.writeframes(b"\\x01\\x02" * int(24000 * 8.0))
+        return buf.getvalue()
+
+    monkeypatch.setattr(t, "TTS_CACHE_DIR", str(tmp_path))
+    old_engines, old_chain = t._ENGINES, t.ENGINE_CHAIN
+    old_active, old_errors = t._active_engine, dict(t._engine_errors)
+    t._ENGINES = {"fake": fake_engine}
+    t.ENGINE_CHAIN = ["fake"]
+    t._active_engine = None
+    try:
+        text = "快取測試口頭禪，你好呀。" * 2  # ≥10 字才進時長守衛
+        a = asyncio.run(t.get_tts_audio_bytes(text))
+        b = asyncio.run(t.get_tts_audio_bytes(text))
+        assert a == b and len(a) > 100
+        assert calls["n"] == 1
+    finally:
+        t._ENGINES, t.ENGINE_CHAIN = old_engines, old_chain
+        t._active_engine = old_active
+        t._engine_errors.clear()
+        t._engine_errors.update(old_errors)
