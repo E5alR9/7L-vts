@@ -517,6 +517,13 @@ async def _prepare_worker(item, gen: int):
             print(f"✅ [翻唱隊列] 《{title}》背景準備完成，已排入待播！")
         else:
             _ACTIVE_TITLES.discard(_dedupe_key(title))
+            try:
+                import services.web_dashboard as web_dash
+                web_dash.broadcast_event("tts_progress", {
+                    "active": False, "mode": "rvc", "stage": "準備失敗",
+                    "percent": 0, "detail": title})
+            except Exception:
+                pass
             _send_brain_slip(f"[系統提示：剛才點的《{title}》背景準備失敗（下載／分離／轉換卡住），請自然地跟大家說這首先跳過、可以再點別首！]")
     except asyncio.CancelledError:
         raise
@@ -548,6 +555,13 @@ async def play_prepared_song(title: str, vocal_path: str, inst_path: str, gen: i
                 print("⚠️ [混用會合] 等鋼琴超時/異常，先開唱，鋼琴隨後跟上。")
         # 開唱清場：準備期的暈（busy worker 掛的）別帶上台；臉有別的戲就不碰
         await _clear_prep_halo()
+        try:
+            import services.web_dashboard as web_dash
+            web_dash.broadcast_event("tts_progress", {
+                "active": True, "mode": "rvc", "stage": "舞台開唱",
+                "percent": 100, "detail": title})
+        except Exception:
+            pass
         await play_cover_audio(vocal_path, title, inst_path=inst_path)
     except asyncio.CancelledError:
         raise
@@ -557,6 +571,13 @@ async def play_prepared_song(title: str, vocal_path: str, inst_path: str, gen: i
     finally:
         _NOW_PLAYING_TITLE = ""
         _ACTIVE_TITLES.discard(key)
+        try:
+            import services.web_dashboard as web_dash
+            web_dash.broadcast_event("tts_progress", {
+                "active": False, "mode": "rvc", "stage": "演唱完畢",
+                "percent": 100, "detail": title})
+        except Exception:
+            pass
     if gen != _PIPELINE_GEN:
         return f"《{title}》已停止。"
     depth = len(SONG_REQUEST_QUEUE) + len(READY_SONGS)
@@ -621,6 +642,13 @@ async def prepare_cover_song(song_name: str):
         if play_vocal:
             play_inst = cached_inst if (os.path.exists(cached_inst) and os.path.getsize(cached_inst) > 100000) else None
             print(f"💾 [7L 專屬翻唱庫] 命中已就緒之獨立人聲與伴奏: 《{song_name}》 (雙軌同步即時放音)")
+            try:
+                import services.web_dashboard as web_dash
+                web_dash.broadcast_event("tts_progress", {
+                    "active": True, "mode": "rvc", "stage": "快取命中即將開唱",
+                    "percent": 95, "detail": song_name})
+            except Exception:
+                pass
             return play_vocal, play_inst
 
         print(f"🚀 [7L 全自動翻唱引擎啟動] 目標曲目: 《{song_name}》")
