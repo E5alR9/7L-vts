@@ -128,8 +128,21 @@ def _monitor(buf: _TqdmCapture, stop: threading.Event, song_name: str,
             pass
 
 
-def separate_roformer(input_wav: str, vocals_out: str, inst_out: str,
-                      song_name: str = "", progress_cb=None) -> bool:
+def preload_roformer(work_dir: str) -> bool:
+    """開機預載（2026-10-11）：639MB 模型上卡 burst 會把同時的 SoVITS 推理拖到 50~80 秒。
+    開機排在 SoVITS 預熱後面先付掉，首歌分離只剩純計算、不再撞 TTS。失敗回 False（首歌再載，不擋開機）。"""
+    try:
+        os.makedirs(work_dir, exist_ok=True)
+        t0 = time.time()
+        _get_separator(work_dir)
+        print(f"✅ [Roformer 預載完成] 常駐 VRAM（{time.time() - t0:.1f}s），首歌不撞 TTS。")
+        return True
+    except Exception as e:
+        print(f"⚠️ [Roformer 預載失敗（首歌再載）]: {e}")
+        return False
+
+
+def separate_roformer(input_wav: str, vocals_out: str, inst_out: str,                      song_name: str = "", progress_cb=None) -> bool:
     """Roformer 分離一首歌。成功回 True（雙 stems 已拷到目標）；任何異常回 False（調用方降級）。
     progress_cb(pct 0~100)：tqdm 解析＋節流（≥3% 才回調），調用方拿去刷 dashboard。"""
     if not input_wav or not os.path.exists(input_wav):

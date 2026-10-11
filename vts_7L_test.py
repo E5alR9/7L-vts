@@ -9010,6 +9010,18 @@ async def main():
                     log_print(f"🟢 [GPT-SoVITS 首推預熱完成] 首次推理 {_t.time() - _t0:.1f}s（開播不會再吃首推懲罰）。")
                 except Exception as _w_err:
                     log_print(f"⚠️ [GPT-SoVITS 首推預熱失敗（權重正常，首句可能較慢）]: {_w_err}")
+                #  2026-10-11：Roformer 639MB 上卡 burst 會把同時的 TTS 拖到 50 秒以上。
+                #  排在 SoVITS 預熱「後面」付掉（兩 burst 互不撞），首歌分離只剩純計算。
+                try:
+                    import services.roformer_sep as _rs
+                    import services.auto_cover_pipeline as _acp
+                    _rdir = os.path.join(_acp.CACHE_DIR, "roformer_out")
+                    if _rs.preload_roformer(_rdir):
+                        log_print("🟢 [Roformer 預載完成] 首歌分離不再撞 TTS。")
+                    else:
+                        log_print("⚠️ [Roformer 預載失敗] 首歌現載（首句 TTS 可能較慢）。")
+                except Exception as _r_err:
+                    log_print(f"⚠️ [Roformer 預載跳過]: {_r_err}")
             else:
                 log_print("⚠️ [GPT-SoVITS 預熱失敗] 初始化回傳空管線，曉伊引擎停用（自動降級其他引擎）。")
         except Exception as e:

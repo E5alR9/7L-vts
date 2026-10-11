@@ -750,6 +750,15 @@ class TextCleanEngine:
         t = t.replace(";", "，")  # SoVITS 前端靜默吞半形分號，轉逗號保留斷句（2026-10-11）
         if for_chinese:
             t = cls._TIME_RE.sub(cls._time_zh, t)
+            #  2026-10-11：程式碼標點會毒死 SoVITS 語言切分——實測
+            #  《Mili - world.execute(me)》交給我 整段消失，後面「背景準備中」被帶成日文讀音。
+            #  拉丁 token 內的 .()_/\ 轉空格（world.execute(me)→world execute me），
+            #  獨立 - 轉逗號斷句（Mili - world→Mili，world），給切分乾淨邊界。
+            #  日文語境不動（交給 pyopenjtalk，無實測不亂改）。
+            t = re.sub(r'\s+-\s+', '，', t)
+            t = re.sub(r'[-_./\\()]+', ' ', t)
+            t = re.sub(r' {2,}', ' ', t)
+            t = re.sub(r' +([，、。！？])', r'\1', t)  # 標點前空格清掉（me ，→me，）
         return t
 
     _KAKASI_INST = None

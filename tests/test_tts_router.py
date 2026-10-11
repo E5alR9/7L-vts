@@ -241,11 +241,12 @@ def test_short_audio_falls_back():
 # ── 工具調用剝離 vs 歌名保留（2026-10-11：world.execute(me) 被當函數吃掉）─────
 def test_tool_call_strip_keeps_song_titles():
     from core.prompts import TextCleanEngine as C
-    # 歌名／自然文本：有括號也必須留活口
+    # 歌名／自然文本：程式碼標點轉口語邊界後照唸，不整段消失
     out = C.clean_for_tts("好喔，Mili - world.execute(me);背景準備中，好了就唱給你聽。")
-    assert "world.execute(me)" in out, out
+    assert "world execute me" in out, out
     assert ";" not in out and "，" in out  # 半形分號轉逗號不斷句
-    assert "hello(world)" in C.clean_for_tts("唱hello(world)吧")
+    assert "(" not in out and ")" not in out and "." not in out.split("，")[1]
+    assert "hello world" in C.clean_for_tts("唱hello(world)吧")
     # 真洩漏照殺：具名工具／蛇形名／參數像代碼
     assert "auto_sing_song" not in C.clean_for_tts("來一首auto_sing_song({'song_name': '晴天'})吧")
     assert "play_virtual_piano" not in C.clean_for_tts("[play_virtual_piano(123)]走起")
@@ -258,7 +259,7 @@ def test_tool_call_strip_keeps_song_titles():
 def test_semicolon_becomes_pause():
     from core.prompts import TextCleanEngine as C
     assert C.normalize_spoken_form("a;b") == "a，b"
-    assert C.normalize_spoken_form("好喔，Mili - world.execute(me);背景") == "好喔，Mili - world.execute(me)，背景"
+    assert C.normalize_spoken_form("好喔，Mili - world.execute(me);背景") == "好喔，Mili，world execute me，背景"
 
 
 # ── 語句磁碟快取（2026-10-11：口頭禪別再花 3 秒合成）─────────────────────────
@@ -324,3 +325,21 @@ def test_tts_cache_serves_repeat_without_resynth(tmp_path, monkeypatch):
         t._active_engine = old_active
         t._engine_errors.clear()
         t._engine_errors.update(old_errors)
+
+
+# ── 程式碼標點轉口語邊界（2026-10-11：Mili 句整段消失＋後面變日文）──────────
+def test_code_punct_to_spoken_boundaries():
+    from core.prompts import TextCleanEngine as C
+    # 拉丁 token 內 .()_/\ 轉空格，獨立 - 轉逗號
+    assert C.normalize_spoken_form("Mili - world.execute(me)") == "Mili，world execute me "
+    assert C.normalize_spoken_form("唱world_execute_me吧") == "唱world execute me吧"
+    assert C.normalize_spoken_form("A/B測") == "A B測"
+    # 時間不受傷（先轉時間，冒號本來就不在集合裡）
+    assert C.normalize_spoken_form("半夜5:20am開播") == "半夜上午五點二十分開播"
+    # 日文語境不動
+    assert C.normalize_spoken_form("12:00に会う", for_chinese=False) == "12:00に会う"
+    # 整管：Mili 句無殘留毒標點，中文不斷
+    out = C.clean_for_tts("好喔，《Mili - world.execute(me)》交給我，背景準備中，好了就唱給你聽！")
+    assert out == "好喔，Mili，world execute me 交給我，背景準備中，好了就唱給你聽。"
+    for bad in ["《", "》", "(", ")"]:
+        assert bad not in out
