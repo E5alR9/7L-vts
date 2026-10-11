@@ -7,7 +7,7 @@ from conftest import ROOT  # noqa: F401
 from services import desktop_helper as dh
 
 
-PERSONA_TURNS = [{"role": "user", "content": "你是 7L 的手機助手，代 7L 用繁體中文跟老爸閒聊。"},
+PERSONA_TURNS = [{"role": "user", "content": "你是 7L 的手機助手，陪老爸聊天就是你的工作。"},
                  {"role": "gemini", "content": "好喔！"}]
 
 
