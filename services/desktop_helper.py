@@ -15,6 +15,7 @@ CPU 關鍵字打不中而已，其他全部照跑。
 - 超時/異常一律拋錯給調用方，由調用方決定怎麼跟觀眾交代
 """
 import os
+import re
 import sys
 import threading
 
@@ -58,12 +59,15 @@ def _controller():
 
 # 助手串指紋：人格首句關鍵字（對話串身份證；被刪/切走就認得出來）。
 HELPER_MARKER = "7L 的手機助手"
+# 上次認領的串名（回家一跳直達；被刪就當沒記過）。
+_ADOPTED_NAME = ""
 
 
 def _find_new_chat_button(c):
-    """找新對話鈕（深搜，免焦點 Invoke 專用；絕不用 Click 動滑鼠）。"""
-    for kw in ({"Name": "新對話", "searchDepth": 25},
-               {"Name": "新對話"}):
+    """找新對話鈕（深搜＋正則，免焦點 Invoke 專用；絕不用 Click 動滑鼠）。"""
+    for kw in ({"RegexName": "新對話", "searchDepth": 25},
+               {"Name": "新對話", "searchDepth": 25},
+               {"RegexName": "新對話"}):
         for cls in ("ButtonControl", "HyperlinkControl"):
             try:
                 el = getattr(c.window_ctrl, cls)(**kw)
@@ -78,9 +82,93 @@ def _find_new_chat_button(c):
     return None
 
 
+def _ensure_sidebar_open(c) -> bool:
+    """側欄開關（2026-10-11）：沒指紋先開側欄再找。找*側欄*鈕 Expand；
+    找不到/已開都算過（冪等），只回報有沒有動過手。」"""
+    try:
+        btn = c.window_ctrl.ButtonControl(RegexName=".*側欄.*", searchDepth=25)
+        if not btn.Exists(3):
+            return False
+        try:
+            pat = btn.GetExpandCollapsePattern()
+            if pat:
+                pat.Expand()
+                return True
+        except Exception:
+            pass
+        try:
+            pat = btn.GetInvokePattern()
+            if pat:
+                pat.Invoke()
+                return True
+        except Exception:
+            pass
+    except Exception:
+        pass
+    return False
+
+
+def _recent_chat_names(c, limit=5):
+    """掃近期對話名（置頂前幾個，RegexName 枚舉 foundIndex）。"""
+    names = []
+    for i in range(1, limit * 4 + 1):
+        if len(names) >= limit:
+            break
+        try:
+            h = c.window_ctrl.HyperlinkControl(RegexName=".+", foundIndex=i)
+            if not h.Exists(1):
+                continue
+            nm = (h.Name or "").strip()
+            if nm and nm not in names:
+                names.append(nm)
+        except Exception:
+            break
+    return names
+
+
+def _adopt_recent_helper_chat(c, limit=5) -> bool:
+    """認領舊助手串（2026-10-11）：開側欄→掃近期→逐個切入驗指紋。
+    找到就停在那個串回 True；都沒有回 False（調用方建新的）。
+    全程免焦點 Invoke；一次只動一個，log 交代行蹤。」"""
+    import time as _t
+    try:
+        _ensure_sidebar_open(c)
+    except Exception:
+        pass
+    if _in_helper_chat(c):
+        return True  # 就站在自己家，不用動
+    global _ADOPTED_NAME
+    _names = _recent_chat_names(c, limit)
+    if _ADOPTED_NAME and _ADOPTED_NAME in _names:
+        _names = [_ADOPTED_NAME] + [n for n in _names if n != _ADOPTED_NAME]
+    for nm in _names:
+        try:
+            el = c.window_ctrl.HyperlinkControl(RegexName="^" + re.escape(nm) + "$")
+            if not el.Exists(2):
+                continue
+            invoked = False
+            try:
+                pat = el.GetInvokePattern()
+                if pat:
+                    pat.Invoke()
+                    invoked = True
+            except Exception:
+                pass
+            if not invoked:
+                continue
+            _t.sleep(2.0)
+            if _in_helper_chat(c):
+                print(f"✅ [桌機助手] 認領舊助手串（免新建）。")
+                _ADOPTED_NAME = nm
+                return True
+        except Exception:
+            continue
+    return False
+
+
 def ensure_helper_chat(timeout: float = HELPER_CHAT_TIMEOUT_SEC) -> bool:
     """點一次「新對話」當 7L 專用串，並先塞人格。找不到就用當前對話（回 False，調用方要大聲警告）。"""
-    global _chat_ready
+    global _chat_ready, _ADOPTED_NAME
     if _chat_ready:
         return True
     c = _controller()
@@ -93,6 +181,7 @@ def ensure_helper_chat(timeout: float = HELPER_CHAT_TIMEOUT_SEC) -> bool:
     except Exception:
         return False
     _chat_ready = True
+    _ADOPTED_NAME = ""  # 新串還沒名字，下次靠指紋掃
     try:
         c.ask(HELPER_SYSTEM_PROMPT, timeout=timeout)
     except Exception:
@@ -119,10 +208,17 @@ def get_answer(question: str, timeout: float = ASK_TIMEOUT_SEC) -> str:
         c = _controller()
         c.ensure_connected()
         if not _in_helper_chat(c):
-            global _chat_ready
-            _chat_ready = False  # 指紋不在，重建
-            if not ensure_helper_chat():
-                print("⚠️ [桌機助手] 找不到新對話鈕，將就用當前對話串（別同時手動玩桌面版）。")
+            # 指紋不在：先開側欄認領舊串，認不到才建新（免空串垃圾）。
+            _adopted = False
+            try:
+                _adopted = _adopt_recent_helper_chat(c)
+            except Exception:
+                pass
+            if not _adopted:
+                global _chat_ready
+                _chat_ready = False  # 指紋不在，重建
+                if not ensure_helper_chat():
+                    print("⚠️ [桌機助手] 找不到新對話鈕，將就用當前對話串（別同時手動玩桌面版）。")
         ans = c.ask(q, timeout=timeout)
     ans = (ans or "").strip()
     if not ans:
