@@ -170,6 +170,25 @@ def extract_sing_song(text: Optional[str]) -> Optional[str]:
     return _scan(text or "", _SING_KW, _NEG_SING)
 
 
+_ASK_DESKTOP_RE = re.compile(
+    r'^\s*(?:請|幫我|幫|來|給我|替我|\s)*問(?:一下)?\s*gemini(?![A-Za-z0-9_])\s*[:：]?\s*(.+)$',
+    re.IGNORECASE | re.DOTALL)
+
+
+def extract_ask_desktop(text: Optional[str]) -> Optional[str]:
+    """桌機助手關鍵字（B 架構，2026-10-11）：問Gemini＋問題，回問題文本。
+    錨定句首（「唱一首問Gemini的歌」這種不搶唱歌的）。零 API，純正則。"""
+    if not text:
+        return None
+    m = _ASK_DESKTOP_RE.match(text.strip())
+    if not m:
+        return None
+    q = m.group(1).strip().strip('？?！!。，,、；;：:～~…')
+    if len(q) < 2 or not _has_content_char(q):
+        return None
+    return q
+
+
 def extract_piano_song(text: Optional[str]) -> Optional[str]:
     """從純文字抽出彈琴曲名；不是明確彈琴祈使句就回 None。"""
     return _scan(text or "", _PIANO_KW, _NEG_PIANO)
@@ -261,8 +280,12 @@ def parse_hard_command(text: Optional[str]) -> Tuple[Optional[str], Dict]:
 
     只認點歌（唱歌/彈琴）。表情不歸 CPU（交還主腦/A 架構，避免誤觸搶戲）。
     混用句（彈X加唱Y）走 parse_mixed_command，不在這裡處理。
-    回 (None, {}) 代表無硬指令，交還主腦（絕不在此呼叫任何 API）。
+    桌機助手（問Gemini）最優先判定：顯式問句不跟唱歌搶。
+    回 (None, {}) 代表無硬指令，交還 A 架構（Live 主腦 → invoke_subagent → NV 解讀）。
     """
+    ask = extract_ask_desktop(text)
+    if ask:
+        return "ask_desktop", {"question": ask}
     song = extract_sing_song(text)
     if song:
         return "auto_sing_song", {"song_name": song}

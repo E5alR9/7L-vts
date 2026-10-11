@@ -852,6 +852,11 @@ async def execute_tool_dispatch(fn_name: str, fn_args: dict, caller_target: str 
         q = fn_args.get("query", "")
         res = await asyncio.to_thread(search_google, q)
         return res
+    elif fn_name in ["ask_desktop", "ask_gemini_desktop"]:
+        q = (fn_args.get("question", "") or "").strip()
+        req_t = caller_target or ("audience" if CURRENT_SPEAKING_TARGET == "audience" else "dad")
+        asyncio.create_task(_desktop_ask_and_report(q, req_t, caller_user))
+        return f" （系統回報：已請桌面版 Gemini 查問，答案稍後播報，不要自己編答案。）"
     elif fn_name in ["generate_ai_image", "draw_illustration"]:
         p = fn_args.get("prompt", "")
         asyncio.create_task(generate_ai_image(p))
@@ -2546,6 +2551,33 @@ async def _song_ack_missing_original(song: str, target: str = "dad"):
 
 MIXED_PIANO_WAIT_SEC = 900.0  # 混用鋼琴等翻唱上限（RVC 慢，給足；掉隊/超時就自己先彈）
 
+
+
+async def _desktop_ask_and_report(question: str, target: str = "dad", user: str = ""):
+    """桌機助手回報（2026-10-11）：拿起手機問→不等（不擋主線）→答了TTS播報。
+    失敗也誠實播報，不裝死。手機只是加法，拿掉不影響任何核心。"""
+    from services import desktop_helper as _dh
+    q = _dh.normalize_question(question)
+    if not q:
+        return
+    try:
+        log_print(f"手機問桌面版：{q[:60]}")
+        ans = await asyncio.to_thread(_dh.get_answer, q, 120.0)
+        text = f"桌面版說：{ans.strip()[:300]}"
+        try:
+            speech_queue.put_nowait({"text": text, "expression": "", "action": "",
+                                     "target": target, "priority": 80})
+        except Exception:
+            pass
+        log_print("桌機助手收到回覆，已排入播報。")
+    except Exception as e:
+        log_print(f"桌機助手問話失敗: {e}")
+        try:
+            speech_queue.put_nowait({"text": "手機沒信號，桌面版沒回我，晚點再問一次吧。",
+                                     "expression": "", "action": "",
+                                     "target": target, "priority": 80})
+        except Exception:
+            pass
 
 async def _mixed_piano_run(piano_title: str, sing_title: str, target: str, requester: str):
     """混用鋼琴側（2026-10-11：先開著等，兩邊備好同時放）。

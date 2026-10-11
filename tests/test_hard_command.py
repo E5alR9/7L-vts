@@ -6,6 +6,7 @@ from core.hard_command import (
     build_slip_text,
     display_requester, parse_slip_for_song, rescue_claim, _RESCUED_SONG_TS,
     split_original_request, find_original_song_file, ORIGINALS_DIR,
+    extract_ask_desktop,
     strip_blob_noise, sanitize_search_query,
 )
 
@@ -334,3 +335,33 @@ def test_original_slip_text(tmp_path, monkeypatch):
     # 普通點歌文案不動（回歸）
     s3 = build_slip_text("auto_sing_song", {"song_name": "晴天"}, "老爸")
     assert "自創曲" not in s3 and "《晴天》" in s3
+
+
+# ── 桌機助手關鍵字（2026-10-11：7L 的手機，問Gemini＋問題）──────────────────
+def test_ask_desktop_hits():
+    assert extract_ask_desktop("問Gemini明天的天氣") == "明天的天氣"
+    assert extract_ask_desktop("請幫我問Gemini 7L是誰") == "7L是誰"
+    assert extract_ask_desktop("問一下gemini：怎麼做蛋糕？") == "怎麼做蛋糕"
+    assert extract_ask_desktop("幫我問GEMINI今晚吃什麼") == "今晚吃什麼"
+    tool, args = parse_hard_command("問Gemini明天會下雨嗎")
+    assert tool == "ask_desktop" and args["question"] == "明天會下雨嗎"
+
+
+def test_ask_desktop_misses():
+    assert extract_ask_desktop("唱晴天") is None
+    assert extract_ask_desktop("問Gemini") is None
+    assert extract_ask_desktop("問") is None
+    assert extract_ask_desktop("") is None
+    assert extract_ask_desktop("今天天氣真好") is None
+    # 唱歌優先級：句首是唱就不搶
+    assert extract_ask_desktop("唱一首問Gemini的歌") is None
+    # 唱歌回歸：parse 不受 ask 分支影響
+    assert parse_hard_command("唱晴天")[0] == "auto_sing_song"
+
+
+def test_desktop_helper_normalize():
+    from services.desktop_helper import normalize_question
+    assert normalize_question("  你好嗎？ ") == "你好嗎？"
+    assert normalize_question("x") == ""
+    assert normalize_question("") == ""
+    assert len(normalize_question("y" * 600)) == 500
