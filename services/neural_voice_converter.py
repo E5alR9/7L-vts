@@ -129,7 +129,7 @@ def convert_vocal_to_xiaoyi(
     try:
         try:
             import services.web_dashboard as web_dash
-            web_dash.broadcast_event("tts_progress", {
+            web_dash.broadcast_event("rvc_progress", {
                 "active": True,
                 "mode": "rvc",
                 "stage": "載入 HuBERT 聲學模型",
@@ -147,7 +147,7 @@ def convert_vocal_to_xiaoyi(
         
         try:
             import services.web_dashboard as web_dash
-            web_dash.broadcast_event("tts_progress", {
+            web_dash.broadcast_event("rvc_progress", {
                 "active": True,
                 "mode": "rvc",
                 "stage": "讀取原唱音軌特徵",
@@ -177,7 +177,7 @@ def convert_vocal_to_xiaoyi(
         
         try:
             import services.web_dashboard as web_dash
-            web_dash.broadcast_event("tts_progress", {
+            web_dash.broadcast_event("rvc_progress", {
                 "active": True,
                 "mode": "rvc",
                 "stage": "RMVPE 音高預測 & 音色置換 (V2)",
@@ -210,7 +210,7 @@ def convert_vocal_to_xiaoyi(
         
         try:
             import services.web_dashboard as web_dash
-            web_dash.broadcast_event("tts_progress", {
+            web_dash.broadcast_event("rvc_progress", {
                 "active": False,
                 "mode": "rvc",
                 "stage": f"7L 歌聲置換完成 ({time.time()-t0:.1f}s)",
@@ -224,7 +224,7 @@ def convert_vocal_to_xiaoyi(
     except Exception as e:
         try:
             import services.web_dashboard as web_dash
-            web_dash.broadcast_event("tts_progress", {
+            web_dash.broadcast_event("rvc_progress", {
                 "active": False,
                 "mode": "rvc",
                 "stage": f"RVC 異常: {e}",

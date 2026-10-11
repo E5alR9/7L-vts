@@ -1078,6 +1078,17 @@ body.frosted-theme::before {
   animation: ttsHudFadeInTop 0.28s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
+/* RVC 翻唱 HUD：疊在 TTS HUD 下方，青藍邊框一眼區分 */
+.tts-progress-hud.rvc-below {
+  top: 148px;
+  border-color: rgba(94, 200, 255, 0.55);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.65), 0 0 28px rgba(80, 180, 255, 0.35), inset 0 1px 1.5px rgba(255, 255, 255, 0.35);
+}
+.tts-progress-hud.rvc-below .tts-hud-pulse {
+  background: #4cc3ff;
+  box-shadow: 0 0 10px #4cc3ff, 0 0 18px rgba(76, 195, 255, 0.8);
+}
+
 @keyframes ttsHudFadeInTop {
   from { opacity: 0; transform: translateY(-12px) scale(0.96); }
   to { opacity: 1; transform: translateY(0) scale(1); }

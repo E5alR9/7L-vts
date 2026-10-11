@@ -178,6 +178,23 @@
             </div>
             <div class="tts-hud-detail" id="ttsHudDetail">準備啟動顯卡神經推論...</div>
           </div>
+
+          <!-- 🎤 翻唱管線即時進度浮動 HUD (RVC：分離/置換/開唱，與 TTS 上下分開顯示) -->
+          <div class="tts-progress-hud rvc-below" id="rvcProgressHud" style="display: none;">
+            <div class="tts-hud-header">
+              <div class="tts-hud-title-wrap">
+                <span class="tts-hud-pulse"></span>
+                <span class="tts-hud-icon" id="rvcHudIcon">🎤</span>
+                <span class="tts-hud-title" id="rvcHudTitle">7L 翻唱管線 (RVC)</span>
+                <span class="tts-hud-stage" id="rvcHudStage">待命中...</span>
+              </div>
+              <div class="tts-hud-pct-badge" id="rvcHudPct">0%</div>
+            </div>
+            <div class="tts-hud-bar-track">
+              <div class="tts-hud-bar-fill" id="rvcHudBarFill" style="width: 0%;"></div>
+            </div>
+            <div class="tts-hud-detail" id="rvcHudDetail">背景翻唱準備中...</div>
+          </div>
         </div>
       </div>
 

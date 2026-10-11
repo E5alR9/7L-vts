@@ -33,7 +33,7 @@ def test_cache_hit_broadcasts_incoming(monkeypatch, tmp_path):
         got = asyncio.run(acp.prepare_cover_song(song))
         assert got[0] == voc
         stages = [(e[1].get("stage"), e[1].get("percent"), e[1].get("active"))
-                  for e in events if e[0] == "tts_progress"]
+                  for e in events if e[0] == "rvc_progress"]
         assert ("快取命中即將開唱", 95, True) in stages
     finally:
         for p in (voc, ins):
@@ -56,7 +56,7 @@ def test_play_lifecycle_broadcasts(monkeypatch, tmp_path):
     asyncio.run(acp.play_prepared_song("單元測試HUD開唱歌", "v.wav", "i.wav",
                                        acp._PIPELINE_GEN))
     stages = [(e[1].get("stage"), e[1].get("active")) for e in events
-              if e[0] == "tts_progress"]
+              if e[0] == "rvc_progress"]
     assert ("舞台開唱", True) in stages
     assert ("演唱完畢", False) in stages
     assert stages.index(("舞台開唱", True)) < stages.index(("演唱完畢", False))
@@ -75,5 +75,5 @@ def test_prepare_fail_hides_hud(monkeypatch):
     asyncio.run(acp._prepare_worker({"title": "單元測試HUD失敗歌",
                                      "requester": ""}, acp._PIPELINE_GEN))
     stages = [(e[1].get("stage"), e[1].get("active")) for e in events
-              if e[0] == "tts_progress"]
+              if e[0] == "rvc_progress"]
     assert ("準備失敗", False) in stages

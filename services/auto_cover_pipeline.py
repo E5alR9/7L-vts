@@ -107,7 +107,7 @@ def separate_stems_gpu(input_wav: str, song_name: str) -> tuple[str, str]:
     def _sep_progress(pct: int):
         try:
             import services.web_dashboard as web_dash
-            web_dash.broadcast_event("tts_progress", {
+            web_dash.broadcast_event("rvc_progress", {
                 "active": True, "mode": "rvc", "stage": "Roformer GPU 拆解人聲與伴奏",
                 "percent": 30 + int(max(0, min(100, pct)) * 0.18), "detail": song_name})
         except Exception:
@@ -482,7 +482,7 @@ async def _run_with_heartbeat(awaitable_fn, label: str, song: str, interval: flo
             print(f"⏳ [{label}進行中] 《{song}》…已跑 {el // 60}分{el % 60:02d}秒，還在跑（不是空轉）。")
             try:
                 import services.web_dashboard as web_dash
-                web_dash.broadcast_event("tts_progress", {
+                web_dash.broadcast_event("rvc_progress", {
                     "active": True, "mode": "rvc", "stage": f"{label}進行中…",
                     "percent": -1, "detail": f"{song}（已跑{el // 60}分{el % 60:02d}秒）"
                 })
@@ -519,7 +519,7 @@ async def _prepare_worker(item, gen: int):
             _ACTIVE_TITLES.discard(_dedupe_key(title))
             try:
                 import services.web_dashboard as web_dash
-                web_dash.broadcast_event("tts_progress", {
+                web_dash.broadcast_event("rvc_progress", {
                     "active": False, "mode": "rvc", "stage": "準備失敗",
                     "percent": 0, "detail": title})
             except Exception:
@@ -557,7 +557,7 @@ async def play_prepared_song(title: str, vocal_path: str, inst_path: str, gen: i
         await _clear_prep_halo()
         try:
             import services.web_dashboard as web_dash
-            web_dash.broadcast_event("tts_progress", {
+            web_dash.broadcast_event("rvc_progress", {
                 "active": True, "mode": "rvc", "stage": "舞台開唱",
                 "percent": 100, "detail": title})
         except Exception:
@@ -573,7 +573,7 @@ async def play_prepared_song(title: str, vocal_path: str, inst_path: str, gen: i
         _ACTIVE_TITLES.discard(key)
         try:
             import services.web_dashboard as web_dash
-            web_dash.broadcast_event("tts_progress", {
+            web_dash.broadcast_event("rvc_progress", {
                 "active": False, "mode": "rvc", "stage": "演唱完畢",
                 "percent": 100, "detail": title})
         except Exception:
@@ -644,7 +644,7 @@ async def prepare_cover_song(song_name: str):
             print(f"💾 [7L 專屬翻唱庫] 命中已就緒之獨立人聲與伴奏: 《{song_name}》 (雙軌同步即時放音)")
             try:
                 import services.web_dashboard as web_dash
-                web_dash.broadcast_event("tts_progress", {
+                web_dash.broadcast_event("rvc_progress", {
                     "active": True, "mode": "rvc", "stage": "快取命中即將開唱",
                     "percent": 95, "detail": song_name})
             except Exception:
@@ -654,7 +654,7 @@ async def prepare_cover_song(song_name: str):
         print(f"🚀 [7L 全自動翻唱引擎啟動] 目標曲目: 《{song_name}》")
         try:
             import services.web_dashboard as web_dash
-            web_dash.broadcast_event("tts_progress", {
+            web_dash.broadcast_event("rvc_progress", {
                 "active": True, "mode": "rvc", "stage": "下載 YouTube 高音質音軌", "percent": 10, "detail": song_name
             })
         except Exception: pass
@@ -665,13 +665,13 @@ async def prepare_cover_song(song_name: str):
         success = await asyncio.to_thread(download_youtube_audio, song_name, raw_wav)
         if not success or not os.path.exists(raw_wav):
             try:
-                web_dash.broadcast_event("tts_progress", {"active": False, "stage": "下載失敗", "percent": 0})
+                web_dash.broadcast_event("rvc_progress", {"active": False, "stage": "下載失敗", "percent": 0})
             except Exception: pass
             print(f"❌ [翻唱準備失敗] 在 YouTube 找不到《{song_name}》可用的高音質音軌。")
             return None, None
 
         try:
-            web_dash.broadcast_event("tts_progress", {
+            web_dash.broadcast_event("rvc_progress", {
                 "active": True, "mode": "rvc", "stage": "Roformer GPU 拆解人聲與伴奏", "percent": 30, "detail": song_name
             })
         except Exception: pass
@@ -682,7 +682,7 @@ async def prepare_cover_song(song_name: str):
             "人聲分離", song_name)
 
         try:
-            web_dash.broadcast_event("tts_progress", {
+            web_dash.broadcast_event("rvc_progress", {
                 "active": True, "mode": "rvc", "stage": "準備進行 RVC 聲線置換", "percent": 50, "detail": song_name
             })
         except Exception: pass
