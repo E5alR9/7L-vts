@@ -18,7 +18,7 @@ def test_marker_const_in_persona():
 
 
 def test_in_helper_chat():
-    home = _FakeC([{"role": "user", "content": "你是 7L 的手機助手，陪老爸聊天就是你的工作。"},
+    home = _FakeC([{"role": "user", "content": "你是 7L 查詢助手，陪老爸聊天就是你的工作。"},
                    {"role": "gemini", "content": "好喔！"}])
     assert dh._in_helper_chat(home) is True
     stranger = _FakeC([{"role": "user", "content": "請用一句話總結台灣的特色美食。"},

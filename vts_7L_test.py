@@ -2552,10 +2552,44 @@ async def _song_ack_missing_original(song: str, target: str = "dad"):
 MIXED_PIANO_WAIT_SEC = 900.0  # 混用鋼琴等翻唱上限（RVC 慢，給足；掉隊/超時就自己先彈）
 
 
+async def _deliver_desktop_findings(vts, input_queue, user_text: str, findings: str,
+                                    target: str = "dad", owner: str = "老爸"):
+    """桌面查到的料→ 唱歌中就 TTS 短版插播，否則遞紙條讓主腦用自己口吻說。
+    2026-10-11 v3：桌面去角色化，只是工具；開口的永遠是 7L 本人。"""
+    findings = (findings or "").strip()
+    if not findings:
+        return
+    try:
+        from services import auto_cover_pipeline as _acp
+        _singing = bool(_acp.singing_audio_active())
+    except Exception:
+        _singing = False
+    if _singing:
+        _say = f"查到了：{findings[:110]}"
+        if vts is not None and input_queue is not None:
+            try:
+                _c = await execute_actions(vts, _say, input_queue,
+                                           caller_target=target, caller_user=owner)
+                if _c and _c.strip():
+                    _say = _c.strip()
+            except Exception:
+                pass
+        try:
+            await speech_queue.put({"text": _say, "target": target, "raw_text": findings})
+        except Exception:
+            pass
+        return
+    try:
+        LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait(
+            f"[黑板同步] {owner}剛說「{user_text[:80]}」，桌面版查到：「{findings[:400]}」。"
+            f"請用妳自己的口吻回覆（可愛一點，1~2句），免重複回答。")
+    except Exception:
+        pass
+
 
 async def _desktop_ask_and_report(question: str, target: str = "dad", user: str = ""):
-    """桌機助手回報（2026-10-11）：拿起手機問→不等（不擋主線）→答了TTS播報。
-    失敗也誠實播報，不裝死。手機只是加法，拿掉不影響任何核心。"""
+    """桌機助手回報（2026-10-11 v3）：桌面只查料，開口的是 7L（紙條→主腦；唱歌中才 TTS 插播）。
+    失敗誠實播報，不裝死。手機只是加法，拿掉不影響任何核心。"""
     from services import desktop_helper as _dh
     q = _dh.normalize_question(question)
     if not q:
@@ -2563,13 +2597,8 @@ async def _desktop_ask_and_report(question: str, target: str = "dad", user: str 
     try:
         log_print(f"手機問桌面版：{q[:60]}")
         ans = await asyncio.to_thread(_dh.get_answer, q, 120.0)
-        text = f"桌面版說：{ans.strip()[:300]}"
-        try:
-            speech_queue.put_nowait({"text": text, "expression": "", "action": "",
-                                     "target": target, "priority": 80})
-        except Exception:
-            pass
-        log_print("桌機助手收到回覆，已排入播報。")
+        await _deliver_desktop_findings(None, None, q, ans, target, user or "大家")
+        log_print("桌機助手收到回覆，已交主腦用自己口吻說。")
     except Exception as e:
         log_print(f"桌機助手問話失敗: {e}")
         try:
@@ -8442,8 +8471,8 @@ def _likely_needs_tools(text: str) -> bool:
 
 
 async def _desktop_dad_reply(vts, input_queue, user_input: str, owner: str = "老爸"):
-    """桌機代答老爸閒聊（2026-10-11）：免費桌面版回話＋TTS，掛了走 Live 老路一句不丟。
-    說完順手給 Live 補一張短上下文紙條（輸入 token 級成本），免得它斷片；它回不回話無所謂。"""
+    """桌機代答老爸閒聊（2026-10-11 v3）：桌面只查料，開口的是 7L（紙條→主腦；唱歌中才 TTS 插播）。
+    掛了走 Live 老路一句不丟。"""
     from services import desktop_helper as _dh
 
     def _fallback_live_paper():
@@ -8469,25 +8498,9 @@ async def _desktop_dad_reply(vts, input_queue, user_input: str, owner: str = "�
         _fallback_live_paper()
         return
     try:
-        from core.memory import append_to_unified_memory
-        append_to_unified_memory(speaker="7L", target="dad", content=ans, role="assistant", source="desktop")
-    except Exception:
-        pass
-    try:
-        record_bot_message(ans)
-    except Exception:
-        pass
-    try:
-        clean = await execute_actions(vts, ans, input_queue, caller_target="dad", caller_user=owner)
-        if clean and clean.strip() and not IS_SINGING_ACTIVE:
-            await speech_queue.put({"text": clean.strip(), "target": "dad", "raw_text": ans})
-        try:
-            LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait(
-                f"[黑板同步] 老爸剛說「{user_input[:60]}」，妳（經桌面）已回覆「{ans[:60]}」，免重複回答。")
-        except Exception:
-            pass
+        await _deliver_desktop_findings(vts, input_queue, user_input, ans, "dad", owner)
     except Exception as e:
-        log_print(f"⚠️ [桌機代答播報失敗]: {e}")
+        log_print(f"⚠️ [桌機代答投遞失敗]: {e}")
         _fallback_live_paper()
 
 
