@@ -7289,6 +7289,34 @@ async def judge_subconscious_intent_via_live_api(memory_context: str, unread_bat
     # 若 Live API 暫時連線繁忙，預設放行由主力大腦判定
     return {"should_speak": True, "target": "", "focus": "", "song": "", "raw": "FALLBACK_ALLOW"}
 
+_BARE_PING_NAMES = {"7l", "小7", "7寶", "小七"}
+_PING_COOLDOWN_SEC = 120.0  # 同一人光桿點名 2 分鐘只應一次（防 ping 刷屏燒 TTS）
+_PING_QUIET_SEC = 20.0  # 20 秒內說過話就不搶（忙的時候點名等大腦正常審）
+_PING_LAST_TS = {}
+
+
+def _is_bare_ping(content: str) -> bool:
+    """光桿點名判定（純函數）：只剩名字（7L/小7/7寶/小七＋標點/emoji/空白）才算。
+    「7L你好嗎」「7L在嗎」「唱歌7L」一律不算（有實質內容交正常流程）。"""
+    t = unicodedata.normalize("NFKC", content or "").strip().lower()
+    t = re.sub(r'[\s!！?？～~。、，,．.・:：;；…\-—_]+', '', t)
+    t = "".join(ch for ch in t if ch.isalnum() or '\u4e00' <= ch <= '\u9fff')
+    return t in _BARE_PING_NAMES
+
+
+def _ping_short_circuit(user: str, content: str, now: float,
+                        last_speech_ts: float, last_ping_ts: float) -> str:
+    """光桿點名短路（純函數，2026-10-11）：三閘全過回焦點文案，否則回 ""。
+    深夜一個人喊名字不理很傷人；但無腦全回會被刷屏洗爆 TTS/GPU。"""
+    if not _is_bare_ping(content):
+        return ""
+    if now - (last_speech_ts or 0.0) < _PING_QUIET_SEC:
+        return ""
+    if now - (last_ping_ts or 0.0) < _PING_COOLDOWN_SEC:
+        return ""
+    return "有人只喊了妳一聲名字，簡短可愛應一聲（10字內，如：在～怎麼啦？），不要長篇大論"
+
+
 async def streamer_mind_loop_worker(vts, input_queue):
     """ 7L 主播記憶腦袋持續讀取與自由意志發話協程：
     1. 背景保持最新 100 句記憶上下文
@@ -7339,7 +7367,24 @@ async def streamer_mind_loop_worker(vts, input_queue):
                 log_print(f"🗑️ [哨兵化石丟棄] {_fm.get('user', '?')}：{(_fm.get('content', '') or '')[:30]}（話題過期不講）。")
             if not batch_to_process:
                 continue
-                
+
+            #  2026-10-11 光桿點名短路：單條光桿點名＋安靜＋冷卻過，不必燒大腦審
+            #  （審了也是 PASS，但深夜一個人不理很傷人；三閘防刷屏）。
+            _ping_focus = ""
+            if len(batch_to_process) == 1:
+                _pm = batch_to_process[0]
+                _pkey = _pm.get("unique_id", "") or _pm.get("user", "")
+                try:
+                    _pnow = time.time()
+                    _ping_focus = _ping_short_circuit(
+                        _pm.get("user", ""), _pm.get("content", ""), _pnow,
+                        LAST_TTS_END_TIME, _PING_LAST_TS.get(_pkey, 0.0))
+                    if _ping_focus:
+                        _PING_LAST_TS[_pkey] = _pnow
+                        log_print(f"📍 [哨兵點名應答] {_pm.get('user', '?')} 光桿點名，安靜＋冷卻通過，直接應一聲。")
+                except Exception:
+                    _ping_focus = ""
+
             # 組合看板彈幕清單與認人資料
             board_lines = []
             users_involved = []
@@ -7382,7 +7427,12 @@ async def streamer_mind_loop_worker(vts, input_queue):
             #  階段一：由 Live API 潛意識哨兵以無限額度進行實時發言決策
             board_context_for_sentry = board_context
 
-            sentry_decision = await judge_subconscious_intent_via_live_api(memory_100_context, board_context_for_sentry)
+            if _ping_focus:
+                sentry_decision = {"should_speak": True,
+                                   "target": (batch_to_process[0].get("user", "") or "觀眾"),
+                                   "focus": _ping_focus}
+            else:
+                sentry_decision = await judge_subconscious_intent_via_live_api(memory_100_context, board_context_for_sentry)
             if not sentry_decision["should_speak"]:
                 for m in batch_to_process:
                     m["status"] = "read"
