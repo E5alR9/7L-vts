@@ -15,6 +15,7 @@
   C. 候選歌名切在 ？！。， 之前，並清洗尾部標點與語氣詞；仍須 ≥2 字、
      非停用詞、非泛指量詞片語（一首歌/個歌…）、且含中英數字
 """
+import os
 import re
 from typing import Dict, Optional, Tuple
 
@@ -209,6 +210,48 @@ def parse_mixed_command(text: Optional[str]) -> list:
     return []
 
 
+# —— 自創曲音軌庫（Lyria 桌面版手動生成，存檔視窗直存這裡）——
+ORIGINALS_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "songs_library", "originals")
+_ORIG_PREFIX_RE = re.compile(r'^(自創曲|原創)\s*[:：、，,]?\s*(.+)$', re.DOTALL)
+
+
+def _norm_name(t: str) -> str:
+    """檔名歸一化：只留字母數字（My_Favorite_Mod == My Favorite Mod）。"""
+    return "".join(ch.lower() for ch in (t or "") if ch.isalnum())
+
+
+def find_original_song_file(title: str) -> str:
+    """在 originals/ 找 MP3/WAV（檔名歸一化比對）。回絕對路徑或 ""。純檔案系統操作，零 API。"""
+    try:
+        os.makedirs(ORIGINALS_DIR, exist_ok=True)
+        want = _norm_name(title)
+        if not want:
+            return ""
+        for f in os.listdir(ORIGINALS_DIR):
+            if not f.lower().endswith((".mp3", ".wav")):
+                continue
+            if _norm_name(os.path.splitext(f)[0]) == want:
+                return os.path.join(ORIGINALS_DIR, f)
+    except Exception:
+        pass
+    return ""
+
+
+def split_original_request(title: str):
+    """自創曲分流（2026-10-11：Lyria 桌面版手動生成 → originals/ → RVC 翻唱鏈）。
+    只有「自創曲/原創」前綴才認 origin；檔存在本身就是人工節點（沒人動手生，檔不會出現）。
+    回 (乾淨歌名, 音軌路徑或"", is_original)。普通點歌原樣穿透，絕不劫持。"""
+    t = (title or "").strip().strip('「」『』《》')
+    m = _ORIG_PREFIX_RE.match(t)
+    if not m:
+        return title, "", False
+    clean = m.group(2).strip().strip('「」『』《》')
+    if not clean:
+        return title, "", False
+    return clean, find_original_song_file(clean), True
+
+
 def parse_hard_command(text: Optional[str]) -> Tuple[Optional[str], Dict]:
     """B 架構入口：把純文字拆成 (工具名, 參數)。
 
@@ -322,6 +365,21 @@ def build_slip_text(fn_name: str, fn_args: Dict, requester_name: str,
     who = (requester_name or "").strip()
     if fn_name in ("auto_sing_song", "sing_song"):
         song = args.get("song_name", "")
+        if (args.get("origin") or "") == "original":
+            # 自創曲：紙條帶【自創曲】標記（主腦才會說「原創」不說「點歌」；
+            # 斷線救援認這個標記撿回，不走 YouTube）。檔沒到就直說，別排程。
+            if not (args.get("source_mp3") or ""):
+                return (f"[系統底層：有人點自創曲《{song}》，但 MP3 還沒丟進 songs_library/originals。"
+                        f"請妳直接跟大家說這首還沒生好、請老爸生好丟進來再點，不要說排程了。]")
+            if who:
+                return (f"[系統底層：收到{who}的自創曲請求，7L 已在背景排程演唱自創曲《{song}》。"
+                        f"【演唱者是妳 7L 本人】{who}只是開口點歌、並沒有親自演唱。"
+                        f"台上若有歌會自動排隊接唱、背景準備照做不間斷；"
+                        f"請妳現在只需要負責口頭答應（記得說這是自創曲／原創）、順著話題接話即可。]")
+            return (f"[系統底層：收到自創曲請求，7L 已在背景排程演唱自創曲《{song}》。"
+                    f"【演唱者是妳 7L 本人，不是點歌的人】"
+                    f"台上若有歌會自動排隊接唱、背景準備照做不間斷；"
+                    f"請妳現在只需要負責口頭答應（記得說這是自創曲／原創）、順著話題接話即可。]")
         if who:
             return (f"[系統底層：收到{who}的點歌請求，7L 已在背景排程演唱《{song}》。"
                     f"【演唱者是妳 7L 本人】{who}只是開口點歌、並沒有親自演唱。"

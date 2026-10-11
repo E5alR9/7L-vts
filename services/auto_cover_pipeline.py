@@ -88,12 +88,30 @@ def download_youtube_audio(song_query: str, output_wav: str) -> bool:
             continue
     return False
 
-def separate_stems_gpu(input_wav: str, song_name: str) -> tuple[str, str]:
+def _convert_local_to_raw(src_mp3: str, output_wav: str) -> bool:
+    """自創曲入口：本地 MP3→44.1k 立體聲 wav（對齊 yt-dlp 產出規格，下游不分流）。
+    已有合格 raw 直接沿用，不重轉。同步函數，調用方丟執行緒。"""
+    try:
+        if os.path.exists(output_wav) and os.path.getsize(output_wav) > 100000:
+            print(f"💾 [快取命中] 已存在自創曲音軌: {output_wav}")
+            return True
+        cmd = [FFMPEG_EXE, "-y", "-i", src_mp3, "-ar", "44100", "-ac", "2", output_wav]
+        ret = subprocess.run(cmd, capture_output=True, timeout=120)
+        if ret.returncode == 0 and os.path.exists(output_wav) and os.path.getsize(output_wav) > 10000:
+            print(f"✅ [自創曲載入成功] 高音質母帶: {output_wav}")
+            return True
+    except Exception as e:
+        print(f"⚠️ [自創曲轉檔異常]: {e}")
+    return False
+
+
+def separate_stems_gpu(input_wav: str, song_name: str, tag: str = "") -> tuple[str, str]:
     """
     使用 Demucs / UVR 進行人聲與伴奏分離
     回傳: (vocals_path, instrumental_path)
+    tag：快取命名空間前綴（自創曲傳 "orig_"，與翻唱快取零碰撞；預設空字串行為不變）
     """
-    safe_name = get_safe_filename(song_name)
+    safe_name = tag + get_safe_filename(song_name)
     vocals_out = os.path.join(CACHE_DIR, f"{safe_name}_vocals.wav")
     inst_out = os.path.join(CACHE_DIR, f"{safe_name}_instrumental.wav")
 
@@ -411,7 +429,7 @@ def _ensure_orchestrator():
     if _ORCH_TASK is None or _ORCH_TASK.done():
         _ORCH_TASK = loop.create_task(_sing_orchestrator())
 
-def request_cover_song(song_name: str, requester: str = "") -> str:
+def request_cover_song(song_name: str, requester: str = "", source_mp3: str = "", origin: str = "") -> str:
     """點歌入口（同步、零等待）：有誰寫誰 requester。回傳給大腦看的狀態文字。
 
     - 台上沒人＋沒在準備 → 立刻開工，回「準備好就開唱」
@@ -430,7 +448,8 @@ def request_cover_song(song_name: str, requester: str = "") -> str:
     idle = ((_ORCH_TASK is None or _ORCH_TASK.done())
             and not READY_SONGS and not _stage_busy()
             and (_PREPARE_TASK is None or _PREPARE_TASK.done()))
-    SONG_REQUEST_QUEUE.append({"title": title, "requester": (requester or "").strip()})
+    SONG_REQUEST_QUEUE.append({"title": title, "requester": (requester or "").strip(),
+                                 "source_mp3": source_mp3 or "", "origin": origin or ""})
     _ACTIVE_TITLES.add(key)
     _ensure_orchestrator()
     if idle:
@@ -507,7 +526,8 @@ async def _prepare_worker(item, gen: int):
     """背景準備一首歌（下載→分離→RVC）：成功進 READY，失敗遞紙條，全程不擋台上演唱。"""
     title = item["title"]
     try:
-        vocal, inst = await prepare_cover_song(title)
+        vocal, inst = await prepare_cover_song(title, source_mp3=item.get("source_mp3", ""),
+                                               origin=item.get("origin", ""))
         if gen != _PIPELINE_GEN:
             print(f"🛑 [翻唱隊列] 《{title}》準備完成但已被停止，丟棄不上台。")
             return
@@ -524,7 +544,12 @@ async def _prepare_worker(item, gen: int):
                     "percent": 0, "detail": title})
             except Exception:
                 pass
-            _send_brain_slip(f"[系統提示：剛才點的《{title}》背景準備失敗（下載／分離／轉換卡住），請自然地跟大家說這首先跳過、可以再點別首！]")
+            _is_orig_missing = (item.get("origin") or "") == "original" and not (item.get("source_mp3") or "")
+            if _is_orig_missing:
+                _send_brain_slip(f"[系統提示：有人點自創曲《{title}》，但 MP3 還沒丟進 songs_library/originals。"
+                                  f"請直接跟大家說這首還沒生好、請老爸生好丟進來再點，不要說排程了。]")
+            else:
+                _send_brain_slip(f"[系統提示：剛才點的《{title}》背景準備失敗（下載／分離／轉換卡住），請自然地跟大家說這首先跳過、可以再點別首！]")
     except asyncio.CancelledError:
         raise
     except Exception as e:
@@ -589,9 +614,11 @@ async def play_prepared_song(title: str, vocal_path: str, inst_path: str, gen: i
 async def produce_and_sing_cover(song_name: str, requester: str = "") -> str:
     """點歌入口（相容舊名）：一律進隊列；台上有人就排隊＋背景 RVC 照做，不再丟掉。"""
     return request_cover_song(song_name, requester)
-async def prepare_cover_song(song_name: str):
-    """背景準備一首歌（查快取→下載→分離→RVC），成功回 (vocal, inst)，失敗回 (None, None)。
-    只做準備、不開唱；開唱由 play_prepared_song 經調度器執行。"""
+async def prepare_cover_song(song_name: str, source_mp3: str = "", origin: str = ""):
+    """背景準備一首歌（查快取→下載/本地載入→分離→RVC），成功回 (vocal, inst)，失敗回 (None, None)。
+    只做準備、不開唱；開唱由 play_prepared_song 經調度器執行。
+    自創曲（origin="original"）：不碰 YouTube，本地 MP3 轉 raw；快取檔名掛 orig_ 前綴，
+    與翻唱快取零碰撞（同歌名兩邊各存各的；去重鍵相同，同時只能排一邊）。"""
     # 清理歌名引數中的多餘字樣（request_cover_song 已清過，這裡防直接調用）
     song_name = re.sub(r'^(?:song_name\s*=\s*)?[\'"]?', '', (song_name or "").strip())
     song_name = re.sub(r'[\'"]?$', '', song_name.strip()).strip().strip('「」『』')
@@ -599,7 +626,8 @@ async def prepare_cover_song(song_name: str):
         return None, None
     try:
 
-        safe_name = get_safe_filename(song_name)
+        _tag = "orig_" if (origin or "") == "original" else ""
+        safe_name = _tag + get_safe_filename(song_name)
         cached_vocal = os.path.join(CACHE_DIR, f"{safe_name}_7l_vocal.wav")
         cached_inst = os.path.join(CACHE_DIR, f"{safe_name}_instrumental.wav")
 
@@ -661,8 +689,25 @@ async def prepare_cover_song(song_name: str):
         
         raw_wav = os.path.join(CACHE_DIR, f"{safe_name}_raw.wav")
         
-        # 步驟 1: 下載
-        success = await asyncio.to_thread(download_youtube_audio, song_name, raw_wav)
+        # 步驟 1: 音軌來源（自創曲走本地 MP3，不碰 YouTube；orig_ 命名空間已在 safe_name 區隔）
+        if (origin or "") == "original":
+            try:
+                import services.web_dashboard as web_dash
+                web_dash.broadcast_event("rvc_progress", {
+                    "active": True, "mode": "rvc", "stage": "載入自創曲音軌",
+                    "percent": 10, "detail": song_name})
+            except Exception:
+                pass
+            if not source_mp3 or not os.path.exists(source_mp3):
+                print(f"❌ [自創曲缺檔] 《{song_name}》的 MP3 還沒丟進 songs_library/originals。")
+                return None, None
+            if not await asyncio.to_thread(_convert_local_to_raw, source_mp3, raw_wav):
+                print(f"❌ [自創曲轉檔失敗] 《{song_name}》")
+                return None, None
+            success = True
+        else:
+            # YouTube 翻唱：下載高音質音軌
+            success = await asyncio.to_thread(download_youtube_audio, song_name, raw_wav)
         if not success or not os.path.exists(raw_wav):
             try:
                 web_dash.broadcast_event("rvc_progress", {"active": False, "stage": "下載失敗", "percent": 0})
@@ -677,8 +722,9 @@ async def prepare_cover_song(song_name: str):
         except Exception: pass
 
         # 步驟 2: 分離伴奏與人聲（幾分鐘級，掛心跳以免看起來空轉）
+        _tag = "orig_" if (origin or "") == "original" else ""
         vocal_wav, inst_wav = await _run_with_heartbeat(
-            lambda: asyncio.to_thread(separate_stems_gpu, raw_wav, song_name),
+            lambda: asyncio.to_thread(separate_stems_gpu, raw_wav, song_name, _tag),
             "人聲分離", song_name)
 
         try:

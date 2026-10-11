@@ -68,7 +68,7 @@ def test_prepare_fail_hides_hud(monkeypatch):
     monkeypatch.setattr(web_dash, "broadcast_event", bcast)
     monkeypatch.setattr(acp, "_send_brain_slip", lambda text: True)
 
-    async def fake_prepare(title):
+    async def fake_prepare(title, source_mp3="", origin=""):
         return None, None
 
     monkeypatch.setattr(acp, "prepare_cover_song", fake_prepare)

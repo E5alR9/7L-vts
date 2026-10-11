@@ -566,7 +566,7 @@ from core.utils import (
     record_interaction_tick, get_silence_ticks, get_uptime_ticks, format_ticks_to_human,
     speech_allowed, operator_input_enabled
 )
-from core.hard_command import parse_hard_command, build_slip_text, display_requester, parse_slip_for_song, strip_blob_noise, sanitize_search_query, rescue_claim
+from core.hard_command import parse_hard_command, build_slip_text, display_requester, parse_slip_for_song, strip_blob_noise, sanitize_search_query, rescue_claim, split_original_request
 from core.subagent_router import resolve_subagent_chain
 from core.db import *
 from core.live_timer_sensor import live_timer_hub
@@ -990,8 +990,18 @@ async def execute_tool_dispatch(fn_name: str, fn_args: dict, caller_target: str 
         await pe.stop_virtual_piano()
     elif fn_name in ["auto_sing_song", "sing_song"]:
         s_name = fn_args.get("song_name", "")
+        _origin = (fn_args.get("origin") or "")
+        _src = (fn_args.get("source_mp3") or "")
+        if not _origin:
+            # 兜底推導：任何沒帶 origin 的自創曲寫法在這裡統一歸隊（混用/CPU直調/腦直調）
+            try:
+                _clean, _src2, _is_orig = split_original_request(s_name)
+                if _is_orig:
+                    s_name, _src, _origin = _clean, _src2, "original"
+            except Exception:
+                pass
         #  點歌進隊列（同步、零等待）：台上有歌就排隊＋背景 RVC 照做，不再直接丟掉
-        return request_cover_song(s_name, caller_user)
+        return request_cover_song(s_name, caller_user, source_mp3=_src, origin=_origin)
     elif fn_name in ["stop_singing_song", "stop_singing", "stop_cover"]:
         stop_singing()
         return "已成功停止唱歌"
@@ -2517,6 +2527,17 @@ async def _song_ack(song: str, target: str = "dad"):
     _SONG_ACK_IDX += 1
     try:
         speech_queue.put_nowait({"text": text, "expression": "星星眼", "action": "",
+                                 "target": target, "priority": 90})
+    except Exception:
+        pass
+
+
+async def _song_ack_missing_original(song: str, target: str = "dad"):
+    """自創曲缺檔應答（2026-10-11）：檔沒到，別說排程了，直接請老爸丟檔。"""
+    song = (song or "這首自創曲").strip() or "這首自創曲"
+    text = f"這首自創曲《{song}》還沒生好，把 MP3 丟進 originals 資料夾再點，我馬上唱！"
+    try:
+        speech_queue.put_nowait({"text": text, "expression": "問號", "action": "",
                                  "target": target, "priority": 90})
     except Exception:
         pass
@@ -7959,6 +7980,38 @@ async def _rescue_missed_song_requests():
         for ts, prompt in list(RECENT_SLIPS):
             if now - ts > RESCUE_WINDOW_SEC:
                 continue
+            #  自創曲標記優先：紙條裡「自創曲《X》」直接還原，不走 CPU 閘門（也不走 YouTube）。
+            _o_song, _o_src, _o_hit = "", "", False
+            try:
+                import re as _re2
+                _om = _re2.search(r'自創曲《([^》]+)》', prompt or "")
+                if _om:
+                    from core.hard_command import split_original_request as _split
+                    _o_song, _o_src, _o_hit = _split(_om.group(1))
+            except Exception:
+                pass
+            if _o_hit and _o_src:
+                try:
+                    if is_song_active(_o_song):
+                        continue
+                except Exception:
+                    pass
+                if not rescue_claim("orig:" + _o_song, now):
+                    continue
+                log_print(f"🛟 [斷線救援] 撿回無人認領的自創曲《{_o_song}》，直接排入隊列。")
+                try:
+                    request_cover_song(_o_song, "", source_mp3=_o_src, origin="original")
+                except Exception as _re:
+                    log_print(f"⚠️ [斷線救援] 排入失敗: {_re}")
+                    continue
+                try:
+                    LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait(
+                        build_slip_text("auto_sing_song", {"song_name": _o_song,
+                            "source_mp3": _o_src, "origin": "original"}, ""))
+                except Exception:
+                    pass
+                rescued += 1
+                continue
             try:
                 tool, args = parse_slip_for_song(prompt)
             except Exception:
@@ -8048,11 +8101,27 @@ async def background_tool_executor(user_text: str, target: str = "dad", requeste
                 return True, "mixed_play_sing", {"desc": _titles}
         if fn_name:
             log_print(f"⚡ [CPU 硬體直連] 成功攔截指令: {fn_name}({fn_args})")
+            # 自創曲歸隊（2026-10-11）：剝前綴＋找檔，後面執行/紙條/應答全用乾淨參數
+            _o_need_file = False
+            if fn_name in ("auto_sing_song", "sing_song"):
+                try:
+                    _o_clean, _o_src, _o_hit = split_original_request((fn_args or {}).get("song_name", ""))
+                    if _o_hit:
+                        fn_args = dict(fn_args or {})
+                        fn_args["song_name"] = _o_clean
+                        fn_args["origin"] = "original"
+                        fn_args["source_mp3"] = _o_src
+                        _o_need_file = not _o_src
+                except Exception:
+                    pass
             # CPU 只認點歌：一律走背景執行＋紙條（表情不歸 CPU，交主腦/A 架構）
             asyncio.create_task(execute_tool_dispatch(fn_name, fn_args, caller_target=target, caller_user=requester_name))
             # 點歌強制應答：主腦常靜默，補一句 TTS 保證出聲（target 透傳，播出规则照舊）
             if fn_name in ("auto_sing_song", "sing_song", "pe.play_virtual_piano", "play_virtual_piano"):
-                asyncio.create_task(_song_ack((fn_args or {}).get("song_name", ""), target))
+                if _o_need_file:
+                    asyncio.create_task(_song_ack_missing_original((fn_args or {}).get("song_name", ""), target))
+                else:
+                    asyncio.create_task(_song_ack((fn_args or {}).get("song_name", ""), target))
             # ⚠️ 紙條必須寫明「唱歌的是 7L 本人」，否則主腦會把點歌的人當成演唱者
             slip_text = build_slip_text(fn_name, fn_args, requester_name)
         else:

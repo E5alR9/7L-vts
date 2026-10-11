@@ -5,6 +5,7 @@ from core.hard_command import (
     extract_sing_song, extract_piano_song, parse_hard_command, parse_mixed_command,
     build_slip_text,
     display_requester, parse_slip_for_song, rescue_claim, _RESCUED_SONG_TS,
+    split_original_request, find_original_song_file, ORIGINALS_DIR,
     strip_blob_noise, sanitize_search_query,
 )
 
@@ -287,3 +288,47 @@ def test_incident_20261010_search_query_with_audio_blob():
     assert q.startswith("暈表情")
     # 殘殼標籤也不留
     assert "<" not in q and ">" not in q
+
+
+# ── 自創曲分流（2026-10-11：Lyria 桌面版 → originals/ → RVC）────────────────
+def test_original_split(tmp_path, monkeypatch):
+    import core.hard_command as hc
+    monkeypatch.setattr(hc, "ORIGINALS_DIR", str(tmp_path))
+    open(tmp_path / "My_Favorite_Mod.mp3", "wb").close()
+    # 前綴＋找檔
+    assert split_original_request("自創曲My Favorite Mod") == (
+        "My Favorite Mod", str(tmp_path / "My_Favorite_Mod.mp3"), True)
+    assert split_original_request("原創《晴天》") == ("晴天", "", True)
+    # 普通點歌穿透，絕不劫持（就算 originals 剛好有同名檔）
+    assert split_original_request("晴天") == ("晴天", "", False)
+    assert split_original_request("My Favorite Mod") == ("My Favorite Mod", "", False)
+    assert split_original_request("") == ("", "", False)
+    assert split_original_request("自創曲") == ("自創曲", "", False)
+
+
+def test_find_original_matches_fuzzy(tmp_path, monkeypatch):
+    import core.hard_command as hc
+    monkeypatch.setattr(hc, "ORIGINALS_DIR", str(tmp_path))
+    open(tmp_path / "My_Favorite_Mod.mp3", "wb").close()
+    assert find_original_song_file("My Favorite Mod") == str(tmp_path / "My_Favorite_Mod.mp3")
+    assert find_original_song_file("myfavoritemod") == str(tmp_path / "My_Favorite_Mod.mp3")
+    assert find_original_song_file("不存在的歌") == ""
+    assert find_original_song_file("") == ""
+    open(tmp_path / "note.txt", "w").write("x")
+    assert find_original_song_file("note") == ""  # 非音訊不認
+
+
+def test_original_slip_text(tmp_path, monkeypatch):
+    import core.hard_command as hc
+    monkeypatch.setattr(hc, "ORIGINALS_DIR", str(tmp_path))
+    # 有檔：排程＋自創曲標記（救援認這個）
+    s = build_slip_text("auto_sing_song",
+                        {"song_name": "X", "source_mp3": "f.mp3", "origin": "original"}, "老爸")
+    assert "自創曲《X》" in s and "7L 本人" in s
+    # 缺檔：直說沒生好，不排程
+    s2 = build_slip_text("auto_sing_song",
+                         {"song_name": "X", "source_mp3": "", "origin": "original"}, "")
+    assert "還沒" in s2 and "背景排程演唱" not in s2
+    # 普通點歌文案不動（回歸）
+    s3 = build_slip_text("auto_sing_song", {"song_name": "晴天"}, "老爸")
+    assert "自創曲" not in s3 and "《晴天》" in s3
