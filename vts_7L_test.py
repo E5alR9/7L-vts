@@ -2761,6 +2761,30 @@ def _load_sound_with_envelope(part_file: str, text: str = ""):
         return None, max(0.5, len(text or "") * 0.22), []
 
 
+def _stop_own_channels(channels, music_fallback: bool = False):
+    """只關自己的發話通道（2026-10-11）：絕不 mixer.stop() 地毯轟炸。
+    血案：唱歌中說話，說完收尾走正常全關，把 6/7 軌（麥克風歌聲）連鋼琴一起掐了。
+    回關掉的通道數；music  fallback 才動 mixer.music（stop＋unload 放行 temp 檔刪除）。"""
+    n = 0
+    for _ch in channels or []:
+        try:
+            _ch.stop()
+            n += 1
+        except Exception:
+            pass
+    if music_fallback:
+        try:
+            pygame.mixer.music.stop()
+            n += 1
+        except Exception:
+            pass
+        try:
+            pygame.mixer.music.unload()
+        except Exception:
+            pass
+    return n
+
+
 
 def is_system_overloaded():
     try:
@@ -3865,6 +3889,8 @@ async def play_voice_complete(text, target: str = "dad", raw_actions_text: str =
                 # 初始更新字幕
                 await asyncio.to_thread(update_subtitle, text)
                 first_chunk = True
+                _used_speech_channels = []
+                _used_music_fallback = False
 
                 while True:
                     item = await audio_stream_queue.get()
@@ -3905,6 +3931,7 @@ async def play_voice_complete(text, target: str = "dad", raw_actions_text: str =
                         ch = pygame.mixer.find_channel(True)
                         if ch is None:
                             ch = pygame.mixer.Channel(0)
+                        _used_speech_channels.append(ch)
                         _play_deadline = time.time() + part_dur + 10.0
                         if ch.get_busy():
                             ch.queue(snd_obj)
@@ -3927,6 +3954,7 @@ async def play_voice_complete(text, target: str = "dad", raw_actions_text: str =
                         pygame.mixer.music.load(part_file)
                         pygame.mixer.music.set_volume(1.0)
                         pygame.mixer.music.play()
+                        _used_music_fallback = True
                         await asyncio.sleep(0.05)
                         _music_deadline = time.time() + part_dur + 10.0
                         while pygame.mixer.music.get_busy():
@@ -3958,10 +3986,9 @@ async def play_voice_complete(text, target: str = "dad", raw_actions_text: str =
                 if director_task and not director_task.done():
                     director_task.cancel()
 
-                if not IS_SINGING_ACTIVE and current_ai_state != "SINGING":
-                    pygame.mixer.stop()
-                    try: pygame.mixer.music.unload()
-                    except Exception: pass
+                #  只關自己的發話通道（2026-10-11）：唱歌/鋼琴/別句 TTS 在別的通道，
+                #  mixer.stop() 全關就是誤殺麥克風。並發說話各關各的，互不掐。
+                _stop_own_channels(_used_speech_channels, _used_music_fallback)
 
                 # 清理所有分段臨時音訊檔案
                 for tf in temp_files_to_clean:

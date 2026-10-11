@@ -408,6 +408,27 @@ def _stage_busy() -> bool:
             return True
     return False
 
+
+def singing_audio_active() -> bool:
+    """歌聲是否在響（單一真相源，2026-10-11）。
+    背景：vts 主程式以 __main__ 執行，acp 經由 sys.modules['vts_7L_test'] 分身
+    setattrs——兩邊的 IS_SINGING_ACTIVE 是兩份拷貝，跨模組讀散旗必分叉。
+    所有收尾邏輯一律問這個（管線旗＋播放任務＋6/7 軌實響，三處任一即算數），不問散旗。"""
+    if IS_SINGING_ACTIVE or _NOW_PLAYING_TITLE:
+        return True
+    try:
+        if _PLAY_TASK is not None and not _PLAY_TASK.done():
+            return True
+    except Exception:
+        pass
+    try:
+        if pygame.mixer.get_init():
+            if pygame.mixer.Channel(6).get_busy() or pygame.mixer.Channel(7).get_busy():
+                return True
+    except Exception:
+        pass
+    return False
+
 def _send_brain_slip(text: str) -> bool:
     """給 Live 主腦遞紙條（跟本檔謝幕紙條同通道）。"""
     try:
