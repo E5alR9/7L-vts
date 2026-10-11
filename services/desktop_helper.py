@@ -198,28 +198,82 @@ def _in_helper_chat(c) -> bool:
         return False
 
 
+def _com_init():
+    """COM 公寓初始化（2026-10-11：V7 經 to_thread 調用時，工作線程沒 CoInitialize，
+    UIA 直接啞巴——主線程驗證全過、V7 裡全瞎就是這麼來的）。回 uninit 回調或 None。"""
+    try:
+        import comtypes
+        try:
+            comtypes.CoInitialize()
+        except Exception:
+            pass
+        return comtypes.CoUninitialize
+    except Exception:
+        return None
+
+
+def _find_input_box(c):
+    """輸入框深搜（默認→25 層；樹狀態會變，淺的找不到就往深處打）。
+    回 control 或 None（調用方接著走原廠 get_input_field 兜底）。"""
+    for kw in ({}, {"searchDepth": 25}):
+        try:
+            el = c.window_ctrl.EditControl(**kw)
+            if el.Exists(2):
+                try:
+                    if el.GetValuePattern() or el.GetLegacyIAccessiblePattern():
+                        return el
+                except Exception:
+                    pass
+                return el
+        except Exception:
+            pass
+    return None
+
+
 def get_answer(question: str, timeout: float = ASK_TIMEOUT_SEC) -> str:
     """問一句拿一答（阻塞，調用方丟執行緒）。全程串行。
     每次先驗指紋：串被刪/被切走就重建（人格重塞），絕不在私人串亂問。"""
     q = normalize_question(question)
     if not q:
         raise ValueError("問題太短")
-    with _lock:
-        c = _controller()
-        c.ensure_connected()
-        if not _in_helper_chat(c):
-            # 指紋不在：先開側欄認領舊串，認不到才建新（免空串垃圾）。
-            _adopted = False
+    _uninit = _com_init()
+    try:
+        with _lock:
+            c = _controller()
+            c.ensure_connected()
+            if not _in_helper_chat(c):
+                # 指紋不在：先開側欄認領舊串，認不到才建新（免空串垃圾）。
+                _adopted = False
+                try:
+                    _adopted = _adopt_recent_helper_chat(c)
+                except Exception:
+                    pass
+                if not _adopted:
+                    global _chat_ready
+                    _chat_ready = False  # 指紋不在，重建
+                    if not ensure_helper_chat():
+                        print("⚠️ [桌機助手] 找不到新對話鈕，將就用當前對話串（別同時手動玩桌面版）。")
+            # 輸入框深搜補丁（2026-10-11）：原廠默認深度在某些樹狀態下找不到，
+            # 找不到就拋錯走 Live 兜底，絕不空轉。
             try:
-                _adopted = _adopt_recent_helper_chat(c)
+                _orig_get_input = c.get_input_field
+
+                def _patched_get_input():
+                    el = _find_input_box(c)
+                    if el is not None:
+                        return el
+                    return _orig_get_input()
+
+                c.get_input_field = _patched_get_input
             except Exception:
                 pass
-            if not _adopted:
-                global _chat_ready
-                _chat_ready = False  # 指紋不在，重建
-                if not ensure_helper_chat():
-                    print("⚠️ [桌機助手] 找不到新對話鈕，將就用當前對話串（別同時手動玩桌面版）。")
-        ans = c.ask(q, timeout=timeout)
+            ans = c.ask(q, timeout=timeout)
+    finally:
+        try:
+            if _uninit:
+                _uninit()
+        except Exception:
+            pass
     ans = (ans or "").strip()
     if not ans:
         raise RuntimeError("桌面版逾時沒回")

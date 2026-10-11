@@ -31,3 +31,50 @@ def test_in_helper_chat():
             raise RuntimeError("app closed")
 
     assert dh._in_helper_chat(_Boom()) is False
+
+
+class _FakeInput:
+    def __init__(self, ok=True):
+        self._ok = ok
+
+    def Exists(self, t):
+        return self._ok
+
+    def GetValuePattern(self):
+        if not self._ok:
+            raise Exception("nope")
+        return object()
+
+    def GetLegacyIAccessiblePattern(self):
+        raise Exception("nope")
+
+
+class _FakeWinInput:
+    """searchDepth < 20 裝死（樹深），25 才找得到——測深搜梯子。"""
+
+    def EditControl(self, **kw):
+        if (kw.get("searchDepth") or 0) >= 20:
+            return _FakeInput(True)
+        return _FakeInput(False)
+
+
+class _FakeWinNoInput:
+    def EditControl(self, **kw):
+        return _FakeInput(False)
+
+
+class _FakeCInput:
+    def __init__(self, win):
+        self.window_ctrl = win
+
+
+def test_find_input_box_ladder():
+    assert dh._find_input_box(_FakeCInput(_FakeWinInput())) is not None
+    assert dh._find_input_box(_FakeCInput(_FakeWinNoInput())) is None
+
+
+def test_com_init_safe():
+    uninit = dh._com_init()
+    assert uninit is None or callable(uninit)
+    if callable(uninit):
+        uninit()  # 配對釋放不炸就行
