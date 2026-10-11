@@ -7350,6 +7350,93 @@ def _ping_short_circuit(user: str, content: str, now: float,
     return "有人只喊了妳一聲名字，簡短可愛應一聲（10字內，如：在～怎麼啦？），不要長篇大論"
 
 
+# ── 自主閒聊（2026-10-11：沒人說話就自己找話題）──
+_IDLE_QUIET_SEC = 180.0  # 房間安靜 3 分鐘才考慮開口
+_IDLE_QUIET_PIANO_SEC = 600.0  # 彈琴中 10 分鐘（演出中少打擾）
+_IDLE_COOLDOWN_SEC = 420.0  # 閒聊完冷卻 7 分鐘（不當話癆燒 TTS）
+_IDLE_LAST_CHATTER = 0.0
+
+
+def _idle_chatter_due(now: float, last_speech_ts: float, last_chatter_ts: float,
+                      piano_active: bool = False) -> bool:
+    """純函數：安靜夠久＋冷卻過＋開機後有人說過話 → 該閒聊了。"""
+    if not (last_speech_ts or 0.0):
+        return False  # 開機還沒人說過話，不對空房間自言自語
+    need = _IDLE_QUIET_PIANO_SEC if piano_active else _IDLE_QUIET_SEC
+    if now - last_speech_ts < need:
+        return False
+    if now - (last_chatter_ts or 0.0) < _IDLE_COOLDOWN_SEC:
+        return False
+    return True
+
+
+async def idle_chatter_worker(vts, input_queue):
+    """自主閒聊：房間安靜就遞紙條請主腦看畫面/記憶/聊天找話題（1~2 句）。
+    只準備紙條，講不講、講什麼主腦定（沒話題回 [SILENCE] 就好）。
+    高壓線：唱歌/睡覺/忙碌不打擾；有新留言不搶（哨兵的活）；Live 斷線不排。」"""
+    global _IDLE_LAST_CHATTER
+    while True:
+        try:
+            await asyncio.sleep(30.0)
+            if IS_SLEEPING:
+                continue
+            if IS_SINGING_ACTIVE or current_ai_state in ("SINGING", "TALKING", "THINKING"):
+                continue
+            try:
+                _piano = bool(pe.is_piano_active)
+            except Exception:
+                _piano = False
+            _now = time.time()
+            try:
+                _last_speech = LAST_TTS_END_TIME
+            except Exception:
+                _last_speech = 0.0
+            if not _idle_chatter_due(_now, _last_speech, _IDLE_LAST_CHATTER, _piano):
+                continue
+            try:
+                if not speech_queue.empty():
+                    continue
+            except Exception:
+                pass
+            try:
+                if any(m.get("status") == "unread" for m in STREAMER_MIND_BOARD):
+                    continue  # 有新留言，哨兵負責，不搶
+            except Exception:
+                pass
+            try:
+                if not is_live_brain_active():
+                    continue  # Live 斷線不排，紙條會過期亂講
+            except Exception:
+                pass
+            _screen = ""
+            try:
+                if time.time() - LAST_VISION_LOOK_TIME < 900.0 and (current_screen_context or "").strip():
+                    _screen = current_screen_context.strip()[:120]
+            except Exception:
+                pass
+            _recent = ""
+            try:
+                _recent = (get_unified_memory_context(limit=6, thought_char_limit=0) or "").strip()[:400]
+            except Exception:
+                pass
+            _quiet_min = int((_now - (_last_speech or _now)) // 60)
+            _slip = (f"[系統提示：【自主閒聊】房間已經安靜約 {_quiet_min} 分鐘，沒有新留言。"
+                     f"請妳看看下面資訊，主動找個輕鬆話題跟大家閒聊 1~2 句（約 20~40 字，完整說完）：\n"
+                     f"- 畫面：{_screen or '（無新畫面）'}\n"
+                     f"- 最近聊過：{_recent or '（無）'}\n"
+                     f"- 現在時間：{get_current_time_string()}\n"
+                     f"規則：像跟老爸/觀眾搭話，不要自言自語，不要重複剛講過的話；"
+                     f"若在彈琴就邊彈邊隨性聊兩句。實在沒話題就輸出 [SILENCE] 保持安靜，不要硬擠。]")
+            try:
+                LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait(_slip)
+            except Exception:
+                continue
+            _IDLE_LAST_CHATTER = _now
+            log_print(f"📻 [自主閒聊] 安靜 {_quiet_min} 分鐘，遞紙條請主腦找話題（冷卻 {_IDLE_COOLDOWN_SEC / 60:.0f} 分鐘）。")
+        except Exception:
+            await asyncio.sleep(5.0)
+
+
 async def streamer_mind_loop_worker(vts, input_queue):
     """ 7L 主播記憶腦袋持續讀取與自由意志發話協程：
     1. 背景保持最新 100 句記憶上下文
@@ -9330,6 +9417,7 @@ async def main():
     asyncio.create_task(busy_expression_worker())
     import services.auto_cover_pipeline as _acp_orig
     asyncio.create_task(_acp_orig.originals_watch_worker())
+    asyncio.create_task(idle_chatter_worker(vts, input_queue))
     asyncio.create_task(autonomous_wander_worker())
     asyncio.create_task(pe.piano_focus_udp_worker())
     asyncio.create_task(pe.piano_liveness_watchdog_worker())
