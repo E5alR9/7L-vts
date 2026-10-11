@@ -17,7 +17,6 @@ CPU 關鍵字打不中而已，其他全部照跑。
 import os
 import sys
 import threading
-import time
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO_ROOT not in sys.path:
@@ -57,6 +56,28 @@ def _controller():
     return GeminiDesktopController()
 
 
+# 助手串指紋：人格首句關鍵字（對話串身份證；被刪/切走就認得出來）。
+HELPER_MARKER = "7L 的手機助手"
+
+
+def _find_new_chat_button(c):
+    """找新對話鈕（深搜，免焦點 Invoke 專用；絕不用 Click 動滑鼠）。"""
+    for kw in ({"Name": "新對話", "searchDepth": 25},
+               {"Name": "新對話"}):
+        for cls in ("ButtonControl", "HyperlinkControl"):
+            try:
+                el = getattr(c.window_ctrl, cls)(**kw)
+                if el.Exists(2):
+                    try:
+                        if el.GetInvokePattern():
+                            return el
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+    return None
+
+
 def ensure_helper_chat(timeout: float = HELPER_CHAT_TIMEOUT_SEC) -> bool:
     """點一次「新對話」當 7L 專用串，並先塞人格。找不到就用當前對話（回 False，調用方要大聲警告）。"""
     global _chat_ready
@@ -64,54 +85,44 @@ def ensure_helper_chat(timeout: float = HELPER_CHAT_TIMEOUT_SEC) -> bool:
         return True
     c = _controller()
     c.ensure_connected()
-    deadline = time.time() + timeout
+    btn = _find_new_chat_button(c)
+    if btn is None:
+        return False
     try:
-        import uiautomation as auto  # noqa: F401 （controller 相依，這裡只借名字找鈕）
-        btn = None
-        try:
-            b = c.window_ctrl.ButtonControl(Name="新對話")
-            if b.Exists(2):
-                btn = b
-        except Exception:
-            pass
-        if btn is None:
-            try:
-                h = c.window_ctrl.HyperlinkControl(Name="新對話")
-                if h.Exists(2):
-                    btn = h
-            except Exception:
-                pass
-        if btn is not None:
-            try:
-                pat = btn.GetInvokePattern()
-                if pat:
-                    pat.Invoke()
-                else:
-                    btn.Click()
-            except Exception:
-                pass
-            _chat_ready = True
-            try:
-                c.ask(HELPER_SYSTEM_PROMPT, timeout=timeout)
-            except Exception:
-                pass
-            return True
+        btn.GetInvokePattern().Invoke()
+    except Exception:
+        return False
+    _chat_ready = True
+    try:
+        c.ask(HELPER_SYSTEM_PROMPT, timeout=timeout)
     except Exception:
         pass
-    _ = deadline
-    return False
+    return True
+
+
+def _in_helper_chat(c) -> bool:
+    """純檢查（不寫入）：當前對話串里有人格指紋嗎？被刪/被切走就回 False。"""
+    try:
+        blob = "\n".join((m.get("content") or "") for m in c.get_conversation_history())
+        return HELPER_MARKER in blob
+    except Exception:
+        return False
 
 
 def get_answer(question: str, timeout: float = ASK_TIMEOUT_SEC) -> str:
-    """問一句拿一答（阻塞，調用方丟執行緒）。全程串行。"""
+    """問一句拿一答（阻塞，調用方丟執行緒）。全程串行。
+    每次先驗指紋：串被刪/被切走就重建（人格重塞），絕不在私人串亂問。"""
     q = normalize_question(question)
     if not q:
         raise ValueError("問題太短")
     with _lock:
         c = _controller()
         c.ensure_connected()
-        if not ensure_helper_chat():
-            print("⚠️ [桌機助手] 找不到新對話鈕，將就用當前對話串（別同時手動玩桌面版）。")
+        if not _in_helper_chat(c):
+            global _chat_ready
+            _chat_ready = False  # 指紋不在，重建
+            if not ensure_helper_chat():
+                print("⚠️ [桌機助手] 找不到新對話鈕，將就用當前對話串（別同時手動玩桌面版）。")
         ans = c.ask(q, timeout=timeout)
     ans = (ans or "").strip()
     if not ans:
