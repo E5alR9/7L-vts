@@ -27,6 +27,16 @@ ASK_TIMEOUT_SEC = 120.0
 HELPER_CHAT_TIMEOUT_SEC = 30.0
 MAX_QUESTION_CHARS = 500
 
+# 手機人格（2026-10-11）：新對話串只設一次。重點是第 3 條——分流閘偶爾漏網，
+# 誠實背帶兜底：辦不到的事直說，絕不假裝辦了（記住了/查到了這種謊最傷）。
+HELPER_SYSTEM_PROMPT = (
+    "你是 7L 的手機助手，代 7L 用繁體中文跟老爸閒聊。規矩：\n"
+    "1. 每次只回 1~2 句短話（20~40 字），口語親暱，叫他老爸。\n"
+    "2. 不知道就說不知道，絕不編答案。\n"
+    "3. 凡是要記錄、操作、查即時資訊、控制設備的，一律說辦不到、叫本體來，絕不假裝辦了。\n"
+    "4. 不要自稱 Gemini，你是 7L 的手機。"
+)
+
 _lock = threading.Lock()
 _chat_ready = False
 
@@ -48,7 +58,7 @@ def _controller():
 
 
 def ensure_helper_chat(timeout: float = HELPER_CHAT_TIMEOUT_SEC) -> bool:
-    """點一次「新對話」當 7L 專用串。找不到就用當前對話（回 False，調用方要大聲警告）。"""
+    """點一次「新對話」當 7L 專用串，並先塞人格。找不到就用當前對話（回 False，調用方要大聲警告）。"""
     global _chat_ready
     if _chat_ready:
         return True
@@ -81,6 +91,10 @@ def ensure_helper_chat(timeout: float = HELPER_CHAT_TIMEOUT_SEC) -> bool:
             except Exception:
                 pass
             _chat_ready = True
+            try:
+                c.ask(HELPER_SYSTEM_PROMPT, timeout=timeout)
+            except Exception:
+                pass
             return True
     except Exception:
         pass

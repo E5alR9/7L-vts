@@ -8420,6 +8420,77 @@ async def background_tool_executor(user_text: str, target: str = "dad", requeste
             log_print(f"⚠️ [CPU 拆解異常]: {err_msg}")
         return False, "", {}
 
+# 桌機代答工具味關鍵字（2026-10-11）：命中→走 API 老路；沒命中→免費桌面版。
+# 只收複合詞（「開心」這種不能進來，否則省個寂寞）；寧可誤判去 API（現狀），
+# 不誤判去桌面（功能靜默丟失——剩下的由手機人格第 3 條兜底）。
+_DESKTOP_TOOL_HINTS = (
+    "唱", "點歌", "彈", "琴", "曲", "歌", "搜尋", "搜一下", "查一下",
+    "找", "畫", "圖", "片", "播", "放", "映", "譜", "定時", "提醒",
+    "倒數", "鬧鐘", "開麥", "關麥", "靜音", "音量", "表情", "臉",
+    "睡", "醒", "休眠", "記住", "備忘", "清除", "忘掉", "打開", "關掉",
+    "放大", "縮小", "加快", "放慢", "天氣", "新聞", "翻譯", "幾點",
+    "截圖", "算一下", "股票", "代碼", "程式", "麥克風", "時鐘",
+)
+
+
+def _likely_needs_tools(text: str) -> bool:
+    """純函數：有工具味→True（走 API 老路）；空字串也回 True（未知交老路）。"""
+    t = (text or "").strip()
+    if not t:
+        return True
+    return any(k in t for k in _DESKTOP_TOOL_HINTS)
+
+
+async def _desktop_dad_reply(vts, input_queue, user_input: str, owner: str = "老爸"):
+    """桌機代答老爸閒聊（2026-10-11）：免費桌面版回話＋TTS，掛了走 Live 老路一句不丟。
+    說完順手給 Live 補一張短上下文紙條（輸入 token 級成本），免得它斷片；它回不回話無所謂。"""
+    from services import desktop_helper as _dh
+
+    def _fallback_live_paper():
+        try:
+            import services.web_dashboard as _wd
+            _wd.broadcast_event("chat_sent", {"text": user_input, "from": owner})
+        except Exception:
+            pass
+        try:
+            LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait(f"[黑板同步] {owner}傳來文字訊息：{user_input}")
+        except Exception:
+            pass
+        log_print("⚡ [極速直通主腦] Live 模式下，控制台訊息已轉交 Live 大腦處理。")
+
+    try:
+        ans = await asyncio.to_thread(_dh.get_answer, f"老爸說：{user_input}", 120.0)
+    except Exception as e:
+        log_print(f"⚠️ [桌機代答失敗，走 Live 兜底]: {e}")
+        _fallback_live_paper()
+        return
+    ans = (ans or "").strip()
+    if not ans:
+        _fallback_live_paper()
+        return
+    try:
+        from core.memory import append_to_unified_memory
+        append_to_unified_memory(speaker="7L", target="dad", content=ans, role="assistant", source="desktop")
+    except Exception:
+        pass
+    try:
+        record_bot_message(ans)
+    except Exception:
+        pass
+    try:
+        clean = await execute_actions(vts, ans, input_queue, caller_target="dad", caller_user=owner)
+        if clean and clean.strip() and not IS_SINGING_ACTIVE:
+            await speech_queue.put({"text": clean.strip(), "target": "dad", "raw_text": ans})
+        try:
+            LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait(
+                f"[黑板同步] 老爸剛說「{user_input[:60]}」，妳（經桌面）已回覆「{ans[:60]}」，免重複回答。")
+        except Exception:
+            pass
+    except Exception as e:
+        log_print(f"⚠️ [桌機代答播報失敗]: {e}")
+        _fallback_live_paper()
+
+
 async def process_chat_message(vts, input_queue, user_input: str, user_audio_b64: Optional[str] = None, request_start_time: Optional[float] = None, interrupted_context: str = "", source: str = "unknown"):
     """單一對話回合的核心處理常式 (即時神經大腦一步到位生成回覆與工具調用)"""
     global last_interaction_time, current_ai_state
@@ -8441,13 +8512,27 @@ async def process_chat_message(vts, input_queue, user_input: str, user_audio_b64
             append_to_unified_memory(speaker=owner, target="7L", content=user_input, role="user", source=source)
             try:
                 _wd.broadcast_event("chat_sent", {"text": user_input, "from": owner})
-                LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait(f"[黑板同步] {owner}傳來文字訊息：{user_input}")
             except Exception: pass
-                
+
             log_print("⚡ [極速直通主腦] Live 模式下，控制台訊息已轉交 Live 大腦處理。")
             # 老爸明確指令（唱歌/彈琴）走 CPU 硬拆解先斬後奏：零成本零幻覺，
             # 紙條照樣遞（主腦只負責口頭答應），Live 不調工具也不會漏執行
             asyncio.create_task(background_tool_executor(user_input, target="dad", requester_name=owner))
+            #  2026-10-11 桌機代答：CPU 沒命中＋沒工具味 → 免費桌面版回話，省 Live 生成。
+            #  工具味/未知/CPU 命中一律走老路（寧可多燒，不靜默丟功能）；桌面掛了也走老路。
+            #  開關：DESKTOP_FIRST=0 關（預設開）。mic/觀眾軌不動。
+            try:
+                _cpu_tool, _ = parse_hard_command(user_input)
+            except Exception:
+                _cpu_tool = None
+            _desk_on = os.getenv("DESKTOP_FIRST", "1").strip() != "0"
+            if _desk_on and not _cpu_tool and not _likely_needs_tools(user_input):
+                asyncio.create_task(_desktop_dad_reply(vts, input_queue, user_input, owner))
+                log_print("📱 [桌機代答] 純閒聊走免費桌面版（省 Live 生成）。")
+                return
+            try:
+                LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait(f"[黑板同步] {owner}傳來文字訊息：{user_input}")
+            except Exception: pass
             return
         # （註：舊的 source == "tiktok_live" 分支已刪除——tiktok_listener 只會送出
         # tiktok / tiktok_gift / tiktok_ambient，從無此 source，屬死碼）
