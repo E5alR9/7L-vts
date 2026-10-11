@@ -3539,17 +3539,22 @@ def parse_action_timeline(raw_text: str, total_duration: float) -> list:
     return timeline
 
 
-async def live_api_direct_sentence_emotions(clean_text: str, total_duration: float) -> list:
-    """ 【Live API 即時潛意識神態導演】：
-    利用 Live API 無限額度與亞秒級低延遲，為發話句子實時感知情感流動，
-    精確策劃上半句與下半句的動態表情切換時間點（上半句一個表情、下半句隨時可換）！
-    回傳: [(timestamp_float, "EXPRESSION"|"WINK"|"MOVE", tag_value), ...]
-    """
-    if not clean_text or total_duration < 1.8 or len(clean_text.strip()) < 6:
-        return []
-
-    candidate_keys = get_dynamic_live_key_candidates(KEYS_AUDIENCE_LIVE if KEYS_AUDIENCE_LIVE else GEMINI_KEYS)
-    for idx, g_key in enumerate(candidate_keys[:3]):
+async def _director_ensure_session():
+    """常駐導演連線（2026-10-11）：不斷就複用，斷了才重連。
+    每句話新建連線（舊碼）握手就要 1~3 秒，經常超 2 秒被丟掉=白做。
+    回 session 或 None（連不上就讓主腦裸奔，絕不擋說話）。"""
+    st = _DIRECTOR_STATE
+    if st.get("session") is not None:
+        return st["session"]
+    try:
+        candidate_keys = get_dynamic_live_key_candidates(KEYS_AUDIENCE_LIVE if KEYS_AUDIENCE_LIVE else GEMINI_KEYS)
+    except Exception:
+        return None
+    if not candidate_keys:
+        return None
+    n = len(candidate_keys)
+    for i in range(min(3, n)):
+        g_key = candidate_keys[(st.get("key_idx", 0) + i) % n]
         try:
             client = genai.Client(api_key=g_key)
             live_cfg = types.LiveConnectConfig(
@@ -3563,37 +3568,78 @@ async def live_api_direct_sentence_emotions(clean_text: str, total_duration: flo
 [秒數: 表情名]
 請直接輸出時間戳標籤！""")])
             )
-            async with asyncio.timeout(2.5):
-                async with client.aio.live.connect(model="gemini-3.8-live", config=live_cfg) as session:
-                    await session.send_realtime_input(text=f"7L 正在發話：「{clean_text.strip()}」（語音總時長 {total_duration:.1f} 秒）")
-                    output_text = ""
-                    async for resp in session.receive():
-                        c = resp.server_content
-                        if c:
-                            if c.output_transcription and c.output_transcription.text:
-                                output_text += c.output_transcription.text
-                            if c.turn_complete or getattr(c, 'generation_complete', False):
-                                break
-
-                    parsed_timeline = []
-                    for line in output_text.splitlines():
-                        m = re.search(r'\[\s*([0-9.]+)\s*s?\s*[：:]\s*([^\]]+)\]', line)
-                        if m:
-                            f_sec = float(m.group(1))
-                            act_val = m.group(2).strip()
-                            if f_sec <= total_duration + 0.5:
-                                if any(w in act_val.upper() for w in ["WINK", "眨眼", "單眼"]):
-                                    parsed_timeline.append((f_sec, "WINK", ""))
-                                else:
-                                    parsed_timeline.append((f_sec, "EXPRESSION", act_val))
-
-                    if parsed_timeline:
-                        log_print(f"⚡ [Live API 神態導演] 成功策劃句中動態表情流: {parsed_timeline}")
-                        return parsed_timeline
+            cm = client.aio.live.connect(model="gemini-3.8-live", config=live_cfg)
+            session = await cm.__aenter__()
+            st["session"] = session
+            st["cm"] = cm
+            st["key_idx"] = (st.get("key_idx", 0) + i + 1) % n
+            log_print(f"🎭 [神態導演連線] 常駐 session 就緒（key 輪轉至第 {st['key_idx']} 把）。")
+            return session
         except Exception:
             continue
+    return None
 
-    return []
+
+async def _director_drop_session():
+    """丟掉壞掉的常駐連線（任何一回合出錯就丟，下一句重連，絕不拿半殘 session 硬問）。"""
+    st = _DIRECTOR_STATE
+    cm = st.pop("cm", None)
+    st["session"] = None
+    if cm is not None:
+        try:
+            await cm.__aexit__(None, None, None)
+        except Exception:
+            pass
+
+
+_DIRECTOR_STATE = {"session": None, "cm": None, "key_idx": 0}
+_DIRECTOR_LOCK = asyncio.Lock()  # 主 loop 單例：導演問答成對序列化，互不插話
+
+
+async def live_api_direct_sentence_emotions(clean_text: str, total_duration: float) -> list:
+    """ 【Live API 即時潛意識神態導演】：
+    利用 Live API 無限額度與亞秒級低延遲，為發話句子實時感知情感流動，
+    精確策劃上半句與下半句的動態表情切換時間點（上半句一個表情、下半句隨時可換）！
+    2026-10-11：改走常駐 session（不斷不重連），熱問答亞秒回。
+    回傳: [(timestamp_float, "EXPRESSION"|"WINK"|"MOVE", tag_value), ...]
+    """
+    if not clean_text or total_duration < 1.8 or len(clean_text.strip()) < 6:
+        return []
+
+    output_text = ""
+    async with _DIRECTOR_LOCK:
+        session = await _director_ensure_session()
+        if session is None:
+            return []
+        try:
+            async with asyncio.timeout(3.0):
+                await session.send_realtime_input(text=f"7L 正在發話：「{clean_text.strip()}」（語音總時長 {total_duration:.1f} 秒）")
+                async for resp in session.receive():
+                    c = resp.server_content
+                    if c:
+                        if c.output_transcription and c.output_transcription.text:
+                            output_text += c.output_transcription.text
+                        if c.turn_complete or getattr(c, 'generation_complete', False):
+                            break
+        except Exception:
+            await _director_drop_session()
+            return []
+
+    parsed_timeline = []
+    for line in output_text.splitlines():
+        m = re.search(r'\[\s*([0-9.]+)\s*s?\s*[：:]\s*([^\]]+)\]', line)
+        if m:
+            f_sec = float(m.group(1))
+            act_val = m.group(2).strip()
+            if f_sec <= total_duration + 0.5:
+                if any(w in act_val.upper() for w in ["WINK", "眨眼", "單眼"]):
+                    parsed_timeline.append((f_sec, "WINK", ""))
+                else:
+                    parsed_timeline.append((f_sec, "EXPRESSION", act_val))
+
+    if parsed_timeline:
+        log_print(f"⚡ [Live API 神態導演] 成功策劃句中動態表情流: {parsed_timeline}")
+    return parsed_timeline
 
 
 async def execute_action_timeline(vts, timeline: list, cancel_event: asyncio.Event = None):
