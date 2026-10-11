@@ -299,9 +299,11 @@ def test_original_split(tmp_path, monkeypatch):
     assert split_original_request("自創曲My Favorite Mod") == (
         "My Favorite Mod", str(tmp_path / "My_Favorite_Mod.mp3"), True)
     assert split_original_request("原創《晴天》") == ("晴天", "", True)
-    # 普通點歌穿透，絕不劫持（就算 originals 剛好有同名檔）
+    # 不用前綴：有檔＝意圖，直接走自創曲管線
+    assert split_original_request("My Favorite Mod") == (
+        "My Favorite Mod", str(tmp_path / "My_Favorite_Mod.mp3"), True)
+    # 無檔普通點歌穿透，絕不劫持
     assert split_original_request("晴天") == ("晴天", "", False)
-    assert split_original_request("My Favorite Mod") == ("My Favorite Mod", "", False)
     assert split_original_request("") == ("", "", False)
     assert split_original_request("自創曲") == ("自創曲", "", False)
 

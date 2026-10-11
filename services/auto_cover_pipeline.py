@@ -429,6 +429,60 @@ def _ensure_orchestrator():
     if _ORCH_TASK is None or _ORCH_TASK.done():
         _ORCH_TASK = loop.create_task(_sing_orchestrator())
 
+
+ORIGINAL_WATCH_SEC = int(os.getenv("ORIGINAL_WATCH_SEC", "20") or "20")
+_ORIG_PREPARING = set()  # 感測器正在背景準備的 orig_ safe 名（防重複開工）
+
+
+async def scan_originals_once():
+    """掃 originals/ 一輪：有音軌、缺 orig_ 成品 → 背景備好（只準備不排隊，唱一定要明說）。
+    GPU 一次只做一首（循序 await，不跟台上搶）。回備好的歌名清單。"""
+    done = []
+    try:
+        import core.hard_command as hc
+        os.makedirs(hc.ORIGINALS_DIR, exist_ok=True)
+        files = sorted(f for f in os.listdir(hc.ORIGINALS_DIR)
+                       if f.lower().endswith((".mp3", ".wav")))
+    except Exception:
+        return done
+    for f in files:
+        stem = os.path.splitext(f)[0]
+        title = re.sub(r'[_\\-]+', ' ', stem).strip() or stem
+        safe = "orig_" + get_safe_filename(title)
+        if safe in _ORIG_PREPARING:
+            continue
+        try:
+            ready = os.path.join(CACHE_DIR, f"{safe}_7l_vocal.wav")
+            if os.path.exists(ready) and os.path.getsize(ready) > 100000:
+                continue
+        except Exception:
+            pass
+        _ORIG_PREPARING.add(safe)
+        try:
+            print(f"👀 [自創曲感測] 發現新檔《{f}》，背景自動 RVC（備好等點，不自動開唱）。")
+            vocal, _inst = await prepare_cover_song(
+                title, source_mp3=os.path.join(hc.ORIGINALS_DIR, f), origin="original")
+            if vocal:
+                done.append(title)
+        except Exception as e:
+            print(f"⚠️ [自創曲感測] 《{title}》背景準備失敗: {e}")
+        finally:
+            _ORIG_PREPARING.discard(safe)
+    return done
+
+
+async def originals_watch_worker():
+    """originals/ 感測常駐（20s 一輪，ORIGINAL_WATCH_SEC 調；0 停用）。
+    檔存在本身就是人工節點——只準備不排隊，唱一定要明說「唱X」，跟翻唱同一個口令。"""
+    if ORIGINAL_WATCH_SEC <= 0:
+        return
+    while True:
+        try:
+            await scan_originals_once()
+        except Exception as e:
+            print(f"⚠️ [自創曲感測異常]: {e}")
+        await asyncio.sleep(ORIGINAL_WATCH_SEC)
+
 def request_cover_song(song_name: str, requester: str = "", source_mp3: str = "", origin: str = "") -> str:
     """點歌入口（同步、零等待）：有誰寫誰 requester。回傳給大腦看的狀態文字。
 

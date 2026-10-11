@@ -116,3 +116,44 @@ def test_queue_carries_origin_and_worker_slip(monkeypatch):
     assert any("originals" in s for s in slips), slips
     assert any(e[0] == "rvc_progress" and e[1].get("active") is False for e in events)
     acp.SONG_REQUEST_QUEUE.clear()
+
+
+# ── originals 感測：一輪掃描（只準備不排隊）───────────────────────────────
+def test_scan_originals_prepares_new_and_skips_ready(monkeypatch, tmp_path):
+    import core.hard_command as hc
+    monkeypatch.setattr(hc, "ORIGINALS_DIR", str(tmp_path))
+    open(tmp_path / "New_Song.mp3", "wb").write(b"\x00" * 100)
+    open(tmp_path / "note.txt", "w").write("x")
+    calls = []
+
+    async def fake_prepare(title, source_mp3="", origin=""):
+        calls.append((title, source_mp3, origin))
+        return (None, None)
+
+    monkeypatch.setattr(acp, "prepare_cover_song", fake_prepare)
+    done = asyncio.run(acp.scan_originals_once())
+    assert done == []  # fake 回 None，不算備好
+    assert calls == [("New Song", str(tmp_path / "New_Song.mp3"), "original")]
+    assert acp._ORIG_PREPARING == set()  # 鎖有放掉
+
+
+def test_scan_originals_skips_prepared(monkeypatch, tmp_path):
+    import core.hard_command as hc
+    monkeypatch.setattr(hc, "ORIGINALS_DIR", str(tmp_path))
+    open(tmp_path / "Done_Song.mp3", "wb").write(b"\x00" * 100)
+    safe = "orig_" + acp.get_safe_filename("Done Song")
+    ready = os.path.join(acp.CACHE_DIR, f"{safe}_7l_vocal.wav")
+    with open(ready, "wb") as f:
+        f.write(b"\x00" * 200000)
+    calls = []
+
+    async def fake_prepare(title, source_mp3="", origin=""):
+        calls.append(title)
+        return ("v", "i")
+
+    monkeypatch.setattr(acp, "prepare_cover_song", fake_prepare)
+    try:
+        done = asyncio.run(acp.scan_originals_once())
+        assert done == [] and calls == []  # 成品在，連碰都不碰
+    finally:
+        os.remove(ready)

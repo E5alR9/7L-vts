@@ -998,6 +998,7 @@ async def execute_tool_dispatch(fn_name: str, fn_args: dict, caller_target: str 
                 _clean, _src2, _is_orig = split_original_request(s_name)
                 if _is_orig:
                     s_name, _src, _origin = _clean, _src2, "original"
+                    log_print(f"📀 [自創曲直通] originals 有檔，《{s_name}》走自創曲管線（不用前綴）。")
             except Exception:
                 pass
         #  點歌進隊列（同步、零等待）：台上有歌就排隊＋背景 RVC 照做，不再直接丟掉
@@ -9206,6 +9207,8 @@ async def main():
     asyncio.create_task(speech_queue_worker(vts, input_queue))
     asyncio.create_task(expression_keeper_worker(vts))
     asyncio.create_task(busy_expression_worker())
+    import services.auto_cover_pipeline as _acp_orig
+    asyncio.create_task(_acp_orig.originals_watch_worker())
     asyncio.create_task(autonomous_wander_worker())
     asyncio.create_task(pe.piano_focus_udp_worker())
     asyncio.create_task(pe.piano_liveness_watchdog_worker())

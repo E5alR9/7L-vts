@@ -448,23 +448,86 @@ def file_extension(engine: str) -> str:
     return ".mp3" if engine in ("edge", "elevenlabs") else ".wav"
 
 
-def _wav_seconds(data: bytes, engine: str):
-    """wav 音訊實際秒數（2026-10-11：有聲但缺段也要抓出來；mp3 不解析回 None）。"""
-    if not data or file_extension(engine) != ".wav":
-        return None
+def _ffmpeg_exe() -> str:
+    import shutil
+    return (os.getenv("FFMPEG_EXE")
+            or shutil.which("ffmpeg")
+            or r"C:\ffmpeg\bin\ffmpeg.exe")
+
+
+# 連續靜音超過幾秒判缺段（自娛自樂事故：18 秒音訊裡 14 秒數位靜音，時長反而超標）。
+# TTS 都是短句，正常標點停頓 <0.5s；2.0s 以上的洞一定是合成端掉片。
+MAX_SILENCE_SEC = 2.0
+
+
+def _audio_profile(data: bytes):
+    """內容嗅探而非副檔名（2026-10-11 教訓：xiaoyi 掛 .wav 標回的卻是 MP3，
+    舊守衛 wave.open 直接炸＝失明）。回 (秒數|None, 最大靜音洞|None)。
+    wav 走標準庫；其他格式走 ffmpeg 解碼；都沒有就 (None, None) 跳過檢查。"""
+    if not data or len(data) <= 100:
+        return None, None
+    pcm = None
+    rate = 0
     try:
-        import wave
-        with wave.open(io.BytesIO(data), "rb") as w:
-            return w.getnframes() / float(w.getframerate() or 1)
+        import wave as _wv
+        with _wv.open(io.BytesIO(data), "rb") as w:
+            n, ch, rate = w.getnframes(), w.getnchannels(), w.getframerate()
+            raw = w.readframes(n)
+        import array as _ar
+        a = _ar.array("h", raw)
+        if ch == 2:
+            a = a[0::2]
+        pcm = a
     except Exception:
-        return None
+        pcm = None
+    if pcm is None:
+        try:
+            import subprocess as _sp
+            exe = _ffmpeg_exe()
+            if not exe or not os.path.exists(exe):
+                return None, None
+            rate = 16000
+            r = _sp.run([exe, "-v", "error", "-i", "pipe:0",
+                         "-f", "s16le", "-ac", "1", "-ar", str(rate), "pipe:1"],
+                        input=bytes(data), capture_output=True, timeout=30)
+            if r.returncode != 0 or len(r.stdout) < rate * 2:
+                return None, None
+            import array as _ar
+            a = _ar.array("h", r.stdout)
+            if len(a) % 2:
+                a = a[:-1]
+            pcm = a
+        except Exception:
+            return None, None
+    try:
+        seconds = len(pcm) / float(rate or 1)
+        win = max(1, int(rate * 0.25))
+        prof = []
+        for i in range(0, len(pcm), win):
+            seg = pcm[i:i + win]
+            prof.append((sum(s * s for s in seg) / len(seg)) ** 0.5 if seg else 0.0)
+        if not prof:
+            return seconds, None
+        peak = max(prof)
+        floor = max(80.0, peak * 0.02)
+        longest = cur = 0.0
+        step = win / float(rate or 1)
+        for v in prof:
+            if v < floor:
+                cur += step
+                longest = max(longest, cur)
+            else:
+                cur = 0.0
+        return seconds, longest
+    except Exception:
+        return None, None
 
 
 # ── 語句磁碟快取（2026-10-11：同樣的口頭禪別再花 3 秒合成一次）───────────────
 # 同文＋同引擎＋同語速命中約 50ms（測過：3.01s → 0.05s）。SoVITS 有採樣隨機性，
 # 快取等於把同一句的講法固定下來——對主播人設是加分（口頭禪每次同一個味道）。
 # 換聲線模型時 bump TTS_CACHE_VERSION，否則舊音色殘留。
-TTS_CACHE_VERSION = "v1"
+TTS_CACHE_VERSION = "v2"  # v1 混入過中段靜音毒檔＋錯標格式，2026-10-11 全面換血
 TTS_CACHE_DIR = os.getenv("TTS_CACHE_DIR") or os.path.join(BASE_DIR, "data", "tts_cache")
 TTS_CACHE_MAX_FILES = int(os.getenv("TTS_CACHE_MAX_FILES") or "500")
 TTS_CACHE_MAX_BYTES = int(os.getenv("TTS_CACHE_MAX_BYTES") or str(300 * 1024 * 1024))
@@ -577,12 +640,15 @@ async def get_tts_audio_bytes(text: str) -> bytes:
                 return hit
             data = await asyncio.wait_for(fn(text), timeout=ENGINE_TIMEOUT_SEC)
             if data and len(data) > 100:
-                dur = _wav_seconds(data, engine)
+                dur, gap = _audio_profile(data)
                 if dur is not None and len(text.strip()) >= 10:
                     expect = max(1.5, len(text.strip()) * 0.22)
                     if dur < expect * 0.4:
                         raise RuntimeError(
                             f"音訊過短疑似缺段（{dur:.1f}s/預期{expect:.1f}s），換引擎")
+                    if gap is not None and gap > MAX_SILENCE_SEC:
+                        raise RuntimeError(
+                            f"音訊中段靜音{gap:.1f}s疑似掉片（自娛自樂式缺段），換引擎")
                 if _active_engine != engine:
                     _log(f"[TTS Router] 切換引擎 -> {engine}")
                     _active_engine = engine

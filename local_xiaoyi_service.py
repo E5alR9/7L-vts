@@ -34,6 +34,10 @@ if BASE_DIR not in sys.path:
 import threading
 from contextlib import contextmanager
 
+# SoVITS 切分策略（2026-10-11：cut5 把短句切成 N 小片，某一片會整片靜音且等長，
+# 時長守衛看不出來；直播都 ≤60 字，整段一坨最穩；XIAOYI_SPLIT 環境變數可調回）。
+XIAOYI_SPLIT_METHOD = os.getenv("XIAOYI_SPLIT", "cut0")
+
 class _WebLogStream:
     """攔截終端輸出並轉發至 Web Dashboard 後台，避免在主終端洗畫面，並即時解析生成進度"""
     def __init__(self, prefix="[GPT-SoVITS] "):
@@ -200,7 +204,7 @@ def init_gpt_sovits():
 
 def synthesize_xiaoyi_bytes(text: str) -> bytes:
     """
-    同步推論函數，回傳 WAV 格式的 bytes
+    同步推論函數，回傳音訊 bytes（lameenc 在就 MP3，否則 WAV——別信舊註解說的 WAV）。
     """
     global _tts_pipeline
     with _thread_lock:
@@ -272,7 +276,7 @@ def synthesize_xiaoyi_bytes(text: str) -> bytes:
                 "top_k": top_k,
                 "top_p": top_p,
                 "temperature": temp,
-                "text_split_method": "cut5",
+                "text_split_method": XIAOYI_SPLIT_METHOD,
                 "batch_size": 2, # 適度放大 batch_size 加速顯卡推理
                 "speed_factor": speed,
                 "repetition_penalty": 1.35,

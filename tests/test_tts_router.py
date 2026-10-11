@@ -208,12 +208,17 @@ def test_short_audio_falls_back():
     import wave
 
     def make_wav(seconds):
+        import math
+        import struct
         buf = io.BytesIO()
         with wave.open(buf, "wb") as w:
             w.setnchannels(1)
             w.setsampwidth(2)
             w.setframerate(24000)
-            w.writeframes(b"\x00\x00" * int(24000 * seconds))
+            frames = bytearray()
+            for i in range(int(24000 * seconds)):
+                frames += struct.pack("<h", int(6000 * math.sin(2 * math.pi * 440 * i / 24000)))
+            w.writeframes(bytes(frames))
         return buf.getvalue()
 
     async def short(text):
@@ -343,3 +348,79 @@ def test_code_punct_to_spoken_boundaries():
     assert out == "好喔，Mili，world execute me 交給我，背景準備中，好了就唱給你聽。"
     for bad in ["《", "》", "(", ")"]:
         assert bad not in out
+
+
+# ── 音訊剖面守衛（2026-10-11：自娛自樂 14 秒靜音案）─────────────────────────
+def _craft_wav(seconds, gaps=(), fr=16000):
+    import math
+    import struct
+    import wave
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(fr)
+        frames = bytearray()
+        for i in range(int(fr * seconds)):
+            t = i / fr
+            v = 0 if any(s <= t < e for s, e in gaps) else int(8000 * math.sin(2 * math.pi * 440 * t))
+            frames += struct.pack("<h", v)
+        w.writeframes(bytes(frames))
+    return buf.getvalue()
+
+
+def test_audio_profile_clean():
+    dur, gap = t._audio_profile(_craft_wav(3.0))
+    assert abs(dur - 3.0) < 0.2 and gap is not None and gap < 0.5
+
+
+def test_audio_profile_catches_silent_middle():
+    dur, gap = t._audio_profile(_craft_wav(8.0, gaps=[(2.0, 5.0)]))
+    assert abs(dur - 8.0) < 0.3
+    assert gap is not None and gap >= 2.9  # 3 秒洞現形（自娛自樂是 14 秒）
+
+
+def test_audio_profile_tolerates_pause():
+    dur, gap = t._audio_profile(_craft_wav(4.0, gaps=[(1.0, 1.3)]))
+    assert gap is not None and gap < t.MAX_SILENCE_SEC  # 正常標點停頓不冤枉
+
+
+def test_audio_profile_garbage():
+    assert t._audio_profile(b"") == (None, None)
+    assert t._audio_profile(b"xyz" * 200) == (None, None)
+
+
+def test_silent_middle_falls_back(tmp_path, monkeypatch):
+    """中段靜音（時長正常）也要換引擎，不將就播出 14 秒空氣。"""
+    import asyncio
+    gappy = _craft_wav(8.0, gaps=[(2.0, 5.0)])
+    good = _craft_wav(8.0)
+
+    async def fake_gappy(text):
+        return gappy
+
+    async def fake_good(text):
+        return good
+
+    monkeypatch.setattr(t, "TTS_CACHE_DIR", str(tmp_path))
+    old_engines, old_chain = t._ENGINES, t.ENGINE_CHAIN
+    old_active, old_errors = t._active_engine, dict(t._engine_errors)
+    t._ENGINES = {"gappy": fake_gappy, "good": fake_good}
+    t.ENGINE_CHAIN = ["gappy", "good"]
+    t._active_engine = None
+    try:
+        out = asyncio.run(t.get_tts_audio_bytes("自娛自樂背景測試句，長度一定要夠十個字。"))
+        assert out == good
+        assert t.get_active_engine() == "good"
+        assert "疑似掉片" in t.get_engine_errors().get("gappy", "")
+    finally:
+        t._ENGINES, t.ENGINE_CHAIN = old_engines, old_chain
+        t._active_engine = old_active
+        t._engine_errors.clear()
+        t._engine_errors.update(old_errors)
+
+
+def test_xiaoyi_split_method_single_piece():
+    """直播短句整段一坨（cut5 碎片會整片靜音）。"""
+    import local_xiaoyi_service as _xs
+    assert _xs.XIAOYI_SPLIT_METHOD == "cut0"

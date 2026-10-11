@@ -239,17 +239,21 @@ def find_original_song_file(title: str) -> str:
 
 
 def split_original_request(title: str):
-    """自創曲分流（2026-10-11：Lyria 桌面版手動生成 → originals/ → RVC 翻唱鏈）。
-    只有「自創曲/原創」前綴才認 origin；檔存在本身就是人工節點（沒人動手生，檔不會出現）。
-    回 (乾淨歌名, 音軌路徑或"", is_original)。普通點歌原樣穿透，絕不劫持。"""
+    """自創曲分流（2026-10-11 改：有檔＝意圖，不用前綴）。
+    「唱X」＋ originals/X.mp3 存在 → 自創曲管線；沒檔 → YouTube 翻唱（舊行為）。
+    「唱自創曲X」前綴保留：顯示乾淨＋缺檔時有專屬文案（請老爸丟檔）。
+    回 (歌名, 音軌路徑或"", is_original)。無檔普通點歌穿透，絕不劫持。"""
     t = (title or "").strip().strip('「」『』《》')
     m = _ORIG_PREFIX_RE.match(t)
-    if not m:
+    if m:
+        clean = m.group(2).strip().strip('「」『』《》')
+        if not clean:
+            return title, "", False
+        return clean, find_original_song_file(clean), True
+    if not t:
         return title, "", False
-    clean = m.group(2).strip().strip('「」『』《》')
-    if not clean:
-        return title, "", False
-    return clean, find_original_song_file(clean), True
+    src = find_original_song_file(t)
+    return t, src, bool(src)
 
 
 def parse_hard_command(text: Optional[str]) -> Tuple[Optional[str], Dict]:
