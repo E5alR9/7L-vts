@@ -12,6 +12,7 @@ import os
 import sys
 import re
 import asyncio
+import functools
 import subprocess
 import shutil
 import time
@@ -689,6 +690,36 @@ async def play_prepared_song(title: str, vocal_path: str, inst_path: str, gen: i
 async def produce_and_sing_cover(song_name: str, requester: str = "") -> str:
     """點歌入口（相容舊名）：一律進隊列；台上有人就排隊＋背景 RVC 照做，不再丟掉。"""
     return request_cover_song(song_name, requester)
+_PREPARING = set()  # 正在背景準備的 (origin, 去重鍵)：同首併發只做一次
+_PREPARE_WAIT_SEC = 600.0
+
+
+def _prepare_singleflight(fn):
+    """同首併發只做一次（2026-10-11：感測器 20s 輪詢 vs 點播撞車會雙開 GPU）。
+    先到的做，後到的等（600s 上限＋30s 打點，絕不空轉假象），再進來直接吃快取。
+    key 取 (origin, 去重鍵)：大小寫差異頂多多等一次，絕不 double-GPU、不髒快取。"""
+    @functools.wraps(fn)
+    async def _wrapper(song_name: str = "", source_mp3: str = "", origin: str = "", **kw):
+        key = ((origin or ""), _dedupe_key(song_name))
+        t0 = time.time()
+        _logged = 0.0
+        while key in _PREPARING:
+            el = time.time() - t0
+            if el >= _PREPARE_WAIT_SEC:
+                break
+            if el - _logged >= 30.0:
+                _logged = el
+                print(f"⏳ [準備併發等待] 《{song_name}》另一路正在準備，等它做完不重開 GPU（已等 {el:.0f}s）。")
+            await asyncio.sleep(3.0)
+        _PREPARING.add(key)
+        try:
+            return await fn(song_name, source_mp3=source_mp3, origin=origin, **kw)
+        finally:
+            _PREPARING.discard(key)
+    return _wrapper
+
+
+@_prepare_singleflight
 async def prepare_cover_song(song_name: str, source_mp3: str = "", origin: str = ""):
     """背景準備一首歌（查快取→下載/本地載入→分離→RVC），成功回 (vocal, inst)，失敗回 (None, None)。
     只做準備、不開唱；開唱由 play_prepared_song 經調度器執行。

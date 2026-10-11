@@ -157,3 +157,48 @@ def test_scan_originals_skips_prepared(monkeypatch, tmp_path):
         assert done == [] and calls == []  # 成品在，連碰都不碰
     finally:
         os.remove(ready)
+
+
+# ── 併發只做一次（感測器 vs 點播撞車不雙開 GPU）───────────────────────────
+def test_concurrent_prepare_singleflight(monkeypatch, tmp_path):
+    import asyncio as _ao
+    import time as _t
+    src = _make_fake_mp3(str(tmp_path / "Race_Song.mp3"))
+    calls = {"sep": 0}
+
+    def slow_sep(input_wav, song_name, tag=""):
+        # 注意：管線用 to_thread 跑同步函數，假函數必須同步（阻塞睡）才符合契約
+        calls["sep"] += 1
+        _t.sleep(0.5)
+        safe = tag + acp.get_safe_filename(song_name)
+        v = os.path.join(acp.CACHE_DIR, f"{safe}_vocals.wav")
+        i = os.path.join(acp.CACHE_DIR, f"{safe}_instrumental.wav")
+        _tiny_wav(v)
+        _tiny_wav(i)
+        return v, i
+
+    def fake_rvc(vocal_in, vocal_out, *a, **k):
+        _tiny_wav(vocal_out, seconds=2.0)
+        return True
+
+    monkeypatch.setattr(acp, "separate_stems_gpu", slow_sep)
+    monkeypatch.setattr(acp, "pitch_shift_vocal_to_female", fake_rvc)
+    song = "單元測試併發準備"
+    safe = "orig_" + acp.get_safe_filename(song)
+
+    async def go():
+        return await _ao.gather(
+            acp.prepare_cover_song(song, source_mp3=src, origin="original"),
+            acp.prepare_cover_song(song, source_mp3=src, origin="original"),
+        )
+
+    try:
+        (v1, _), (v2, _) = asyncio.run(go())
+        assert calls["sep"] == 1  # 分離只跑一次，第二路等＋吃快取
+        assert v1 == v2 and v1.endswith("_7l_vocal.wav")
+        assert acp._PREPARING == set()  # 鎖有放掉
+    finally:
+        import glob
+        for f in glob.glob(os.path.join(acp.CACHE_DIR, f"{safe}_*")):
+            if os.path.isfile(f):
+                os.remove(f)
