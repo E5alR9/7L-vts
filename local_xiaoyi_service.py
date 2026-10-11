@@ -174,7 +174,9 @@ def init_gpt_sovits():
             from TTS_infer_pack.TTS import TTS, TTS_Config
             config = TTS_Config("GPT_SoVITS/configs/tts_infer.yaml")
             config.device = "cuda"
-            config.is_half = True
+            # 精度開關（2026-10-11：同 RVC，fp32 拉滿；XIAOYI_HALF=1 切回半精度。
+            # 代價：idle VRAM +1~2GB、每句慢幾秒——已和老爸確認收下。）
+            config.is_half = os.getenv("XIAOYI_HALF", "0") == "1"
             config.t2s_weights_path = os.path.join(GPT_SOVITS_DIR, "GPT_weights_v2", "xiaoyi_finetune-e4.ckpt")
             config.vits_weights_path = os.path.join(FINETUNE_DATA_DIR, "opt", "xiaoyi_finetune", "xiaoyi_sovits_inference.pth")
             config.cnhubert_base_path = "pretrained_models/chinese-hubert-base"

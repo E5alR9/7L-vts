@@ -41,8 +41,11 @@ from infer.module.models import SynthesizerTrnMs768NSFsid
 from infer.hubert import load_hubert_model
 from infer.vc.pipeline import Pipeline
 
+# 精度開關（2026-10-11：fp16 換 fp32 拉滿，慢幾秒無所謂；RVC_HALF=1 可切回半精度）。
+_USE_HALF = os.getenv("RVC_HALF", "0") == "1"
+
 class RVCConfig:
-    def __init__(self, device="cuda:0", is_half=True):
+    def __init__(self, device="cuda:0", is_half=False):
         self.device = device
         self.is_half = is_half
         self.x_pad = 1
@@ -57,8 +60,8 @@ _DEVICE = "cuda:0" if torch.cuda.is_available() else "cpu"
 def get_hubert():
     global _HUBERT_MODEL
     if _HUBERT_MODEL is None:
-        print(f"📦 [神經語音引擎] 載入 HuBERT 聲學特徵模型 ({_DEVICE}, FP16)...")
-        _HUBERT_MODEL = load_hubert_model(_DEVICE, is_half=True)
+        print(f"📦 [神經語音引擎] 載入 HuBERT 聲學特徵模型 ({_DEVICE}, {'FP16' if _USE_HALF else 'FP32'})...")
+        _HUBERT_MODEL = load_hubert_model(_DEVICE, is_half=_USE_HALF)
     return _HUBERT_MODEL
 
 def get_net_g(model_pth: str):
@@ -70,10 +73,11 @@ def get_net_g(model_pth: str):
         tgt_sr = config[-1]
         config[-3] = cpt["weight"]["emb_g.weight"].shape[0]
         
-        net_g = SynthesizerTrnMs768NSFsid(*config, is_half=True)
+        net_g = SynthesizerTrnMs768NSFsid(*config, is_half=_USE_HALF)
         net_g.load_state_dict(cpt["weight"], strict=False)
         net_g.eval().to(_DEVICE)
-        net_g = net_g.half()
+        if _USE_HALF:
+            net_g = net_g.half()
         _NET_G_CACHE[model_pth] = (net_g, cpt, tgt_sr)
     return _NET_G_CACHE[model_pth]
 
@@ -142,7 +146,7 @@ def convert_vocal_to_xiaoyi(
         hubert = get_hubert()
         net_g, cpt, tgt_sr = get_net_g(model_pth)
         
-        cfg = RVCConfig(device=_DEVICE, is_half=True)
+        cfg = RVCConfig(device=_DEVICE, is_half=_USE_HALF)
         pipeline = Pipeline(tgt_sr, cfg)
         
         try:
