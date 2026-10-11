@@ -5159,6 +5159,10 @@ async def live_search_tool_task(session, query):
 LIVE_CONTEXT_MEMORY = []
 # 主腦上次調用工具的時間戳（紙條看門狗用：送出 20 秒還沒動靜＝她沒理會）
 LAST_BRAIN_TOOL_TS = 0.0
+# 主腦上次說完一段話（turn_complete）的時間戳（2026-10-11：看門狗只看工具有盲區，說話了也報警）
+LAST_BRAIN_TURN_TS = 0.0
+# Live 服務端上次有任何回包的時間戳（2026-10-11：有回包＝session 活著，只是不緊不慢）
+LAST_LIVE_RX_TS = 0.0
 
 GLOBAL_LIVE_SESSION = None
 INSTINCT_LIVE_SESSION = None
@@ -5257,15 +5261,33 @@ async def instinct_live_worker():
             log_print(f"⚠️ [本能大腦] 連線中斷或重啟中: {e}")
             await asyncio.sleep(3)
 
-async def _slip_watchdog(prompt: str, sent_ts: float, timeout: float = 20.0):
-    """紙條看門狗（2026-10-10：紙條只管送不管腦理不理，「唱 インフェルノシティ」就這樣丟了）。
+def _slip_needs_rescue(now: float, sent_ts: float, tool_ts: float, turn_ts: float,
+                       rx_ts: float, timeout: float = 20.0) -> bool:
+    """純函數：紙條送出 timeout 秒後，工具＋說話＋服務端回包三無 → 真安靜，值得撿回一次。
+    任一有動靜都不撿（腦慢不等於腦死；服務端在回包就讓子彈飛）。"""
+    if now - sent_ts < timeout:
+        return False
+    return tool_ts < sent_ts and turn_ts < sent_ts and rx_ts < sent_ts
 
-    動作類紙條送出後 timeout 秒，主腦一次工具都沒調＝她沒理會（session 僵住、
-    或當閒聊回掉），打一條警告讓人知道，而不是靜默丟失。
-    例外：紙條裡的歌 CPU 已經在唱／排隊＝活幹完了，主腦回不回話無所謂，直接收工。
+
+async def _slip_watchdog(prompt: str, sent_ts: float, timeout: float = 20.0):
+    """紙條看門狗（2026-10-10 起源：動作紙條只管送不管腦理不理）。
+    2026-10-11 擴大＋精準化：
+    - 所有紙條都盯（聊天紙條裸奔會靜默丟失——「收到請回答」連啞兩次）；
+    - 自主閒聊不盯（[SILENCE] 是合法答案，盯了只會狼來了＋催命連發）；
+    - 安靜判定＝工具＋說話＋服務端回包三無（舊碼只看工具，說話了也報警）。
+    - 真安靜：警告＋憑 rescue 賬本撿回一次（防循環）；演唱/睡覺中不打擾。
+    例外：紙條裡的歌 CPU 已經在唱／排隊＝活幹完了，直接收工。
     """
     await asyncio.sleep(timeout)
     try:
+        if "【自主閒聊】" in (prompt or ""):
+            return
+        try:
+            if IS_SINGING_ACTIVE or current_ai_state == "SINGING" or IS_SLEEPING:
+                return
+        except Exception:
+            pass
         tool, args = parse_slip_for_song(prompt)
         song = (args or {}).get("song_name", "") if tool else ""
         if not song:
@@ -5276,9 +5298,25 @@ async def _slip_watchdog(prompt: str, sent_ts: float, timeout: float = 20.0):
         if song and is_song_active(song):
             log_print(f"📎 [紙條備註] 《{song}》CPU 已在背景執行，主腦回不回話無所謂，看門狗收工。")
             return
-        if globals().get("LAST_BRAIN_TOOL_TS", 0.0) < sent_ts:
-            log_print(f"⚠️ [紙條無回應] 主腦 {timeout:.0f} 秒沒理會紙條（{prompt[:40]}…）。"
-                      f"可能 session 僵住或她當閒聊回掉；CPU 有直接執行的不受影響。")
+        import time as _t
+        if not _slip_needs_rescue(_t.time(), sent_ts,
+                                  globals().get("LAST_BRAIN_TOOL_TS", 0.0),
+                                  globals().get("LAST_BRAIN_TURN_TS", 0.0),
+                                  globals().get("LAST_LIVE_RX_TS", 0.0), timeout):
+            return  # 腦有動靜（調工具/說話了/服務端有回包），收工
+        log_print(f"⚠️ [紙條無回應] 主腦 {timeout:.0f} 秒沒理會紙條（{(prompt or '')[:40]}…），撿回一次。")
+        import hashlib as _hl
+        try:
+            _key = "slip:" + _hl.sha1((prompt or "").encode("utf-8")).hexdigest()[:16]
+        except Exception:
+            return
+        if not rescue_claim(_key, _t.time()):
+            return
+        try:
+            LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait(prompt)
+            log_print("🛟 [紙條撿回] 已重發一次，等主腦回應。")
+        except Exception:
+            pass
     except Exception:
         pass
 
@@ -5502,6 +5540,8 @@ async def continuous_live_worker(vts):
                     try:
                         async for resp in session.receive():
                             c = resp.server_content
+                            global LAST_LIVE_RX_TS
+                            LAST_LIVE_RX_TS = time.time()
                             if c:
                                 if getattr(c, 'model_turn', None) and c.model_turn.parts:
                                     for part in c.model_turn.parts:
@@ -5610,6 +5650,8 @@ async def continuous_live_worker(vts):
                                         chunk_buffer = ""
                                     
                                     if turn_buffer.strip():
+                                        global LAST_BRAIN_TURN_TS
+                                        LAST_BRAIN_TURN_TS = time.time()
                                         from core.memory import append_to_unified_memory
                                         append_to_unified_memory(speaker="7L", target="dad", content=turn_buffer.strip(), role="assistant", source="live_api")
                                         log_print(f"📝 [黑板紀錄] 7L Live 大腦: {turn_buffer.strip()}")
@@ -5646,8 +5688,9 @@ async def continuous_live_worker(vts):
                                         RECENT_SLIPS.append((sent_ts, prompt))
                                     except Exception:
                                         pass
-                                    # 動作類紙條（點歌/搜尋/表情）主腦可能已讀不理，掛看門狗
-                                    if re.search(r'唱|彈|點歌|搜尋|表情', prompt):
+                                    #  所有紙條都掛看門狗（聊天紙條裸奔會靜默丟失）；
+                                    #  自主閒聊除外（[SILENCE] 是合法答案，盯了只會狼來了）。
+                                    if "【自主閒聊】" not in (prompt or ""):
                                         asyncio.create_task(_slip_watchdog(prompt, sent_ts))
                             except Exception as inner_e:
                                 log_print(f"⚠️ [黑板同步] 發送失敗 ({inner_e})，訊息已退回佇列等待重連...")
