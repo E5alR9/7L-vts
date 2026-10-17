@@ -61,46 +61,38 @@ try:
 except ImportError:
     record_string_unknown = None
 from google.genai import types
-from services.piano_engine import get_piano_realtime_prompt
-from services.piano_engine import is_piano_active
-from services.tiktok_listener import tiktok_live_worker
 from services.twitch_listener import twitch_live_worker
 from services.youtube_live_listener import youtube_live_worker
 from services.auto_cover_pipeline import produce_and_sing_cover, stop_singing, request_cover_song, is_song_active
 import services.web_dashboard as web_dash
-from PIL import BmpImagePlugin
-from PIL import Image, ImageDraw, ImageGrab, ImageChops
+from PIL import BmpImagePlugin  # noqa: F401  註冊 BMP 外掛（打包環境不會自動載入）
+from PIL import Image
 import os
 import sys
 import io
-import copy
 import subprocess
 import re
 import asyncio
 import aiohttp
-import websockets
-import core.websocket_patch  
-import pyvts
+import core.websocket_patch  # noqa: F401  副作用：修補 websockets 與 google-genai Live 的相容性
 import services.rag_memory_service as rag_service
 import pygame
 import time
 import json
 import base64
-import datetime
 import pyautogui
 import speech_recognition as sr
 import math
 import random
 import wave
-import socket
 import numpy as np
 import soundcard as sc
 import psutil
 import glob
 import difflib
-from typing import Optional, Any, Union
+from typing import Optional
 import collections
-from collections import deque, defaultdict
+from collections import deque
 import shutil
 import webbrowser
 import platform
@@ -562,7 +554,7 @@ if sys.platform == "win32":
         pass
 
 from core.utils import (
-    log_print, sys_notify, get_current_time_string, get_unified_time_prompt,
+    log_print, sys_notify, get_current_time_string,
     record_interaction_tick, get_silence_ticks, get_uptime_ticks, format_ticks_to_human,
     speech_allowed, operator_input_enabled
 )
@@ -586,7 +578,7 @@ from core.llm_engine import (
     track_key, sort_keys_by_load, key_load,
     UNRESTRICTED_SAFETY_SETTINGS
 )
-from core.memory import init_unified_memory, fetch_from_long_term_memory, save_to_long_term_memory, append_to_unified_memory, clear_all_memories, get_recent_100_memory_context, get_viewer_profile, save_viewer_profile, record_bot_message, get_cloud_knowledge, update_cloud_prompt_field, UNIFIED_LIVE_MEMORY, UNIFIED_DIALOGUE_MEMORY, TIKTOK_CHATROOM_MEMORY, STREAMER_MIND_BOARD, DEFAULT_CHANNEL_ID, save_cloud_knowledge, get_unified_memory_context, RECENT_BOT_MESSAGES, evaluate_memory_demand, MemoryDemandLevel, USER_PROFILE_FILE, MODE
+from core.memory import init_unified_memory, fetch_from_long_term_memory, save_to_long_term_memory, append_to_unified_memory, clear_all_memories, get_recent_100_memory_context, get_viewer_profile, save_viewer_profile, record_bot_message, get_cloud_knowledge, update_cloud_prompt_field, TIKTOK_CHATROOM_MEMORY, STREAMER_MIND_BOARD, DEFAULT_CHANNEL_ID, save_cloud_knowledge, get_unified_memory_context, RECENT_BOT_MESSAGES, evaluate_memory_demand, USER_PROFILE_FILE
 
 
 
@@ -856,7 +848,7 @@ async def execute_tool_dispatch(fn_name: str, fn_args: dict, caller_target: str 
         q = (fn_args.get("question", "") or "").strip()
         req_t = caller_target or ("audience" if CURRENT_SPEAKING_TARGET == "audience" else "dad")
         asyncio.create_task(_desktop_ask_and_report(q, req_t, caller_user))
-        return f" （系統回報：已請桌面版 Gemini 查問，答案稍後播報，不要自己編答案。）"
+        return " （系統回報：已請桌面版 Gemini 查問，答案稍後播報，不要自己編答案。）"
     elif fn_name in ["generate_ai_image", "draw_illustration"]:
         p = fn_args.get("prompt", "")
         asyncio.create_task(generate_ai_image(p))
@@ -1710,7 +1702,7 @@ async def call_gemini_live_audience_reply(vts, input_queue, audience_user: str, 
                 LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait(f"[黑板同步] TikTok 觀眾 {id_display} 對妳說：{audience_content}")
             else:
                 LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait(f"[黑板同步] TikTok 觀眾 {id_display} 在聊天室說：{audience_content}")
-        except: pass
+        except Exception: pass
 
         # 整理近期聊天室動態字串
         recent_chat_lines = []
@@ -2016,7 +2008,7 @@ def fit_text_to_width(text: str, max_cols: int) -> str:
     return "".join(res) + ".."
 
 try:
-    import pyaudio
+    import pyaudio  # noqa: F401  只探測是否安裝
     HAS_PYAUDIO = True
 except ImportError:
     HAS_PYAUDIO = False
@@ -2025,7 +2017,7 @@ except ImportError:
 from google import genai
 
 from realtime_tasks.task_manager import realtime_task_mgr
-from mic_live_plugin import mic_live_analyzer, voiceprint_verifier, os_desktop_sensor
+from mic_live_plugin import mic_live_analyzer, voiceprint_verifier, os_desktop_sensor  # noqa: F401  os_desktop_sensor 給 piano_engine 經 __main__ 讀
 
 # ────────────────────────────────────────────────────────
 #  1. 環境變數載入與金鑰矩陣分流初始化 (API Keys & Pools)
@@ -2781,6 +2773,19 @@ def _slip_is_dupe(prompt: str, now: float) -> bool:
         except Exception:
             pass
     return False
+
+
+def _slip_forget(prompt: str) -> None:
+    """撤銷一筆去重記帳：紙條沒送成功要重送時用，否則 10 秒內重送會被當成重複丟掉。"""
+    import hashlib
+    try:
+        _SLIP_LAST_TS.pop(hashlib.sha1((prompt or "").encode("utf-8")).hexdigest(), None)
+    except Exception:
+        pass
+
+
+# 送失敗待重送的紙條：下個 session 優先送（asyncio.Queue 不能插隊到最前面）
+_LIVE_SLIP_RETRY = deque()
 # 進行中的子智能體任務（防 GC、手動盤點用；開幾個跑幾個，不設上限）
 _RUNNING_SUBAGENT_TASKS = set()
 pygame.mixer.init()
@@ -3349,7 +3354,6 @@ LATEST_REALWORLD_SPEECH_TEXT = ""
 LATEST_REALWORLD_SPEECH_TIME = 0.0
 
 GLOBAL_SYSTEM_WAV_BYTES = None
-import collections
 GLOBAL_SPEECH_AUDIO_BUFFER = collections.deque(maxlen=70)
 
 def check_is_echo_by_waveform(mic_wav_bytes: bytes, sys_wav_bytes: bytes, threshold: float = 0.15) -> bool:
@@ -4280,7 +4284,7 @@ def capture_screen_multi_view():
     """
     global has_printed_vision_error
     try:
-        from PIL import ImageDraw, Image
+        from PIL import Image
         import io
         
         screenshot = None
@@ -5424,6 +5428,21 @@ def _split_fossil_batch(batch, now: float, max_age: float = 180.0, max_attempts:
     return fresh, dropped
 
 
+_S2TWP_CONVERTER = None
+
+
+def _to_tw(text: str) -> str:
+    """簡轉繁（台灣用語）。OpenCC 建構要載字典檔，只建一次重複用。"""
+    global _S2TWP_CONVERTER
+    try:
+        if _S2TWP_CONVERTER is None:
+            import opencc
+            _S2TWP_CONVERTER = opencc.OpenCC('s2twp')
+        return _S2TWP_CONVERTER.convert(text)
+    except Exception:
+        return text
+
+
 async def continuous_live_worker(vts):
     """真・雙向串流 Live 大腦核心"""
     global GLOBAL_LIVE_SESSION, LIVE_SESSION_ACTIVE
@@ -5436,7 +5455,7 @@ async def continuous_live_worker(vts):
     except Exception:
         owner = "老爸"
         char_name = "7L"
-    import pyaudio, base64
+    import pyaudio, threading
     FORMAT = pyaudio.paInt16
     CHANNELS = 1
     RATE = 16000
@@ -5506,15 +5525,30 @@ async def continuous_live_worker(vts):
                     pass
                 
                 p = pyaudio.PyAudio()
-                stream = p.open(format=FORMAT, channels=CHANNELS, rate=RATE, input=True, frames_per_buffer=CHUNK)
-                
+                try:
+                    stream = p.open(format=FORMAT, channels=CHANNELS, rate=RATE, input=True, frames_per_buffer=CHUNK)
+                except Exception:
+                    p.terminate()  # 麥克風開不起來也要釋放，否則每次重連漏一個 PyAudio
+                    raise
+
+                # stream.read 跑在背景執行緒，收音任務被取消時執行緒不會跟著停；
+                # 關 stream 前必須等它讀完，PortAudio 跨執行緒邊讀邊關可能整個程式崩潰。
+                mic_read_lock = threading.Lock()
+                mic_closed = threading.Event()
+
+                def _read_mic_chunk():
+                    with mic_read_lock:
+                        if mic_closed.is_set():
+                            raise OSError("live mic stream closed")
+                        return stream.read(CHUNK, exception_on_overflow=False)
+
                 ws_send_lock = asyncio.Lock()  # 新增併發鎖，避免音訊跟文字搶通道
                 
                 async def send_mic_audio():
                     global current_mic_action_str, LATEST_REALWORLD_SPEECH_TIME
                     try:
                         while True:
-                            data = await asyncio.to_thread(stream.read, CHUNK, exception_on_overflow=False)
+                            data = await asyncio.to_thread(_read_mic_chunk)
                             
                             # 若手動關閉麥克風，或 7L 正在講話 (避免麥克風回音觸發 Live API 的 VAD 打斷)
                             if not IS_MIC_ENABLED or (CURRENT_PLAYING_VOICE_TASK and not CURRENT_PLAYING_VOICE_TASK.done()):
@@ -5657,12 +5691,7 @@ async def continuous_live_worker(vts):
                                 if c.output_transcription and c.output_transcription.text:
                                     if user_transcription_buffer.strip():
                                         user_spoken = user_transcription_buffer.strip()
-                                        try:
-                                            import opencc
-                                            converter = opencc.OpenCC('s2twp')
-                                            user_spoken = converter.convert(user_spoken)
-                                        except Exception:
-                                            pass
+                                        user_spoken = _to_tw(user_spoken)
                                             
                                         from core.memory import append_to_unified_memory
                                         append_to_unified_memory(speaker=owner, target=char_name, content=user_spoken, role="user", source="mic")
@@ -5729,7 +5758,10 @@ async def continuous_live_worker(vts):
                 async def send_system_prompts_to_live():
                     try:
                         while True:
-                            prompt = await LIVE_API_SYSTEM_PROMPT_QUEUE.get()
+                            if _LIVE_SLIP_RETRY:
+                                prompt = _LIVE_SLIP_RETRY.popleft()
+                            else:
+                                prompt = await LIVE_API_SYSTEM_PROMPT_QUEUE.get()
                             try:
                                 if _slip_is_dupe(prompt, time.time()):
                                     log_print("📄 [紙條去重] 10 秒內相同紙條已送過，跳過（一次點歌三張同字紙條會自斷風暴）。")
@@ -5740,7 +5772,6 @@ async def continuous_live_worker(vts):
                             try:
                                 async with ws_send_lock:
                                     await session.send_realtime_input(text=prompt)
-                                    import time
                                     sent_ts = time.time()
                                     LIVE_CONTEXT_MEMORY.append((sent_ts, prompt))
                                     if len(LIVE_CONTEXT_MEMORY) > 10:
@@ -5755,8 +5786,9 @@ async def continuous_live_worker(vts):
                                         asyncio.create_task(_slip_watchdog(prompt, sent_ts))
                             except Exception as inner_e:
                                 log_print(f"⚠️ [黑板同步] 發送失敗 ({inner_e})，訊息已退回佇列等待重連...")
-                                # 把剛剛拿出來但沒送成功的紙條塞回佇列的最前面
-                                LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait(prompt)
+                                # 沒送成功的紙條排到最前面，並撤銷去重記帳，重連後才不會被當重複丟掉
+                                _slip_forget(prompt)
+                                _LIVE_SLIP_RETRY.appendleft(prompt)
                                 raise inner_e
                     except asyncio.CancelledError: pass
                     except Exception as e:
@@ -5781,10 +5813,17 @@ async def continuous_live_worker(vts):
                 for task in pending: task.cancel()
                 if pending:
                     await asyncio.wait(pending)
-                
-                stream.stop_stream()
-                stream.close()
-                p.terminate()
+
+                # 等背景執行緒手上那一塊讀完（CHUNK 約 0.5 秒）再關 stream
+                got_mic_lock = await asyncio.to_thread(mic_read_lock.acquire, True, 2.0)
+                try:
+                    mic_closed.set()
+                    stream.stop_stream()
+                    stream.close()
+                    p.terminate()
+                finally:
+                    if got_mic_lock:
+                        mic_read_lock.release()
                 
                 first_exc = None
                 for t in done.union(pending):
@@ -7151,7 +7190,6 @@ async def speech_queue_worker(vts, input_queue):
                     break
                 await asyncio.sleep(0.1)
             
-            import services.auto_cover_pipeline as auto_cover
             is_singing = globals().get("IS_SINGING_ACTIVE", False) or auto_cover.IS_SINGING_ACTIVE
             if input_queue.empty() and speech_queue.empty() and not pe.is_piano_active and not is_singing:
                 await set_vts_expression(vts, "_RESET_")
@@ -8531,7 +8569,7 @@ async def process_chat_message(vts, input_queue, user_input: str, user_audio_b64
             try:
                 from core.identity import get_owner_name
                 owner = get_owner_name()
-            except:
+            except Exception:
                 owner = "老爸"
                 
             # 寫入記憶並廣播到後台
@@ -9131,7 +9169,7 @@ async def chat_processor_worker(vts, input_queue):
                             if isinstance(it, dict) and it.get("target") == "dad":
                                 temp_dad_items.append(it)
                             speech_queue.task_done()
-                        except:
+                        except Exception:
                             break
                     for d_it in temp_dad_items:
                         await speech_queue.put(d_it)
@@ -10153,7 +10191,8 @@ async def main():
         set_mic_cb=_set_mic,
         set_sleep_cb=lambda enable: _set_switch("IS_SLEEPING", enable),
         trigger_expression_cb=_trigger_expr,
-        get_memory_cb=lambda: list(UNIFIED_LIVE_MEMORY),
+        # 走模組屬性：後台改記憶容量時 core.memory 會換一個新 deque，檔頭 import 的名字會變舊殼
+        get_memory_cb=lambda: list(sys.modules["core.memory"].UNIFIED_LIVE_MEMORY),
         get_mind_board_cb=lambda: list(STREAMER_MIND_BOARD),
         get_last_vision_image_cb=_get_last_vision_img,
         restart_cb=_restart,

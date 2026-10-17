@@ -24,6 +24,7 @@ frown_timer = 0.0
 GLOBAL_VTS = None
 MY_CONTROLLED_EXPS = ["黑脸.exp3.json", "爱心.exp3.json", "星星眼.exp3.json", "红脸.exp3.json", "吐舌.exp3.json", "哭哭.exp3.json", "晕晕.exp3.json", "比心.exp3.json", "流汗.exp3.json", "生气.exp3.json", "着急.exp3.json", "花花.exp3.json", "问号.exp3.json", "黑化.exp3.json", "话筒.exp3.json", "打游戏.exp3.json", "双马尾.exp3.json", "右抬手.exp3.json", "左抬手.exp3.json"]
 CURRENT_ACTIVE_EXP = None
+CURRENT_ACTIVE_EXPS = set()  # 目前開在臉上的表情檔（小本本）
 EXPRESSION_HOLD_SECONDS = 3.5  #  說完話後表情持續保留的秒數（保持自然情緒餘韻）
 
 VTS_EXPRESSION_MAP = {
@@ -168,6 +169,7 @@ class RobustVTSClient:
         self.req_counter = 0
         self.is_authenticated = False
         self._last_token_req = 0.0
+        self._connect_lock = asyncio.Lock()
 
     def is_connected(self):
         if self.ws is None:
@@ -177,6 +179,11 @@ class RobustVTSClient:
         return getattr(self.ws, 'close_code', None) is None
 
     async def connect(self, retries=5, retry_delay=2.0):
+        # 序列化：VTS 重開時心跳和其他協程可能同時重連，會開出多條連線、互相取消 reader
+        async with self._connect_lock:
+            return await self._connect_locked(retries, retry_delay)
+
+    async def _connect_locked(self, retries, retry_delay):
         self.is_authenticated = False
         for attempt in range(1, retries + 1):
             if self.is_connected():
@@ -208,7 +215,7 @@ class RobustVTSClient:
                 self.ws = ws
                 if self.reader_task and not self.reader_task.done():
                     self.reader_task.cancel()
-                self.reader_task = asyncio.create_task(self._socket_reader())
+                self.reader_task = asyncio.create_task(self._socket_reader(ws))
                 return True
             if attempt < retries:
                 await asyncio.sleep(retry_delay)
@@ -226,9 +233,9 @@ class RobustVTSClient:
         except Exception:
             return False
 
-    async def _socket_reader(self):
+    async def _socket_reader(self, ws):
         try:
-            async for raw_msg in self.ws:
+            async for raw_msg in ws:
                 try:
                     data = json.loads(raw_msg)
                     req_id = data.get("requestID")
@@ -242,6 +249,17 @@ class RobustVTSClient:
             pass
         except Exception:
             pass
+        finally:
+            # 連線斷了：還在等回應的請求立刻失敗，不必各自乾等 timeout。
+            # 若 connect() 已換上新連線，pending 裡可能是新連線的請求，不能動。
+            if self.ws is ws:
+                self._fail_pending(ConnectionError("VTS 連線已中斷"))
+
+    def _fail_pending(self, exc):
+        pending, self.pending_requests = self.pending_requests, {}
+        for future in pending.values():
+            if not future.done():
+                future.set_exception(exc)
 
     async def read_token(self):
         if os.path.exists(self.token_file):
@@ -354,24 +372,28 @@ class RobustVTSClient:
         return resp2
 
     async def request(self, req_dict: dict, timeout: float = 2.0) -> dict:
+        # 不在這裡偷偷重連：舊版重連後沒重新認證，且多個協程會同時重連互相踩。
+        # 斷線一律快速失敗，重連＋認證交給 vts_health_worker 統一處理。
         if not self.is_connected():
-            await self.connect()
+            raise ConnectionError("VTS 未連線（等待心跳自動重連）")
 
-        if "requestID" not in req_dict:
-            self.req_counter += 1
-            req_dict["requestID"] = f"Req_{self.req_counter}_{int(time.time()*1000)}"
-        req_id = req_dict["requestID"]
+        # 每個請求配唯一 requestID：呼叫端常用固定 ID（如 "ActivateExpression"），
+        # 同名請求逾時後晚到的回應會被錯配給下一個同名請求
+        self.req_counter += 1
+        req_id = f"{str(req_dict.get('requestID') or 'Req')[:40]}_{self.req_counter}"
+        payload = dict(req_dict, requestID=req_id)
 
         loop = asyncio.get_running_loop()
         future = loop.create_future()
         self.pending_requests[req_id] = future
-
-        await self.ws.send(json.dumps(req_dict))
         try:
+            await self.ws.send(json.dumps(payload))
             return await asyncio.wait_for(future, timeout=timeout)
         except asyncio.TimeoutError:
-            self.pending_requests.pop(req_id, None)
             return {"errorID": 408, "message": f"Request {req_id} timed out"}
+        finally:
+            # 外層 wait_for 取消、send 失敗時也要清掉，避免 pending 越積越多
+            self.pending_requests.pop(req_id, None)
 
     async def inject_parameters(self, param_values: list, face_found: bool = True, mode: str = "set"):
         """極速非同步注入參數，不阻塞接收佇列"""
@@ -578,7 +600,7 @@ async def move_vts_spatial(
     *args, **kwargs
 ):
     """【VTS Live2D 模型平滑走位與縮放控制器】透過 WebSocket 官方 API 驅動 7L 在 VTS 畫布內平滑走位、相對微調與縮放"""
-    global BASE_VTS_MODEL_X, BASE_VTS_MODEL_Y, BASE_VTS_MODEL_SIZE, CURRENT_VTS_MODEL_X, CURRENT_VTS_MODEL_Y, CURRENT_VTS_MODEL_SIZE
+    global CURRENT_VTS_MODEL_X, CURRENT_VTS_MODEL_Y, CURRENT_VTS_MODEL_SIZE
     target_vts = GLOBAL_VTS
     if not target_vts:
         return False
@@ -755,13 +777,21 @@ async def apply_spatial_position(
 
 LAST_CONSCIOUS_ACTION_TIME = 0.0
 
+
+def _vts_ok(resp) -> bool:
+    """request() 逾時/VTS 報錯時是回錯誤 dict 而不是丟例外，要看內容才知道成功沒"""
+    return isinstance(resp, dict) and "errorID" not in resp and resp.get("messageType") != "APIError"
+
+
+def _vts_err(resp) -> str:
+    if not isinstance(resp, dict):
+        return str(resp)
+    data = resp.get("data") or {}
+    return str(data.get("message") or resp.get("message") or resp)
+
+
 async def set_vts_expression(vts, exp_tag, is_instinct=False):
     global CURRENT_ACTIVE_EXP, shock_timer, wink_timer, wink_side, frown_timer, eye_roll_timer, is_tracking_mouse, LAST_CONSCIOUS_ACTION_TIME
-    global CURRENT_ACTIVE_EXPS
-    try:
-        CURRENT_ACTIVE_EXPS
-    except NameError:
-        CURRENT_ACTIVE_EXPS = set()
     
     if not is_instinct:
         LAST_CONSCIOUS_ACTION_TIME = time.time()
@@ -793,10 +823,12 @@ async def set_vts_expression(vts, exp_tag, is_instinct=False):
                 async with vts_lock:
                     for exp in list(to_close):
                         try:
-                            await asyncio.wait_for(vts.request({
+                            resp = await asyncio.wait_for(vts.request({
                                 "apiName": "VTubeStudioPublicAPI", "apiVersion": "1.0", "requestID": "ResetExp",
                                 "messageType": "ExpressionActivationRequest", "data": {"expressionFile": exp, "active": False}
                             }), timeout=1.0)
+                            if not _vts_ok(resp):
+                                raise RuntimeError(_vts_err(resp))
                         except Exception as de:
                             failed.append(exp)
                             log_print(f"❌ [Live2D 表情] 關閉 {exp} 失敗: {de}")
@@ -862,29 +894,24 @@ async def set_vts_expression(vts, exp_tag, is_instinct=False):
             log_print(f"⚠️ [Live2D 表情] 未知表情標籤：「{clean_tag}」，已忽略（請確認模型內有對應 .exp3.json 或在 VTS_EXPRESSION_MAP 新增映射）")
             return
 
-        prev_exp = CURRENT_ACTIVE_EXP
         CURRENT_ACTIVE_EXP = list(target_filenames)[0] if target_filenames else None
         log_print(f"✨ [Live2D 表情] 成功啟動表情檔組合: 《{', '.join(target_filenames)}》 (標籤: {clean_tag})")
         
         async with vts_lock:
-            # 單獨開關邏輯 (允許疊加)：若已開啟則關閉，若未開啟則啟動並疊加
+            # 疊加開啟：已開著的再下一次照樣送 active=True（VTS 冪等），不再反向關掉——
+            # 舊 toggle 會讓連續兩句同表情時第二句把表情關掉。要關一律走 _RESET_。
             for exp_file in target_filenames:
-                if exp_file in CURRENT_ACTIVE_EXPS:
-                    try:
-                        await asyncio.wait_for(vts.request({
-                            "apiName": "VTubeStudioPublicAPI", "apiVersion": "1.0", "requestID": "DeactivateExp",
-                            "messageType": "ExpressionActivationRequest", "data": {"expressionFile": exp_file, "active": False}
-                        }), timeout=0.2)
-                        CURRENT_ACTIVE_EXPS.remove(exp_file)
-                    except Exception: pass
-                else:
-                    try:
-                        await asyncio.wait_for(vts.request({
-                            "apiName": "VTubeStudioPublicAPI", "apiVersion": "1.0", "requestID": "ActivateExpression",
-                            "messageType": "ExpressionActivationRequest", "data": {"expressionFile": exp_file, "active": True}
-                        }), timeout=0.2)
+                try:
+                    resp = await asyncio.wait_for(vts.request({
+                        "apiName": "VTubeStudioPublicAPI", "apiVersion": "1.0", "requestID": "ActivateExpression",
+                        "messageType": "ExpressionActivationRequest", "data": {"expressionFile": exp_file, "active": True}
+                    }), timeout=1.0)
+                    if _vts_ok(resp):
                         CURRENT_ACTIVE_EXPS.add(exp_file)
-                    except Exception: pass
+                    else:
+                        log_print(f"⚠️ [Live2D 表情] 開啟 {exp_file} 失敗: {_vts_err(resp)}")
+                except Exception as ae:
+                    log_print(f"⚠️ [Live2D 表情] 開啟 {exp_file} 失敗: {ae}")
     except Exception as e:
         log_print(f"\n❌ [表情系統] 發生錯誤: {e}")
 
@@ -896,10 +923,6 @@ async def sync_expression_state(vts=None) -> set:
     回傳同步後的集合。
     """
     global CURRENT_ACTIVE_EXPS
-    try:
-        CURRENT_ACTIVE_EXPS
-    except NameError:
-        CURRENT_ACTIVE_EXPS = set()
     target = vts or globals().get("GLOBAL_VTS")
     if target is None:
         return set(CURRENT_ACTIVE_EXPS)
@@ -928,7 +951,6 @@ async def sync_expression_state(vts=None) -> set:
 
 async def trigger_vts_expression(expression_name: str, is_instinct: bool = False) -> str:
     """切換 7L (Live2D 模型) 的臉部表情以表達情感或關閉表情。"""
-    global GLOBAL_VTS
     clean_name = expression_name.strip().replace("[", "").replace("]", "").replace("EXPRESSION:", "").replace("EXPRESSION：", "").strip()
     if not is_instinct:
         print(f"\n🎭 [Tool 調用] 7L 正在切換表情至: 「{clean_name}」")
@@ -1106,7 +1128,8 @@ async def update_vts_window_center(sw: float, sh: float):
         for w in gw.getAllWindows():
             if w.visible and w.width > 150 and w.height > 150:
                 win_t = (w.title or "").lower()
-                if 'vtube' in win_t or 'vts' in win_t:
+                # 只認 "VTube Studio"：舊的 'vts' 會先撞到「vts_7L_test.py - Visual Studio Code」或終端機
+                if 'vtube studio' in win_t:
                     found_win = (w.left + w.width / 2, w.top + w.height / 2)
                     break
     except Exception:
@@ -1122,7 +1145,7 @@ async def update_vts_window_center(sw: float, sh: float):
                     buf = ctypes.create_unicode_buffer(256)
                     user32.GetWindowTextW(hwnd, buf, 256)
                     title = (buf.value or "").lower()
-                    if 'vtube' in title or 'vts' in title:
+                    if 'vtube studio' in title:
                         rect = ctypes.wintypes.RECT()
                         user32.GetWindowRect(hwnd, ctypes.byref(rect))
                         w = rect.right - rect.left
