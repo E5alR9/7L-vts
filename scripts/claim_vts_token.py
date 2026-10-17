@@ -35,7 +35,7 @@ async def main(timeout: float) -> int:
         await client.connect(retries=3, retry_delay=1.0)
     except Exception as e:
         print(f"❌ 無法連上 VTube Studio: {e}")
-        print("   請先確認 VTube Studio 已開啟、且設定 → Plugins → API 已啟用 (port 8001)")
+        print("   請先確認 VTube Studio 已開啟、且設定 → Plugins → API 已啟用（預設 port 8001，改過請在 .env 設 VTS_PORT）")
         return 1
 
     token = await client.read_token()

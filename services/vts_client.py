@@ -149,14 +149,17 @@ CURRENT_VTS_MODEL_SIZE = None
 
 class RobustVTSClient:
     """ 高效能非同步 VTube Studio WebSocket 通訊引擎（支援無阻塞極速參數注入與 RequestID 精準匹配）"""
-    def __init__(self, plugin_info=None, port=8001):
+    TOKEN_REQ_COOLDOWN = 60.0  # 申請 Token 失敗後的冷卻秒數
+
+    def __init__(self, plugin_info=None, port=None):
         self.plugin_info = plugin_info or {
             "plugin_name": "7L_AI_VTuber",
             "developer": "e5_Studio",
             "authentication_token_path": "./vts_token.txt"
         }
         self.token_file = self.plugin_info.get("authentication_token_path", "./vts_token.txt")
-        self.port = port
+        # 埠號：參數 > .env 的 VTS_PORT > 8001；連不上時會自動掃 8001~8010（VTS 設定裡的 API 埠可能被改過）
+        self.port = int(port or os.getenv("VTS_PORT") or 8001)
         self.uri = f"ws://127.0.0.1:{self.port}"
         self.ws = None
         self.authentic_token = None
@@ -164,6 +167,7 @@ class RobustVTSClient:
         self.reader_task = None
         self.req_counter = 0
         self.is_authenticated = False
+        self._last_token_req = 0.0
 
     def is_connected(self):
         if self.ws is None:
@@ -175,25 +179,52 @@ class RobustVTSClient:
     async def connect(self, retries=5, retry_delay=2.0):
         self.is_authenticated = False
         for attempt in range(1, retries + 1):
-            try:
-                if self.is_connected():
-                    try: await self.ws.close()
+            if self.is_connected():
+                try: await self.ws.close()
+                except Exception: pass
+            # 先試上次成功/設定的埠，不行再掃其他常見埠
+            ports = [self.port] + [p for p in range(8001, 8011) if p != self.port]
+            last_err = None
+            for p in ports:
+                try:
+                    ws = await websockets.connect(
+                        f"ws://127.0.0.1:{p}",
+                        max_size=10*1024*1024,
+                        open_timeout=10.0 if p == self.port else 2.0,
+                        ping_interval=20.0
+                    )
+                except Exception as e:
+                    if p == self.port:
+                        last_err = e
+                    continue
+                if p != self.port and not await self._looks_like_vts(ws):
+                    try: await ws.close()
                     except Exception: pass
-                self.ws = await websockets.connect(
-                    self.uri, 
-                    max_size=10*1024*1024,
-                    open_timeout=10.0,
-                    ping_interval=20.0
-                )
+                    continue
+                if p != self.port:
+                    log_print(f"🔎 [VTS] Port {self.port} 連不上，在 Port {p} 找到 VTube Studio（可在 .env 設 VTS_PORT={p}）")
+                    self.port = p
+                    self.uri = f"ws://127.0.0.1:{p}"
+                self.ws = ws
                 if self.reader_task and not self.reader_task.done():
                     self.reader_task.cancel()
                 self.reader_task = asyncio.create_task(self._socket_reader())
                 return True
-            except Exception as e:
-                if attempt < retries:
-                    await asyncio.sleep(retry_delay)
-                else:
-                    raise ConnectionError(f"Cannot connect to VTube Studio at {self.uri}: {e}")
+            if attempt < retries:
+                await asyncio.sleep(retry_delay)
+            else:
+                raise ConnectionError(f"Cannot connect to VTube Studio at {self.uri} (也掃過 8001~8010): {last_err}")
+
+    @staticmethod
+    async def _looks_like_vts(ws) -> bool:
+        """掃到的埠要先確認真的是 VTS API，避免連到別的 WebSocket 服務"""
+        try:
+            await ws.send(json.dumps({"apiName": "VTubeStudioPublicAPI", "apiVersion": "1.0",
+                                      "requestID": "PortProbe", "messageType": "APIStateRequest", "data": {}}))
+            resp = json.loads(await asyncio.wait_for(ws.recv(), timeout=2.0))
+            return resp.get("apiName") == "VTubeStudioPublicAPI"
+        except Exception:
+            return False
 
     async def _socket_reader(self):
         try:
@@ -254,23 +285,11 @@ class RobustVTSClient:
             log_print(f"❌ [VTS 授權] Token 申請失敗: {err_msg}")
         return token
 
-    async def request_authenticate(self):
-        """使用現有 Token 向 VTS 認證。若 Token 失效（APIError），才重申請。"""
-        if not self.authentic_token:
-            await self.read_token()
-        if not self.authentic_token:
-            # 完全沒有 token，需要重新向 VTS 申請（會彈授權視窗）
-            new_token = await self.request_authenticate_token()
-            if new_token:
-                await self.write_token()
-            else:
-                log_print("❌ [VTS 認證] 無法取得 Token，VTS 連線跳過。")
-                return {}
-
+    async def _send_auth(self, req_id: str = "AuthReq") -> dict:
         resp = await self.request({
             "apiName": "VTubeStudioPublicAPI",
             "apiVersion": "1.0",
-            "requestID": "AuthReq",
+            "requestID": req_id,
             "messageType": "AuthenticationRequest",
             "data": {
                 "pluginName": self.plugin_info.get("plugin_name", "7L_AI_VTuber"),
@@ -278,50 +297,61 @@ class RobustVTSClient:
                 "authenticationToken": self.authentic_token
             }
         })
-        self.is_authenticated = resp.get("data", {}).get("authenticated", False)
+        self.is_authenticated = bool(resp.get("data", {}).get("authenticated", False))
+        return resp
 
+    async def _claim_new_token(self) -> bool:
+        """申請新 Token 並寫檔。冷卻 TOKEN_REQ_COOLDOWN 秒，避免心跳重連時每 10 秒狂彈授權視窗。"""
+        now = time.time()
+        if now - self._last_token_req < self.TOKEN_REQ_COOLDOWN:
+            wait = int(self.TOKEN_REQ_COOLDOWN - (now - self._last_token_req))
+            log_print(f"⏳ [VTS 授權] 上次申請 Token 未成功，{wait} 秒後再試（請到 VTS 視窗按【允許】）")
+            return False
+        self._last_token_req = now
+        new_token = await self.request_authenticate_token()
+        if not new_token:
+            return False
+        self._last_token_req = 0.0
+        await self.write_token()
+        return True
+
+    async def request_authenticate(self):
+        """使用現有 Token 向 VTS 認證；沒有 Token 或 Token 已失效就自動申請新的並寫回檔案。"""
+        # 每次都重讀檔案：外部（如 claim_vts_token.py）換了 token，這裡會直接吃到新的
+        await self.read_token()
+        if not self.authentic_token:
+            # 完全沒有 token，需要重新向 VTS 申請（會彈授權視窗）
+            if not await self._claim_new_token():
+                log_print("❌ [VTS 認證] 無法取得 Token，VTS 連線跳過。")
+                return {}
+
+        resp = await self._send_auth()
         if self.is_authenticated:
             log_print("✅ [VTS 認證] Token 驗證成功！")
             return resp
 
-        # 認證失敗 → 只有在 VTS 明確回傳 APIError（token 被撤銷/無效）才重申請
-        # 其他情況（如網路暫時超時）不刪 token，避免健康檢查重連時無限循環彈授權視窗
+        # VTS 對失效/被撤銷的 token 回的是 AuthenticationResponse(authenticated=false, reason=...)，
+        # 不是 APIError。只有 VTS 真的回了「認證失敗」才換 token；
+        # 逾時（errorID=408、沒有 messageType）或 APIError 等其他情況保留舊 token，下次心跳再試。
         msg_type = resp.get("messageType", "")
-        err_id = resp.get("data", {}).get("errorID", -1)
-        is_token_revoked = (msg_type == "APIError" and err_id in [50, 51, 52, 53, 54, 55, 0])
+        data = resp.get("data", {}) or {}
+        if msg_type != "AuthenticationResponse":
+            log_print(f"⚠️ [VTS 認證] authenticated=False（非 token 失效，可能是暫時性問題）: {resp}")
+            return resp
 
-        if is_token_revoked:
-            log_print(f"⚠️ [VTS 認證] Token 已被 VTS 撤銷（errorID={err_id}），正在清空並重新申請...")
-            self.authentic_token = None
-            try:
-                if os.path.exists(self.token_file):
-                    os.remove(self.token_file)
-            except Exception:
-                pass
-            new_token = await self.request_authenticate_token()
-            if new_token:
-                await self.write_token()
-                resp2 = await self.request({
-                    "apiName": "VTubeStudioPublicAPI",
-                    "apiVersion": "1.0",
-                    "requestID": "AuthReqRetry",
-                    "messageType": "AuthenticationRequest",
-                    "data": {
-                        "pluginName": self.plugin_info.get("plugin_name", "7L_AI_VTuber"),
-                        "pluginDeveloper": self.plugin_info.get("developer", "e5_Studio"),
-                        "authenticationToken": self.authentic_token
-                    }
-                })
-                self.is_authenticated = resp2.get("data", {}).get("authenticated", False)
-                if self.is_authenticated:
-                    log_print("✅ [VTS 認證] 重新認證成功！Token 已更新並儲存。")
-                else:
-                    log_print("❌ [VTS 認證] 重新認證仍失敗，請確認在 VTS 視窗點選了【允許】。")
-                return resp2
+        reason = data.get("reason") or data.get("message") or msg_type
+        log_print(f"⚠️ [VTS 認證] Token 已失效（{reason}），正在自動申請新 Token...")
+        self.authentic_token = None
+        if not await self._claim_new_token():
+            log_print("❌ [VTS 認證] 新 Token 申請未成功，請確認在 VTS 視窗點選了【允許】。")
+            return resp
+
+        resp2 = await self._send_auth("AuthReqRetry")
+        if self.is_authenticated:
+            log_print("✅ [VTS 認證] 重新認證成功！Token 已更新並儲存。")
         else:
-            log_print(f"⚠️ [VTS 認證] authenticated=False（非 token 撤銷，可能是暫時性問題）: {resp}")
-
-        return resp
+            log_print(f"❌ [VTS 認證] 新 Token 認證仍失敗: {resp2}")
+        return resp2
 
     async def request(self, req_dict: dict, timeout: float = 2.0) -> dict:
         if not self.is_connected():
