@@ -52,7 +52,7 @@ class MainProxy:
 
 main_obj = MainProxy()
 
-from core.utils import log_print
+from core.utils import log_print, to_tw
 from services.vts_client import apply_spatial_position
 
 # If there are circular dependency issues, we can import them locally or pass them.
@@ -1640,15 +1640,9 @@ async def resolve_piano_intent_by_ai(
             if isinstance(data, dict):
                 data["_from_ai"] = True
                 data["_provider"] = "groq"
-                try:
-                    import opencc
-                    converter = opencc.OpenCC('s2twp')
-                    if data.get("song_title"):
-                        data["song_title"] = converter.convert(data["song_title"])
-                    if data.get("search_query"):
-                        data["search_query"] = converter.convert(data["search_query"])
-                except Exception:
-                    pass
+                for _k in ("song_title", "search_query"):
+                    if isinstance(data.get(_k), str):
+                        data[_k] = to_tw(data[_k])
                 return data
     except Exception:
         pass
@@ -1680,15 +1674,9 @@ async def resolve_piano_intent_by_ai(
                     if resp and resp.text:
                         data = json.loads(resp.text.strip())
                         data["_from_ai"] = True
-                        try:
-                            import opencc
-                            converter = opencc.OpenCC('s2twp')
-                            if data.get("song_title"):
-                                data["song_title"] = converter.convert(data["song_title"])
-                            if data.get("search_query"):
-                                data["search_query"] = converter.convert(data["search_query"])
-                        except Exception:
-                            pass
+                        for _k in ("song_title", "search_query"):
+                            if isinstance(data.get(_k), str):
+                                data[_k] = to_tw(data[_k])
                         return data
                 except Exception:
                     continue

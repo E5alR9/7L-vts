@@ -24,3 +24,17 @@ def test_operator_speech_opt_in_values(monkeypatch):
         monkeypatch.setenv("OPERATOR_SPEECH", val)
         assert speech_allowed(True) is want, f"OPERATOR_SPEECH={val!r}"
     monkeypatch.delenv("OPERATOR_SPEECH", raising=False)
+
+
+def test_to_tw_converts_and_caches_converter():
+    """2026-10-17：OpenCC 只建一次（舊碼每句 STT／每次點歌解析都重載字典）。"""
+    import pytest
+    pytest.importorskip("opencc")
+    import core.utils as u
+    assert u.to_tw("软件开发") == "軟體開發"
+    first = u._S2TWP_CONVERTER
+    assert first is not None
+    u.to_tw("鼠标")
+    assert u._S2TWP_CONVERTER is first
+    assert u.to_tw("") == ""
+    assert u.to_tw(None) is None

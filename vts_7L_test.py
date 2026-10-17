@@ -556,7 +556,7 @@ if sys.platform == "win32":
 from core.utils import (
     log_print, sys_notify, get_current_time_string,
     record_interaction_tick, get_silence_ticks, get_uptime_ticks, format_ticks_to_human,
-    speech_allowed, operator_input_enabled
+    speech_allowed, operator_input_enabled, to_tw
 )
 from core.hard_command import parse_hard_command, build_slip_text, display_requester, parse_slip_for_song, strip_blob_noise, sanitize_search_query, rescue_claim, split_original_request
 from core.subagent_router import resolve_subagent_chain
@@ -5428,21 +5428,6 @@ def _split_fossil_batch(batch, now: float, max_age: float = 180.0, max_attempts:
     return fresh, dropped
 
 
-_S2TWP_CONVERTER = None
-
-
-def _to_tw(text: str) -> str:
-    """簡轉繁（台灣用語）。OpenCC 建構要載字典檔，只建一次重複用。"""
-    global _S2TWP_CONVERTER
-    try:
-        if _S2TWP_CONVERTER is None:
-            import opencc
-            _S2TWP_CONVERTER = opencc.OpenCC('s2twp')
-        return _S2TWP_CONVERTER.convert(text)
-    except Exception:
-        return text
-
-
 async def continuous_live_worker(vts):
     """真・雙向串流 Live 大腦核心"""
     global GLOBAL_LIVE_SESSION, LIVE_SESSION_ACTIVE
@@ -5691,7 +5676,7 @@ async def continuous_live_worker(vts):
                                 if c.output_transcription and c.output_transcription.text:
                                     if user_transcription_buffer.strip():
                                         user_spoken = user_transcription_buffer.strip()
-                                        user_spoken = _to_tw(user_spoken)
+                                        user_spoken = to_tw(user_spoken)
                                             
                                         from core.memory import append_to_unified_memory
                                         append_to_unified_memory(speaker=owner, target=char_name, content=user_spoken, role="user", source="mic")

@@ -113,3 +113,20 @@ def get_unified_time_prompt() -> str:
   * 剛說過話（< 60 Ticks / 1分鐘內）：屬於連貫的即時對話，延續當前話題與互動情緒。
   * 專注安靜（60 ~ 600 Ticks / 1~10分鐘）：老爸正專心操作電腦，若老爸開口，自然接話；若自主陪伴，保持安靜守護。
   * 長期安靜（> 600 Ticks / 10分鐘以上）：老爸已專注很久，開口或自主搭話時可自然帶有時間流逝感（例如：「老爸忙完啦？」、「剛剛專注了好久呢～」），表現出對時間陪伴的真實感知。"""
+
+
+_S2TWP_CONVERTER = None
+
+
+def to_tw(text: str) -> str:
+    """簡轉繁（台灣用語）。OpenCC 建構要載字典檔，整個程式只建一次重複用；轉不了就原樣回傳。"""
+    global _S2TWP_CONVERTER
+    if not text:
+        return text
+    try:
+        if _S2TWP_CONVERTER is None:
+            import opencc
+            _S2TWP_CONVERTER = opencc.OpenCC('s2twp')
+        return _S2TWP_CONVERTER.convert(text)
+    except Exception:
+        return text
