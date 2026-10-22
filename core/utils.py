@@ -1,5 +1,6 @@
 import os
 import shutil
+import sys
 import time
 from datetime import datetime
 
@@ -75,6 +76,32 @@ def log_print(msg: str):
     term_cols = shutil.get_terminal_size((80, 20)).columns
     blank = " " * max(1, min(term_cols - 1, 79))
     print(f"\r\033[2K\r{blank}\r{msg}", flush=True)
+
+# 吞錯節流表：(呼叫端檔案, 行號) -> [上次記錄時間, 期間被壓下的次數]
+_SWALLOWED = {}
+SWALLOW_LOG_INTERVAL = 60.0
+
+def log_swallowed(where: str = "", interval: float = SWALLOW_LOG_INTERVAL):
+    """取代 except Exception: pass —— 在 except 區塊裡呼叫，例外照吞、控制流程不變，
+    但同一位置（呼叫端 檔名:行號）每 interval 秒最多記一行，期間壓下的次數併在下一行報。
+    本身絕不拋錯。"""
+    try:
+        exc = sys.exc_info()[1]
+        f = sys._getframe(1)
+        key = (f.f_code.co_filename, f.f_lineno)
+        now = time.monotonic()
+        rec = _SWALLOWED.get(key)
+        if rec is not None and now - rec[0] < interval:
+            rec[1] += 1
+            return
+        suppressed = rec[1] if rec else 0
+        _SWALLOWED[key] = [now, 0]
+        name = where or f.f_code.co_name
+        extra = f"（前 {interval:.0f}s 另壓下 {suppressed} 次）" if suppressed else ""
+        log_print(f"🔇 [吞錯] {name} @ {os.path.basename(key[0])}:{key[1]} "
+                  f"{type(exc).__name__ if exc else '?'}: {str(exc)[:200]}{extra}")
+    except Exception:
+        pass
 
 def sys_notify(msg, duration=4.0):
     global current_system_notification, notification_expire_time

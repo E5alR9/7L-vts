@@ -507,7 +507,7 @@ def build_genai_declarations(is_proactive=False):
         try:
             tool_list.append(types.Tool(google_search=types.GoogleSearch()))
         except Exception:
-            pass # Fallback in case types.GoogleSearch is missing in an older SDK version
+            log_swallowed() # Fallback in case types.GoogleSearch is missing in an older SDK version
     return tool_list
 
 
@@ -563,7 +563,7 @@ if sys.platform == "win32":
         pass
 
 from core.utils import (
-    log_print, sys_notify, get_current_time_string,
+    log_print, log_swallowed, sys_notify, get_current_time_string,
     record_interaction_tick, get_silence_ticks,
     speech_allowed, operator_input_enabled, to_tw
 )
@@ -1090,7 +1090,7 @@ async def get_lightweight_gemini_vision(image_base64: str, temporal_frames: list
             if extrema == ((0, 0), (0, 0), (0, 0)) or (isinstance(extrema, tuple) and all(e == (0, 0) for e in extrema if isinstance(e, tuple))):
                 return "螢幕處於休眠或全黑狀態。"
         except Exception:
-            pass
+            log_swallowed()
 
         candidate_keys = get_dynamic_live_key_candidates(KEYS_VISION if KEYS_VISION else GEMINI_KEYS)
         
@@ -1301,12 +1301,12 @@ async def fetch_ai_response(messages, image_base64=None, audio_base64=None, is_p
                 try:
                     config_kwargs["thinking_config"] = types.ThinkingConfig(thinking_budget=0)
                 except Exception:
-                    pass
+                    log_swallowed()
             elif any(k in g_model for k in ["3.8", "3.7", "2.5", "3-flash", "3.1-pro"]):
                 try:
                     config_kwargs["thinking_config"] = types.ThinkingConfig(thinking_budget=-1 if is_complex_query else 0)
                 except Exception:
-                    pass
+                    log_swallowed()
 
             gen_config = types.GenerateContentConfig(**config_kwargs)
 
@@ -1355,7 +1355,7 @@ async def fetch_ai_response(messages, image_base64=None, audio_base64=None, is_p
                     if response.text:
                         model_speech = response.text.strip()
                 except Exception:
-                    pass
+                    log_swallowed()
 
             # 7L 已有獨立背景即時心流協程，對話回覆不再包裹 [THOUGHT: ...]
 
@@ -1622,7 +1622,7 @@ async def fetch_ai_response(messages, image_base64=None, audio_base64=None, is_p
                             current_model_tag = f" {win_model} ({used_engine_tag}){time_stat}"
                         return extracted_text.strip()
                 except Exception:
-                    pass
+                    log_swallowed()
         else:
             # 12 秒到期：日誌提示，原任務未逾時未報錯、仍在背景深度思考，依序輪流加開雙軌熱備搶答！
             running_names = [active_gemini_tasks[t][0] for t in active_gemini_tasks]
@@ -1659,9 +1659,9 @@ async def fetch_ai_response(messages, image_base64=None, audio_base64=None, is_p
                             current_model_tag = f" {win_model} ({used_engine_tag}){time_stat}"
                         return extracted_text.strip()
                 except Exception:
-                    pass
+                    log_swallowed()
         except Exception:
-            pass
+            log_swallowed()
         for rem_task in list(active_gemini_tasks.keys()):
             rem_task.cancel()
         active_gemini_tasks.clear()
@@ -1674,7 +1674,7 @@ async def fetch_ai_response(messages, image_base64=None, audio_base64=None, is_p
             try: 
                 local_desc = await get_lightweight_gemini_vision(image_base64)
             except Exception: 
-                pass
+                log_swallowed()
                 
         if local_desc:
             if messages and messages[-1]["role"] == "user": 
@@ -1721,7 +1721,7 @@ async def call_gemini_live_audience_reply(vts, input_queue, audience_user: str, 
                 LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait(f"[黑板同步] TikTok 觀眾 {id_display} 對妳說：{audience_content}")
             else:
                 LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait(f"[黑板同步] TikTok 觀眾 {id_display} 在聊天室說：{audience_content}")
-        except Exception: pass
+        except Exception: log_swallowed()
 
         # 整理近期聊天室動態字串
         recent_chat_lines = []
@@ -1859,7 +1859,7 @@ async def call_gemini_live_audience_reply(vts, input_queue, audience_user: str, 
                     full_reply = g_candidate
                     used_model_name = f"Groq/{g_resp.model.split('/')[-1]}"
         except Exception:
-            pass
+            log_swallowed()
 
         for idx, g_key in enumerate(all_candidate_keys[:6]):
             if full_reply: break
@@ -3341,7 +3341,7 @@ async def generate_ai_image(prompt: str) -> str:
             if sys.platform == "win32":
                 os.startfile(save_path)
         except Exception:
-            pass
+            log_swallowed()
             
         return f"（系統回報：插畫已成功繪製並儲存至 {file_name}，且已在桌面彈出展示）"
 
@@ -4675,7 +4675,7 @@ async def live_timer_sensor_worker(vts, input_queue):
                         curr_fg_title = fg_info.get("window_title", "").strip()
                         curr_fg_app = fg_info.get("app_label", "").strip()
                     except Exception:
-                        pass
+                        log_swallowed()
                         
                     fg_hint = f"（老爸當前正在使用視窗：{curr_fg_title} - {curr_fg_app}）" if curr_fg_title else ""
                     music_hint = f"（電腦音樂：{LATEST_SYSTEM_MUSIC_INFO}）" if LATEST_SYSTEM_MUSIC_INFO else ""
@@ -4721,7 +4721,7 @@ async def live_timer_sensor_worker(vts, input_queue):
                                 "spoken": clean_spoken
                             })
                         except Exception:
-                            pass
+                            log_swallowed()
                     except Exception as err:
                         log_print(f"❌ [定時感測喚醒模型發言異常]: {err}")
                         if caller:
@@ -5046,7 +5046,7 @@ async def mic_volume_worker():
             p = pyaudio.PyAudio()
             stream = p.open(format=pyaudio.paInt16, channels=1, rate=16000, input=True, frames_per_buffer=1024)
         except Exception:
-            pass 
+            log_swallowed() 
 
     while True:
         if not IS_MIC_ENABLED:
@@ -5254,7 +5254,7 @@ async def live_mirror_tool_task(session, vts):
             try:
                 await session.send_realtime_input(text="[系統提示：找不到圖片，請發揮傲嬌本性找個有趣的藉口告訴老爸妳現在照不到鏡子（請發揮創意）]")
             except Exception:
-                pass
+                log_swallowed()
             return
             
         log_print("🪞 [照鏡子] 正在讀取並分析她自己的圖片...")
@@ -5435,7 +5435,7 @@ async def _slip_watchdog(prompt: str, sent_ts: float, timeout: float = 20.0):
             if is_singing_active() or current_ai_state == "SINGING" or IS_SLEEPING:
                 return
         except Exception:
-            pass
+            log_swallowed()
         tool, args = parse_slip_for_song(prompt)
         song = (args or {}).get("song_name", "") if tool else ""
         if not song:
@@ -5464,9 +5464,9 @@ async def _slip_watchdog(prompt: str, sent_ts: float, timeout: float = 20.0):
             LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait(prompt)
             log_print("🛟 [紙條撿回] 已重發一次，等主腦回應。")
         except Exception:
-            pass
+            log_swallowed()
     except Exception:
-        pass
+        log_swallowed()
 
 
 def _rotate_live_key(k_idx: int, m_idx: int, n_keys: int, n_models: int):
@@ -5590,7 +5590,7 @@ async def continuous_live_worker(vts):
                 try:
                     asyncio.create_task(_rescue_missed_song_requests())
                 except Exception:
-                    pass
+                    log_swallowed()
                 
                 p = pyaudio.PyAudio()
                 try:
@@ -5767,7 +5767,7 @@ async def continuous_live_worker(vts):
                                         try:
                                             import services.web_dashboard as _wd
                                             _wd.broadcast_event("chat_sent", {"text": user_spoken, "from": owner})
-                                        except Exception: pass
+                                        except Exception: log_swallowed()
                                         user_transcription_buffer = ""
 
                                     text_chunk = c.output_transcription.text
@@ -5835,7 +5835,7 @@ async def continuous_live_worker(vts):
                                     log_print("📄 [紙條去重] 10 秒內相同紙條已送過，跳過（一次點歌三張同字紙條會自斷風暴）。")
                                     continue
                             except Exception:
-                                pass
+                                log_swallowed()
                             log_print(f"📥 [黑板同步] 透過紙條傳送給 Live 大腦: {prompt}")
                             try:
                                 async with ws_send_lock:
@@ -5847,7 +5847,7 @@ async def continuous_live_worker(vts):
                                     try:
                                         RECENT_SLIPS.append((sent_ts, prompt))
                                     except Exception:
-                                        pass
+                                        log_swallowed()
                                     #  所有紙條都掛看門狗（聊天紙條裸奔會靜默丟失）；
                                     #  自主閒聊除外（[SILENCE] 是合法答案，盯了只會狼來了）。
                                     if "【自主閒聊】" not in (prompt or ""):
@@ -5877,7 +5877,7 @@ async def continuous_live_worker(vts):
                         except Exception as te:
                             log_print(f"🔍 [Live 任務結束] {t.get_name()} 報錯: {te}"[:300])
                 except Exception:
-                    pass
+                    log_swallowed()
                 for task in pending: task.cancel()
                 if pending:
                     await asyncio.wait(pending)
@@ -5900,7 +5900,7 @@ async def continuous_live_worker(vts):
                         if exc and not isinstance(exc, asyncio.CancelledError):
                             if first_exc is None: first_exc = exc
                     except asyncio.CancelledError: pass
-                    except Exception: pass
+                    except Exception: pass  # pending 任務問 exception() 本來就會 InvalidStateError，不記
                     
                 if first_exc:
                     raise first_exc
@@ -6071,7 +6071,7 @@ async def text_file_listener_worker(input_queue, filename="chat_input.txt"):
                 with open(p, "w", encoding="utf-8") as f:
                     f.write("")
             except Exception:
-                pass
+                log_swallowed()
 
     while True:
         try:
@@ -6086,7 +6086,7 @@ async def text_file_listener_worker(input_queue, filename="chat_input.txt"):
                             with open(p, "w", encoding="utf-8") as f:
                                 f.write("")
                         except Exception:
-                            pass
+                            log_swallowed()
                         
                         log_print(f"📥 [檔案打字接收] 收到輸入: {cleaned_content}")
                         if check_immediate_shutdown(cleaned_content):
@@ -6095,7 +6095,7 @@ async def text_file_listener_worker(input_queue, filename="chat_input.txt"):
                         await input_queue.put({"text": cleaned_content, "timestamp": time.time(), "source": "text_file"})
                         break
         except Exception:
-            pass
+            log_swallowed()
         
         await asyncio.sleep(0.3)
 
@@ -6152,7 +6152,7 @@ async def screen_capture_worker():
                     SCREEN_TEMPORAL_HISTORY.append((time.time(), latest_screen_cache[0][1]))
                 latest_screen_cache = new_views
         except Exception:
-            pass
+            log_swallowed()
             
         sleep_time = 1.8
         try:
@@ -6163,7 +6163,7 @@ async def screen_capture_worker():
             elif CURRENT_VISION_CHANGE_LEVEL == "none":
                 sleep_time = 3.0
         except Exception:
-            pass
+            log_swallowed()
             
         await asyncio.sleep(sleep_time)
 
@@ -6190,7 +6190,7 @@ async def peripheral_vision_worker():
             elif CURRENT_VISION_CHANGE_LEVEL == "none":
                 base_sleep = 20.0
         except Exception:
-            pass
+            log_swallowed()
             
         await asyncio.sleep(base_sleep) 
         if IS_SLEEPING or not IS_PERIPHERAL_VISION_ENABLED:
@@ -6253,9 +6253,9 @@ async def peripheral_vision_worker():
                     try:
                         LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait(f"[環境動態] 電腦畫面剛剛發生變化：{detailed_desc}")
                     except Exception:
-                        pass
+                        log_swallowed()
         except Exception:
-            pass
+            log_swallowed()
 
 async def identify_system_music_and_sound(wav_bytes: bytes) -> str:
     """ 7L 智能電腦音樂與音效多模態感知中樞：
@@ -6293,7 +6293,7 @@ async def identify_system_music_and_sound(wav_bytes: bytes) -> str:
             if any(k in fg_title.lower() or k in fg_pname.lower() for k in ["spotify", "music", "foobar", "potplayer", "vlc", "aimp"]):
                 media_clues.append(f"焦點播放器視窗: [{fg_pname}] {fg_title} (注意：若未播放請勿採信)")
     except Exception:
-        pass
+        log_swallowed()
 
     target_key = ""
     try:
@@ -6388,7 +6388,7 @@ async def identify_system_music_and_sound(wav_bytes: bytes) -> str:
                 realtime_task_mgr.update_audio_context(current_system_audio_context)
                 return LATEST_SYSTEM_MUSIC_INFO
         except Exception:
-            pass
+            log_swallowed()
     return ""
 
 async def system_audio_worker():
@@ -6469,7 +6469,7 @@ async def system_audio_worker():
                     try:
                         is_tts = pygame.mixer.music.get_busy()
                     except Exception:
-                        pass
+                        log_swallowed()
 
                     now = time.time()
                     if rms > 0.007 and not is_tts and not is_transcribing:
@@ -6498,7 +6498,7 @@ async def system_audio_worker():
                                             if m_wav_bytes:
                                                 await identify_system_music_and_sound(m_wav_bytes)
                                 except Exception:
-                                    pass
+                                    log_swallowed()
                                 finally:
                                     is_transcribing = False
 
@@ -6554,7 +6554,7 @@ async def _ai_face_tracking_loop_impl(vts):
                     try:
                         ch6_busy = pygame.mixer.Channel(6).get_busy()
                     except Exception:
-                        pass
+                        log_swallowed()
                 is_playing = (
                     IS_MP3_PLAYING 
                     or is_singing_active() 
@@ -6564,7 +6564,7 @@ async def _ai_face_tracking_loop_impl(vts):
                     or yt_comp.IS_YT_SPEAKING
                 )
             except Exception:
-                pass
+                log_swallowed()
 
             if current_ai_state == "IDLE" and not is_playing and not vc.is_tracking_mouse:
                 if auto_mouse_track_timer > 0:
@@ -6874,14 +6874,14 @@ async def expression_keeper_worker(vts):
                                 "data": {"expressionFile": exp_file, "active": True}
                             }), timeout=0.8)
         except Exception:
-            pass
+            log_swallowed()
 
 WATERMARK_REASSERT_SEC = 60.0  # 水印守護間隔：每分鐘重申一次常駐（冪等，開著再開一次無害）
 
 
 async def anti_watermark_worker(vts, interval: float = WATERMARK_REASSERT_SEC):
     """水印常駐守護（真 daemon）：開機 2 秒先開一次，之後每 interval 重申。
-    2026-10-11：之前只跑一次就結束，誰關掉水印就永遠掉。改迴圈，失敗靜默等下輪。"""
+    2026-10-11：之前只跑一次就結束，誰關掉水印就永遠掉。改迴圈，失敗記節流 log 等下輪。"""
     await asyncio.sleep(2.0)
     while True:
         try:
@@ -6899,7 +6899,7 @@ async def anti_watermark_worker(vts, interval: float = WATERMARK_REASSERT_SEC):
         except asyncio.CancelledError:
             break
         except Exception:
-            pass
+            log_swallowed()
         try:
             await asyncio.sleep(interval)
         except asyncio.CancelledError:
@@ -6989,19 +6989,19 @@ def _background_busy() -> bool:
         if _RUNNING_SUBAGENT_TASKS:
             return True
     except Exception:
-        pass
+        log_swallowed()
     try:
         import services.auto_cover_pipeline as ac
         _pt = ac._PREPARE_TASK
         if _pt is not None and not _pt.done():
             return True
     except Exception:
-        pass
+        log_swallowed()
     try:
         if pe.PENDING_PIANO_PRELOADS:
             return True
     except Exception:
-        pass
+        log_swallowed()
     return False
 
 
@@ -7062,16 +7062,16 @@ async def busy_expression_worker():
                 try:
                     await vc.trigger_vts_expression("暈")
                 except Exception:
-                    pass
+                    log_swallowed()
             elif act == "reset":
                 try:
                     await vc.set_vts_expression(vc.GLOBAL_VTS, "_RESET_")
                 except Exception:
-                    pass
+                    log_swallowed()
         except asyncio.CancelledError:
             break
         except Exception:
-            pass
+            log_swallowed()
 
 
 async def autonomous_wander_worker():
@@ -7218,12 +7218,12 @@ async def speech_queue_worker(vts, input_queue):
                 try:
                     await asyncio.to_thread(update_subtitle, "")
                 except Exception:
-                    pass
+                    log_swallowed()
                 try:
                     import services.web_dashboard as _wd
                     _wd.broadcast_event("dad_reply_silent", {"text": shown})
                 except Exception:
-                    pass
+                    log_swallowed()
                 continue
 
             CURRENT_SPEAKING_TARGET = target
@@ -7277,7 +7277,7 @@ async def speech_queue_worker(vts, input_queue):
             try:
                 speech_queue.task_done()
             except Exception:
-                pass
+                log_swallowed()
 
 # ────────────────────────────────────────────────────────
 #  15. 對話處理與自主發話大腦核心
@@ -7366,7 +7366,7 @@ async def prefetch_song_midi_background(song_query: str):
         if ai_intent.get("is_song_request") and ai_intent.get("song_title"):
             await pe.resolve_local_midi_file(ai_intent["song_title"])
     except Exception:
-        pass
+        log_swallowed()
 
 # ────────────────────────────────────────────────────────
 #  15. 全集中全景時序記憶中樞與對話派發系統 (Unified Mind-Stream Architecture)
@@ -7460,7 +7460,7 @@ def add_to_streamer_mind_board(user_display: str, unique_id: str, content: str, 
                     log_print(f"🎵 [Gemini 意圖確認] 高智商大腦確認老爸/觀眾點播《{target_song}》，自動預載排入待播隊列！")
                     await pe.play_virtual_piano(target_song, midi_file=cand_midi, requester_name=user_display, target="audience", is_direct_song_name=True)
             except Exception:
-                pass
+                log_swallowed()
         asyncio.create_task(evaluate_and_queue_with_gemini(content))
 
 def mark_streamer_mind_board_as_read(unique_id: str = None, content: str = None):
@@ -7626,28 +7626,28 @@ async def idle_chatter_worker(vts, input_queue):
                 if not speech_queue.empty():
                     continue
             except Exception:
-                pass
+                log_swallowed()
             try:
                 if any(m.get("status") == "unread" for m in STREAMER_MIND_BOARD):
                     continue  # 有新留言，哨兵負責，不搶
             except Exception:
-                pass
+                log_swallowed()
             try:
                 if not is_live_brain_active():
                     continue  # Live 斷線不排，紙條會過期亂講
             except Exception:
-                pass
+                log_swallowed()
             _screen = ""
             try:
                 if time.time() - LAST_VISION_LOOK_TIME < 900.0 and (current_screen_context or "").strip():
                     _screen = current_screen_context.strip()[:120]
             except Exception:
-                pass
+                log_swallowed()
             _recent = ""
             try:
                 _recent = (get_unified_memory_context(limit=6, thought_char_limit=0) or "").strip()[:400]
             except Exception:
-                pass
+                log_swallowed()
             _quiet_min = int((_now - (_last_speech or _now)) // 60)
             _slip = (f"[系統提示：【自主閒聊】房間已經安靜約 {_quiet_min} 分鐘，沒有新留言。"
                      f"請妳看看下面資訊，主動找個輕鬆話題跟大家閒聊 1~2 句（約 20~40 字，完整說完）：\n"
@@ -7688,7 +7688,7 @@ async def streamer_mind_loop_worker(vts, input_queue):
             try:
                 is_speaking = is_singing or (pygame.mixer.get_init() and pygame.mixer.music.get_busy()) or not speech_queue.empty() or current_ai_state == "TALKING"
             except Exception:
-                pass
+                log_swallowed()
                 
             if is_speaking or current_ai_state in ["THINKING", "SINGING"] or is_singing:
                 continue
@@ -7919,7 +7919,7 @@ async def streamer_mind_loop_worker(vts, input_queue):
                         log_print("🤫 7L (看板過濾): Groq 研判為無關刷屏 ➔ [PASS] 略過")
                         full_reply = "[PASS]"
             except Exception:
-                pass
+                log_swallowed()
 
             for g_key in candidate_keys[:6]:
                 if full_reply: break
@@ -8056,7 +8056,7 @@ async def streamer_mind_loop_worker(vts, input_queue):
                     if isinstance(m, dict) and m.get("status") == "processing":
                         m["status"] = "unread"
             except Exception:
-                pass
+                log_swallowed()
             await asyncio.sleep(1.0)
 
 
@@ -8545,7 +8545,7 @@ async def background_tool_executor(user_text: str, target: str = "dad", requeste
                         fn_args["source_mp3"] = _o_src
                         _o_need_file = not _o_src
                 except Exception:
-                    pass
+                    log_swallowed()
             # CPU 只認點歌：一律走背景執行＋紙條（表情不歸 CPU，交主腦/A 架構）
             asyncio.create_task(execute_tool_dispatch(fn_name, fn_args, caller_target=target, caller_user=requester_name))
             # 點歌強制應答：主腦常靜默，補一句 TTS 保證出聲（target 透傳，播出规则照舊）
@@ -8869,7 +8869,7 @@ async def process_chat_message(vts, input_queue, user_input: str, user_audio_b64
             try:
                 await fetch_ai_response(shadow_msgs, image_base64=current_screen_snapshot, is_proactive=True, request_start_time=req_start)
             except Exception:
-                pass
+                log_swallowed()
         asyncio.create_task(run_shadow_brain())
         
         # 嘴巴神經（極速串流，無Tool負擔）
@@ -9370,7 +9370,7 @@ async def cma_monitor_worker():
             f.write(f"  7L CMA 監控面板初始化中... - {get_current_time_string()}\n")
             f.write("==================================================")
     except Exception:
-        pass
+        log_swallowed()
 
     while True:
         try:
@@ -9425,7 +9425,7 @@ async def cma_monitor_worker():
             if not any(k in current_ai_status_str for k in ["思考中", "提取中", "探測中", "繪圖中"]):
                 current_ai_status_str = f" 通道就緒 (Gemini:{avail_gemini})"
         except Exception:
-            pass
+            log_swallowed()
             
         await asyncio.sleep(1.0)
 
