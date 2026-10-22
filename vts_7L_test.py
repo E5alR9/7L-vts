@@ -64,6 +64,7 @@ from google.genai import types
 from services.twitch_listener import twitch_live_worker
 from services.youtube_live_listener import youtube_live_worker
 from services.auto_cover_pipeline import produce_and_sing_cover, stop_singing, request_cover_song, is_song_active
+import services.auto_cover_pipeline as auto_cover
 import services.web_dashboard as web_dash
 from PIL import BmpImagePlugin  # noqa: F401  註冊 BMP 外掛（打包環境不會自動載入）
 from PIL import Image
@@ -2443,8 +2444,40 @@ DEFAULT_USER_TITLE = "老爸"
 
 
 tk_listener.IS_STREAMING = False
-current_ai_state = "IDLE"  # IDLE / THINKING / TALKING / PIANO / SINGING
-IS_SINGING_ACTIVE = False
+current_ai_state = "IDLE"  # IDLE / THINKING / TALKING / PIANO / SINGING / SLEEP
+
+
+def set_ai_state(new: str, reason: str = "", only_from=None) -> bool:
+    """AI 狀態唯一轉換點（2026-10-23）：主程式、翻唱管線（經 get_core_vts()）一律走這裡，
+    不准再直接改寫 current_ai_state。
+    only_from：給了就只在目前狀態屬於它（字串或序列）時才轉，取代各處
+    「if current_ai_state == X: current_ai_state = Y」。
+    回 True＝真的換了狀態（同狀態重設不算，不記 log、不廣播）。"""
+    global current_ai_state
+    old = current_ai_state
+    if only_from is not None:
+        allowed = (only_from,) if isinstance(only_from, str) else tuple(only_from)
+        if old not in allowed:
+            return False
+    if new == old:
+        return False
+    current_ai_state = new
+    log_print(f"🔀 [AI 狀態] {old} → {new}" + (f"（{reason}）" if reason else ""))
+    try:
+        # 狀態一天翻上千次，不進 RECENT_EVENTS，免得把後台重連要回放的聊天紀錄擠掉
+        web_dash.broadcast_event("system_state_update", {
+            "ai_state": new.lower(), "mode": new.lower(), "prev": old.lower(), "reason": reason,
+        }, keep_history=False)
+    except Exception:
+        pass
+    return True
+
+
+def is_singing_active() -> bool:
+    """唱歌旗單一真相：翻唱管線自己的 IS_SINGING_ACTIVE（主程式不再留拷貝，免得兩份分叉）。"""
+    return bool(auto_cover.IS_SINGING_ACTIVE)
+
+
 last_interaction_time = time.time()
 record_interaction_tick()
 
@@ -2705,7 +2738,7 @@ async def _wait_speech_done(timeout_sec: float = 30.0):
 
 
 async def set_sleep_mode(enable: bool):
-    global IS_SLEEPING, current_ai_status_str, current_ai_state
+    global IS_SLEEPING, current_ai_status_str
     if enable:
         try:
             from core.identity import is_vtuber
@@ -2717,7 +2750,7 @@ async def set_sleep_mode(enable: bool):
     IS_SLEEPING = bool(enable)
     if IS_SLEEPING:
         current_ai_status_str = " 閉眼沉睡中 (0 API 消耗)"
-        current_ai_state = "SLEEP"
+        set_ai_state("SLEEP", "進入休眠")
         try:
             await interrupt_current_speech(clear_queue=True, reason="老爸開啟休眠模式")
         except Exception:
@@ -2730,7 +2763,7 @@ async def set_sleep_mode(enable: bool):
         log_print("🌙 [系統] 7L 已進入深層睡眠模式（雙眼安詳閉合，0 API 消耗，安靜沉睡中...）")
     else:
         current_ai_status_str = " 正常運作中"
-        current_ai_state = "IDLE"
+        set_ai_state("IDLE", "喚醒")
         if vc.GLOBAL_VTS:
             try:
                 await set_vts_expression(vc.GLOBAL_VTS, "_RESET_")
@@ -3904,11 +3937,10 @@ async def execute_action_timeline(vts, timeline: list, cancel_event: asyncio.Eve
 
 
 async def play_voice_complete(text, target: str = "dad", raw_actions_text: str = "", vts=None):
-    global current_ai_state, LAST_TTS_END_TIME, IS_MP3_PLAYING, MP3_ECHO_TRAILING_CHUNKS, CURRENT_SPEAKING_TARGET
+    global LAST_TTS_END_TIME, IS_MP3_PLAYING, MP3_ECHO_TRAILING_CHUNKS, CURRENT_SPEAKING_TARGET
     global CURRENT_MOUTH_ENVELOPE, CURRENT_SPEECH_START_TIME, CURRENT_SMOOTH_MOUTH
-    
-    import services.auto_cover_pipeline as auto_cover
-    is_singing_now = globals().get("IS_SINGING_ACTIVE", False) or auto_cover.IS_SINGING_ACTIVE
+
+    is_singing_now = is_singing_active()
     backup_envelope = CURRENT_MOUTH_ENVELOPE if is_singing_now else None
     backup_start_time = CURRENT_SPEECH_START_TIME if is_singing_now else 0.0
 
@@ -4006,7 +4038,7 @@ async def play_voice_complete(text, target: str = "dad", raw_actions_text: str =
                 await asyncio.sleep(0.05)
 
             try:
-                if pygame.mixer.music.get_busy() and not IS_SINGING_ACTIVE:
+                if pygame.mixer.music.get_busy() and not is_singing_active():
                     pygame.mixer.music.stop()
             except Exception: pass
 
@@ -4036,7 +4068,7 @@ async def play_voice_complete(text, target: str = "dad", raw_actions_text: str =
                     CURRENT_MOUTH_ENVELOPE = part_env
                     CURRENT_SMOOTH_MOUTH = 0.0
                     CURRENT_SPEECH_START_TIME = time.time()
-                    current_ai_state = "TALKING"
+                    set_ai_state("TALKING", "語音開播")
                     IS_MP3_PLAYING = True
 
                     # 若第一句剛開始播，掛載神態時間軸
@@ -4140,8 +4172,7 @@ async def play_voice_complete(text, target: str = "dad", raw_actions_text: str =
                     CURRENT_SPEECH_START_TIME = 0.0
                     IS_MP3_PLAYING = False
 
-                    if current_ai_state == "TALKING":
-                        current_ai_state = "IDLE"
+                    set_ai_state("IDLE", "語音播完", only_from="TALKING")
 
                 MP3_ECHO_TRAILING_CHUNKS = 1
                 LAST_TTS_END_TIME = time.time()
@@ -4172,7 +4203,7 @@ async def play_voice_complete(text, target: str = "dad", raw_actions_text: str =
             IS_MP3_PLAYING = False
             MP3_ECHO_TRAILING_CHUNKS = 1
             LAST_TTS_END_TIME = time.time()
-            if current_ai_state == "TALKING": current_ai_state = "IDLE"
+            set_ai_state("IDLE", "語音被取消", only_from="TALKING")
             raise
         except Exception as e:
             log_print(f"❌ [語音合成錯誤]: {e}")
@@ -4191,12 +4222,12 @@ async def play_voice_complete(text, target: str = "dad", raw_actions_text: str =
             IS_MP3_PLAYING = False
             MP3_ECHO_TRAILING_CHUNKS = 1
             LAST_TTS_END_TIME = time.time()
-            if current_ai_state == "TALKING": current_ai_state = "IDLE"
+            set_ai_state("IDLE", "語音合成錯誤", only_from="TALKING")
 
 async def play_instant_sound_clip(audio_path: str, subtitle: str = ""):
     """ 0 秒極速播放 7L 專屬觸電尖叫聲（即時對嘴 + 臉紅），後續對話無縫接軌"""
     global CURRENT_MOUTH_ENVELOPE, CURRENT_SPEECH_START_TIME, CURRENT_SMOOTH_MOUTH
-    global current_ai_state, IS_MP3_PLAYING, IS_SHOCK_SCREAMING
+    global IS_MP3_PLAYING, IS_SHOCK_SCREAMING
     
     if not audio_path or not os.path.exists(audio_path):
         log_print(f"⚠️ [即時音訊警告]: 找不到音訊檔案: {audio_path}")
@@ -4222,7 +4253,7 @@ async def play_instant_sound_clip(audio_path: str, subtitle: str = ""):
             CURRENT_MOUTH_ENVELOPE = []
             CURRENT_SMOOTH_MOUTH = 0.0
 
-        current_ai_state = "TALKING"
+        set_ai_state("TALKING", "觸電尖叫")
         IS_MP3_PLAYING = True
         CURRENT_SPEECH_START_TIME = time.time()
         
@@ -4252,8 +4283,7 @@ async def play_instant_sound_clip(audio_path: str, subtitle: str = ""):
         CURRENT_SPEECH_START_TIME = 0.0
         IS_SHOCK_SCREAMING = False
         IS_MP3_PLAYING = False
-        if current_ai_state == "TALKING":
-            current_ai_state = "IDLE"
+        set_ai_state("IDLE", "尖叫播完", only_from="TALKING")
         log_print("⚡ [即時尖叫完畢] 觸電叫聲播放結束，無縫移交大腦後續即時回應！")
 
 
@@ -5402,7 +5432,7 @@ async def _slip_watchdog(prompt: str, sent_ts: float, timeout: float = 20.0):
         if "【自主閒聊】" in (prompt or ""):
             return
         try:
-            if IS_SINGING_ACTIVE or current_ai_state == "SINGING" or IS_SLEEPING:
+            if is_singing_active() or current_ai_state == "SINGING" or IS_SLEEPING:
                 return
         except Exception:
             pass
@@ -5537,7 +5567,7 @@ async def continuous_live_worker(vts):
             recent_ctx = get_unified_memory_context(limit=6, thought_char_limit=0)
             if recent_ctx and recent_ctx.strip():
                 state_msg = ""
-                if IS_SINGING_ACTIVE or current_ai_state == "SINGING":
+                if is_singing_active() or current_ai_state == "SINGING":
                     state_msg = "【目前狀態強制覆寫：妳目前正在舞台上全心全意地演唱歌曲中！請專心唱歌，請勿開口說話打斷自己的演唱，如果沒有老爸的呼喚，請直接安靜輸出 [SILENCE] 即可！】\n"
                 system_instruction += f"\n\n[系統背景動態刷新]\n以下是你們最新的對話紀錄，請直接、無縫地接續剛才的話題往下聊。注意：請自然接續話題，忽略連線中斷的插曲！也不要重複講妳已經講過的話！\n{state_msg}{recent_ctx}"
             
@@ -5773,7 +5803,7 @@ async def continuous_live_worker(vts):
                                     if chunk_buffer.strip():
                                         sentence = chunk_buffer.strip()
                                         clean_sentence = await execute_actions(vts, sentence, input_queue, caller_target="dad", caller_user=owner)
-                                        if clean_sentence.strip() and not IS_SINGING_ACTIVE:
+                                        if clean_sentence.strip() and not is_singing_active():
                                             await speech_queue.put({"text": clean_sentence.strip(), "target": "dad", "raw_text": sentence})
                                         chunk_buffer = ""
                                     
@@ -5999,7 +6029,7 @@ async def mic_worker(recognizer, input_queue):
                     continue
 
                 #  3. 全雙工傾聽不打斷：保留 7L 完整發音說話或唱歌，絕不中斷，背景接收老爸輸入！
-                is_currently_speaking = (current_ai_state in ["TALKING", "SINGING"]) or IS_SINGING_ACTIVE or IS_MP3_PLAYING or (pygame.mixer.get_init() and pygame.mixer.music.get_busy())
+                is_currently_speaking = (current_ai_state in ["TALKING", "SINGING"]) or is_singing_active() or IS_MP3_PLAYING or (pygame.mixer.get_init() and pygame.mixer.music.get_busy())
                 if is_currently_speaking:
                     log_print(f"🎙️ [老爸語音接收] 聲紋確認 ({vp_score:.2f}) ➔ 7L 說話不中斷，背景接收老爸輸入！")
 
@@ -6416,7 +6446,7 @@ async def system_audio_worker():
                     GLOBAL_SPEECH_AUDIO_BUFFER.append(data)
 
                     #  若 7L 自身正在唱歌，電腦聲音為 7L 歌聲，略過 STT 與音樂猜測，防止自己被自己打斷
-                    if IS_SINGING_ACTIVE or current_ai_state == "SINGING":
+                    if is_singing_active() or current_ai_state == "SINGING":
                         current_system_audio_context = "7L 本人正在演唱翻唱歌曲（Live2D 舞台開唱中；演唱者是 7L，不是老爸也不是觀眾）"
                         LATEST_SYSTEM_MUSIC_INFO = "7L 本人翻唱歌曲"
                         LATEST_SYSTEM_MUSIC_TIME = time.time()
@@ -6527,7 +6557,7 @@ async def _ai_face_tracking_loop_impl(vts):
                         pass
                 is_playing = (
                     IS_MP3_PLAYING 
-                    or IS_SINGING_ACTIVE 
+                    or is_singing_active() 
                     or ch6_busy 
                     or (current_ai_state == "SINGING") 
                     or (pygame.mixer.get_init() and pygame.mixer.music.get_busy())
@@ -7010,7 +7040,7 @@ async def busy_expression_worker():
     while True:
         await asyncio.sleep(2.0)
         try:
-            if IS_SLEEPING or IS_SINGING_ACTIVE or current_ai_state == "SINGING":
+            if IS_SLEEPING or is_singing_active() or current_ai_state == "SINGING":
                 continue
             try:
                 _rp = pe.GLOBAL_PIANO_REALTIME_STATE.get("is_playing", False)
@@ -7062,7 +7092,7 @@ async def autonomous_wander_worker():
                     # 醒來不一定說話：靜靜睜眼即可，老爸說話哨兵自然會接
                 continue
 
-            if pe.is_piano_active or IS_SINGING_ACTIVE or current_ai_state in ["TALKING", "THINKING", "PIANO", "SINGING"]:
+            if pe.is_piano_active or is_singing_active() or current_ai_state in ["TALKING", "THINKING", "PIANO", "SINGING"]:
                 continue
 
             #  7L 自主作息小憩邏輯（深夜15分鐘或白天60分鐘無人對話且環境完全安靜時，7L 自主決定小憩入睡）
@@ -7126,7 +7156,7 @@ async def autonomous_wander_worker():
 
 # ---  語音合成排隊協程 (老爸優先 / 異步雙軌仲裁器) ---
 async def speech_queue_worker(vts, input_queue):
-    global current_ai_state, CURRENT_SPEAKING_TARGET, CURRENT_PLAYING_VOICE_TASK
+    global CURRENT_SPEAKING_TARGET, CURRENT_PLAYING_VOICE_TASK
     while True:
         try:
             item = await speech_queue.get()
@@ -7134,8 +7164,7 @@ async def speech_queue_worker(vts, input_queue):
                 continue
 
             # 若正在唱歌，判斷接下來 3 秒是否有歌聲。若有，則暫停 TTS；若為空白伴奏，則允許插話！
-            import services.auto_cover_pipeline as auto_cover
-            is_singing = lambda: globals().get("IS_SINGING_ACTIVE", False) or auto_cover.IS_SINGING_ACTIVE
+            is_singing = is_singing_active
             
             def is_vocal_upcoming(window_sec=3.0):
                 if not is_singing(): return False
@@ -7198,7 +7227,7 @@ async def speech_queue_worker(vts, input_queue):
                 continue
 
             CURRENT_SPEAKING_TARGET = target
-            current_ai_state = "TALKING"
+            set_ai_state("TALKING", "語音排隊開播")
             touch_interaction()
             
             # 建立可隨時被自己插話或老爸說話秒級 cancel 的播放任務（整合 Live API 潛意識神態導演與句中多表情動態時間軸）
@@ -7212,8 +7241,8 @@ async def speech_queue_worker(vts, input_queue):
             
             #  發話音訊一播放完畢，立即秒級釋放麥克風狀態，絕不卡死老爸即時接話！
             if speech_queue.empty():
-                if current_ai_state == "TALKING":
-                    current_ai_state = "SINGING" if IS_SINGING_ACTIVE else ("PIANO" if pe.is_piano_active else "IDLE")
+                set_ai_state("SINGING" if is_singing_active() else ("PIANO" if pe.is_piano_active else "IDLE"),
+                             "發話結束", only_from="TALKING")
                 CURRENT_SPEAKING_TARGET = "none"
             
             #  表情停留緩衝：發話完畢後若表情仍在時效內，持續保留一段時間（預設 3.5 秒），讓情緒自然延續
@@ -7234,17 +7263,15 @@ async def speech_queue_worker(vts, input_queue):
                     break
                 await asyncio.sleep(0.1)
             
-            is_singing = globals().get("IS_SINGING_ACTIVE", False) or auto_cover.IS_SINGING_ACTIVE
+            is_singing = is_singing_active()
             if input_queue.empty() and speech_queue.empty() and not pe.is_piano_active and not is_singing:
                 await set_vts_expression(vts, "_RESET_")
             
-            if current_ai_state == "TALKING":
-                current_ai_state = "PIANO" if pe.is_piano_active else "IDLE"
+            set_ai_state("PIANO" if pe.is_piano_active else "IDLE", "表情停留結束", only_from="TALKING")
             CURRENT_SPEAKING_TARGET = "none"
         except Exception as e:
             log_print(f"\n❌ [語音排隊系統異常]: {e}")
-            if current_ai_state == "TALKING":
-                current_ai_state = "PIANO" if pe.is_piano_active else "IDLE"
+            set_ai_state("PIANO" if pe.is_piano_active else "IDLE", "語音排隊異常", only_from="TALKING")
             CURRENT_SPEAKING_TARGET = "none"
         finally:
             try:
@@ -7582,7 +7609,7 @@ async def idle_chatter_worker(vts, input_queue):
             await asyncio.sleep(30.0)
             if IS_SLEEPING:
                 continue
-            if IS_SINGING_ACTIVE or current_ai_state in ("SINGING", "TALKING", "THINKING"):
+            if is_singing_active() or current_ai_state in ("SINGING", "TALKING", "THINKING"):
                 continue
             try:
                 _piano = bool(pe.is_piano_active)
@@ -7656,7 +7683,7 @@ async def streamer_mind_loop_worker(vts, input_queue):
                 continue
             
             # 1. 狀態檢查：若正在說話、唱歌、思考、或老爸正在對話，先保持安靜
-            is_singing = IS_SINGING_ACTIVE or current_ai_state == "SINGING"
+            is_singing = is_singing_active() or current_ai_state == "SINGING"
             is_speaking = False
             try:
                 is_speaking = is_singing or (pygame.mixer.get_init() and pygame.mixer.music.get_busy()) or not speech_queue.empty() or current_ai_state == "TALKING"
@@ -8609,7 +8636,7 @@ async def _desktop_dad_reply(vts, input_queue, user_input: str, owner: str = "�
 
 async def process_chat_message(vts, input_queue, user_input: str, user_audio_b64: Optional[str] = None, request_start_time: Optional[float] = None, interrupted_context: str = "", source: str = "unknown"):
     """單一對話回合的核心處理常式 (即時神經大腦一步到位生成回覆與工具調用)"""
-    global last_interaction_time, current_ai_state
+    global last_interaction_time
     global IS_MIC_ENABLED, CURRENT_CHAT_SESSION_ID
     
     CURRENT_CHAT_SESSION_ID += 1
@@ -8654,7 +8681,7 @@ async def process_chat_message(vts, input_queue, user_input: str, user_audio_b64
         # tiktok / tiktok_gift / tiktok_ambient，從無此 source，屬死碼）
 
         req_start = request_start_time if request_start_time else time.time()
-        current_ai_state = "THINKING"
+        set_ai_state("THINKING", "處理對話")
         touch_interaction()
         user_profile = await get_user_profile()
         current_custom_name = user_profile.get("custom_name", DEFAULT_USER_TITLE)
@@ -8694,7 +8721,7 @@ async def process_chat_message(vts, input_queue, user_input: str, user_audio_b64
             live_ok = await call_gemini_live_audience_reply(vts, input_queue, aud_u, aud_c)
             if live_ok:
                 last_interaction_time = time.time()
-                current_ai_state = "PIANO" if pe.is_piano_active else "IDLE"
+                set_ai_state("PIANO" if pe.is_piano_active else "IDLE", "TikTok Live 管道已接手")
                 return  #  Live 專屬管道處理完成，直接返回！
             log_print("⚠️ [TikTok 降級] Live 專屬管道暫不可用，自動無縫回退至極速文字/Gemini Flash Lite 保底大腦...")
 
@@ -8788,7 +8815,7 @@ async def process_chat_message(vts, input_queue, user_input: str, user_audio_b64
             log_print(f"🤫 [Live 潛意識哨兵] 審查全集中記憶判定：{current_custom_name}在專注自語/無發話需求 ➔ [SILENCE] 保持靈動安靜陪伴 (0 消耗主力額度)")
             realtime_task_mgr.mark_dad_input_read()
             mark_streamer_mind_board_as_read(unique_id="dad", content=user_input)
-            current_ai_state = "PIANO" if pe.is_piano_active else "IDLE"
+            set_ai_state("PIANO" if pe.is_piano_active else "IDLE", "哨兵判定靜默")
             return
             
         log_focus = sentry_decision.get("focus") or "深度對話"
@@ -8941,8 +8968,7 @@ async def process_chat_message(vts, input_queue, user_input: str, user_audio_b64
         realtime_task_mgr.finish_dad_task()
         realtime_task_mgr.mark_dad_input_read()
         mark_streamer_mind_board_as_read(unique_id="dad", content=user_input)
-        if current_ai_state == "THINKING":
-            current_ai_state = "PIANO" if pe.is_piano_active else "IDLE"
+        set_ai_state("PIANO" if pe.is_piano_active else "IDLE", "對話處理結束", only_from="THINKING")
 
 async def execute_punish_action(reason: str = "", is_severe: bool = None):
     """
@@ -8967,7 +8993,7 @@ async def execute_punish_action(reason: str = "", is_severe: bool = None):
         #  唱歌中被電：當首停掉（被電到唱不下去），排隊保留；口型同步歸位給尖叫
         try:
             import services.auto_cover_pipeline as ac
-            if ac.IS_SINGING_ACTIVE:
+            if is_singing_active():
                 ac.stop_current_song()
                 log_print("🛑 [電擊中斷] 演唱中被電擊，當首停止（排隊保留）。")
         except Exception:
@@ -9727,18 +9753,11 @@ async def main():
 
     #  註冊鋼琴狀態即時監聽回調：當鋼琴強制關閉或離線時，秒級切換回 IDLE
     def _on_piano_liveness_change(is_active: bool):
-        global current_ai_state
         if not is_active:
-            if current_ai_state == "PIANO":
-                current_ai_state = "IDLE"
-                log_print("🎹 [主系統感知] 收到鋼琴離線/強制關機信號，運行模式秒級重置回 IDLE！")
-                web_dash.broadcast_event("system_state_update", {"ai_state": "idle", "mode": "idle"})
+            if set_ai_state("IDLE", "鋼琴離線/強制關機", only_from="PIANO"):
                 web_dash.broadcast_telemetry()
         else:
-            if current_ai_state == "IDLE":
-                current_ai_state = "PIANO"
-                log_print("🎹 [主系統感知] 鋼琴即時在線，運行模式同步切換為 PIANO")
-                web_dash.broadcast_event("system_state_update", {"ai_state": "piano", "mode": "piano"})
+            if set_ai_state("PIANO", "鋼琴即時在線", only_from="IDLE"):
                 web_dash.broadcast_telemetry()
 
     pe.register_piano_state_callback(_on_piano_liveness_change)
@@ -9848,10 +9867,9 @@ async def main():
         }
 
     def _get_system_state():
-        global current_ai_state
         #  鋼琴在線狀態即時動態核實 (若鋼琴被強制關機，秒級自動回歸 IDLE，絕不卡死)
         if current_ai_state == "PIANO" and not pe.is_piano_active_and_alive():
-            current_ai_state = "IDLE"
+            set_ai_state("IDLE", "後台核實：鋼琴已不在線", only_from="PIANO")
 
         eff_status = " 正常運作中" if not IS_SLEEPING and current_ai_state == "IDLE" and "休眠" not in current_ai_status_str else current_ai_status_str
         stress_info = get_api_stress_metrics()

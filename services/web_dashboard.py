@@ -467,8 +467,9 @@ def _safe_json_value(v):
     except (TypeError, ValueError):
         return str(v)
 
-def broadcast_event(event_type: str, data: Dict[str, Any]):
-    """向所有已連接的瀏覽器用戶端即時推送事件（支援跨線程調用）"""
+def broadcast_event(event_type: str, data: Dict[str, Any], keep_history: bool = True):
+    """向所有已連接的瀏覽器用戶端即時推送事件（支援跨線程調用）。
+    keep_history=False：只推給在線用戶端，不進 RECENT_EVENTS（高頻事件用，免得擠掉重連回放）"""
     global RECENT_EVENTS, MAIN_EVENT_LOOP
     # 🛡️ 防止 coroutine / 不可序列化物件污染 RECENT_EVENTS
     safe_data = _safe_json_value(data) if isinstance(data, dict) else data
@@ -482,9 +483,10 @@ def broadcast_event(event_type: str, data: Dict[str, Any]):
     except (TypeError, ValueError):
         # 無法序列化，跳過不 append 到 RECENT_EVENTS，避免污染
         return
-    RECENT_EVENTS.append(payload)
-    if len(RECENT_EVENTS) > 60:
-        RECENT_EVENTS.pop(0)
+    if keep_history:
+        RECENT_EVENTS.append(payload)
+        if len(RECENT_EVENTS) > 60:
+            RECENT_EVENTS.pop(0)
 
     if not CONNECTED_CLIENTS:
         return

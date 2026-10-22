@@ -242,6 +242,13 @@ def get_core_vts():
     """動態取得當前運行的主核心模組，杜絕重複 import 導致 .env 與全域狀態衝突"""
     return sys.modules.get("vts_7L_test") or sys.modules.get("__main__")
 
+
+def _core_set_ai_state(core_vts, new: str, reason: str = "", only_from=None):
+    """AI 狀態一律交給主核心 set_ai_state 轉（唯一轉換點：統一 log＋後台廣播），不再 setattr 硬改。"""
+    fn = getattr(core_vts, "set_ai_state", None) if core_vts else None
+    if callable(fn):
+        fn(new, reason, only_from=only_from)
+
 def stop_singing():
     """立即中斷當前 7L 翻唱演奏並恢復狀態"""
     global IS_SINGING_ACTIVE, _PIPELINE_GEN
@@ -265,10 +272,8 @@ def stop_singing():
         pass
     core_vts = get_core_vts()
     if core_vts:
-        setattr(core_vts, "IS_SINGING_ACTIVE", False)
         setattr(core_vts, "IS_MP3_PLAYING", False)
-        if getattr(core_vts, "current_ai_state", "") == "SINGING":
-            setattr(core_vts, "current_ai_state", "IDLE")
+        _core_set_ai_state(core_vts, "IDLE", "翻唱手動停止", only_from="SINGING")
         setattr(core_vts, "CURRENT_MOUTH_ENVELOPE", [])
         setattr(core_vts, "CURRENT_SMOOTH_MOUTH", 0.0)
         setattr(core_vts, "CURRENT_SPEECH_START_TIME", 0.0)
@@ -303,10 +308,8 @@ def stop_current_song() -> bool:
         pass
     core_vts = get_core_vts()
     if core_vts:
-        setattr(core_vts, "IS_SINGING_ACTIVE", False)
         setattr(core_vts, "IS_MP3_PLAYING", False)
-        if getattr(core_vts, "current_ai_state", "") == "SINGING":
-            setattr(core_vts, "current_ai_state", "IDLE")
+        _core_set_ai_state(core_vts, "IDLE", "電擊打斷當首", only_from="SINGING")
         setattr(core_vts, "CURRENT_MOUTH_ENVELOPE", [])
         setattr(core_vts, "CURRENT_SMOOTH_MOUTH", 0.0)
         setattr(core_vts, "CURRENT_SPEECH_START_TIME", 0.0)
@@ -403,23 +406,20 @@ def cover_ready_or_playing(title: str) -> bool:
     return bool(_NOW_PLAYING_TITLE) and _dedupe_key(_NOW_PLAYING_TITLE) == key
 
 def _stage_busy() -> bool:
-    """舞台是否有人在唱（含主核心同步過來的狀態）"""
+    """舞台是否有人在唱（管線旗＋主核心 AI 狀態）"""
     if IS_SINGING_ACTIVE:
         return True
     core_vts = get_core_vts()
-    if core_vts:
-        if getattr(core_vts, "IS_SINGING_ACTIVE", False):
-            return True
-        if getattr(core_vts, "current_ai_state", "") == "SINGING":
-            return True
+    if core_vts and getattr(core_vts, "current_ai_state", "") == "SINGING":
+        return True
     return False
 
 
 def singing_audio_active() -> bool:
     """歌聲是否在響（單一真相源，2026-10-11）。
-    背景：vts 主程式以 __main__ 執行，acp 經由 sys.modules['vts_7L_test'] 分身
-    setattrs——兩邊的 IS_SINGING_ACTIVE 是兩份拷貝，跨模組讀散旗必分叉。
-    所有收尾邏輯一律問這個（管線旗＋播放任務＋6/7 軌實響，三處任一即算數），不問散旗。"""
+    背景：以前主程式也留一份 IS_SINGING_ACTIVE 由這裡 setattr 同步，兩份拷貝必分叉；
+    2026-10-23 起旗子只剩本模組這一份（主程式經 is_singing_active() 來問）。
+    所有收尾邏輯一律問這個（管線旗＋播放任務＋6/7 軌實響，三處任一即算數）。"""
     if IS_SINGING_ACTIVE or _NOW_PLAYING_TITLE:
         return True
     try:
@@ -869,9 +869,8 @@ async def play_cover_audio(vocal_path: str, song_name: str, inst_path: str = Non
         IS_SINGING_ACTIVE = True
         core_vts = get_core_vts()
         if core_vts:
-            setattr(core_vts, "IS_SINGING_ACTIVE", True)
             setattr(core_vts, "IS_MP3_PLAYING", True)
-            setattr(core_vts, "current_ai_state", "SINGING")
+            _core_set_ai_state(core_vts, "SINGING", f"準備開唱《{song_name}》")
 
         if not pygame.mixer.get_init():
             pygame.mixer.init(frequency=44100, size=-16, channels=2, buffer=2048)
@@ -917,9 +916,8 @@ async def play_cover_audio(vocal_path: str, song_name: str, inst_path: str = Non
         ch_vocal.play(snd_vocal)
         if core_vts:
             setattr(core_vts, "CURRENT_SPEECH_START_TIME", time.time())
-            setattr(core_vts, "IS_SINGING_ACTIVE", True)
             setattr(core_vts, "IS_MP3_PLAYING", True)
-            setattr(core_vts, "current_ai_state", "SINGING")
+            _core_set_ai_state(core_vts, "SINGING", f"雙軌齊發《{song_name}》")
             
             # 🎤 唱歌自動拿出麥克風 (不重置其他表情，單獨開關麥克風)
             import services.vts_client as vc
@@ -969,10 +967,8 @@ async def play_cover_audio(vocal_path: str, song_name: str, inst_path: str = Non
                 asyncio.create_task(_toggle_mic_off())
         core_vts = get_core_vts()
         if core_vts:
-            setattr(core_vts, "IS_SINGING_ACTIVE", False)
             setattr(core_vts, "IS_MP3_PLAYING", False)
-            if getattr(core_vts, "current_ai_state", "") == "SINGING":
-                setattr(core_vts, "current_ai_state", "IDLE")
+            _core_set_ai_state(core_vts, "IDLE", f"演唱結束《{song_name}》", only_from="SINGING")
             setattr(core_vts, "CURRENT_MOUTH_ENVELOPE", [])
             setattr(core_vts, "CURRENT_SMOOTH_MOUTH", 0.0)
             setattr(core_vts, "CURRENT_SPEECH_START_TIME", 0.0)
