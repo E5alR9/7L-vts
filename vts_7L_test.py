@@ -564,7 +564,7 @@ if sys.platform == "win32":
 
 from core.utils import (
     log_print, sys_notify, get_current_time_string,
-    record_interaction_tick, get_silence_ticks, get_uptime_ticks, format_ticks_to_human,
+    record_interaction_tick, get_silence_ticks,
     speech_allowed, operator_input_enabled, to_tw
 )
 from core.hard_command import parse_hard_command, build_slip_text, display_requester, parse_slip_for_song, strip_blob_noise, sanitize_search_query, rescue_claim, split_original_request
@@ -9542,6 +9542,112 @@ async def discord_mic_on(ctx):
 async def discord_mic_off(ctx):
     await control_mic(ctx, "off")
 
+# ⚠️ init_gpt_sovits() 內部會暫時 os.chdir(GPT-SoVITS)，此期間其他程式碼請使用絕對路徑
+def _prewarm_xiaoyi():
+    try:
+        import local_xiaoyi_service
+        _pipe = local_xiaoyi_service.init_gpt_sovits()
+        if _pipe:
+            log_print("🟢 [GPT-SoVITS 預熱完成] 7L 本地顯卡語音引擎已就緒！")
+            #  2026-10-11：只載權重不夠——首次推理要編 CUDA kernel＋cudnn 調優，
+            #  開播第一句曾吃 82 秒還撞上 Roformer 載入。開機先真跑一句短的，
+            #  把首次成本付在後台，別付在直播中。
+            try:
+                import time as _t
+                _t0 = _t.time()
+                local_xiaoyi_service.synthesize_xiaoyi_bytes("你好呀")
+                log_print(f"🟢 [GPT-SoVITS 首推預熱完成] 首次推理 {_t.time() - _t0:.1f}s（開播不會再吃首推懲罰）。")
+            except Exception as _w_err:
+                log_print(f"⚠️ [GPT-SoVITS 首推預熱失敗（權重正常，首句可能較慢）]: {_w_err}")
+            #  2026-10-11：Roformer 639MB 上卡 burst 會把同時的 TTS 拖到 50 秒以上。
+            #  排在 SoVITS 預熱「後面」付掉（兩 burst 互不撞），首歌分離只剩純計算。
+            try:
+                import services.roformer_sep as _rs
+                import services.auto_cover_pipeline as _acp
+                _rdir = os.path.join(_acp.CACHE_DIR, "roformer_out")
+                if _rs.preload_roformer(_rdir):
+                    log_print("🟢 [Roformer 預載完成] 首歌分離不再撞 TTS。")
+                else:
+                    log_print("⚠️ [Roformer 預載失敗] 首歌現載（首句 TTS 可能較慢）。")
+            except Exception as _r_err:
+                log_print(f"⚠️ [Roformer 預載跳過]: {_r_err}")
+        else:
+            log_print("⚠️ [GPT-SoVITS 預熱失敗] 初始化回傳空管線，曉伊引擎停用（自動降級其他引擎）。")
+    except Exception as e:
+        log_print(f"⚠️ [GPT-SoVITS 預熱跳過]: {e}")
+
+
+async def safe_discord_runner():
+    while True:
+        try:
+            if DISCORD_TOKEN:
+                await discord_bot.start(DISCORD_TOKEN)
+            else:
+                break
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            log_print(f"⚠️ [Discord 機器人連線提示]: {e}，15 秒後自動重連...")
+            await asyncio.sleep(15.0)
+
+
+#  鋼琴狀態即時監聽回調（main() 註冊）：當鋼琴強制關閉或離線時，秒級切換回 IDLE
+def _on_piano_liveness_change(is_active: bool):
+    if not is_active:
+        if set_ai_state("IDLE", "鋼琴離線/強制關機", only_from="PIANO"):
+            web_dash.broadcast_telemetry()
+    else:
+        if set_ai_state("PIANO", "鋼琴即時在線", only_from="IDLE"):
+            web_dash.broadcast_telemetry()
+
+
+async def _status_bar_loop():
+    """終端機即時狀態列（每 0.1 秒重畫一行；main() 啟動完畢後一直跑到被取消）"""
+    spinner_chars = ['/', '-', '\\', '|']
+    idx = 0
+    while True:
+        char = spinner_chars[idx % len(spinner_chars)]
+        term_cols = shutil.get_terminal_size((80, 20)).columns
+        max_cols = max(30, term_cols - 1)  # 留 1 個 column 絕對防止 Windows 控制台自動換行
+        
+        # 依據是否有即時通知，動態組合尾端文字 (通知放在最後面，絕不佔用整行)
+        has_notif = time.time() < notification_expire_time
+        if has_notif:
+            tail_str = f" {current_system_notification}"
+            if tk_listener.current_tiktok_status_str and tk_listener.current_tiktok_status_str != "[ TikTok: 待命中]":
+                tail_str = f"{tk_listener.current_tiktok_status_str} | {tail_str}"
+        else:
+            tail_str = tk_listener.current_tiktok_status_str
+
+        #  若 YouTube 伴看活躍中，優先顯示伴看狀態
+        if yt_comp.IS_YT_COMPANION_ACTIVE:
+            yt_info = f" 伴看中: {yt_comp.CURRENT_YT_TITLE[:15]}..."
+            tail_str = f"{yt_info} | {tail_str}" if tail_str else yt_info
+
+        # 依據終端寬度動態分配狀態文字、動作文字、音量與 尾端通知/動態 (排在最後面)
+        if max_cols < 85:
+            status_text = fit_text_to_width(current_ai_status_str, max(18, max_cols - 48))
+            action_text = " 聆聽中" if is_user_listening else fit_text_to_width(current_mic_action_str, 8)
+            tail_text = fit_text_to_width(tail_str, max(14, max_cols - 45))
+            raw_msg = f"[{char}] {status_text} | {action_text} | {current_mic_volume_str} | {tail_text}"
+        else:
+            status_text = fit_text_to_width(current_ai_status_str, max(28, max_cols - 65))
+            action_text = " 聆聽中..." if is_user_listening else fit_text_to_width(current_mic_action_str, 12)
+            tail_text = fit_text_to_width(tail_str, max(20, max_cols - 75))
+            raw_msg = f"[{char}] {status_text} | {action_text} | {current_mic_volume_str} | {tail_text}"
+        out_msg = fit_text_to_width(raw_msg, max_cols)
+        
+        out_msg = out_msg.replace('\n', ' ').replace('\r', '')
+        disp_w = get_display_width(out_msg)
+        padding = " " * max(0, max_cols - disp_w)
+        
+        # 使用 ANSI 擦除 + 精準寬度填充，徹底根除 Windows 終端換行與尾端空格殘影
+        print(f"\r\033[2K\r{out_msg}{padding}", end="", flush=True)
+        
+        idx += 1
+        await asyncio.sleep(0.1)
+
+
 # ────────────────────────────────────────────────────────
 async def main():
     """系統主進入點：協同啟動所有背景感知神經與對話處理協程"""
@@ -9573,39 +9679,6 @@ async def main():
             print(f"⚠️ 聲紋綁定過程發生錯誤: {e}")
 
     # 🔥 GPT-SoVITS 曉伊模型預熱（提早至 main 最前端）：在背景 Thread 初始化，與 RAG / 記憶 / VTS 連線並行，避免第一句說話卡頓
-    # ⚠️ init_gpt_sovits() 內部會暫時 os.chdir(GPT-SoVITS)，此期間其他程式碼請使用絕對路徑
-    def _prewarm_xiaoyi():
-        try:
-            import local_xiaoyi_service
-            _pipe = local_xiaoyi_service.init_gpt_sovits()
-            if _pipe:
-                log_print("🟢 [GPT-SoVITS 預熱完成] 7L 本地顯卡語音引擎已就緒！")
-                #  2026-10-11：只載權重不夠——首次推理要編 CUDA kernel＋cudnn 調優，
-                #  開播第一句曾吃 82 秒還撞上 Roformer 載入。開機先真跑一句短的，
-                #  把首次成本付在後台，別付在直播中。
-                try:
-                    import time as _t
-                    _t0 = _t.time()
-                    local_xiaoyi_service.synthesize_xiaoyi_bytes("你好呀")
-                    log_print(f"🟢 [GPT-SoVITS 首推預熱完成] 首次推理 {_t.time() - _t0:.1f}s（開播不會再吃首推懲罰）。")
-                except Exception as _w_err:
-                    log_print(f"⚠️ [GPT-SoVITS 首推預熱失敗（權重正常，首句可能較慢）]: {_w_err}")
-                #  2026-10-11：Roformer 639MB 上卡 burst 會把同時的 TTS 拖到 50 秒以上。
-                #  排在 SoVITS 預熱「後面」付掉（兩 burst 互不撞），首歌分離只剩純計算。
-                try:
-                    import services.roformer_sep as _rs
-                    import services.auto_cover_pipeline as _acp
-                    _rdir = os.path.join(_acp.CACHE_DIR, "roformer_out")
-                    if _rs.preload_roformer(_rdir):
-                        log_print("🟢 [Roformer 預載完成] 首歌分離不再撞 TTS。")
-                    else:
-                        log_print("⚠️ [Roformer 預載失敗] 首歌現載（首句 TTS 可能較慢）。")
-                except Exception as _r_err:
-                    log_print(f"⚠️ [Roformer 預載跳過]: {_r_err}")
-            else:
-                log_print("⚠️ [GPT-SoVITS 預熱失敗] 初始化回傳空管線，曉伊引擎停用（自動降級其他引擎）。")
-        except Exception as e:
-            log_print(f"⚠️ [GPT-SoVITS 預熱跳過]: {e}")
     asyncio.create_task(asyncio.to_thread(_prewarm_xiaoyi))
             
     try:
@@ -9735,522 +9808,17 @@ async def main():
     asyncio.create_task(youtube_live_worker(input_queue))
     asyncio.create_task(pe.auto_restore_piano_state_on_startup())
     asyncio.create_task(live_timer_sensor_worker(vts, input_queue))
-    async def safe_discord_runner():
-        while True:
-            try:
-                if DISCORD_TOKEN:
-                    await discord_bot.start(DISCORD_TOKEN)
-                else:
-                    break
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                log_print(f"⚠️ [Discord 機器人連線提示]: {e}，15 秒後自動重連...")
-                await asyncio.sleep(15.0)
-
     if DISCORD_TOKEN and not _IS_VTUBER:
         asyncio.create_task(safe_discord_runner())
-
-    #  註冊鋼琴狀態即時監聽回調：當鋼琴強制關閉或離線時，秒級切換回 IDLE
-    def _on_piano_liveness_change(is_active: bool):
-        if not is_active:
-            if set_ai_state("IDLE", "鋼琴離線/強制關機", only_from="PIANO"):
-                web_dash.broadcast_telemetry()
-        else:
-            if set_ai_state("PIANO", "鋼琴即時在線", only_from="IDLE"):
-                web_dash.broadcast_telemetry()
 
     pe.register_piano_state_callback(_on_piano_liveness_change)
 
     #  啟動 7L Web 視覺化即時監控與控制後台 (Port 7860 -> http://localhost:7860)
-    def get_audio_perception_summary():
-        """整合電腦內部聲音 (WASAPI Loopback) 與現實環境聲音 (MIC) 的多模態感知資料"""
-        # 1. 電腦內部聲音感知 (全系統聲音：WASAPI Loopback 捕捉所有喇叭輸出)
-        #  LEVEL 音量百分比：100% 真實反映整台電腦當前的即時音量跳動，絕不死鎖在固定數值！
-        sys_level = min(100, max(0, int(CURRENT_SYSTEM_AUDIO_VOL_PERCENT)))
-        piano_playing = False
-        piano_song = ""
-
-        try:
-            if pe and pe.is_piano_active_and_alive():
-                piano_playing = True
-                piano_song = pe.current_piano_song_title or pe.GLOBAL_PIANO_REALTIME_STATE.get("title") or "名曲"
-        except Exception:
-            pass
-
-        now = time.time()
-        has_recent_sys_text = bool(LATEST_SYSTEM_AUDIO_TEXT and (now - LATEST_SYSTEM_AUDIO_TEXT_TIME < 20.0))
-        has_recent_music = bool(LATEST_SYSTEM_MUSIC_INFO and (now - LATEST_SYSTEM_MUSIC_TIME < 25.0))
-
-        if piano_playing:
-            if has_recent_sys_text:
-                sys_tag = "全系統音訊 (鋼琴+語音)"
-                sys_detail = f"7L 正在彈奏：《{piano_song}》 | 聽見電腦語音：『{LATEST_SYSTEM_AUDIO_TEXT}』"
-            elif sys_level > 5:
-                sys_tag = "全系統音訊 (鋼琴演奏)"
-                sys_detail = f"電腦全系統聲音監聽中 | 7L 正在彈奏：《{piano_song}》"
-            else:
-                sys_tag = "全系統音訊 (鋼琴待命)"
-                sys_detail = f"7L 琴房在線 | 曲目：《{piano_song}》"
-        elif has_recent_music and sys_level > 3:
-            sys_tag = "辨識到音樂/音效"
-            sys_detail = f"聽出電腦正在播放：{LATEST_SYSTEM_MUSIC_INFO}"
-        elif has_recent_sys_text:
-            sys_tag = "辨識到電腦語音/台詞"
-            sys_detail = f"聽見電腦音訊：『{LATEST_SYSTEM_AUDIO_TEXT}』"
-        elif sys_level > 5:
-            # 檢查是否有螢幕影音線索
-            if current_screen_context and any(k in current_screen_context for k in ["YouTube", "影片", "音樂", "鋼琴", "Campanella", "piano", "歌"]):
-                hint_clean = current_screen_context.split("，")[0].split("。")[0][:28]
-                sys_tag = "播放影音中"
-                sys_detail = f"偵測到螢幕影音播放中 ({hint_clean})，7L 正在聆聽曲目..."
-            else:
-                sys_tag = "播放全系統音訊"
-                sys_detail = "電腦正在播放背景音樂/旋律，7L 正在辨識中..."
-        elif current_system_audio_context and "目前沒有" not in current_system_audio_context:
-            sys_tag = "播放中"
-            sys_detail = current_system_audio_context
-        else:
-            sys_tag = "安靜無聲"
-            sys_detail = "電腦目前無音訊輸出（全系統聲音安靜）。"
-
-        # 2. 現實環境聲音感知
-        real_tag = "靈敏傾聽中"
-        real_detail = "現實環境安靜，等待老爸說話中..."
-        real_level = min(100, max(0, int(CURRENT_MIC_VOL_PERCENT)))
-
-        if IS_SLEEPING:
-            real_tag = "休眠暫停"
-            real_detail = "7L 正在睡覺，已暫停接收現實人聲。"
-            real_level = 0
-        elif not IS_MIC_ENABLED:
-            real_tag = "麥克風靜音"
-            real_detail = "麥克風目前已手動關閉。"
-            real_level = 0
-        elif is_user_listening:
-            real_tag = "捕捉到人聲"
-            real_detail = "正在傾聽老爸說話中..."
-            if real_level < 25:
-                real_level = 45
-        elif LATEST_REALWORLD_SPEECH_TEXT and (time.time() - LATEST_REALWORLD_SPEECH_TIME < 45):
-            diff_sec = int(time.time() - LATEST_REALWORLD_SPEECH_TIME)
-            time_hint = "剛剛" if diff_sec < 5 else f"{diff_sec} 秒前"
-            real_tag = "剛才發話"
-            real_detail = f"老爸{time_hint}說：『{LATEST_REALWORLD_SPEECH_TEXT}』"
-        elif real_level > 12:
-            real_tag = "環境動態"
-            real_detail = "偵測到微弱聲響，隨時待命辨識..."
-
-        # 整體狀態
-        if IS_SLEEPING:
-            status_text = "休眠暫停中"
-        elif piano_playing:
-            status_text = " 鋼琴演奏 & 全系統聲音"
-        elif sys_level > 5 and is_user_listening:
-            status_text = "電腦全系統音訊 & 聆聽老爸"
-        elif is_user_listening:
-            status_text = " 聆聽老爸中"
-        elif sys_level > 5:
-            status_text = " 電腦全系統音訊播放中"
-        else:
-            status_text = "雙向全雙工監聽"
-
-        return {
-            "status_text": status_text,
-            "sys_tag": sys_tag,
-            "sys_detail": sys_detail,
-            "sys_level": sys_level,
-            "real_tag": real_tag,
-            "real_detail": real_detail,
-            "real_level": real_level,
-            "user_speaking": LATEST_REALWORLD_SPEECH_TEXT if (time.time() - LATEST_REALWORLD_SPEECH_TIME < 45) else ""
-        }
-
-    def _get_system_state():
-        #  鋼琴在線狀態即時動態核實 (若鋼琴被強制關機，秒級自動回歸 IDLE，絕不卡死)
-        if current_ai_state == "PIANO" and not pe.is_piano_active_and_alive():
-            set_ai_state("IDLE", "後台核實：鋼琴已不在線", only_from="PIANO")
-
-        eff_status = " 正常運作中" if not IS_SLEEPING and current_ai_state == "IDLE" and "休眠" not in current_ai_status_str else current_ai_status_str
-        stress_info = get_api_stress_metrics()
-        silence_ticks = get_silence_ticks()
-        uptime_ticks = get_uptime_ticks()
-        return {
-            "ai_status": eff_status,
-            "ai_state": "sleep" if IS_SLEEPING else current_ai_state.lower(),
-            "silence_ticks": silence_ticks,
-            "silence_human": format_ticks_to_human(silence_ticks),
-            "uptime_ticks": uptime_ticks,
-            "uptime_human": format_ticks_to_human(uptime_ticks),
-            "is_sleeping": IS_SLEEPING,
-            "mic_action": " 聆聽中" if is_user_listening else current_mic_action_str,
-            "is_mic_enabled": IS_MIC_ENABLED,
-            "mic_volume": 0.0 if IS_SLEEPING else CURRENT_MIC_VOL_PERCENT / 100.0,
-            "model_name": "Gemini Live API (WebSocket)" if IS_LIVE_MODE_ACTIVE else "Gemini 3.5 Flash-Lite (REST)",
-            "api_calls": TOTAL_API_CALLS,
-            "api_energy": max(5.0, round(100.0 - (TOTAL_API_CALLS * 0.4), 1)),
-            "api_stress": stress_info,
-            "vision_change": "high" if yt_comp.IS_YT_COMPANION_ACTIVE else CURRENT_VISION_CHANGE_LEVEL,
-            "vision_change_score": 85 if yt_comp.IS_YT_COMPANION_ACTIVE else CURRENT_VISION_CHANGE_SCORE,
-            "vts_expression": getattr(vts, "current_expression", "自然") if vts else "未連線",
-            "screen_context": f"正在觀看 YouTube 影片《{yt_comp.CURRENT_YT_TITLE[:25]}》" if yt_comp.IS_YT_COMPANION_ACTIVE else current_screen_context,
-            "vision_history": list(VISION_HISTORY_STREAM),
-            "last_vision_time": time.time() if yt_comp.IS_YT_COMPANION_ACTIVE else LAST_VISION_LOOK_TIME,
-            "audio_context": current_system_audio_context,
-            "audio_perception": get_audio_perception_summary(),
-            "timer_sensor": live_timer_hub.get_sensor_summary()
-        }
-
-    async def _set_mic(enable=None):
-        target = not IS_MIC_ENABLED if enable is None else bool(enable)
-        return await _set_switch("IS_MIC_ENABLED", target)
-
-    async def _trigger_expr(expr):
-        if vts:
-            await set_vts_expression(vts, expr)
-
-    def _get_last_vision_img():
-        #  若 YouTube 伴看活躍中，優先返回 YouTube 視窗高畫質截圖
-        if yt_comp.IS_YT_COMPANION_ACTIVE and yt_comp.LATEST_YT_FRAME_BYTES:
-            return yt_comp.LATEST_YT_FRAME_BYTES
-        if LATEST_HD_SCREEN_BYTES:
-            return LATEST_HD_SCREEN_BYTES
-        if latest_screen_cache and isinstance(latest_screen_cache, list) and len(latest_screen_cache) > 0:
-            return latest_screen_cache[0][1]
-        return None
-
-    def _restart():
-        log_print("🔄 [系統] 收到 Web 控制台重啟指令，正在重新啟動 7L 系統...")
-        shutdown_7l(restart=True)
-
-    def _shutdown():
-        log_print("👋 [系統] 收到 Web 控制台關機指令，正在安全退出 7L 系統...")
-        shutdown_7l()
-
-    async def _execute_tool_manually(tool_name: str, args: dict):
-        log_print(f"🛠️ [老爸手動調用] 正在執行工具: {tool_name}，參數: {args}")
-        if tool_name in ["pe.play_virtual_piano", "play_virtual_piano"]:
-            song_name = args.get("song_name", "鐘")
-            force_online = bool(args.get("force_online", False))
-            await pe.play_virtual_piano(song_name, force_online=force_online, target="dad", requester_name="老爸", is_direct_song_name=True)
-            return f"已成功為老爸排播/演奏鋼琴曲目《{song_name}》"
-        elif tool_name in ["pe.compose_and_play_original_piano", "compose_and_play_original_piano"]:
-            theme = args.get("theme_or_title", "星空漫步")
-            style = args.get("mood_or_style", "治癒抒情")
-            await pe.compose_and_play_original_piano(theme_or_title=theme, mood_or_style=style, target="dad", requester_name="老爸")
-            return f"已完成現場即興創作並演奏《{theme}》（風格：{style}）"
-        elif tool_name in ["pe.mashup_virtual_piano", "mashup_virtual_piano"]:
-            s1 = args.get("song_name1", "冬風")
-            s2 = args.get("song_name2", "")
-            if s2:
-                await pe.mashup_virtual_piano(s1, s2)
-                return f"已啟動多曲極限串燒演奏：《{s1}》 x 《{s2}》"
-            else:
-                await pe.mashup_virtual_piano(s1)
-                return f"已啟動多曲極限串燒演奏：《{s1}》"
-        elif tool_name in ["pe.insert_virtual_piano", "insert_virtual_piano"]:
-            s = args.get("song_name", "少女的祈禱")
-            await pe.insert_virtual_piano(s)
-            return f"已成功插播追加曲目：《{s}》"
-        elif tool_name in ["pe.set_piano_instrument", "set_piano_instrument"]:
-            inst = args.get("instrument", "鋼琴")
-            await pe.set_piano_instrument(inst)
-            return f"已將鋼琴發聲音色切換為：{inst}"
-        elif tool_name in ["pe.set_piano_speed", "set_piano_speed"]:
-            spd = float(args.get("speed", 1.0))
-            await pe.set_piano_speed(spd)
-            return f"已將鋼琴演奏速度調整為：{spd:.2f}x"
-        elif tool_name in ["pe.set_piano_volume", "set_piano_volume"]:
-            vol = int(args.get("volume", 85))
-            await pe.set_piano_volume(vol)
-            return f"已將鋼琴演奏音量調整為：{vol}%"
-        elif tool_name in ["pe.open_virtual_piano", "open_virtual_piano"]:
-            await pe.open_virtual_piano()
-            return "已在桌面打開 88 鍵鋼琴介面待命"
-        elif tool_name in ["pe.pause_virtual_piano", "pause_virtual_piano"]:
-            await pe.pause_virtual_piano()
-            return "已暫停當前鋼琴演奏"
-        elif tool_name in ["pe.resume_virtual_piano", "resume_virtual_piano"]:
-            await pe.resume_virtual_piano()
-            return "已恢復繼續鋼琴演奏"
-        elif tool_name in ["pe.stop_virtual_piano", "stop_virtual_piano"]:
-            await pe.stop_virtual_piano()
-            return "已停止鋼琴演奏並關閉鋼琴"
-        elif tool_name == "move_spatial_position":
-            pos = args.get("target_position", "正中間")
-            await apply_spatial_position(pos)
-            return f"已平滑移動 7L 站位至：{pos}"
-        elif tool_name == "trigger_vts_expression":
-            expr = args.get("expression_name", "自然")
-            if vts:
-                await set_vts_expression(vts, expr)
-            return f"已觸發 VTS 表情：{expr}"
-        elif tool_name == "control_microphone":
-            enabled = bool(args.get("is_enabled", True))
-            control_microphone(enabled)
-            return f"已{'開啟' if enabled else '靜音關閉'}麥克風收音"
-        elif tool_name == "set_sleep_mode":
-            enable = bool(args.get("enable", False))
-            await set_sleep_mode(enable)
-            return f"已切換為{'深層休眠 (0 API)' if enable else '全速運作喚醒狀態'}"
-        elif tool_name == "set_timer":
-            sec = int(args.get("seconds", 60))
-            msg = args.get("message", "提醒時間到！")
-            asyncio.create_task(set_timer(sec, msg, input_queue, caller_user="老爸"))
-            return f"已設定 {sec} 秒後鬧鐘提醒：「{msg}」"
-        elif tool_name == "open_browser":
-            url = args.get("url", "https://www.google.com")
-            if not url.startswith("http"):
-                url = "https://" + url
-            import webbrowser
-            webbrowser.open(url)
-            return f"已在預設瀏覽器中開啟網頁：{url}"
-        elif tool_name == "search_google":
-            q = args.get("query", "")
-            
-            res = await asyncio.to_thread(search_google, q)
-            return res or f"已搜尋「{q}」"
-        elif tool_name == "update_cloud_knowledge":
-            cat = args.get("category", "facts")
-            content = args.get("content", "")
-            await update_cloud_prompt_field(cat, content)
-            return f"已成功將新認知寫入雲端大腦 [{cat}]：{content}"
-        elif tool_name == "clear_all_memories":
-            
-            await clear_all_memories()
-            return "已清空 7L 當前短期記憶中樞"
-        elif tool_name in ["generate_ai_image", "draw_illustration"]:
-            p = args.get("prompt", "")
-            res = await generate_ai_image(p)
-            return res or f"已生成 AI 插畫：「{p}」"
-        elif tool_name in ["sing_song", "auto_sing_song"]:
-            s = args.get("song_name", "")
-            return request_cover_song(s, "老爸")
-        elif tool_name in ["stop_singing_song", "stop_singing", "stop_cover"]:
-            stop_singing()
-            return "已停止唱歌"
-        elif tool_name == "execute_local_python_code":
-            code = args.get("code_string", "")
-            res = await execute_local_python_code(code)
-            return res or "Python 程式碼執行完成"
-        else:
-            raise ValueError(f"未知的工具名稱: {tool_name}")
-
-    def _get_switches():
-        return [
-            {
-                "key": "IS_AUTO_PIANO_ENABLED",
-                "name": "閒置自主彈琴",
-                "category": "piano",
-                "category_name": " 音樂與演奏",
-                "description": "當 7L 閒置且環境無聲音超過 60 秒時，每隔 5 分鐘是否自主坐到鋼琴前隨機挑選曲目演奏。",
-                "value": bool(IS_AUTO_PIANO_ENABLED),
-                "icon": "piano"
-            },
-            {
-                "key": "IS_PIANO_AUTO_RADIO_MODE",
-                "name": "鋼琴隨機電台連播",
-                "category": "piano",
-                "category_name": " 音樂與演奏",
-                "description": "當前鋼琴曲目彈完後，若隊列已無點歌，是否自動從曲庫中無限接續隨機抽歌連播。",
-                "value": bool(getattr(pe, "IS_PIANO_AUTO_RADIO_MODE", False)),
-                "icon": "radio"
-            },
-            {
-                "key": "IS_AUTO_WANDER_ENABLED",
-                "name": "閒置自主漫遊走位",
-                "category": "wander",
-                "category_name": " 自主行為與漫遊",
-                "description": "7L 處於閒置狀態超過 60 秒時，每隔 60 秒在螢幕舞台上隨機走位、變換站位與姿態。",
-                "value": bool(IS_AUTO_WANDER_ENABLED),
-                "icon": "walk"
-            },
-            {
-                "key": "IS_PROACTIVE_SPEAK_ENABLED",
-                "name": "視覺陪伴主動搭話",
-                "category": "wander",
-                "category_name": " 自主行為與漫遊",
-                "description": "每隔 35~50 秒根據老爸目前視窗、聆聽音樂與操作動態，自主決定是否主動搭話或吐槽。關閉時轉為純被動（有問才答）。",
-                "value": bool(IS_PROACTIVE_SPEAK_ENABLED),
-                "icon": "chat"
-            },
-            {
-                "key": "IS_PERIPHERAL_VISION_ENABLED",
-                "name": "餘光視覺感知中樞",
-                "category": "vision",
-                "category_name": " 多模態感知",
-                "description": "背景是否定時截取並分析老爸的螢幕動態與視窗畫面，維持連續時序視覺記憶緩存。",
-                "value": bool(IS_PERIPHERAL_VISION_ENABLED),
-                "icon": "eye"
-            },
-            {
-                "key": "IS_FACE_TRACKING_ENABLED",
-                "name": "AI 視線與頭部追蹤",
-                "category": "vision",
-                "category_name": " 多模態感知",
-                "description": "啟用 Live2D 模型的自然視線跟隨、呼吸律動與自然眨眼同步。",
-                "value": bool(IS_FACE_TRACKING_ENABLED),
-                "icon": "user"
-            },
-            {
-                "key": "IS_MIC_ENABLED",
-                "name": "麥克風語音監聽收音",
-                "category": "system",
-                "category_name": " 系統核心與收音",
-                "description": "即時監聽並轉寫實體麥克風收到的語音。關閉時 7L 不再收音，僅接受文字發話。",
-                "value": bool(IS_MIC_ENABLED),
-                "icon": "mic"
-            },
-            {
-                "key": "IS_STREAM_CHAT_ENABLED",
-                "name": "直播彈幕即時互動",
-                "category": "system",
-                "category_name": " 系統核心與收音",
-                "description": "是否開啟直播間（如 TikTok）即時彈幕串流接入與觀眾留言排隊互動。",
-                "value": bool(getattr(tk_listener, "IS_STREAMING", False)),
-                "icon": "broadcast"
-            },
-            {
-                "key": "IS_SLEEPING",
-                "name": "深層休眠模式 (0 API)",
-                "category": "system",
-                "category_name": " 系統核心與收音",
-                "description": "雙眼閉合安睡，完全停止視覺截圖、背景思考與計時器，達成 0 API 消耗。",
-                "value": bool(IS_SLEEPING),
-                "icon": "moon"
-            },
-            {
-                "key": "IS_YT_WATCHER_ENABLED",
-                "name": " YouTube 即時伴看 (Multimodal Live)",
-                "category": "vision",
-                "category_name": " 視覺與多模態感知",
-                "description": "自動檢測螢幕上的 YouTube 影片，以 1 FPS 視窗裁剪與系統音訊內錄持續跟進理解。",
-                "value": bool(yt_comp.IS_YT_WATCHER_ENABLED),
-                "icon": "video"
-            },
-            {
-                "key": "MODE_TOGGLE",
-                "name": "伴侶模式 (需重啟)",
-                "category": "system",
-                "category_name": " 系統核心與收音",
-                "description": "開啟時為伴侶模式 (同時陪你與聊天室)，關閉為實況主模式 (只理聊天室)。切換後請點擊上方「重啟大腦」生效。",
-                "value": _RUN_MODE == "companion",
-                "icon": "user"
-            }
-        ]
-
-    async def _set_switch(key: str, value=None, sync_cloud=True):
-        global IS_AUTO_PIANO_ENABLED, IS_AUTO_WANDER_ENABLED, IS_PROACTIVE_SPEAK_ENABLED
-        global IS_PERIPHERAL_VISION_ENABLED, IS_FACE_TRACKING_ENABLED, IS_MIC_ENABLED
-        nonlocal _RUN_MODE
-        
-        current_map = {
-            "IS_AUTO_PIANO_ENABLED": IS_AUTO_PIANO_ENABLED,
-            "IS_PIANO_AUTO_RADIO_MODE": getattr(pe, "IS_PIANO_AUTO_RADIO_MODE", False),
-            "IS_AUTO_WANDER_ENABLED": IS_AUTO_WANDER_ENABLED,
-            "IS_PROACTIVE_SPEAK_ENABLED": IS_PROACTIVE_SPEAK_ENABLED,
-            "IS_PERIPHERAL_VISION_ENABLED": IS_PERIPHERAL_VISION_ENABLED,
-            "IS_FACE_TRACKING_ENABLED": IS_FACE_TRACKING_ENABLED,
-            "IS_MIC_ENABLED": IS_MIC_ENABLED,
-            "IS_STREAM_CHAT_ENABLED": getattr(tk_listener, "IS_STREAMING", False),
-            "IS_SLEEPING": IS_SLEEPING,
-            "IS_YT_WATCHER_ENABLED": yt_comp.IS_YT_WATCHER_ENABLED,
-            "MODE_TOGGLE": _RUN_MODE == "companion"
-        }
-        
-        target_val = not current_map.get(key, False) if value is None else bool(value)
-        
-        if key == "IS_AUTO_PIANO_ENABLED":
-            IS_AUTO_PIANO_ENABLED = target_val
-            log_print(f"🎛️ [系統開關] 閒置自主彈琴已{'🟢 開啟' if target_val else '🔴 關閉'}")
-        elif key == "IS_PIANO_AUTO_RADIO_MODE":
-            pe.IS_PIANO_AUTO_RADIO_MODE = target_val
-            log_print(f"🎛️ [系統開關] 鋼琴無限隨機電台已{'🟢 開啟' if target_val else '🔴 關閉'}")
-        elif key == "IS_AUTO_WANDER_ENABLED":
-            IS_AUTO_WANDER_ENABLED = target_val
-            log_print(f"🎛️ [系統開關] 閒置自主漫遊已{'🟢 開啟' if target_val else '🔴 關閉'}")
-        elif key == "IS_PROACTIVE_SPEAK_ENABLED":
-            IS_PROACTIVE_SPEAK_ENABLED = target_val
-            log_print(f"🎛️ [系統開關] 視覺陪伴主動搭話已{'🟢 開啟' if target_val else '🔴 關閉'}")
-        elif key == "IS_PERIPHERAL_VISION_ENABLED":
-            IS_PERIPHERAL_VISION_ENABLED = target_val
-            log_print(f"🎛️ [系統開關] 餘光視覺感知已{'🟢 開啟' if target_val else '🔴 關閉'}")
-        elif key == "IS_FACE_TRACKING_ENABLED":
-            IS_FACE_TRACKING_ENABLED = target_val
-            log_print(f"🎛️ [系統開關] AI 視線與頭部追蹤已{'🟢 開啟' if target_val else '🔴 關閉'}")
-        elif key == "IS_MIC_ENABLED":
-            IS_MIC_ENABLED = target_val
-            log_print(f"🎛️ [系統開關] 麥克風收音已{'🟢 開啟' if target_val else '🔴 關閉'}")
-        elif key == "IS_STREAM_CHAT_ENABLED":
-            tk_listener.IS_STREAMING = target_val
-            log_print(f"🎛️ [系統開關] 直播彈幕即時互動已{'🟢 開啟' if target_val else '🔴 關閉'}")
-        elif key == "IS_SLEEPING":
-            await set_sleep_mode(target_val)
-            target_val = IS_SLEEPING
-            log_print(f"🎛️ [系統開關] 深層休眠模式已{'🟢 開啟' if target_val else '🔴 關閉'}")
-        elif key == "IS_YT_WATCHER_ENABLED":
-            yt_comp.IS_YT_WATCHER_ENABLED = target_val
-            log_print(f"🎛️ [系統開關] YouTube 即時伴看已{'🟢 開啟' if target_val else '🔴 關閉'}")
-        elif key == "MODE_TOGGLE":
-            new_mode = "companion" if target_val else "vtuber"
-            import os
-            os.environ["MODE"] = new_mode
-            if new_mode == "companion":
-                os.environ["OPERATOR_INPUT"] = "1"
-                os.environ["OPERATOR_SPEECH"] = "1"
-            else:
-                os.environ["OPERATOR_INPUT"] = "0"
-                os.environ["OPERATOR_SPEECH"] = "0"
-            _RUN_MODE = new_mode
-            log_print(f"🎛️ [系統開關] 運行模式已切換為 {new_mode} (已即時生效，徹底生效請點擊重啟大腦)")
-
-        if sync_cloud:
-            try:
-                from core.memory import get_cloud_knowledge, save_cloud_knowledge
-                kn = await get_cloud_knowledge()
-                if "system_switches" not in kn:
-                    kn["system_switches"] = {}
-                kn["system_switches"][key] = target_val
-                await save_cloud_knowledge(kn)
-                log_print(f"☁️ [全域開關同步] {key} = {target_val} 已儲存至雲端大腦")
-            except Exception as e:
-                log_print(f"⚠️ [全域開關同步失敗]: {e}")
-            
-        return target_val
-        
-    try:
-        from core.memory import get_cloud_knowledge
-        kn = await get_cloud_knowledge()
-        switches = kn.get("system_switches", {})
-        if switches:
-            log_print("☁️ [雲端還原] 正在載入全域系統開關...")
-            for k, v in switches.items():
-                if k != "MODE_TOGGLE":
-                    await _set_switch(k, v, sync_cloud=False)
-            log_print("✅ [雲端還原] 全域系統開關載入完成")
-    except Exception as e:
-        log_print(f"⚠️ [雲端開關載入失敗]: {e}")
-
-    asyncio.create_task(web_dash.start_web_dashboard(
-        port=7860,
-        input_queue=input_queue,
-        vts=vts,
-        get_system_state_cb=_get_system_state,
-        set_mic_cb=_set_mic,
-        set_sleep_cb=lambda enable: _set_switch("IS_SLEEPING", enable),
-        trigger_expression_cb=_trigger_expr,
-        # 走模組屬性：後台改記憶容量時 core.memory 會換一個新 deque，檔頭 import 的名字會變舊殼
-        get_memory_cb=lambda: list(sys.modules["core.memory"].UNIFIED_LIVE_MEMORY),
-        get_mind_board_cb=lambda: list(STREAMER_MIND_BOARD),
-        get_last_vision_image_cb=_get_last_vision_img,
-        restart_cb=_restart,
-        shutdown_cb=_shutdown,
-        execute_tool_cb=_execute_tool_manually,
-        get_switches_cb=_get_switches,
-        set_switch_cb=_set_switch,
-        punish_cb=execute_punish_action,
-        reward_cb=execute_reward_action
-    ))
+    #  後台 callback 全在 services/dashboard_bridge.py；主程式狀態經本模組物件明確交給它
+    from services.dashboard_bridge import DashboardBridge
+    bridge = DashboardBridge(core=sys.modules[__name__], vts=vts, input_queue=input_queue, run_mode=_RUN_MODE)
+    await bridge.restore_switches_from_cloud()
+    asyncio.create_task(web_dash.start_web_dashboard(port=7860, **bridge.dashboard_callbacks()))
     
     #  啟動 YouTube 自動伴看與實時多模態視聽理解服務
     yt_comp.ON_VISION_RECORD_CB = record_vision_history_entry
@@ -10260,51 +9828,8 @@ async def main():
     print("✨ [7L] 已啟動！")
     print("=========================================\n")
 
-    spinner_chars = ['/', '-', '\\', '|']
-    idx = 0
-    
     try:
-        while True:
-            char = spinner_chars[idx % len(spinner_chars)]
-            term_cols = shutil.get_terminal_size((80, 20)).columns
-            max_cols = max(30, term_cols - 1)  # 留 1 個 column 絕對防止 Windows 控制台自動換行
-            
-            # 依據是否有即時通知，動態組合尾端文字 (通知放在最後面，絕不佔用整行)
-            has_notif = time.time() < notification_expire_time
-            if has_notif:
-                tail_str = f" {current_system_notification}"
-                if tk_listener.current_tiktok_status_str and tk_listener.current_tiktok_status_str != "[ TikTok: 待命中]":
-                    tail_str = f"{tk_listener.current_tiktok_status_str} | {tail_str}"
-            else:
-                tail_str = tk_listener.current_tiktok_status_str
-
-            #  若 YouTube 伴看活躍中，優先顯示伴看狀態
-            if yt_comp.IS_YT_COMPANION_ACTIVE:
-                yt_info = f" 伴看中: {yt_comp.CURRENT_YT_TITLE[:15]}..."
-                tail_str = f"{yt_info} | {tail_str}" if tail_str else yt_info
-
-            # 依據終端寬度動態分配狀態文字、動作文字、音量與 尾端通知/動態 (排在最後面)
-            if max_cols < 85:
-                status_text = fit_text_to_width(current_ai_status_str, max(18, max_cols - 48))
-                action_text = " 聆聽中" if is_user_listening else fit_text_to_width(current_mic_action_str, 8)
-                tail_text = fit_text_to_width(tail_str, max(14, max_cols - 45))
-                raw_msg = f"[{char}] {status_text} | {action_text} | {current_mic_volume_str} | {tail_text}"
-            else:
-                status_text = fit_text_to_width(current_ai_status_str, max(28, max_cols - 65))
-                action_text = " 聆聽中..." if is_user_listening else fit_text_to_width(current_mic_action_str, 12)
-                tail_text = fit_text_to_width(tail_str, max(20, max_cols - 75))
-                raw_msg = f"[{char}] {status_text} | {action_text} | {current_mic_volume_str} | {tail_text}"
-            out_msg = fit_text_to_width(raw_msg, max_cols)
-            
-            out_msg = out_msg.replace('\n', ' ').replace('\r', '')
-            disp_w = get_display_width(out_msg)
-            padding = " " * max(0, max_cols - disp_w)
-            
-            # 使用 ANSI 擦除 + 精準寬度填充，徹底根除 Windows 終端換行與尾端空格殘影
-            print(f"\r\033[2K\r{out_msg}{padding}", end="", flush=True)
-            
-            idx += 1
-            await asyncio.sleep(0.1)
+        await _status_bar_loop()
     except (KeyboardInterrupt, asyncio.CancelledError):
         # asyncio.run 收到 Ctrl+C 是把 main 取消，這裡收到的是 CancelledError，不是 KeyboardInterrupt；
         # 舊版被下面的 except BaseException 接走，正常中斷也印成「底層系統異常崩潰」＋traceback
