@@ -545,6 +545,14 @@ if sys.platform == "win32":
         mode = ctypes.c_ulong()
         if kernel32.GetConsoleMode(hStdOut, ctypes.byref(mode)):
             kernel32.SetConsoleMode(hStdOut, mode.value | 0x0004 | 0x0002)
+        # 關閉 QuickEdit：傳統主控台視窗裡滑鼠一點選取，輸出就會暫停，所有 print 都在 event loop 上，
+        # 整個 7L（追蹤、TTS、Live）會跟著凍結到按 Esc。要保留可在 .env 設 CONSOLE_QUICKEDIT=1。
+        if os.getenv("CONSOLE_QUICKEDIT", "0") != "1":
+            hStdIn = kernel32.GetStdHandle(-10)
+            in_mode = ctypes.c_ulong()
+            if kernel32.GetConsoleMode(hStdIn, ctypes.byref(in_mode)):
+                ENABLE_QUICK_EDIT_MODE, ENABLE_EXTENDED_FLAGS = 0x0040, 0x0080
+                kernel32.SetConsoleMode(hStdIn, (in_mode.value & ~ENABLE_QUICK_EDIT_MODE) | ENABLE_EXTENDED_FLAGS)
     except Exception:
         pass
     try:
@@ -576,9 +584,10 @@ from core.llm_engine import (
     DualHotStandbyLiveManager,
     get_dynamic_live_key_candidates,
     track_key, sort_keys_by_load, key_load,
+    cool_key, key_cooling,
     UNRESTRICTED_SAFETY_SETTINGS
 )
-from core.memory import init_unified_memory, fetch_from_long_term_memory, save_to_long_term_memory, append_to_unified_memory, clear_all_memories, get_recent_100_memory_context, get_viewer_profile, save_viewer_profile, record_bot_message, get_cloud_knowledge, update_cloud_prompt_field, TIKTOK_CHATROOM_MEMORY, STREAMER_MIND_BOARD, DEFAULT_CHANNEL_ID, save_cloud_knowledge, get_unified_memory_context, RECENT_BOT_MESSAGES, evaluate_memory_demand, USER_PROFILE_FILE
+from core.memory import init_unified_memory, flush_unified_memory, fetch_from_long_term_memory, save_to_long_term_memory, append_to_unified_memory, clear_all_memories, get_recent_100_memory_context, get_viewer_profile, save_viewer_profile, record_bot_message, get_cloud_knowledge, update_cloud_prompt_field, TIKTOK_CHATROOM_MEMORY, STREAMER_MIND_BOARD, DEFAULT_CHANNEL_ID, save_cloud_knowledge, get_unified_memory_context, RECENT_BOT_MESSAGES, evaluate_memory_demand, USER_PROFILE_FILE
 
 
 
@@ -695,7 +704,7 @@ def get_available_gemini_channels(limit=1, user_query="", has_image=False, is_pr
         short_m = g_model.replace("gemini-", "")
         for idx in ring_indices:
             target_id = f"G{idx}_{short_m}"
-            if not is_locked(target_id) and (target_keys[idx], g_model, target_id) not in available:
+            if not is_locked(target_id) and not key_cooling(target_keys[idx], g_model) and (target_keys[idx], g_model, target_id) not in available:
                 available.append((target_keys[idx], g_model, target_id))
                 break # 每一階挑選一把最佳金鑰後，優先為下一階模型排入通道！
         if len(available) >= limit:
@@ -707,7 +716,7 @@ def get_available_gemini_channels(limit=1, user_query="", has_image=False, is_pr
             short_m = g_model.replace("gemini-", "")
             for idx in ring_indices:
                 target_id = f"G{idx}_{short_m}"
-                if not is_locked(target_id) and (target_keys[idx], g_model, target_id) not in available:
+                if not is_locked(target_id) and not key_cooling(target_keys[idx], g_model) and (target_keys[idx], g_model, target_id) not in available:
                     available.append((target_keys[idx], g_model, target_id))
                     if len(available) >= limit:
                         return available
@@ -1121,9 +1130,17 @@ async def get_lightweight_gemini_vision(image_base64: str, temporal_frames: list
             all_parts.append(types.Part.from_text(text="[當前最新畫面]"))
         all_parts.append(types.Part.from_bytes(data=img_bytes, mime_type="image/jpeg"))
 
+        # 總時間上限：舊版 4 把 key × 4 個模型 × 6 秒，最壞 96 秒才回來，看到的早就是舊畫面
+        deadline = time.time() + float(os.getenv("VISION_TIME_BUDGET_SEC", "15"))
         for idx, g_key in enumerate(candidate_keys[:4]):
             client = genai.Client(api_key=g_key)
             for model_name in GEMINI_MODELS:
+                remaining = deadline - time.time()
+                if remaining <= 0.5:
+                    log_print("⌛ [餘光視覺] 超過時間上限，這次不看了")
+                    return ""
+                if key_cooling(g_key, model_name):
+                    continue
                 try:
                     async with track_key(g_key):
                         resp = await asyncio.wait_for(
@@ -1135,14 +1152,15 @@ async def get_lightweight_gemini_vision(image_base64: str, temporal_frames: list
                                 safety_settings=UNRESTRICTED_SAFETY_SETTINGS
                             )
                         ),
-                        timeout=6.0
+                        timeout=min(6.0, remaining)
                     )
                     clean_desc = resp.text.strip() if resp.text else ""
                     if clean_desc and not any(k in clean_desc for k in ["沒辦法接收", "無法接收", "視訊鏡頭", "看不到畫面", "需要鏡頭", "無法看見"]):
                         frame_info = f"({n_hist} 幀動態)" if n_hist > 0 else "(靜態)"
                         log_print(f"👁️ [餘光視覺感知] 認真看畫面 {frame_info}：{clean_desc[:50]}... (🧠 {model_name.replace('gemini-', '')} 專用視覺)")
                         return clean_desc
-                except Exception:
+                except Exception as e:
+                    report_gemini_key_error(g_key, e, model_name)
                     continue
     except Exception as e:
         log_print(f"⚠️ [餘光視覺異常]: {e}")
@@ -1446,27 +1464,27 @@ async def fetch_ai_response(messages, image_base64=None, audio_base64=None, is_p
             record_model_failure(g_model, err_str)
             if "503" in err_str or "unavailable" in err_str or "high demand" in err_str:
                 log_print(f"⚠️ [伺服器超載 503] 通道 {target_id} ({g_model}): 官方模型高負載/忙碌中 ➔ 暫時冷卻 180s")
-                lock_target(target_id, "503 high demand")
+                lock_target(target_id, "503 high demand", key=g_key, model=g_model)
             elif "404" in err_str or "not_found" in err_str or "no longer available" in err_str:
                 if 'DEAD_GEMINI_MODELS' in globals():
                     DEAD_GEMINI_MODELS.add(g_model)
                 log_print(f"❌ [模型下架 404] 通道 {target_id} ({g_model}): 模型未開通或已下架 ➔ 封印至午夜")
                 lock_entire_model(g_model, duration=get_seconds_until_pt_midnight(), reason="404 下架/未開通")
-                lock_target(target_id, "404 not found")
+                lock_target(target_id, "404 not found", key=g_key, model=g_model)
             elif any(k in err_str for k in ["per day", "requests per day", "daily requests", "rpd", "tokens per day", "tpd", "exceeded your current quota", "quota exceeded"]):
                 log_print(f"🛑 [今日額度用盡] 通道 {target_id} ({g_model}): 此 API Key 今日免費額度已滿 (RPD/Quota) ➔ 封印至 PT 午夜，自動切換下一把金鑰")
-                lock_target(target_id, str(e))
+                lock_target(target_id, str(e), key=g_key, model=g_model)
             elif "429" in err_str or "rate limit" in err_str or "resource" in err_str or "quota" in err_str:
                 err_summary = err_str[:120] + "..." if len(err_str) > 120 else err_str
                 log_print(f"⚠️ [頻率超限 429] 通道 {target_id} ({g_model}): 呼叫過於頻繁 (RPM/TPM) ➔ 短暫冷卻 60s ({err_summary})")
-                lock_target(target_id, str(e))
+                lock_target(target_id, str(e), key=g_key, model=g_model)
             elif "timeouterror" in err_str or "timeout" in err_str:
                 log_print(f"⌛ [通道連線逾時] 通道 {target_id} ({g_model}) 連線中斷或逾時")
             else:
                 clean_err = str(e).replace('\n', ' ').strip()[:70]
                 display_err = clean_err if clean_err else type(e).__name__
                 log_print(f"⚠️ [大腦異常/無回應] 通道 {target_id} ({g_model}): {display_err} ➔ 自動切換下一把金鑰")
-                lock_target(target_id, "wait 30s")
+                lock_target(target_id, "wait 30s", key=g_key, model=g_model)
             return None
 
     #  第零防線：Groq 極速前鋒（純文字請求；實測 0.4s 級）
@@ -1846,6 +1864,8 @@ async def call_gemini_live_audience_reply(vts, input_queue, audience_user: str, 
             if full_reply: break
             client = genai.Client(api_key=g_key)
             for model_name in STREAMER_MIND_MODELS:
+                if key_cooling(g_key, model_name):
+                    continue
                 try:
                     async with track_key(g_key):
                         resp = await asyncio.wait_for(
@@ -1910,8 +1930,7 @@ async def call_gemini_live_audience_reply(vts, input_queue, audience_user: str, 
                         tool_output_text = tool_out
                         break
                 except Exception as gen_err:
-                    err_msg = str(gen_err)
-                    if "429" in err_msg or "RESOURCE_EXHAUSTED" in err_msg:
+                    if report_gemini_key_error(g_key, gen_err, model_name):
                         break
                     continue
 
@@ -2303,10 +2322,12 @@ def is_locked(target_id):
             save_api_locks()
     return False
 
-def lock_target(target_id, error_msg="", headers=None):
+def lock_target(target_id, error_msg="", headers=None, key="", model=""):
     duration = parse_cooldown_seconds(error_msg, headers)
     API_LOCKS[target_id] = time.time() + duration
     save_api_locks()
+    if key:
+        cool_key(key, duration, model)  # 同步進共用冷卻表，其他 Gemini 呼叫點也會避開
     
     if duration >= 3600: dur_str = f"{duration/3600:.1f}h"
     elif duration >= 60: dur_str = f"{duration/60:.1f}m"
@@ -2340,6 +2361,22 @@ def lock_entire_model(model_name: str, duration: float = 60.0, reason: str = "�
     save_api_locks()
     dur_str = f"{int(duration)}s" if duration < 60 else (f"{duration/60:.1f}m" if duration < 3600 else f"{duration/3600:.1f}h")
     log_print(f"⚡ [大腦極速熔斷] 模型 [{model_name}] 遇 {reason} ➔ 暫停此模型 {dur_str}，秒切下一個備用模型！")
+
+
+_KEY_LIMIT_MARKERS = ("429", "resource_exhausted", "resource exhausted", "rate limit", "quota",
+                      "per day", "503", "unavailable", "high demand")
+
+
+def report_gemini_key_error(key: str, err, model: str = "") -> bool:
+    """fetch_ai_response 以外的 Gemini 呼叫點遇錯時呼叫：限流／配額／過載就把 (key, model) 冷卻，
+    之後候選池會把這把 key 排到最後，其他呼叫點不會再先撞它。回傳是否有冷卻。"""
+    err_low = str(err).lower()
+    if not key or not any(m in err_low for m in _KEY_LIMIT_MARKERS):
+        return False
+    secs = parse_cooldown_seconds(err_low)
+    cool_key(key, secs, model)
+    log_print(f"🔒 [金鑰冷卻] ...{key[-6:]} {model or '(整把)'} 冷卻 {int(secs)}s：{err_low[:80]}")
+    return True
 
 
 #  自主發話時主動保留/跳過的頂配旗艦大腦清單（保留給老爸主動對話使用）
@@ -3218,6 +3255,8 @@ async def generate_ai_image(prompt: str) -> str:
             temp_client = genai.Client(api_key=g_key)
             
             for img_model in ["gemini-3.1-flash-lite-image", "gemini-3.1-flash-image", "gemini-3-pro-image"]:
+                if key_cooling(g_key, img_model):
+                    continue
                 try:
                     async with track_key(g_key):
                         res = await asyncio.wait_for(
@@ -3236,7 +3275,8 @@ async def generate_ai_image(prompt: str) -> str:
                                         break
                             if img_bytes: break
                     if img_bytes: break
-                except Exception:
+                except Exception as e:
+                    report_gemini_key_error(g_key, e, img_model)
                     continue
 
     #  第二防線：FLUX.1 / SDXL 頂尖二次元與寫實藝術引擎 (100% 保證出圖、0 配額限制、超高畫質)
@@ -3711,7 +3751,8 @@ async def _director_ensure_session():
             st["key_idx"] = (st.get("key_idx", 0) + i + 1) % n
             log_print(f"🎭 [神態導演連線] 常駐 session 就緒（key 輪轉至第 {st['key_idx']} 把）。")
             return session
-        except Exception:
+        except Exception as e:
+            report_gemini_key_error(g_key, e, "gemini-3.8-live")
             continue
     return None
 
@@ -4474,6 +4515,8 @@ async def check_screen_change_via_live_api(img_bytes: bytes, current_context: st
         
     candidate_keys = get_dynamic_live_key_candidates(KEYS_VISION if KEYS_VISION else GEMINI_KEYS)
     for idx, g_key in enumerate(candidate_keys[:4]):
+        if key_cooling(g_key, "gemini-3.8-live"):
+            continue
         client = genai.Client(api_key=g_key)
         try:
             live_cfg = types.LiveConnectConfig(
@@ -4507,7 +4550,8 @@ async def check_screen_change_via_live_api(img_bytes: bytes, current_context: st
                         return True
                     if "[NO_CHANGE]" in decision_clean or "NO_CHANGE" in decision_clean or "[SILENCE]" in decision_clean:
                         return False
-        except Exception:
+        except Exception as e:
+            report_gemini_key_error(g_key, e, "gemini-3.8-live")
             continue
     return False
 
@@ -5053,6 +5097,31 @@ def listen_once_fast(recognizer):
         current_mic_action_str = "待命"
         return ("", None)
 
+def shutdown_7l(restart: bool = False) -> None:
+    """唯一的關機／重開出口（2026-10-22 收斂自 4 份複本，舊版全都直接 os._exit、記憶最後幾句會丟）。
+    順序：先把記憶寫進磁碟（重開的新程序開機就讀這份）→ 停鋼琴、全部音符關掉 → 重開或結束。"""
+    try:
+        flush_unified_memory()
+    except Exception as e:
+        log_print(f"⚠️ [關機存檔失敗]: {e}")
+    if pe.current_piano_process and pe.current_piano_process.poll() is None:
+        try:
+            pe.current_piano_process.terminate()
+        except Exception:
+            pass
+    if pe.SOUND_ENGINE:
+        try:
+            pe.SOUND_ENGINE.all_notes_off()
+        except Exception:
+            pass
+    if restart:
+        try:
+            subprocess.Popen([sys.executable] + sys.argv)
+        except Exception as e:
+            log_print(f"⚠️ [重啟失敗]: {e}")
+    os._exit(0)
+
+
 def check_immediate_shutdown(text: str) -> bool:
     """毫秒級即時關機 / 重開機攔截：
     必須帶有 7L / 阿七 等明確目標前綴（如「7L關機」、「7L重開機」、「阿七關機」，
@@ -5090,18 +5159,7 @@ def check_immediate_shutdown(text: str) -> bool:
 
     if is_exact_restart or has_restart_cmd:
         log_print(f"🔄 [系統] 收到即時重開機指令「{text.strip()}」，正在重新啟動 7L 系統...")
-        if pe.current_piano_process and pe.current_piano_process.poll() is None:
-            try:
-                pe.current_piano_process.terminate()
-            except Exception:
-                pass
-        if pe.SOUND_ENGINE:
-            pe.SOUND_ENGINE.all_notes_off()
-        try:
-            subprocess.Popen([sys.executable] + sys.argv)
-        except Exception as e:
-            log_print(f"⚠️ [重啟失敗]: {e}")
-        os._exit(0)
+        shutdown_7l(restart=True)
         return True
 
     #  即時安全退出 / 關機指令 (0.001s 安全硬終止)
@@ -5119,14 +5177,7 @@ def check_immediate_shutdown(text: str) -> bool:
 
     if is_exact_shutdown or has_shutdown_cmd:
         log_print(f"👋 [系統] 收到即時關機指令「{text.strip()}」，正在安全退出...")
-        if pe.current_piano_process and pe.current_piano_process.poll() is None:
-            try:
-                pe.current_piano_process.terminate()
-            except Exception:
-                pass
-        if pe.SOUND_ENGINE:
-            pe.SOUND_ENGINE.all_notes_off()
-        os._exit(0)
+        shutdown_7l()
         return True
 
     return False
@@ -5269,7 +5320,8 @@ async def instinct_live_worker():
     log_print("🦊 啟動 7L 身體本能 (Instinct) 平行 Live 大腦...")
     while True:
         try:
-            live_key = random.choice(KEYS_AUDIENCE_LIVE if KEYS_AUDIENCE_LIVE else GEMINI_KEYS)
+            _pool = KEYS_AUDIENCE_LIVE if KEYS_AUDIENCE_LIVE else GEMINI_KEYS
+            live_key = random.choice([k for k in _pool if not key_cooling(k, "gemini-3.8-live")] or _pool)
             client = genai.Client(api_key=live_key)
             
             import services.vts_client as _vc_menu
@@ -5323,6 +5375,7 @@ async def instinct_live_worker():
             break
         except Exception as e:
             INSTINCT_LIVE_SESSION = None
+            report_gemini_key_error(live_key, e, "gemini-3.8-live")
             log_print(f"⚠️ [本能大腦] 連線中斷或重啟中: {e}")
             await asyncio.sleep(3)
 
@@ -5829,6 +5882,8 @@ async def continuous_live_worker(vts):
             _quota_hit = any(w in err_str for w in ["limit", "exceed", "quota", "403", "429"])
             if _quota_hit:
                 log_print(f"⚠️ [Live 連線超限 429] 模型 {live_models[current_m_idx]} 通道 G{current_k_idx} 耗盡。")
+                if GEMINI_KEYS:
+                    report_gemini_key_error(GEMINI_KEYS[current_k_idx % len(GEMINI_KEYS)], e, live_models[current_m_idx])
             elif "goaway" in err_str or "1008" in err_str:
                 log_print(f"⏱️ [Live 週期重置] 模型 {live_models[current_m_idx]} 達到 15 分鐘安全連線上限 (GoAway)，準備無縫重連...")
             else:
@@ -6035,8 +6090,9 @@ async def console_keyboard_input_worker(input_queue):
                 elif ch == '\x08':  # Backspace
                     if buffer:
                         buffer.pop()
-                elif ch == '\x03':  # Ctrl+C
-                    os._exit(0)
+                elif ch == '\x03':  # Ctrl+C（msvcrt 讀鍵時 Ctrl+C 會變成字元送到這裡，不是 SIGINT）
+                    log_print("👋 [系統] 收到 Ctrl+C，存好記憶後退出...")
+                    shutdown_7l()
                 elif ord(ch) >= 32 or ch > '\x7f':
                     buffer.append(ch)
             time.sleep(0.03)
@@ -6209,6 +6265,7 @@ async def identify_system_music_and_sound(wav_bytes: bytes) -> str:
     except Exception:
         pass
 
+    target_key = ""
     try:
         candidate_keys = get_dynamic_live_key_candidates(KEYS_VISION if KEYS_VISION else GEMINI_KEYS)
         if not candidate_keys:
@@ -6234,11 +6291,12 @@ async def identify_system_music_and_sound(wav_bytes: bytes) -> str:
             "請直接輸出結果（25 字以內）："
         )
 
-        resp = await asyncio.to_thread(
+        # 同步 SDK 丟執行緒跑；加逾時，API 卡住時系統音監聽才不會永遠等下去
+        resp = await asyncio.wait_for(asyncio.to_thread(
             client.models.generate_content,
             model="gemini-3.1-flash-lite",
             contents=[audio_part, prompt_text]
-        )
+        ), timeout=12.0)
 
         res_text = resp.text.strip() if resp and resp.text else ""
         res_text = re.sub(r"^(這段音訊是|電腦正在播放|這聽起來是|這是一首|這是)\s*", "", res_text)
@@ -6283,7 +6341,8 @@ async def identify_system_music_and_sound(wav_bytes: bytes) -> str:
             if not is_duplicate:
                 log_print(f"🎵 [電腦音樂感知] 7L 聽出電腦正在播放: 「{res_text}」")
             return res_text
-    except Exception:
+    except Exception as e:
+        report_gemini_key_error(target_key, e, "gemini-3.1-flash-lite")
         # 若 API 短暫異常，由 GSMTC 底層精確線索保底
         try:
             from mic_live_plugin.os_desktop_sensor import os_desktop_sensor
@@ -7405,6 +7464,8 @@ async def judge_subconscious_intent_via_live_api(memory_context: str, unread_bat
     """
     candidate_keys = get_dynamic_live_key_candidates(KEYS_AUDIENCE_LIVE if KEYS_AUDIENCE_LIVE else GEMINI_KEYS)
     for idx, g_key in enumerate(candidate_keys[:4]):
+        if key_cooling(g_key, "gemini-3.8-live"):
+            continue
         client = genai.Client(api_key=g_key)
         try:
             live_cfg = types.LiveConnectConfig(
@@ -7456,7 +7517,8 @@ async def judge_subconscious_intent_via_live_api(memory_context: str, unread_bat
                             "song": t_song,
                             "raw": decision_clean
                         }
-        except Exception:
+        except Exception as e:
+            report_gemini_key_error(g_key, e, "gemini-3.8-live")
             continue
             
     # 若 Live API 暫時連線繁忙，預設放行由主力大腦判定
@@ -7836,6 +7898,8 @@ async def streamer_mind_loop_worker(vts, input_queue):
                 if full_reply: break
                 client = genai.Client(api_key=g_key)
                 for model_name in STREAMER_MIND_MODELS:
+                    if key_cooling(g_key, model_name):
+                        continue
                     try:
                         async with track_key(g_key):
                             resp = await asyncio.wait_for(
@@ -7902,8 +7966,7 @@ async def streamer_mind_loop_worker(vts, input_queue):
                             tool_output_text = tool_out
                             break
                     except Exception as gen_err:
-                        err_str = str(gen_err)
-                        if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+                        if report_gemini_key_error(g_key, gen_err, model_name):
                             break
                         continue
                         
@@ -8010,8 +8073,10 @@ def _subagent_gemini_pairs(models, attempts):
     order = keys[:]
     _r.shuffle(order)  # 先打散，同負載時保持隨機（防雷群同時擠同一把）
     order = sort_keys_by_load(order)
-    for i in range(attempts):
-        yield order[i % len(order)], models[i % len(models)]
+    pairs = [(order[i % len(order)], models[i % len(models)]) for i in range(attempts)]
+    # 冷卻中的 (key, model) 排到最後（全部冷卻時照樣試，不餓死）
+    pairs.sort(key=lambda km: key_cooling(km[0], km[1]))
+    yield from pairs
 
 
 async def _nv_tool_pass(task_ins, target, requester_name, system_instruction_text):
@@ -8128,6 +8193,7 @@ async def _gemini_tool_pass(task_ins, target, requester_name, system_instruction
             return fn_name, fn_args
         except Exception as e:
             last_err = e
+            report_gemini_key_error(gkey, e, gmodel)
             log_print(f"⚠️ [Gemini 工具判定失敗 ({gmodel})]: {str(e)[:80]}")
             continue
     raise last_err if last_err is not None else RuntimeError("Gemini 工具判定梯隊全滅")
@@ -8163,6 +8229,7 @@ async def _gemini_think_pass(task_ins, target, requester_name, system_instructio
             return "miss", ""
         except Exception as e:
             last_err = e
+            report_gemini_key_error(gkey, e, gmodel)
             log_print(f"⚠️ [Gemini 深思失敗 ({gmodel})]: {str(e)[:80]}")
             continue
     raise last_err if last_err is not None else RuntimeError("Gemini 深思梯隊全滅")
@@ -9836,33 +9903,11 @@ async def main():
 
     def _restart():
         log_print("🔄 [系統] 收到 Web 控制台重啟指令，正在重新啟動 7L 系統...")
-        if pe.current_piano_process and pe.current_piano_process.poll() is None:
-            try:
-                pe.current_piano_process.terminate()
-            except Exception:
-                pass
-        if pe.SOUND_ENGINE:
-            try:
-                pe.SOUND_ENGINE.all_notes_off()
-            except Exception:
-                pass
-        import subprocess
-        try:
-            subprocess.Popen([sys.executable] + sys.argv)
-        except Exception as e:
-            log_print(f"⚠️ [重啟失敗] {e}")
-        os._exit(0)
+        shutdown_7l(restart=True)
 
     def _shutdown():
         log_print("👋 [系統] 收到 Web 控制台關機指令，正在安全退出 7L 系統...")
-        if pe.current_piano_process and pe.current_piano_process.poll() is None:
-            try:
-                pe.current_piano_process.terminate()
-            except Exception:
-                pass
-        if pe.SOUND_ENGINE:
-            pe.SOUND_ENGINE.all_notes_off()
-        os._exit(0)
+        shutdown_7l()
 
     async def _execute_tool_manually(tool_name: str, args: dict):
         log_print(f"🛠️ [老爸手動調用] 正在執行工具: {tool_name}，參數: {args}")
@@ -10242,12 +10287,24 @@ async def main():
             
             idx += 1
             await asyncio.sleep(0.1)
-    except KeyboardInterrupt:
-        print("\n👋 [系統] 收到 Ctrl+C 中斷，正在安全退出...")
-    except BaseException as e:
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        # asyncio.run 收到 Ctrl+C 是把 main 取消，這裡收到的是 CancelledError，不是 KeyboardInterrupt；
+        # 舊版被下面的 except BaseException 接走，正常中斷也印成「底層系統異常崩潰」＋traceback
+        print("\n👋 [系統] 收到 Ctrl+C 中斷，存好記憶後退出...")
+        shutdown_7l()
+    except Exception as e:
         import traceback
         print(f"\n❌ [底層系統異常崩潰]: {e}")
         traceback.print_exc()
+        try:
+            flush_unified_memory()
+        except Exception:
+            pass
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        # 啟動途中（狀態列迴圈之前）按 Ctrl+C 會走到這裡；記憶有載入才會存（flush 自帶保護）
+        print("\n👋 [系統] 收到 Ctrl+C，已退出。")
+        shutdown_7l()

@@ -58,6 +58,7 @@ class DualHotStandbyLiveManager:
         """報告金鑰連線失敗，將其加入冷卻並觸發雙軌熱備無縫切換"""
         now = time.time()
         self.cooldown_keys[failed_key] = now + 45.0
+        cool_key(failed_key, 45.0)  # 同步進全程式共用冷卻表，其他呼叫點也會避開
         if failed_key == self.primary_key:
             log_print(f"⚡ [Live 雙軌熱備] 主通道金鑰 (...{failed_key[-6:]}) 異常 ➔ 備用通道 (...{self.standby_key[-6:]}) 立即無縫接管升為主通道！")
             self.primary_key = self.standby_key
@@ -74,19 +75,54 @@ class DualHotStandbyLiveManager:
         """尋找下一把未冷卻且健康的可用金鑰"""
         now = time.time()
         for k in self.key_pool + GEMINI_KEYS:
-            if k not in exclude and self.cooldown_keys.get(k, 0) < now:
+            if k not in exclude and self.cooldown_keys.get(k, 0) < now and not key_cooling_any(k):
                 return k
         for k in self.key_pool + GEMINI_KEYS:
             if k not in exclude:
                 return k
         return self.primary_key
 
+# ── 全程式共用的金鑰冷卻表（2026-10-22）──
+# 以前 429 只有 fetch_ai_response 會封印通道，其他 11 個 Gemini 呼叫點拿候選 key 時看不到，
+# 被限流的 key 會被一直重打。現在所有呼叫點遇到限流都寫進這裡，候選池據此排序。
+# 鍵：(key, model)；model 為 "" 代表整把 key 冷卻。
+_KEY_COOLDOWN: Dict[Tuple[str, str], float] = {}
+
+
+def cool_key(key: str, seconds: float, model: str = "") -> None:
+    """把 (key, model) 冷卻 seconds 秒；已有更長的冷卻就保留較長的。"""
+    if not key:
+        return
+    k = (key, model or "")
+    _KEY_COOLDOWN[k] = max(_KEY_COOLDOWN.get(k, 0.0), time.time() + max(0.0, float(seconds)))
+
+
+def key_cooling(key: str, model: str = "") -> bool:
+    """這把 key（整把，或指定 model）是否冷卻中。過期的順手清掉。"""
+    now = time.time()
+    for k in {(key, ""), (key, model or "")}:
+        until = _KEY_COOLDOWN.get(k)
+        if until is None:
+            continue
+        if until > now:
+            return True
+        _KEY_COOLDOWN.pop(k, None)
+    return False
+
+
+def key_cooling_any(key: str) -> bool:
+    """這把 key 在任何模型上冷卻中（候選池排序用：曾被限流的 key 往後排）。"""
+    now = time.time()
+    return any(until > now for (k, _m), until in list(_KEY_COOLDOWN.items()) if k == key)
+
+
 def get_dynamic_live_key_candidates(preferred_pool: List[str]) -> List[str]:
     """
     🔄 動態 Live API 金鑰故障轉移候選池
-    
+
     🎯 目的：
        優先使用該通道專用金鑰，遇到 429/網路中斷時，自動跨池調用全量空閒金鑰繼續維持 Live 雙工對話。
+       冷卻中的 key 排到最後（只排序不剔除：全部冷卻時照樣有 key 可試，不餓死）。
     """
     candidates = []
     seen = set()
@@ -98,6 +134,7 @@ def get_dynamic_live_key_candidates(preferred_pool: List[str]) -> List[str]:
         if k and k not in seen:
             candidates.append(k)
             seen.add(k)
+    candidates.sort(key=key_cooling_any)  # 穩定排序：健康的保持原順序在前
     return candidates
 
 DEAD_GEMINI_MODELS = set()

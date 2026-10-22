@@ -83,6 +83,7 @@ def _load(fx):
         "types": fake_types,
         "log_print": logs.append,
         "get_dynamic_live_key_candidates": lambda keys: list(keys),
+        "report_gemini_key_error": lambda *a, **k: False,
         "KEYS_AUDIENCE_LIVE": [],
         "GEMINI_KEYS": ["K1", "K2", "K3"],
         "_DIRECTOR_STATE": {"session": None, "cm": None, "key_idx": 0},

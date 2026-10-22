@@ -6,6 +6,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 import time
 import asyncio
+import threading
 from collections import deque
 from typing import List, Dict, Any, Optional
 
@@ -342,8 +343,31 @@ def record_bot_message(msg: str):
         if len(RECENT_BOT_MESSAGES) > 30:
             RECENT_BOT_MESSAGES.pop(0)
 
-def _save_unified_memory_to_disk():
-    """安全將最新對話記憶、心流思緒與全域記憶時間線序列化保存至本地磁碟並同步備份至雲端 Firestore"""
+_SAVE_LOCK = threading.Lock()  # 存檔可能同時從 loop 執行緒和執行緒池進來，同一個 .tmp 不能兩邊一起寫
+
+
+def _schedule_on_loop(coro, loop=None) -> None:
+    """把協程排到 event loop 上。存檔常在執行緒池裡跑，那裡沒有 running loop，
+    舊版直接 get_running_loop() 必定 RuntimeError 被吞掉，雲端備份從沒送出過。"""
+    try:
+        asyncio.get_running_loop().create_task(coro)
+        return
+    except RuntimeError:
+        pass
+    if loop is not None and loop.is_running() and not loop.is_closed():
+        asyncio.run_coroutine_threadsafe(coro, loop)
+    else:
+        coro.close()
+
+
+def _save_unified_memory_to_disk(loop=None, cloud: bool = True):
+    """安全將最新對話記憶、心流思緒與全域記憶時間線序列化保存至本地磁碟並同步備份至雲端 Firestore。
+    loop：從執行緒池呼叫時傳入主 event loop，雲端同步才排得回去。"""
+    with _SAVE_LOCK:
+        _save_unified_memory_to_disk_locked(loop, cloud)
+
+
+def _save_unified_memory_to_disk_locked(loop, cloud):
     global UNIFIED_LIVE_MEMORY, UNIFIED_DIALOGUE_MEMORY, UNIFIED_THOUGHT_MEMORY
     try:
         # 1. 儲存對話專屬記憶（保留最近 500 句，永不被心流稀釋）
@@ -378,7 +402,7 @@ def _save_unified_memory_to_disk():
                 os.rename(temp_file, UNIFIED_MEMORY_FILE)
                 
         # ☁️ 同步備份最新全集中全景時序記憶至雲端 Firestore
-        if db_module.db is not None:
+        if cloud and db_module.db is not None:
             async def sync_unified_to_cloud(items, dialogues):
                 try:
                     await db_module.db.collection("unified_memory").document("live_stream_timeline").set({
@@ -388,13 +412,63 @@ def _save_unified_memory_to_disk():
                     }, merge=True)
                 except Exception:
                     pass
-            try:
-                loop = asyncio.get_running_loop()
-                loop.create_task(sync_unified_to_cloud(data_to_save, list(UNIFIED_DIALOGUE_MEMORY)))
-            except RuntimeError:
-                pass
-    except Exception:
-        pass
+            _schedule_on_loop(sync_unified_to_cloud(data_to_save, list(UNIFIED_DIALOGUE_MEMORY)), loop)
+    except Exception as e:
+        log_print(f"⚠️ [記憶存檔失敗]: {e}")
+
+_SAVE_INTERVAL = 2.0
+_TRAILING_SAVE_HANDLE = None
+_MEMORY_LOADED = False  # init_unified_memory 載入完才 True；之前 flush 會用空記憶蓋掉磁碟檔
+
+
+def _kick_save_now() -> None:
+    """立刻存一次：有 event loop 就丟執行緒池（帶上 loop 讓雲端同步排得回來），沒有就同步存。"""
+    global _LAST_UNIFIED_SAVE_TIME
+    _LAST_UNIFIED_SAVE_TIME = time.time()
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        _save_unified_memory_to_disk()
+        return
+    loop.run_in_executor(None, _save_unified_memory_to_disk, loop)
+
+
+def _request_unified_save(now_t: float) -> None:
+    """節流存檔：距上次超過 2 秒就立刻存；否則排一次「窗口結束補存」。
+    舊版只存窗口開頭那筆，2 秒內的後續對話要等下一次有人說話才落地，關機前那幾句常常丟掉。"""
+    global _TRAILING_SAVE_HANDLE
+    if now_t - _LAST_UNIFIED_SAVE_TIME > _SAVE_INTERVAL:
+        _kick_save_now()
+        return
+    if _TRAILING_SAVE_HANDLE is not None:
+        return  # 已排了補存，這筆會一起存到
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return  # 沒有 loop 的同步呼叫維持舊行為；關機路徑另有 flush_unified_memory()
+
+    def _fire():
+        global _TRAILING_SAVE_HANDLE
+        _TRAILING_SAVE_HANDLE = None
+        _kick_save_now()
+
+    delay = max(0.05, _SAVE_INTERVAL - (now_t - _LAST_UNIFIED_SAVE_TIME))
+    _TRAILING_SAVE_HANDLE = loop.call_later(delay, _fire)
+
+
+def flush_unified_memory() -> None:
+    """關機／重開前呼叫：取消排程中的補存，同步把記憶寫進磁碟（雲端來不及等，略過）。"""
+    global _TRAILING_SAVE_HANDLE
+    if _TRAILING_SAVE_HANDLE is not None:
+        try:
+            _TRAILING_SAVE_HANDLE.cancel()
+        except Exception:
+            pass
+        _TRAILING_SAVE_HANDLE = None
+    if not _MEMORY_LOADED:
+        return  # 還沒從磁碟載入（啟動到一半就關），存了反而把舊記憶蓋成空的
+    _save_unified_memory_to_disk(cloud=False)
+
 
 def append_to_unified_memory(speaker: str, target: str, content: str, role: str = "user", source: str = "text"):
     """🌟 全集中全景記憶中樞雙軌寫入常式：
@@ -451,14 +525,8 @@ def append_to_unified_memory(speaker: str, target: str, content: str, role: str 
 
     UNIFIED_LIVE_MEMORY.append(entry)
 
-    # 磁碟寫入節流（每隔 2 秒或必要時儲存）
-    if now_t - _LAST_UNIFIED_SAVE_TIME > 2.0:
-        _LAST_UNIFIED_SAVE_TIME = now_t
-        try:
-            loop = asyncio.get_running_loop()
-            loop.run_in_executor(None, _save_unified_memory_to_disk)
-        except RuntimeError:
-            _save_unified_memory_to_disk()
+    # 磁碟寫入節流（每隔 2 秒；窗口內的後續寫入會在窗口結束時補存）
+    _request_unified_save(now_t)
 
     # RAG: 若為老爸對話或 AI 回應，加入向量記憶庫
     if role in ["user", "ai"] and source in ["text", "voice"]:
@@ -577,6 +645,8 @@ def init_unified_memory():
         UNIFIED_LIVE_MEMORY.extend(combined_all)
 
     _save_unified_memory_to_disk()
+    global _MEMORY_LOADED
+    _MEMORY_LOADED = True
     cap_str = f"上限 {DIALOGUE_MEMORY_CAPACITY} 句" if DIALOGUE_MEMORY_CAPACITY > 0 else "⚡ 無上限"
     log_print(f"📜 [全集中記憶] 雙軌獨立載入成功：💬 對話記憶 {len(UNIFIED_DIALOGUE_MEMORY)} 句（{cap_str}），💭 心流思緒 {len(UNIFIED_THOUGHT_MEMORY)} 筆！")
 
