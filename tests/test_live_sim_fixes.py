@@ -270,3 +270,59 @@ def test_segment_check_rejects_unfinished_audio():
     assert not lx._segment_ok(stuck, sr, 9)                                   # 念兩個字就停、後面全空白
     holed = np.concatenate([tone[: sr], np.zeros(sr * 4, np.int16), tone[: sr]])
     assert not lx._segment_ok(holed, sr, 9)                                   # 中間 4 秒空白
+
+
+def test_sampling_top_p_is_not_nucleus_truncated():
+    """top_p<1 時停頓處只剩靜音可選，念一半就停的根本原因（2026-10-25 對照實驗）。"""
+    import local_xiaoyi_service as lx
+    assert lx._TOP_P == 1.0
+    src = open(os.path.join(ROOT, "local_xiaoyi_service.py"), encoding="utf-8").read()
+    assert "top_p = 0.8" not in src and "top_p = 0.75" not in src
+    assert src.count("top_p = _TOP_P") == 2          # 中文、日文兩條都改
+
+
+def test_generation_cap_follows_segment_length():
+    import local_xiaoyi_service as lx
+    assert lx._segment_max_sec(3) == 8                 # 短句至少 8 秒
+    assert lx._segment_max_sec(22) == 14               # 22 字：約 4.8 秒的 3 倍
+    src = open(os.path.join(ROOT, "local_xiaoyi_service.py"), encoding="utf-8").read()
+    assert "_tts_pipeline.configs.max_sec = _orig_max_sec" in src   # 用完一定還原
+
+
+def test_comma_only_long_sentence_is_split_too():
+    import local_xiaoyi_service as lx
+    t = "一邊玩Minecraft，一邊跑程式，旁邊還開着鋼琴影片跟自動點擊器，這是要多工初理到極限嗎？"
+    segs = lx._split_for_tts(t, 22)
+    assert "".join(segs) == t and all(len(s) <= 22 for s in segs) and len(segs) >= 2
+
+
+def test_whole_sentence_first_then_segments_as_fallback(monkeypatch):
+    """先整句（快、自然）；整句不合格才切段重來。短句不切段，整句重抽。"""
+    import numpy as np
+    import local_xiaoyi_service as lx
+    sr = 32000
+    good = (np.sign(np.sin(np.arange(sr * 3) * 0.05)) * 8000).astype(np.int16)
+    stuck = np.concatenate([good[: int(sr * 0.4)], np.zeros(sr * 20, np.int16)])
+    calls = []
+
+    class FakePipe:
+        configs = pytypes.SimpleNamespace(max_sec=54)
+
+        def run(self, inputs):
+            calls.append((inputs["text"], self.configs.max_sec))
+            whole = inputs["text"].startswith("路人甲你問得好。關於")
+            yield sr, (stuck if whole else good)
+
+    monkeypatch.setattr(lx, "_tts_pipeline", FakePipe())
+    monkeypatch.setattr(lx, "_REF_ZH", "ref.wav")
+    long_text = "路人甲你問得好。關於今天要玩什麼遊戲，這就要問老爸喔。老爸，你有什麼好玩的計劃嗎？"
+    assert lx.synthesize_xiaoyi_bytes(long_text)
+    texts = [c[0] for c in calls]
+    import unicodedata
+    assert texts[0] == unicodedata.normalize("NFKC", long_text)   # 合成前會轉半形標點
+    assert len(texts) == 4                                     # 整句 1 次 → 切 3 段各 1 次就好
+    assert all(c[1] < 54 for c in calls)                       # 生成上限跟著字數縮短
+    assert FakePipe.configs.max_sec == 54                      # 用完還原
+    calls.clear()
+    assert lx.synthesize_xiaoyi_bytes("收到。沒問題。")
+    assert [c[0] for c in calls] == ["收到。沒問題。"]           # 短句整句一次就過

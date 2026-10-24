@@ -166,16 +166,30 @@ _REF_ZH = None   # 實際用的中文參考音（停頓壓短版，見 _tight_re
 _REF_JA = None   # 日文同理：實測失敗率 4/12 → 1/12
 
 
-_SEGMENT_CHARS = int(os.getenv("XIAOYI_SEGMENT_CHARS", "22"))   # 0 = 不切段，整句合成
+# top_p 必須是 1.0（不做核心取樣）：0.8 時念到停頓處，「靜音」單位的機率就佔滿那 80%，候選裡只剩靜音，
+# 「結束」和「繼續說話」都被排除，於是空白一路生成到長度上限＝念一半就停。這是 TTS 失敗的根本原因：
+# 2026-10-25 實測一次只改一個參數，top_p 0.8→1.0 失敗 15%→0/16；只升溫度 12%、只降 top_k 反而 38%。
+_TOP_P = float(os.getenv("XIAOYI_TOP_P", "1.0"))
+_SEGMENT_CHARS = int(os.getenv("XIAOYI_SEGMENT_CHARS", "22"))   # 整句不合格時的備援切段長度；0 = 不切段
 _SEGMENT_TRIES = 3
 
 
 def _split_for_tts(text: str, limit: int = None) -> list:
-    """長句在句末標點（。！？）切成短段，太短的段併回前一段；不超過 limit 字就不切。"""
+    """長句在句末標點（。！？）切成短段，單句還太長就再從逗號切；太短的段併回前一段。不超過 limit 字就不切。
+
+    為什麼是 22 字：曉伊的 GPT 微調資料 179 段最長 7.9 秒、28 字（中位數 14 字）。超過這長度的句子
+    模型沒看過，常念完第一句就停住、後面全是空白到長度上限（2026-10-25 實測長句整句合成約 1/3 失敗）。"""
     limit = _SEGMENT_CHARS if limit is None else limit
     if limit <= 0 or len(text) <= limit:
         return [text]
-    parts = [p for p in re.split(r"(?<=[。！？!?])", text) if p.strip()]
+    parts = []
+    for p in re.split(r"(?<=[。！？!?])", text):
+        if not p.strip():
+            continue
+        if len(p) <= limit:
+            parts.append(p)
+        else:
+            parts += [q for q in re.split(r"(?<=[，、；,;])", p) if q.strip()]
     out = []
     for p in parts:
         if out and len(out[-1]) + len(p) <= limit:
@@ -183,6 +197,41 @@ def _split_for_tts(text: str, limit: int = None) -> list:
         else:
             out.append(p)
     return out or [text]
+
+
+def _synth_segments(inputs: dict, segs: list, tries: int):
+    """逐段合成，每段最多 tries 次（不合格才重抽）。回 (取樣率, 各段音訊, 是否每段都合格)。
+    每段不合格到最後就用第一次的結果，交給整句檢查（tts_router）再把關。呼叫端要持有 _thread_lock。"""
+    sr = None
+    pieces = []
+    all_ok = True
+    for seg in segs:
+        seg_inputs = dict(inputs, text=seg)
+        first = None
+        seg_ok = False
+        # 生成長度上限跟著字數走：卡在靜音循環時早點停（模型預設 54 秒／1500 步，卡一次白等 10~20 秒）
+        _tts_pipeline.configs.max_sec = _segment_max_sec(len(seg))
+        for _attempt in range(tries):
+            with capture_tts_output():
+                chunks = list(_tts_pipeline.run(seg_inputs))
+            if not chunks:
+                continue
+            sr = chunks[0][0]
+            seg_audio = chunks[0][1] if len(chunks) == 1 else np.concatenate([c for _, c in chunks])
+            if _segment_ok(seg_audio, sr, len(seg)):
+                first, seg_ok = seg_audio, True
+                break
+            if first is None:
+                first = seg_audio
+        all_ok = all_ok and seg_ok
+        if first is not None:
+            pieces.append(first)
+    return sr, pieces, all_ok
+
+
+def _segment_max_sec(n_chars: int) -> int:
+    """這段最多讓模型生成幾秒：預期長度的 3 倍、至少 8 秒。正常念完遠低於此，卡在靜音循環才會撞到。"""
+    return int(max(8.0, n_chars * 0.22 * 3))
 
 
 def _segment_ok(audio, sr: int, n_chars: int) -> bool:
@@ -319,7 +368,7 @@ def synthesize_xiaoyi_bytes(text: str) -> bytes:
                 ref_lang = "all_ja"
                 text_lang = "ja" if num_hanzi == 0 else "auto"
                 top_k = 15
-                top_p = 0.75
+                top_p = _TOP_P
                 temp = 0.65
                 speed = 1.0
             else:
@@ -331,7 +380,7 @@ def synthesize_xiaoyi_bytes(text: str) -> bytes:
                 has_english = bool(re.search(r'[a-zA-Z]', text))
                 text_lang = "zh" if (num_kana == 0 and not has_english) else "auto"
                 top_k = 15
-                top_p = 0.80
+                top_p = _TOP_P
                 temp = 0.80
                 speed = 1.05
             
@@ -370,27 +419,23 @@ def synthesize_xiaoyi_bytes(text: str) -> bytes:
             except Exception:
                 pass
 
-            # 長句切段逐段合成：三、四十字的多子句長句整句合成約 1/3 會念一半停住，
-            # 切成 ≤22 字的短段後 24/24 成功、也比較快（2026-10-25 實測）。每段自己檢查、壞了只重抽那段。
+            # 先整句合成（快、語氣自然）；不合格才把長句切段、每段自己檢查重抽（備援）。
+            # top_p 改 1.0 後整句 0/120 失敗、平均 2.6 秒；分段版一樣 0 失敗但平均 3.0、最慢 11.8 秒（2026-10-25）
+            plans = [[text]]
+            if _SEGMENT_CHARS > 0 and len(text) > _SEGMENT_CHARS:
+                plans.append(_split_for_tts(text))
             sr = None
             pieces = []
-            for seg in _split_for_tts(text):
-                seg_inputs = dict(inputs, text=seg)
-                first = None
-                for _attempt in range(_SEGMENT_TRIES):
-                    with capture_tts_output():
-                        chunks = list(_tts_pipeline.run(seg_inputs))
-                    if not chunks:
-                        continue
-                    sr = chunks[0][0]
-                    seg_audio = chunks[0][1] if len(chunks) == 1 else np.concatenate([c for _, c in chunks])
-                    if _segment_ok(seg_audio, sr, len(seg)):
-                        first = seg_audio
+            _orig_max_sec = _tts_pipeline.configs.max_sec
+            try:
+                for plan_idx, segs in enumerate(plans):
+                    tries = 1 if plan_idx < len(plans) - 1 else _SEGMENT_TRIES   # 還有備援就只試一次整句
+                    sr, pieces, all_ok = _synth_segments(inputs, segs, tries)
+                    if all_ok:
                         break
-                    if first is None:
-                        first = seg_audio  # 都不合格就用第一次的，整句檢查（tts_router）會再把關
-                if first is not None:
-                    pieces.append(first)
+                    print(f"⚠️ [GPT-SoVITS] 合成不完整，{'改切段重來' if plan_idx < len(plans) - 1 else '重抽後仍不合格'}：{text[:20]}")
+            finally:
+                _tts_pipeline.configs.max_sec = _orig_max_sec
             if not pieces:
                 try:
                     import services.web_dashboard as web_dash

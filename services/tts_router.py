@@ -565,8 +565,8 @@ def _audio_profile_full(data: bytes):
 # 同文＋同引擎＋同語速命中約 50ms（測過：3.01s → 0.05s）。SoVITS 有採樣隨機性，
 # 快取等於把同一句的講法固定下來——對主播人設是加分（口頭禪每次同一個味道）。
 # 換聲線模型時 bump TTS_CACHE_VERSION，否則舊音色殘留。
-TTS_CACHE_VERSION = "v3"  # v1 混入過中段靜音毒檔＋錯標格式，2026-10-11 全面換血；
-# v3（2026-10-25）：參考音換成停頓壓短版，舊檔裡也有「念一兩字就停」的尾巴靜音檔漏網
+TTS_CACHE_VERSION = "v4"  # v1 混入過中段靜音毒檔＋錯標格式，2026-10-11 全面換血；
+# v3（2026-10-25）：參考音換成停頓壓短版，舊檔裡也有「念一兩字就停」的尾巴靜音檔漏網；v4：top_p 0.8→1.0（失敗的根本原因），語氣跟著變
 TTS_CACHE_DIR = os.getenv("TTS_CACHE_DIR") or os.path.join(BASE_DIR, "data", "tts_cache")
 TTS_CACHE_MAX_FILES = int(os.getenv("TTS_CACHE_MAX_FILES") or "500")
 TTS_CACHE_MAX_BYTES = int(os.getenv("TTS_CACHE_MAX_BYTES") or str(300 * 1024 * 1024))
