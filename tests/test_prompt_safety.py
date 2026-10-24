@@ -114,3 +114,40 @@ def test_prompts_teach_silence_not_pass():
     for f in ("7L_audience.md",):
         assert "[PASS]" not in open(os.path.join(ROOT, "prompts", f), encoding="utf-8").read()
     assert "可輸出 [PASS] 略過" not in MAIN_SRC
+
+
+# ── 2026-10-24：google_search 拿掉、看板大腦新版 prompt ──
+def _build_decls():
+    from google.genai import types
+    tree = ast.parse(MAIN_SRC)
+    it = next(n for n in tree.body if isinstance(n, ast.Assign) and getattr(n.targets[0], "id", "") == "INTERACTIONS_TOOLS")
+    ns = {"INTERACTIONS_TOOLS": ast.literal_eval(it.value), "types": types, "log_swallowed": lambda *a, **k: None}
+    fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "build_genai_declarations")
+    exec(compile(ast.Module(body=[fn], type_ignores=[]), "x", "exec"), ns)
+    return ns["build_genai_declarations"]
+
+
+def test_proactive_tools_have_no_google_search():
+    """帳號沒有 Google 搜尋額度：帶著它的 Gemini 呼叫每次都 429，還會把金鑰冷卻到午夜。"""
+    for proactive in (True, False):
+        tools = _build_decls()(is_proactive=proactive)
+        assert all(not getattr(t, "google_search", None) for t in tools)
+        names = [d.name for t in tools for d in (t.function_declarations or [])]
+        assert "search_google" in names          # 搜尋改走函式工具
+    assert "google_search=types.GoogleSearch()" not in MAIN_SRC
+
+
+def _streamer_prompt_text():
+    tree = ast.parse(MAIN_SRC)
+    fn = next(x for x in ast.walk(tree) if isinstance(x, ast.AsyncFunctionDef) and x.name == "streamer_mind_loop_worker")
+    return "".join(ast.get_source_segment(MAIN_SRC, n) or "" for n in ast.walk(fn) if isinstance(n, ast.Assign)
+                   and isinstance(n.targets[0], ast.Name) and n.targets[0].id in ("role_strict_block", "sys_instruction", "prompt_user_input"))
+
+
+def test_streamer_prompt_v2_shape():
+    t = _streamer_prompt_text()
+    assert "極重要" not in t and "100%" not in t                  # 強調詞拿掉
+    assert t.count("【要老爸決定的事】") == 1                        # 推給老爸合成一條
+    assert "不用事事問老爸" in t                                     # 寫明聊天自己回
+    assert "不要自己呼叫工具" in t                                   # 點歌由背景副腦處理
+    assert t.count("！") <= 5
