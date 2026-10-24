@@ -2,8 +2,9 @@
 """子智能體用腦路由（純函式、零依賴、可單元測試）。
 
 背景：子智能體以前只會用 NV（Nemotron）。2026-10-09 起 Gemini 也能上桌：
-NV 保留給真正要動腦的深度思考，Gemini 吃掉走量的工具判定——兩邊額度疊起來大很多。
-    SUBAGENT_BRAIN=auto   （預設）Gemini 工具判定 → NV 深度思考
+兩邊額度疊起來大很多。NV 的推理模型深度思考要 60 秒，即時對話等不起，所以 auto 兩棒都 Gemini 先、
+NV 只在 Gemini 報錯時接手（2026-10-24 改；之前深度思考是 NV 先）。
+    SUBAGENT_BRAIN=auto   （預設）Gemini → NV 備援
     SUBAGENT_BRAIN=nv     舊行為：NV 工具判定 → NV 深度思考（不用 Gemini 一滴）
     SUBAGENT_BRAIN=gemini 全走 Gemini（不用 NV 一滴，NV 額度全留）
 """

@@ -435,8 +435,43 @@ def build_slip_text(fn_name: str, fn_args: Dict, requester_name: str,
         return (f"[系統底層：收到表情請求，{done}。"
                 f"【做表情的是妳 7L 本人】請妳口頭答應一聲即可，"
                 f"絕對不要重複下達表情指令（重複會把剛開的表情關掉）。]")
+    # 不寫原始工具名和參數字典（主腦可能照念出 pe.play_virtual_piano {'song_name': …}），改寫中文
+    label = _TOOL_LABELS.get(fn_name, "處理交代的事")
+    detail = "、".join(str(v).strip() for v in args.values()
+                      if isinstance(v, (str, int, float)) and not isinstance(v, bool) and str(v).strip())[:60]
+    detail = f"（{detail}）" if detail else ""
     if who:
-        return (f"[系統底層：已成功幫{who}{via}執行了 {fn_name} 指令，參數：{args}。"
+        return (f"[系統底層：已成功{via}幫{who}{label}{detail}。"
                 f"請妳現在只需要負責口頭答應、順著話題接話即可，程式指令已在背景執行。]")
-    return (f"[系統底層：已{via}執行了 {fn_name} 指令，參數：{args}。"
+    return (f"[系統底層：已{via}{label}{detail}。"
             f"請妳現在只需要負責口頭答應、順著話題接話即可，程式指令已在背景執行。]")
+
+
+_TOOL_LABELS = {
+    "search_google": "上網搜尋",
+    "search_knowledge": "查知識庫",
+    "set_timer": "設定計時提醒",
+    "generate_ai_image": "畫圖",
+    "move_spatial_position": "移動位置",
+    "open_virtual_piano": "打開鋼琴",
+    "pe.play_midi_band": "樂團演奏",
+    "pe.compose_and_play_original_piano": "即興作曲彈奏",
+    "video.request_watch": "看影片",
+    "music.generate_song": "生成歌曲",
+    "midi.inspect": "查看樂譜",
+    "midi.edit": "修改樂譜",
+    "music.transcribe_song": "扒譜",
+    "music.stem_pack": "分離音軌",
+    "pe.mashup_virtual_piano": "鋼琴串燒",
+    "pe.insert_virtual_piano": "插播鋼琴曲",
+    "pe.pause_virtual_piano": "暫停鋼琴",
+    "pe.resume_virtual_piano": "繼續彈鋼琴",
+    "pe.stop_virtual_piano": "停止鋼琴",
+    "list_piano_sheets": "列出鋼琴曲目",
+    "set_piano_volume": "調整鋼琴音量",
+    "set_piano_speed": "調整鋼琴速度",
+    "set_piano_instrument": "換鋼琴音色",
+    "control_microphone": "控制麥克風",
+    "clear_all_memories": "清除記憶",
+    "update_cloud_knowledge": "更新雲端知識",
+}

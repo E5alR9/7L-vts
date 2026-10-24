@@ -740,9 +740,13 @@ def get_available_gemini_channels(limit=1, user_query="", has_image=False, is_pr
 LIVE_API_TOOLS = [
     types.Tool(
         function_declarations=[
+            # 非阻塞：主腦不用等子智能體跑完才說話（阻塞版實機查匯率靜默 17 秒、想點子 33 秒，2026-10-24）。
+            # 實測她呼叫時幾乎不開口，改由 _handle_invoke_subagent 先回中間回應請她答應。
+            # 描述不叫她「先答應」：那樣她更常只嘴上說「停下囉」卻沒呼叫（停止彈琴 0/3）
             types.FunctionDeclaration(
                 name="invoke_subagent",
-                description="當老爸明確要求進行操作（例如點歌、唱歌、彈琴、查資料）時，呼叫此工具。將任務交給背景的子智能體處理。注意：若只是純聊天，請不要呼叫此工具！",
+                behavior=types.Behavior.NON_BLOCKING,
+                description="當老爸明確要求進行操作（例如點歌、唱歌、彈琴、停止或暫停鋼琴、計時、查資料）時，呼叫此工具。將任務交給背景的子智能體處理。只有呼叫才會真的執行，光說「好了」不算；結果回來系統會告訴妳。注意：若只是純聊天，請不要呼叫此工具！",
                 parameters=types.Schema(
                     type="OBJECT",
                     properties={
@@ -5719,11 +5723,32 @@ async def continuous_live_worker(vts):
                     user_transcription_buffer = ""
 
                     async def _handle_invoke_subagent(_fn_name, _fn_call_id, _task_ins):
-                        """單個子智能體任務全流程（CPU→NV→回報），獨立背景執行、互不堵塞。
-                        主腦一次開多通就同時跑多個（NV 內建 20s/30s 超時，不設上限）。"""
+                        """單個子智能體任務全流程（CPU→副腦→回報），獨立背景執行、互不堵塞。
+                        invoke_subagent 是非阻塞工具。實測主腦呼叫時幾乎都不開口（2026-10-24），所以：
+                        CPU 硬指令命中（不到 1 秒）→ 一則回應請她答應；
+                        要等副腦（幾秒到半分鐘）→ 先回中間回應（will_continue）讓她答應，結果回來再補。
+                        要她開口的用 WHEN_IDLE（等她講完手上這句）；做完記著就好的用 SILENT，免得講兩次。
+                        她已經自己答應過的話，請她輸出 [SILENCE]。"""
+                        _speak = types.FunctionResponseScheduling.WHEN_IDLE
+                        _quiet = types.FunctionResponseScheduling.SILENT
+                        _no_result = ("請妳自己直接回答剛才的問題；需要即時資料的（匯率、天氣、新聞之類）"
+                                      "就老實說這次沒查到，不要自己編數字。]")
+                        _if_said = "（妳剛才如果已經答應過，就輸出 [SILENCE]，不要再講一次。）"
+
+                        async def _respond(_text, _sched, _more=False):
+                            _fr = {"name": _fn_name, "response": {"result": _text}, "scheduling": _sched}
+                            if _more:
+                                _fr["will_continue"] = True
+                            if _fn_call_id:
+                                _fr["id"] = _fn_call_id
+                            try:
+                                async with ws_send_lock:
+                                    await session.send_tool_response(function_responses=[types.FunctionResponse(**_fr)])
+                            except Exception as _se:
+                                log_print(f"⚠️ [子智能體回報失敗]: {_se}")
+
                         try:
                             if _task_ins:
-                                # 等 CPU 拆解回執再回話：命中才說啟動，沒命中就讓主腦直接回
                                 # ⚠️ requester 傳空字串：task_ins 是主腦自己寫的指令，
                                 # 點歌人不一定是老爸（可能是轉述觀眾點的），紙條走中性文案
                                 try:
@@ -5731,31 +5756,38 @@ async def continuous_live_worker(vts):
                                 except Exception as _be:
                                     log_print(f"⚠️ [子智能體執行異常]: {_be}")
                                     _hit, _tname, _targs = False, "", {}
-                                if _hit:
-                                    _result_text = f"子智能體已在背景啟動（{_tname} {_targs}），請妳立刻用口語回應，告訴對方妳正在準備了。"
+                                if _hit and _tname == "mixed_play_sing":
+                                    _result_text = (f"[系統底層：《{_targs.get('desc', '')}》已在背景排程，彈琴和唱歌的都是妳 7L 本人。"
+                                                    f"請妳口頭答應一聲。]" + _if_said)
+                                    _sched = _speak
+                                elif _hit:
+                                    _result_text, _sched = build_slip_text(_tname, _targs, "", via="") + _if_said, _speak
                                 else:
-                                    # CPU 沒命中 → NV 解讀（A 鏈第二棒）
+                                    await _respond("[系統底層：子智能體開始處理了，要幾秒到半分鐘。請妳先用一句短話答應對方"
+                                                   "（例如「好，我去查！」），不要猜結果；結果回來會再告訴妳。]" + _if_said,
+                                                   _speak, _more=True)
+                                    # CPU 沒命中 → 副腦解讀（工具判定＋深度思考），整段限時，免得主腦答應後一直等不到結果
                                     try:
-                                        _k2, _t2 = await nv_interpret_task(_task_ins, target="dad", requester_name="")
-                                        if _k2 in ("tool", "advice"):
-                                            _result_text = _t2
-                                        else:
-                                            _result_text = "該任務無需後台執行，請妳直接用口語回覆即可。"
+                                        _k2, _t2 = await asyncio.wait_for(
+                                            nv_interpret_task(_task_ins, target="dad", requester_name=""),
+                                            timeout=_SUBAGENT_TOTAL_TIMEOUT)
+                                    except asyncio.TimeoutError:
+                                        log_print(f"⚠️ [子智能體] 超過 {_SUBAGENT_TOTAL_TIMEOUT:.0f} 秒沒結果，放棄：{_task_ins[:40]}")
+                                        _k2, _t2 = "timeout", ""
                                     except Exception as _be2:
-                                        log_print(f"⚠️ [NV 解讀異常]: {_be2}")
-                                        _result_text = "後台執行異常，請妳直接用口語回覆即可。"
+                                        log_print(f"⚠️ [子智能體解讀異常]: {_be2}")
+                                        _k2, _t2 = "miss", ""
+                                    if _k2 == "tool":
+                                        _result_text, _sched = _t2, _quiet
+                                    elif _k2 in ("report", "advice"):
+                                        _result_text, _sched = _t2, _speak
+                                    elif _k2 == "timeout":
+                                        _result_text, _sched = "[系統底層：子智能體處理太久，這次放棄了。" + _no_result, _speak
+                                    else:
+                                        _result_text, _sched = "[系統底層：子智能體這次沒有結果。" + _no_result, _speak
                             else:
-                                _result_text = "任務指示為空，請妳直接用口語回覆即可。"
-                            _fr = {"name": _fn_name, "response": {"result": _result_text}}
-                            if _fn_call_id:
-                                _fr["id"] = _fn_call_id
-                            try:
-                                async with ws_send_lock:
-                                    await session.send_tool_response(
-                                        function_responses=[types.FunctionResponse(**_fr)]
-                                    )
-                            except Exception as _se:
-                                log_print(f"⚠️ [子智能體回報失敗]: {_se}")
+                                _result_text, _sched = "任務指示是空的，沒有執行任何事。", _quiet
+                            await _respond(_result_text, _sched)
                         except Exception as _e:
                             log_print(f"⚠️ [子智能體任務異常]: {_e}")
 
@@ -8140,26 +8172,71 @@ CURRENT_PROCESSING_USER_INPUT = ""
 
 def _extract_think_reply(text: str):
     """把副腦思考輸出拆成 (思考過程, 最終結論)。
-    認 [THINK]...[/THINK] + [REPLY]...[/REPLY]；沒標籤就整段當結論（向後相容）。"""
+    認 [THINK]...[/THINK] + [REPLY]...[/REPLY]；沒標籤就整段當結論（向後相容）。
+    沒寫 [REPLY] 標籤時，結論是 [/THINK] 後面那段；後面沒東西就當沒結論。
+    舊碼拿思考過程當結論，主腦收到的是「分析意圖：…」而不是答案（2026-10-24 實機）。"""
     import re
     t = text or ""
-    m_think = re.search(r'\[THINK\](.*?)\[/THINK\]', t, re.S | re.I)
-    m_reply = re.search(r'\[REPLY\](.*?)\[/REPLY\]', t, re.S | re.I)
+    m_think = re.search(r'\[THINK\](.*?)(?:\[/THINK\]|$)', t, re.S | re.I)
+    m_reply = re.search(r'\[REPLY\](.*?)(?:\[/REPLY\]|$)', t, re.S | re.I)
     think = m_think.group(1).strip() if m_think else ""
     if m_reply:
-        reply = m_reply.group(1).strip()
-    elif think:
-        # 只有思考沒結論：拿思考當結論（總比靜默好），標籤不外洩
-        reply = think
+        reply = m_reply.group(1)
+    elif m_think:
+        _end = re.search(r'\[/THINK\]', t, re.I)
+        reply = t[_end.end():] if _end else ""
     else:
-        reply = t.strip()
+        reply = t
+    reply = re.sub(r'\[/?(?:THINK|REPLY)\]', '', reply, flags=re.I).strip()
     return think, reply
 
 
 _SUBAGENT_GEMINI_TOOL_TIMEOUT = 12.0
 _SUBAGENT_GEMINI_TOOL_ATTEMPTS = 2
-_SUBAGENT_GEMINI_THINK_TIMEOUT = 20.0
-_SUBAGENT_GEMINI_THINK_ATTEMPTS = 2
+# 深思每次 13 秒、試 3 次（第 3 次輪到 lite 梯隊）：舊的 20 秒×2 次實機遇過 3.8-flash 逾時＋3.6-flash 503，
+# 兩次就耗掉 24 秒還沒答案（2026-10-24）
+_SUBAGENT_GEMINI_THINK_TIMEOUT = 13.0
+_SUBAGENT_GEMINI_THINK_ATTEMPTS = 3
+_SUBAGENT_TOTAL_TIMEOUT = 45.0     # 工具判定＋搜尋／深度思考整段的上限（各段逾時加起來最壞會超過 90 秒）
+_SUBAGENT_THINK_SUFFIX = ("\n（深度思考模式：先在 [THINK]...[/THINK] 裡一步一步寫出你的思考步驟（分析意圖、拆解問題、檢查歧義），"
+                          "再在 [REPLY]...[/REPLY] 裡給出最終結論。結論要簡潔、直接可用。不要呼叫任何工具，必須輸出文字。）")
+
+# NV 子智能體：模型可用 NV_SUBAGENT_MODEL 換（熱切換免重啟）。舊的 nemotron-3-super-120b-a12b
+# 2026-10-24 在 3 把金鑰上都回 404，每次都白試一次才換 Gemini；回 404 就先停用 NV 一段時間。
+_NV_SUBAGENT_DEFAULT_MODEL = "nvidia/nemotron-3-ultra-550b-a55b"
+_NV_SUBAGENT_TOOL_TIMEOUT = 12.0
+_NV_SUBAGENT_THINK_TIMEOUT = 25.0
+_NV_SUBAGENT_DOWN_SEC = 600.0
+_NV_SUBAGENT_DOWN_UNTIL = 0.0
+
+
+def _nv_subagent_model() -> str:
+    return (os.getenv("NV_SUBAGENT_MODEL") or "").strip() or _NV_SUBAGENT_DEFAULT_MODEL
+
+
+def _nv_subagent_down() -> bool:
+    return time.time() < _NV_SUBAGENT_DOWN_UNTIL
+
+
+def _nv_subagent_note_error(e, model: str):
+    """模型回 404（下架或改名）就停用 NV 子智能體 10 分鐘；其他錯誤（逾時、限流）不停。"""
+    global _NV_SUBAGENT_DOWN_UNTIL
+    if getattr(e, "status_code", None) == 404:
+        _NV_SUBAGENT_DOWN_UNTIL = time.time() + _NV_SUBAGENT_DOWN_SEC
+        log_print(f"⚠️ [NV 子智能體] 模型 {model} 回 404，先停用 NV {_NV_SUBAGENT_DOWN_SEC / 60:.0f} 分鐘；請檢查 NV_SUBAGENT_MODEL。")
+
+
+# 交給主腦轉述的結果：舊文案寫「不要照唸」，主腦就自由發揮把事實丟了——
+# 匯率摘要是「1 美元約換 159.4 日圓、日圓走弱」，她講成「日圓超甜，換美金超划算」（2026-10-24 實機）
+_SUBAGENT_RELAY_RULE = "（用妳自己的口吻講，但數字、日期、名稱要照資料講對；資料裡沒有的不要自己補。）"
+
+
+def _subagent_report_text(requester_name: str, summary: str) -> str:
+    return f"[搜尋結果，要告訴{requester_name or '剛才問的人'}：{summary}]{_SUBAGENT_RELAY_RULE}"
+
+
+def _subagent_advice_text(requester_name: str, reply: str) -> str:
+    return f"[副腦針對{requester_name}剛才的話題想好的答案：{reply}]{_SUBAGENT_RELAY_RULE}"
 
 
 def _subagent_gemini_pairs(models, attempts):
@@ -8182,6 +8259,8 @@ async def _nv_tool_pass(task_ins, target, requester_name, system_instruction_tex
     """NV 第一棒「工具判定」（temp 0 + tools）：命中回 (fn, args)，乾淨無調用回 (None, None)，報錯上拋。"""
     if not NV_KEYS:
         raise RuntimeError("無 NV 金鑰")
+    if _nv_subagent_down():
+        raise RuntimeError("NV 子智能體停用中（模型之前回 404）")
     import random
     from openai import AsyncOpenAI
     import core.groq_router as gr
@@ -8193,16 +8272,21 @@ async def _nv_tool_pass(task_ins, target, requester_name, system_instruction_tex
     # NVIDIA 不允許函數名稱包含點號 (.)，先 wire
     for wt in openai_tools:
         wt["function"]["name"] = gr._wire_name(wt["function"]["name"])
-    async with track_key(nv_key):
-        nv_resp = await asyncio.wait_for(nv_client.chat.completions.create(
-            model="nvidia/nemotron-3-super-120b-a12b",
-            messages=[
-                {"role": "system", "content": system_instruction_text},
-                {"role": "user", "content": task_ins}
-            ],
-            tools=openai_tools,
-            temperature=0.0
-        ), timeout=20.0)
+    nv_model = _nv_subagent_model()
+    try:
+        async with track_key(nv_key):
+            nv_resp = await asyncio.wait_for(nv_client.chat.completions.create(
+                model=nv_model,
+                messages=[
+                    {"role": "system", "content": system_instruction_text},
+                    {"role": "user", "content": task_ins}
+                ],
+                tools=openai_tools,
+                temperature=0.0
+            ), timeout=_NV_SUBAGENT_TOOL_TIMEOUT)
+    except Exception as e:
+        _nv_subagent_note_error(e, nv_model)
+        raise
     choice = nv_resp.choices[0]
     if not choice.message.tool_calls:
         return None, None
@@ -8225,7 +8309,7 @@ async def _nv_tool_pass(task_ins, target, requester_name, system_instruction_tex
 
 async def _nv_think_pass(task_ins, target, requester_name, system_instruction_text):
     """NV 第二棒「深度思考」（temp 0.8、無 tools）：回 ("advice", text) 或 ("miss", "")，報錯上拋。"""
-    if not NV_KEYS:
+    if not NV_KEYS or _nv_subagent_down():
         return "miss", ""
     import random
     from openai import AsyncOpenAI
@@ -8236,15 +8320,20 @@ async def _nv_think_pass(task_ins, target, requester_name, system_instruction_te
     # 強制先寫思考步驟再給結論（step-by-step 推理顯著提升複雜問題正確率）：
     # 不掛 tools（掛著它只會想著調用，不會好好想），temp 0.8 保證想得開
     log_print("🧠 [NV 深思] 第一棒無工具調用，轉深度思考模式重想一次...")
-    async with track_key(nv_key):
-        think_resp = await asyncio.wait_for(nv_client.chat.completions.create(
-            model="nvidia/nemotron-3-super-120b-a12b",
-            messages=[
-                {"role": "system", "content": system_instruction_text + "\n（深度思考模式：先在 [THINK]...[/THINK] 裡一步一步寫出你的思考步驟（分析意圖、拆解問題、檢查歧義），再在 [REPLY]...[/REPLY] 裡給出最終結論。結論要簡潔、直接可用。不要呼叫任何工具，必須輸出文字。）"},
-                {"role": "user", "content": task_ins}
-            ],
-            temperature=0.8
-        ), timeout=30.0)
+    nv_model = _nv_subagent_model()
+    try:
+        async with track_key(nv_key):
+            think_resp = await asyncio.wait_for(nv_client.chat.completions.create(
+                model=nv_model,
+                messages=[
+                    {"role": "system", "content": system_instruction_text + _SUBAGENT_THINK_SUFFIX},
+                    {"role": "user", "content": task_ins}
+                ],
+                temperature=0.8
+            ), timeout=_NV_SUBAGENT_THINK_TIMEOUT)
+    except Exception as e:
+        _nv_subagent_note_error(e, nv_model)
+        raise
     think_choice = think_resp.choices[0]
     think_raw = (getattr(think_choice.message, "content", "") or "").strip()
     think_steps, final_reply = _extract_think_reply(think_raw)
@@ -8252,7 +8341,7 @@ async def _nv_think_pass(task_ins, target, requester_name, system_instruction_te
         log_print(f"🧠 [NV 深思步驟] {think_steps[:120]}")
     if final_reply:
         log_print(f"💡 [NV 深思] {final_reply[:80]}")
-        return "advice", f"[{requester_name}剛才的話題，副腦深度思考後的見解（轉述用，不要照唸）：{final_reply}]"
+        return "advice", _subagent_advice_text(requester_name, final_reply)
     return "miss", ""
 
 
@@ -8310,7 +8399,7 @@ async def _gemini_think_pass(task_ins, target, requester_name, system_instructio
             cfg = types.GenerateContentConfig(
                 temperature=0.8,
                 safety_settings=UNRESTRICTED_SAFETY_SETTINGS,
-                system_instruction=system_instruction_text + "\n（深度思考模式：先在 [THINK]...[/THINK] 裡一步一步寫出你的思考步驟（分析意圖、拆解問題、檢查歧義），再在 [REPLY]...[/REPLY] 裡給出最終結論。結論要簡潔、直接可用。不要呼叫任何工具，必須輸出文字。）",
+                system_instruction=system_instruction_text + _SUBAGENT_THINK_SUFFIX,
             )
             async with track_key(gkey):
                 resp = await asyncio.wait_for(client.aio.models.generate_content(
@@ -8324,7 +8413,7 @@ async def _gemini_think_pass(task_ins, target, requester_name, system_instructio
                 log_print(f"🧠 [Gemini 深思步驟] {think_steps[:120]}")
             if final_reply:
                 log_print(f"💡 [Gemini 深思] {final_reply[:80]}")
-                return "advice", f"[{requester_name}剛才的話題，副腦深度思考後的見解（轉述用，不要照唸）：{final_reply}]"
+                return "advice", _subagent_advice_text(requester_name, final_reply)
             return "miss", ""
         except Exception as e:
             last_err = e
@@ -8385,13 +8474,14 @@ async def nv_interpret_task(task_ins: str, target: str = "dad", requester_name: 
     第一棒「工具判定」（temp 0 + tools）：是硬指令就派發；
     第二棒「深度思考」（temp 0.8、無 tools）：第一棒沒叫工具時，讓副腦真正當大腦想一次。
     用腦順序看環境變數 SUBAGENT_BRAIN（熱切換免重啟，預設 auto；見 core/subagent_router.py）：
-      auto   = Gemini 工具判定 → NV 深度思考（Gemini 吃量，NV 專做聰明活）
+      auto   = 兩棒都是 Gemini 先、NV 備援（NV 推理模型深度思考要 60 秒，即時對話等不起）
       nv     = 全走 NV（舊行為，不碰 Gemini 一滴）
       gemini = 全走 Gemini（不碰 NV 一滴，NV 額度全留）
     乾淨無調用就信任它、不問下一棒；報錯才換下一棒。單腦模式報錯即收工（沿用舊語義）。
-    回傳 (kind, instruction_text)，kind ∈ {"tool","advice","miss"}：
-      - "tool"：已派發執行，附带口頭答應指示（搜尋類會等結果＋摘要）。
-      - "advice"：副腦思考後的見解，轉述用。
+    回傳 (kind, instruction_text)，kind ∈ {"tool","report","advice","miss"}：
+      - "tool"：已派發執行，主腦記著就好（中間回應已經請她答應過）。
+      - "report"：搜尋結果摘要（或搜尋失敗），要主腦講出來。
+      - "advice"：副腦思考後的答案，要主腦轉述。
       - "miss"：無可用腦／超時／空回應，调用方讓主腦直接回。
     只在 Live invoke_subagent 且 CPU 未命中時進入；B 架構永遠不碰這裡。"""
     if not task_ins or not task_ins.strip():
@@ -8423,9 +8513,10 @@ async def nv_interpret_task(task_ins: str, target: str = "dad", requester_name: 
                 try:
                     _res = await execute_tool_dispatch(fn_name, fn_args, caller_target=target, caller_user=requester_name)
                     _sum = await summarize_search_to_speech(fn_args.get("query", ""), _res, user_role_name=requester_name)
-                    return "tool", f"[系統底層：搜網專家回報（轉述給{requester_name or '大家'}聽，不要照唸）：{_sum}]"
+                    return "report", _subagent_report_text(requester_name, _sum)
                 except Exception as _se:
-                    return "tool", f"[系統底層：搜網專家查詢失敗（{str(_se)[:60]}），請跟{requester_name or '大家'}說待會再查。]"
+                    log_print(f"⚠️ [子智能體搜尋失敗]: {str(_se)[:80]}")
+                    return "report", f"[系統底層：這次搜尋失敗了，請跟{requester_name or '剛才問的人'}說待會再查，不要自己編答案。]"
             if fn_name == "trigger_vts_expression":
                 # 本能主、NV 備用：先讓本能做，查臉確認，沒接住才自己上（防 toggle 關表情）
                 exp_name = (fn_args or {}).get("expression_name", "")
@@ -8443,12 +8534,8 @@ async def nv_interpret_task(task_ins: str, target: str = "dad", requester_name: 
                 asyncio.create_task(execute_tool_dispatch(fn_name, fn_args, caller_target=target, caller_user=requester_name))
             # ⚠️ 同 CPU 路徑：唱歌/彈琴紙條必須寫明演唱者是 7L 本人，避免主腦說成「老爸唱的」
             return "tool", build_slip_text(fn_name, fn_args, requester_name, via="")
-        # —— 第二棒：深度思考（第一棒乾淨無調用才到這裡；聰明的活優先給 NV）——
-        if chain == ["gemini", "nv"]:
-            think_order = ["nv", "gemini"]
-        else:
-            think_order = list(chain)
-        for _brain in think_order:
+        # —— 第二棒：深度思考（第一棒乾淨無調用才到這裡；順序同第一棒，Gemini 先）——
+        for _brain in chain:
             try:
                 if _brain == "gemini":
                     _k, _t = await _gemini_think_pass(task_ins, target, requester_name, system_instruction_text)

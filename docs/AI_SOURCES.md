@@ -11,7 +11,7 @@
 | 背景純文字（定時提醒／搜尋提煉／鋼琴過場碎念） | GROQ | 同上梯隊（一律 `groq_chat`） | 同上 | 同上 | **2026-10-09 起全程零 Gemini**；失敗走本地離線摘要器／固定備援句／安靜不說話 |
 | 主腦深度推理 | GEMINI | 3.8-flash → 3.7 → 3.6 → 3.5 → 3-flash-preview → lite 系（`core/llm_engine.py`，pro-preview 已因 0 配額踢除） | `GEMINI_API_KEYS`×35，分池（觀眾／心流／視覺／主腦） | 旗艦 RPD 20／天／key；lite RPM 15／RPD 500 | 高頻一律 lite |
 | Live 全雙工（觀眾回覆／心流串流） | GEMINI-LIVE | **gemini-3.8-live**（舊 3.1-preview 已遷移，表上消失） | 同上（動態跨池備援） | RPM／RPD Unlimited，TPM 65K | 7x24 成立 |
-| Live 子智能體（工具判定＋深度思考） | GEMINI＋NVIDIA | Gemini lite 梯隊判定 → Nemotron-3-Super-120B 深思（`SUBAGENT_BRAIN`=auto 預設；可切 nv／gemini，`core/subagent_router.py`） | `NV_API_KEYS`×3／GEMINI keys | NV 專做聰明活、Gemini 吃量 | 2026-10-09 |
+| Live 子智能體（工具判定＋深度思考） | GEMINI＋NVIDIA | 兩棒都 Gemini 先、NV 備援（`SUBAGENT_BRAIN`=auto 預設；可切 nv／gemini，`core/subagent_router.py`）；NV 模型 `NV_SUBAGENT_MODEL`，預設 Nemotron-3-Ultra-550B，回 404 停用 10 分鐘 | `NV_API_KEYS`×3／GEMINI keys | NV 推理模型深思要 60 秒，只當備援；舊的 Super-120B 已 404 | 2026-10-24 |
 | 視覺看圖（餘光／截圖／抽幀） | GEMINI-VISION | 3.1-flash-lite → 3.6-flash（`get_lightweight_gemini_vision`） | KEYS_VISION（keys 12:18） | lite RPD 500 | 黑屏檢測防幻覺 |
 | 生圖 | GEMINI-IMAGE | Nano Banana 系（2.5-image → 3.1-image → pro-image） | 同上 | ⚠️ 全系 0／0／0，現降級中 | 有配額前不可用 |
 | 本地第四條腿（規劃） | GEMMA | Ollama gemma3:4b（視覺＋128K）／3n E4B（影音圖文， transformers 路） | 無 key，本地 GPU | 無 | 伴侶隱私模式＋視覺初篩 |

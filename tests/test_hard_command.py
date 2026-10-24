@@ -92,7 +92,8 @@ def test_slip_states_7l_is_the_performer():
     assert "日光謙也✨只是點曲" in p
 
     other = build_slip_text("search_google", {"query": "x"}, "老爸")
-    assert "search_google" in other
+    assert "上網搜尋（x）" in other
+    assert "search_google" not in other  # 原始工具名主腦會照念
 
 
 def test_slip_neutral_when_requester_unknown():
@@ -109,7 +110,7 @@ def test_slip_neutral_when_requester_unknown():
 
     g = build_slip_text("search_google", {"query": "x"}, "")
     assert "老爸" not in g
-    assert "search_google" in g
+    assert "上網搜尋" in g and "search_google" not in g
 
 
 def test_empty_and_none_safe():
