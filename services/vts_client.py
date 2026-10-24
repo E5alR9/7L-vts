@@ -1000,8 +1000,7 @@ EXPRESSION_MENU_TEXT = "；".join(f"{ctx}→{'、'.join(names)}" for ctx, names 
 
 
 # ── 表情去重查詢（2026-10-10：本能腦主做表情、NV 子代理備用）──
-# toggle 語義：同檔已在臉上時再下一次＝關掉。NV 動手前必須先查臉，
-# 本能已經做了就閉嘴，否則會把剛開的表情關掉。
+# 2026-10-17 起同檔再下一次＝維持開啟（不再 toggle 關掉）；NV 動手前查臉仍可省掉重複請求。
 _RESET_WORDS = {"_reset_", "_reset", "預設", "重置", "關閉", "正常",
                 "恢復", "無", "取消", "reset", "default", "none", "close", "off", "0"}
 _WINK_WORDS = ("wink", "眨眼", "單眼", "眨單眼", "单眼", "眨单眼")

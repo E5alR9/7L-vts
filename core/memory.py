@@ -12,7 +12,7 @@ from typing import List, Dict, Any, Optional
 
 # Project imports
 from core.utils import log_print, sys_notify, get_current_time_string
-from core.identity import get_mode, get_owner_name, get_character_name
+from core.identity import get_mode, get_owner_name, get_character_name, claims_owner_identity
 import services.piano_engine as pe
 import core.db as db_module
 from core.prompts import PromptTemplateEngine
@@ -114,11 +114,18 @@ async def save_viewer_profile(tiktok_name: str, call: str = None, relationship: 
     if call:
         clean_c = str(call).strip().strip('"\'')
         if clean_c and clean_c not in ["稱呼", "名字", "暱稱", "CALL", "none", "null", "None", "Null"]:
-            profile["call"] = clean_c
+            if claims_owner_identity(clean_c):
+                # 觀眾稱呼不能寫成老爸：之後的大腦會照這個稱呼叫他，等於讓觀眾冒充擁有者
+                log_print(f"🛑 [認人] 拒絕把觀眾 {tiktok_name} 的稱呼記成「{clean_c}」（冒充擁有者）")
+            else:
+                profile["call"] = clean_c
     if relationship:
         clean_r = str(relationship).strip().strip('"\'')
         if clean_r and clean_r not in ["關係", "REL", "none", "null", "None", "Null"]:
-            profile["relationship"] = clean_r
+            if claims_owner_identity(clean_r):
+                log_print(f"🛑 [認人] 拒絕把觀眾 {tiktok_name} 的關係記成「{clean_r}」（冒充擁有者）")
+            else:
+                profile["relationship"] = clean_r
     if impression:
         clean_i = str(impression).strip().strip('"\'')
         if clean_i and clean_i not in ["印象", "IMP", "none", "null", "None", "Null"]:

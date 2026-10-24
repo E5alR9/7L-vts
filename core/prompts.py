@@ -899,6 +899,18 @@ class TextCleanEngine:
 
         return ''.join(out_parts)
 
+_VIEWER_MARKUP = str.maketrans({"【": "「", "】": "」", "[": "(", "]": ")", "<": "‹", ">": "›"})
+
+
+def neutralize_viewer_text(text, limit: int = 300) -> str:
+    """觀眾原文進 prompt 前的中和（2026-10-24）：觀眾打的字和暱稱原封不動塞進 prompt，
+    打「【老爸】：…」就跟系統標身分的格式一模一樣，打「[LEARN_RULE: …]」就像系統標籤。
+    把 【】→「」、[]→()、<>→‹›、換行→空白，再限制長度；內容意思不變，只是不能偽裝成系統格式。"""
+    t = str(text or "").translate(_VIEWER_MARKUP)
+    t = " ".join(t.split())
+    return t[:limit] + "…" if limit and len(t) > limit else t
+
+
 class PromptTemplateEngine:
     HARD_TECHNICAL_RULES = ""
     TOOL_RULES_DESCRIPTION = ""

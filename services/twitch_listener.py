@@ -68,6 +68,7 @@ def build_queue_item(user: str, display: str, message: str, message_id: str = ""
     who = f"{display} (@{user})" if display and display.lower() != user.lower() else user
     return {
         "text": f"【Twitch 直播觀眾 {who}】：{message}",
+        "platform_uid": user or "",   # Twitch 登入名（唯一），認老爸只信這個
         "audio_base64": None,
         "timestamp": time.time(),
         "source": "twitch",

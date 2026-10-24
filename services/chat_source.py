@@ -142,6 +142,8 @@ def make_chat_item(provider, channel="", message_id="", user="", display="",
         "avatar": avatar or "",
         "actor_id": actor_id or "",
         "actor_login": actor_login or "",
+        # 平台唯一帳號：主程式認老爸只信這個（顯示名稱觀眾可以亂取）
+        "platform_uid": actor_id or (user if provider == "twitch" else ""),
         "sent_at": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime()),
     }
 

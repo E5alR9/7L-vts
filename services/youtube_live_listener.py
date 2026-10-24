@@ -174,7 +174,8 @@ def parse_live_chat_response(data):
         except Exception:
             sent_at = time.time()
         messages.append({"user": author, "message": text, "id": msg_id,
-                         "avatar": avatar, "sent_at": sent_at})
+                         "avatar": avatar, "sent_at": sent_at,
+                         "channel_id": str(renderer.get("authorExternalChannelId") or "")})
 
     cont = lc.get("continuation")
     if not cont:                                  # 下一代 token 藏在 continuations 陣列裡
@@ -196,11 +197,12 @@ def parse_live_chat_response(data):
     return messages, cont, wait
 
 
-def build_queue_item(user: str, message: str, message_id: str = "", avatar: str = "") -> dict:
+def build_queue_item(user: str, message: str, message_id: str = "", avatar: str = "", channel_id: str = "") -> dict:
     """與 TikTok/Twitch 相容的格式（軌道2 正則可解析；無 (@id) 時自動用暱稱當 id）
     text 格式凍結不可改；多出 message_id/avatar/user 欄位給控制台顯示用。"""
     return {
         "text": f"【YouTube 直播觀眾 {user}】：{message}",
+        "platform_uid": channel_id or "",   # YouTube 頻道 ID（唯一）；顯示名稱可以亂取，認老爸只信這個
         "audio_base64": None,
         "timestamp": time.time(),
         "source": "youtube",
@@ -291,7 +293,8 @@ async def youtube_live_worker(input_queue):
                             continue                # 重 poll 的舊留言，直接丟
                         await input_queue.put(build_queue_item(
                             m["user"], m["message"],
-                            message_id=m.get("id", ""), avatar=m.get("avatar", "")))
+                            message_id=m.get("id", ""), avatar=m.get("avatar", ""),
+                            channel_id=m.get("channel_id", "")))
                         try:
                             import services.web_dashboard as wd
                             wd.broadcast_event("youtube_comment", {

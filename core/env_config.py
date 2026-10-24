@@ -25,6 +25,8 @@ SETTINGS_SPECS: List[Dict[str, Any]] = [
      "choices": ["vtuber", "companion"], "restart": True, "default": "vtuber"},
     {"key": "OWNER_NAME", "label": "擁有者稱謂（舊預設：老爸）", "type": "str", "restart": True, "default": "老爸"},
     {"key": "CHARACTER_NAME", "label": "角色名（舊預設：7L）", "type": "str", "restart": True, "default": "7L"},
+    {"key": "OWNER_ACCOUNT_IDS", "label": "擁有者平台帳號 ID（逗號分隔；只認帳號 ID，不認暱稱）", "type": "str",
+     "restart": True, "default": "7lβ,7lbeta,qiwai,7lofficial,hostadmin,adminqiwai"},
     {"key": "FIREBASE_ENABLED", "label": "Firebase 雲同步（預設關=純本地）", "type": "bool",
      "restart": True, "default": "0"},
     # ── 語音 ──

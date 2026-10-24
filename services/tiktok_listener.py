@@ -276,7 +276,9 @@ async def tiktok_live_worker(input_queue):
                         "text": f"【TikTok 直播觀眾 {user_name} 留言】：{comment_text}",
                         "audio_base64": None,
                         "timestamp": time.time(),
-                        "source": "tiktok"
+                        "source": "tiktok",
+                        # 平台唯一帳號（觀眾改不到），主程式只信這個認老爸；暱稱可以亂取
+                        "platform_uid": getattr(event.user, "unique_id", "") or "",
                     })
 
             @client.on(BarrageEvent)
@@ -311,7 +313,8 @@ async def tiktok_live_worker(input_queue):
                         "text": f"【TikTok 直播觀眾 {u_name} 留言】：{b_text}",
                         "audio_base64": None,
                         "timestamp": time.time(),
-                        "source": "tiktok"
+                        "source": "tiktok",
+                        "platform_uid": (getattr(user_name, "unique_id", "") or "") if user_name else "",
                     })
 
             @client.on(EmoteChatEvent)
@@ -336,7 +339,8 @@ async def tiktok_live_worker(input_queue):
                     "text": f"【TikTok 直播觀眾 {u_name} 留言】：{e_text}",
                     "audio_base64": None,
                     "timestamp": time.time(),
-                    "source": "tiktok"
+                    "source": "tiktok",
+                    "platform_uid": (getattr(user_name, "unique_id", "") or "") if user_name else "",
                 })
 
             @client.on(JoinEvent)
