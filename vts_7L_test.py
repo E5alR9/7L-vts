@@ -746,7 +746,7 @@ LIVE_API_TOOLS = [
             types.FunctionDeclaration(
                 name="invoke_subagent",
                 behavior=types.Behavior.NON_BLOCKING,
-                description="當老爸明確要求進行操作（例如點歌、唱歌、彈琴、停止或暫停鋼琴、計時、查資料）時，呼叫此工具。將任務交給背景的子智能體處理。只有呼叫才會真的執行，光說「好了」不算；結果回來系統會告訴妳。注意：若只是純聊天，請不要呼叫此工具！",
+                description="當老爸明確要求進行操作（例如點歌、唱歌、彈琴、停止或暫停鋼琴、計時、查資料）時，呼叫此工具。將任務交給背景的子智能體處理。只有呼叫才會真的執行，光說「好了」不算；結果回來系統會告訴妳。注意：若只是純聊天，請不要呼叫此工具！看螢幕畫面不要用這個工具（子智能體看不到畫面），請照規則說 [TOOL:VISION]。",
                 parameters=types.Schema(
                     type="OBJECT",
                     properties={
@@ -1188,7 +1188,7 @@ async def get_lightweight_gemini_vision(image_base64: str, temporal_frames: list
         
     return ""
 
-async def fetch_ai_response(messages, image_base64=None, audio_base64=None, is_proactive=False, request_start_time: Optional[float] = None, is_mouth_stream=False):
+async def fetch_ai_response(messages, image_base64=None, audio_base64=None, is_proactive=False, request_start_time: Optional[float] = None, is_mouth_stream=False, use_tools: bool = True):
     """PROVIDER: GEMINI（主腦 generate_content＋Live；純文字正遷 Groq；見 docs/AI_SOURCES.md）"""
     """
      多模態大腦推理總入口 (文字 + 視覺 + 音訊 + 工具調用)
@@ -1199,6 +1199,8 @@ async def fetch_ai_response(messages, image_base64=None, audio_base64=None, is_p
         audio_base64: 麥克風音訊資料 Base64
         is_proactive: 是否為主動巡邏/主動找話題發話
         request_start_time: 請求發起的時間戳記（計算精確總延遲）
+        use_tools: 給模型工具。看螢幕／照鏡子這種只要描述的請求要關掉：競速的每個通道都會各自執行
+            模型回傳的工具，2026-10-25 實機兩個通道各觸發一次「星星眼」，一開一關抵銷
     """
     global current_ai_status_str, current_model_tag, CURRENT_GEMINI_KEY_STEP, TOTAL_API_CALLS
     try:
@@ -1310,9 +1312,10 @@ async def fetch_ai_response(messages, image_base64=None, audio_base64=None, is_p
             active_tools = GENAI_PROACTIVE_TOOLS if is_proactive else GENAI_TOOLS
             config_kwargs = {
                 "temperature": 0.85,
-                "tools": active_tools,
                 "safety_settings": UNRESTRICTED_SAFETY_SETTINGS
             }
+            if use_tools:
+                config_kwargs["tools"] = active_tools
             
             #  深度思考調度：日常對話、電擊/摸頭事件與即時互動預設思考預算為 0，達成 1.2s~1.8s 極速秒回！
             # 只有當老爸提出明確的寫程式碼、數學邏輯、哲學深度推理等高智商問題時，才開啟 thinking_budget=-1
@@ -1583,11 +1586,12 @@ async def fetch_ai_response(messages, image_base64=None, audio_base64=None, is_p
         # 嚴格限制同時進行的通道數最多為 2 個，杜絕同時爆發 20 個併發把所有金鑰配額瞬間打滿
         if len(active_gemini_tasks) < 2:
             channels = get_available_gemini_channels(limit=5, user_query=user_query, has_image=bool(image_base64), is_proactive=is_proactive)
-            candidate = None
-            for ch in channels:
-                if ch[2] not in launched_gemini_targets:
-                    candidate = ch
-                    break
+            # 先挑還沒在跑的模型：模型卡住不回（不算錯誤、不會被鎖）時，換金鑰還是同一個模型、一樣卡。
+            # 2026-10-25 實機：看螢幕請求一直加開 3.8-flash，等了將近 4 分鐘
+            running_models = {m for (_tid, m, _st) in active_gemini_tasks.values()}
+            candidate = next((ch for ch in channels if ch[2] not in launched_gemini_targets and ch[1] not in running_models), None)
+            if candidate is None:
+                candidate = next((ch for ch in channels if ch[2] not in launched_gemini_targets), None)
 
             if candidate:
                 g_key, g_model, target_id = candidate
@@ -2632,7 +2636,7 @@ async def _song_ack(song: str, target: str = "dad", piano: bool = False):
     _SONG_ACK_IDX += 1
     try:
         speech_queue.put_nowait({"text": text, "expression": "星星眼", "action": "",
-                                 "target": target, "priority": 90})
+                                 "target": target, "priority": 90, "skip_if_singing": True})
     except Exception:
         pass
 
@@ -4411,6 +4415,66 @@ def get_dxcam_cam():
         _DXCAM_FAILED = True
         return None
 
+_DXCAM_LAST_FRAME = None
+
+
+def _gdi_capture_screen():
+    """GDI BitBlt 全螢幕截圖（dxcam 不能用時的備援）。回 PIL RGB 圖。
+
+    用自己的 WinDLL 物件並宣告參數／回傳型別：預設 c_int 會把 64 位元的 handle 截斷或溢位，
+    舊碼在畫面靜止（dxcam 回 None）時一走這裡就 OverflowError（2026-10-25 實機一小時 6 次）。
+    另開 WinDLL 不會動到 ctypes.windll，其他套件照舊。"""
+    from PIL import Image
+    import ctypes
+    from ctypes import wintypes as wt
+    user32 = ctypes.WinDLL("user32")
+    gdi32 = ctypes.WinDLL("gdi32")
+    H = ctypes.c_void_p
+    user32.GetSystemMetrics.argtypes = [ctypes.c_int]
+    user32.GetDesktopWindow.restype = H
+    user32.GetWindowDC.argtypes, user32.GetWindowDC.restype = [H], H
+    user32.ReleaseDC.argtypes = [H, H]
+    gdi32.CreateCompatibleDC.argtypes, gdi32.CreateCompatibleDC.restype = [H], H
+    gdi32.CreateCompatibleBitmap.argtypes, gdi32.CreateCompatibleBitmap.restype = [H, ctypes.c_int, ctypes.c_int], H
+    gdi32.SelectObject.argtypes, gdi32.SelectObject.restype = [H, H], H
+    gdi32.BitBlt.argtypes = [H, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, H, ctypes.c_int, ctypes.c_int, wt.DWORD]
+    gdi32.GetDIBits.argtypes = [H, H, wt.UINT, wt.UINT, ctypes.c_void_p, ctypes.c_void_p, wt.UINT]
+    gdi32.DeleteObject.argtypes = [H]
+    gdi32.DeleteDC.argtypes = [H]
+
+    class BITMAPINFOHEADER(ctypes.Structure):
+        _fields_ = [
+            ('biSize', ctypes.c_uint32), ('biWidth', ctypes.c_int32), ('biHeight', ctypes.c_int32),
+            ('biPlanes', ctypes.c_uint16), ('biBitCount', ctypes.c_uint16), ('biCompression', ctypes.c_uint32),
+            ('biSizeImage', ctypes.c_uint32), ('biXPelsPerMeter', ctypes.c_int32), ('biYPelsPerMeter', ctypes.c_int32),
+            ('biClrUsed', ctypes.c_uint32), ('biClrImportant', ctypes.c_uint32)
+        ]
+
+    w = user32.GetSystemMetrics(0)
+    h = user32.GetSystemMetrics(1)
+    hdesk = user32.GetDesktopWindow()
+    desk_dc = user32.GetWindowDC(hdesk)
+    img_dc = gdi32.CreateCompatibleDC(desk_dc)
+    mem_bmp = gdi32.CreateCompatibleBitmap(desk_dc, w, h)
+    try:
+        gdi32.SelectObject(img_dc, mem_bmp)
+        gdi32.BitBlt(img_dc, 0, 0, w, h, desk_dc, 0, 0, 0x00CC0020)
+        bmi = BITMAPINFOHEADER()
+        bmi.biSize = ctypes.sizeof(BITMAPINFOHEADER)
+        bmi.biWidth = w
+        bmi.biHeight = -h
+        bmi.biPlanes = 1
+        bmi.biBitCount = 32
+        bmi.biCompression = 0
+        buf = ctypes.create_string_buffer(w * h * 4)
+        gdi32.GetDIBits(img_dc, mem_bmp, 0, h, buf, ctypes.byref(bmi), 0)
+        return Image.frombuffer('RGBA', (w, h), buf, 'raw', 'BGRA', 0, 1).convert('RGB')
+    finally:
+        gdi32.DeleteObject(mem_bmp)
+        gdi32.DeleteDC(img_dc)
+        user32.ReleaseDC(hdesk, desk_dc)
+
+
 def capture_screen_multi_view():
     """
     五方多視角超高清螢幕感知系統 (DXGI GPU 加速 + 硬件級 StretchBlt 極速引擎)：
@@ -4420,7 +4484,7 @@ def capture_screen_multi_view():
     4.  左下象限原生細節放大圖 (Bottom-Left)
     5.  右下象限原生細節放大圖 (Bottom-Right)
     """
-    global has_printed_vision_error
+    global has_printed_vision_error, _DXCAM_LAST_FRAME
     try:
         from PIL import Image
         import io
@@ -4433,44 +4497,17 @@ def capture_screen_multi_view():
             try:
                 frame = cam.grab()
                 if frame is not None:
+                    _DXCAM_LAST_FRAME = frame
+                # dxcam 在畫面沒變時回 None：沒變就代表上一張還是現在的畫面
+                frame = frame if frame is not None else _DXCAM_LAST_FRAME
+                if frame is not None:
                     screenshot = Image.fromarray(frame)
             except Exception:
                 pass
                 
         # 2. 高效 GDI 硬件級 BitBlt 引擎 (耗時僅 ~15ms，零縮放失真，真實 1:1 4K 像素)
         if screenshot is None:
-            user32 = ctypes.windll.user32
-            gdi32 = ctypes.windll.gdi32
-            w = user32.GetSystemMetrics(0)
-            h = user32.GetSystemMetrics(1)
-            
-            hdesk = user32.GetDesktopWindow()
-            desk_dc = user32.GetWindowDC(hdesk)
-            img_dc = gdi32.CreateCompatibleDC(desk_dc)
-            mem_bmp = gdi32.CreateCompatibleBitmap(desk_dc, w, h)
-            gdi32.SelectObject(img_dc, mem_bmp)
-            gdi32.BitBlt(img_dc, 0, 0, w, h, desk_dc, 0, 0, 0x00CC0020)
-            
-            class BITMAPINFOHEADER(ctypes.Structure):
-                _fields_ = [
-                    ('biSize', ctypes.c_uint32), ('biWidth', ctypes.c_int32), ('biHeight', ctypes.c_int32),
-                    ('biPlanes', ctypes.c_uint16), ('biBitCount', ctypes.c_uint16), ('biCompression', ctypes.c_uint32),
-                    ('biSizeImage', ctypes.c_uint32), ('biXPelsPerMeter', ctypes.c_int32), ('biYPelsPerMeter', ctypes.c_int32),
-                    ('biClrUsed', ctypes.c_uint32), ('biClrImportant', ctypes.c_uint32)
-                ]
-            bmi = BITMAPINFOHEADER()
-            bmi.biSize = ctypes.sizeof(BITMAPINFOHEADER)
-            bmi.biWidth = w
-            bmi.biHeight = -h
-            bmi.biPlanes = 1
-            bmi.biBitCount = 32
-            bmi.biCompression = 0
-            buf = ctypes.create_string_buffer(w * h * 4)
-            gdi32.GetDIBits(img_dc, mem_bmp, 0, h, buf, ctypes.byref(bmi), 0)
-            screenshot = Image.frombuffer('RGBA', (w, h), buf, 'raw', 'BGRA', 0, 1).convert('RGB')
-            gdi32.DeleteObject(mem_bmp)
-            gdi32.DeleteDC(img_dc)
-            user32.ReleaseDC(hdesk, desk_dc)
+            screenshot = _gdi_capture_screen()
 
         if screenshot is None:
             return None
@@ -5288,25 +5325,46 @@ def _clean_result_for_brain(text: str) -> str:
     return _TOOL_TAG_RE.sub('', text or "")
 
 
+VISION_TOOL_TIMEOUT_SEC = 45.0   # 她說了「我看看」之後最多等這麼久，看不完就請老爸唸給她聽
+# 看完畫面送回報後，她回答時常順手又寫 [TOOL:VISION]，於是看完又看、每 10 秒循環一次
+# （2026-10-25 實機：視覺修好、幾秒就回來之後才冒出來）。回報後這段時間內的 [TOOL:VISION] 不觸發。
+VISION_REPORT_QUIET_SEC = 15.0
+_VISION_STATE = {"report_ts": 0.0}
+
+
+def _vision_report_recent(now: float) -> bool:
+    return now - _VISION_STATE["report_ts"] < VISION_REPORT_QUIET_SEC
+
+
+# 主腦有時把「看螢幕」也丟給子智能體；子智能體看不到畫面，交給 [TOOL:VISION] 處理
+_SUBAGENT_VISION_TASK_RE = re.compile(r"螢幕|屏幕|畫面|截圖|桌面上")
+
+
 async def live_vision_tool_task(session, vts):
     """背景視覺打工人：使用現有 fetch_ai_response 備援機制分析截圖"""
     try:
         log_print("👁️ [視覺大腦啟動] 正在背景截圖並分析畫面...")
         current_screen_snapshot = get_combined_temporal_screen_snapshot()
-        messages = [{"role": "user", "content": "請簡短描述這個畫面上有什麼？如果是程式碼，請說出檔名與關鍵邏輯。用繁體中文。"}]
-        resp = await fetch_ai_response(
-            messages=messages, 
+        # 提示詞避開「程式碼／寫程式」：fetch_ai_response 看到這些字會改走高智商梯隊（3.8-flash 打頭），
+        # 舊提示詞因此每次都排到最慢的模型，還讓她把畫面講成程式碼（2026-10-25 實機：畫面是鋼琴影片和 Minecraft）
+        messages = [{"role": "user", "content": "請簡短描述這個畫面：開著哪些視窗、老爸主要在看什麼或做什麼。若是在寫 code，說出檔名與重點。用繁體中文。"}]
+        resp = await asyncio.wait_for(fetch_ai_response(
+            messages=messages,
             image_base64=current_screen_snapshot,
-            is_proactive=False
-        )
+            is_proactive=False,
+            use_tools=False,
+        ), timeout=VISION_TOOL_TIMEOUT_SEC)
         if not resp:
             raise Exception("視覺模型未回傳任何內容或請求失敗")
-        reply_text = resp[0]
+        # fetch_ai_response 回的是字串；舊碼取 resp[0] 只拿到第一個字，主腦只收到「這」，
+        # 只好自己猜畫面（2026-10-25 實機：她說「螢幕上只有一個這字」、上一輪講成程式碼）
+        reply_text = resp if isinstance(resp, str) else resp[0]
         log_print(f"👁️ [視覺大腦回報] 分析完成: {reply_text[:50]}...")
-        await session.send_realtime_input(text=f"[系統提示：視覺大腦回報畫面內容] {_clean_result_for_brain(reply_text)}")
+        _VISION_STATE["report_ts"] = time.time()
+        await session.send_realtime_input(text=f"[系統提示：視覺大腦回報畫面內容（已經看完了，直接用這段回答，不要再輸出 [TOOL:VISION]）] {_clean_result_for_brain(reply_text)}")
     except Exception as e:
-        log_print(f"❌ [視覺大腦錯誤] {e}")
-        fallback_prompt = "[系統提示：視覺功能暫時失敗（遇到 API 限流）。請發揮傲嬌本性抱怨暫時看不到畫面，並叫老爸直接把畫面內容唸給妳聽！請發揮創意，用不同的說法。]"
+        log_print(f"❌ [視覺大腦錯誤] {'超過 %.0f 秒沒看完' % VISION_TOOL_TIMEOUT_SEC if isinstance(e, asyncio.TimeoutError) else e}")
+        fallback_prompt = "[系統提示：這次沒看清楚畫面（看太久或遇到 API 限流）。請發揮傲嬌本性抱怨暫時看不到畫面，並叫老爸直接把畫面內容唸給妳聽！請發揮創意，用不同的說法。]"
         try:
             await session.send_realtime_input(text=fallback_prompt)
         except Exception as inner_e:
@@ -5330,14 +5388,15 @@ async def live_mirror_tool_task(session, vts):
             b64_str = base64.b64encode(f.read()).decode("utf-8")
             
         messages = [{"role": "user", "content": "這是妳自己（7L）的全身 V-tuber 造型圖片。請仔細觀察並用活潑、自豪的語氣，向老爸描述妳現在穿什麼衣服、髮色、瞳孔顏色、髮飾、鞋子，以及身上有哪些可愛或性感的特徵，字數不要超過 150 字。"}]
-        resp = await fetch_ai_response(
-            messages=messages, 
+        resp = await asyncio.wait_for(fetch_ai_response(
+            messages=messages,
             image_base64=b64_str,
-            is_proactive=False
-        )
+            is_proactive=False,
+            use_tools=False,
+        ), timeout=VISION_TOOL_TIMEOUT_SEC)
         if not resp:
             raise Exception("視覺模型未回傳")
-        reply_text = resp[0]
+        reply_text = resp if isinstance(resp, str) else resp[0]  # 同上：舊碼只拿到第一個字
         log_print(f"🪞 [鏡子回報] {reply_text[:50]}...")
         await session.send_realtime_input(text=f"[系統提示：鏡子裡映出的妳長這樣，請自然地把這段觀察說出來：] {_clean_result_for_brain(reply_text)}")
     except Exception as e:
@@ -5581,6 +5640,32 @@ def _split_fossil_batch(batch, now: float, max_age: float = 180.0, max_attempts:
     return fresh, dropped
 
 
+# Live 連線續接（2026-10-25）：伺服器約 15 分鐘會先送 GoAway 預告再切線。舊碼沒接預告，被 1008 硬切；
+# 重連只塞回最近 6 筆對話，主腦每 15 分鐘失憶一次（實機把點琴的「小明」講成「壞壞」）。
+# 改成記下伺服器給的續接 handle，換線時帶著它接回同一段對話。handle 只用一次，接不回去就退回塞記憶。
+_LIVE_RESUME = {"handle": None, "model": None, "key": None, "ts": 0.0}
+_LIVE_RESUME_MAX_AGE = 3600.0   # 官方說 2 小時內有效，保守取 1 小時
+
+
+def _remember_live_resume_handle(update, model: str, key_idx: int, now: float) -> bool:
+    """收到 session_resumption_update 時記下新的 handle（不可續接的時間點會送 resumable=False，不記）。"""
+    handle = getattr(update, "new_handle", None)
+    if not handle or getattr(update, "resumable", True) is False:
+        return False
+    _LIVE_RESUME.update(handle=handle, model=model, key=key_idx, ts=now)
+    return True
+
+
+def _take_live_resume_handle(model: str, key_idx: int, now: Optional[float] = None) -> Optional[str]:
+    """取出可用的 handle 並清掉（只用一次）：模型或金鑰換了、或放太久就不續接。"""
+    now = time.time() if now is None else now
+    handle = _LIVE_RESUME.get("handle")
+    ok = (handle and _LIVE_RESUME.get("model") == model and _LIVE_RESUME.get("key") == key_idx
+          and now - (_LIVE_RESUME.get("ts") or 0.0) < _LIVE_RESUME_MAX_AGE)
+    _LIVE_RESUME["handle"] = None
+    return handle if ok else None
+
+
 async def continuous_live_worker(vts):
     """真・雙向串流 Live 大腦核心"""
     global GLOBAL_LIVE_SESSION, LIVE_SESSION_ACTIVE
@@ -5634,7 +5719,9 @@ async def continuous_live_worker(vts):
 """
             import time
             from core.memory import get_unified_memory_context
-            recent_ctx = get_unified_memory_context(limit=6, thought_char_limit=0)
+            _resume_handle = _take_live_resume_handle(live_m, current_k_idx)
+            # 續接時伺服器會接回整段對話，不用再塞最近 6 筆（塞了反而重複）
+            recent_ctx = "" if _resume_handle else get_unified_memory_context(limit=6, thought_char_limit=0)
             if recent_ctx and recent_ctx.strip():
                 state_msg = ""
                 if is_singing_active() or current_ai_state == "SINGING":
@@ -5645,7 +5732,9 @@ async def continuous_live_worker(vts):
                 response_modalities=[types.Modality.AUDIO], 
                 system_instruction=types.Content(parts=[types.Part.from_text(text=system_instruction)]),
                 tools=LIVE_API_TOOLS,
-                output_audio_transcription=types.AudioTranscriptionConfig()
+                output_audio_transcription=types.AudioTranscriptionConfig(),
+                session_resumption=types.SessionResumptionConfig(handle=_resume_handle),
+                context_window_compression=types.ContextWindowCompressionConfig(sliding_window=types.SlidingWindow()),
             )
             
             async with client.aio.live.connect(model=live_m, config=live_cfg) as session:
@@ -5653,6 +5742,8 @@ async def continuous_live_worker(vts):
                 LIVE_SESSION_ACTIVE = True
                 log_print(f"✅ 已成功連線至 Live API！模型: {live_m} (通道 G{current_k_idx}) 麥克風持續收音中...")
                 clean_fail_count = 0  # 連上即歸零：上輪是健康連線。
+                if _resume_handle:
+                    log_print("🔗 [Live 續接] 已接回上一段對話（換線不失憶）。")
                 if recent_ctx and recent_ctx.strip():
                     log_print("🧠 [記憶恢復] 已向新連線的系統提示中注入最新對話歷史記憶。")
                 # 🛟 斷線救援：上個 session 吞掉的點歌紙條，在這裡撿回來
@@ -5755,6 +5846,12 @@ async def continuous_live_worker(vts):
                                 log_print(f"⚠️ [子智能體回報失敗]: {_se}")
 
                         try:
+                            if _task_ins and _SUBAGENT_VISION_TASK_RE.search(_task_ins):
+                                # 子智能體看不到畫面：照舊流程會回「沒結果，請妳自己回答」，她就自己編畫面內容
+                                # （2026-10-25 實機：視覺結果還沒回來，她先說「螢幕上滿滿的都是舊照片」）
+                                await _respond("[系統底層：看畫面不歸子智能體管，視覺大腦（[TOOL:VISION]）會回報，"
+                                               "在那之前不要描述畫面內容。]", _quiet)
+                                return
                             if _task_ins:
                                 # ⚠️ requester 傳空字串：task_ins 是主腦自己寫的指令，
                                 # 點歌人不一定是老爸（可能是轉述觀眾點的），紙條走中性文案
@@ -5798,6 +5895,7 @@ async def continuous_live_worker(vts):
                         except Exception as _e:
                             log_print(f"⚠️ [子智能體任務異常]: {_e}")
 
+                    goaway_pending = False
                     try:
                         # SDK 的 receive() 收到 turn_complete 就結束迭代；不包迴圈的話每講完一句整條連線就關掉重連（2026-10-24）
                         while True:
@@ -5805,6 +5903,15 @@ async def continuous_live_worker(vts):
                                 c = resp.server_content
                                 global LAST_LIVE_RX_TS
                                 LAST_LIVE_RX_TS = time.time()
+                                _ru = getattr(resp, 'session_resumption_update', None)
+                                if _ru:
+                                    _remember_live_resume_handle(_ru, live_m, current_k_idx, LAST_LIVE_RX_TS)
+                                if getattr(resp, 'go_away', None) and not goaway_pending:
+                                    # 伺服器預告要換線：正在講就等這輪講完再換（不切掉她的話），閒著就馬上換
+                                    log_print(f"⏱️ [Live 週期重置] 伺服器預告 {getattr(resp.go_away, 'time_left', '') or ''} 後換線，準備帶著續接 handle 換線...")
+                                    goaway_pending = True
+                                    if not turn_buffer.strip() and not chunk_buffer.strip():
+                                        raise ConnectionResetError("goaway：伺服器預告換線，主動換線續接")
                                 # Live API 的工具呼叫走 resp.tool_call（沒有 server_content，c 是 None）；舊碼只看 model_turn.parts，
                                 # 主腦每次呼叫 invoke_subagent 都被漏掉、工具回應永遠不回，整輪卡到下一則訊息才被「打斷」（2026-10-24 實機發現）
                                 _fcs = list(getattr(getattr(resp, 'tool_call', None), 'function_calls', None) or [])
@@ -5889,9 +5996,12 @@ async def continuous_live_worker(vts):
                                             else:
                                                 log_print("⚠️ [攔截暗號] 搜尋關鍵字全是雜訊，跳過不搜。")
                                         if "[TOOL:VISION]" in text_chunk:
-                                            log_print("⚡ [攔截暗號] 啟動平行代理人：視覺大腦！")
                                             text_chunk = text_chunk.replace("[TOOL:VISION]", "").strip()
-                                            asyncio.create_task(live_vision_tool_task(session, vts))
+                                            if _vision_report_recent(time.time()):
+                                                log_print("👁️ [視覺] 她正在回答剛看到的畫面，這次的 [TOOL:VISION] 不重看（防看完又看的迴圈）")
+                                            else:
+                                                log_print("⚡ [攔截暗號] 啟動平行代理人：視覺大腦！")
+                                                asyncio.create_task(live_vision_tool_task(session, vts))
                                         
                                         if "[TOOL:MIRROR]" in text_chunk:
                                             log_print("🪞 [攔截暗號] 啟動平行代理人：照鏡子！")
@@ -5917,9 +6027,14 @@ async def continuous_live_worker(vts):
                                             # 記憶會注入回 prompt：存原文的話，內心戲段落與 [INTERRUPT_SELF] 會被模型照著學（2026-10-24）
                                             _mem_text = TextCleanEngine.extract_thought(turn_buffer.strip())[1]
                                             _mem_text = re.sub(r'\[(?:INTERRUPT_SELF|CUT_IN|INTERRUPT|SELF_INTERRUPT|插話|中斷|打斷自己)\]', '', _mem_text, flags=re.IGNORECASE).strip()
+                                            # 語速／音高標籤只給 TTS 用，存進記憶只會佔掉上下文（一句話常夾十幾個）；表情標籤留著
+                                            _mem_text = re.sub(r'\[(?:SPEED|PITCH|VOLUME|RATE)\b[^\]]*\]', '', _mem_text, flags=re.IGNORECASE)  # 也吃模型漏寫冒號的 [SPEED+8%]
+                                            _mem_text = re.sub(r' {2,}', ' ', _mem_text).strip()
                                             append_to_unified_memory(speaker="7L", target="dad", content=_mem_text or turn_buffer.strip(), role="assistant", source="live_api")
                                             log_print(f"📝 [黑板紀錄] 7L Live 大腦: {turn_buffer.strip()}")
                                             turn_buffer = ""
+                                        if goaway_pending:
+                                            raise ConnectionResetError("goaway：這輪講完了，主動換線續接")
                     except asyncio.CancelledError: pass
                     except Exception as e:
                         err_str = str(e).lower()
@@ -7199,7 +7314,8 @@ async def autonomous_wander_worker():
                     # 醒來不一定說話：靜靜睜眼即可，老爸說話哨兵自然會接
                 continue
 
-            if pe.is_piano_active or is_singing_active() or current_ai_state in ["TALKING", "THINKING", "PIANO", "SINGING"]:
+            # 只看「正在彈」：彈完後鋼琴留在台上待命，舊碼看 is_piano_active，待命時連自動睡覺都一起跳過
+            if pe.is_piano_performing() or is_singing_active() or current_ai_state in ["TALKING", "THINKING", "PIANO", "SINGING"]:
                 continue
 
             #  7L 自主作息小憩邏輯（深夜15分鐘或白天60分鐘無人對話且環境完全安靜時，7L 自主決定小憩入睡）
@@ -7229,11 +7345,12 @@ async def autonomous_wander_worker():
                     await set_sleep_mode(True)
                     continue
             
-            idle_seconds = None
+            # 舊碼是 idle_seconds = None、now 是空函式，每 12 秒丟一次 TypeError 被下面吞掉，
+            # 漫遊和自主彈琴從匯入那天起就沒跑過（2026-10-25 實機發現）
+            idle_seconds = idle_ticks  # get_silence_ticks() 一格一秒
+            now = time.time()
             if IS_AUTO_WANDER_ENABLED and current_ai_state == "IDLE" and idle_seconds > 60.0:
                 #  自主彈琴邏輯：預設關閉（IS_AUTO_PIANO_ENABLED = False），避免未經指示自作主張彈琴打斷老爸或與背景音樂打架
-                def now():
-                    pass
                 if IS_AUTO_PIANO_ENABLED and (now - LAST_AUTO_PIANO_TIME > 300.0):
                     # 嚴防干擾：若電腦正在播放音樂/音訊，絕不彈琴搶聲音
                     is_noisy = bool(LATEST_SYSTEM_MUSIC_INFO)
@@ -7253,12 +7370,14 @@ async def autonomous_wander_worker():
                             await pe.play_virtual_piano(song_seed)
                             continue
 
-                if now - LAST_WANDER_TIME > 60.0:
+                if now - LAST_WANDER_TIME > 60.0 and not pe.is_piano_active:  # 坐在鋼琴前待命時不走位
                     LAST_WANDER_TIME = now
+                    log_print(f"🚶 [自主漫遊] 閒置 {int(idle_seconds)} 秒，隨機換個位置")
                     await move_vts_spatial(target_pos="random", duration=3.0)
                     vc.CURRENT_SPATIAL_LOCATION = "自由漫遊"
                     
         except Exception:
+            log_swallowed()  # 舊碼整個吞掉，壞了一個月沒人發現
             await asyncio.sleep(5.0)
 
 # ---  語音合成排隊協程 (老爸優先 / 異步雙軌仲裁器) ---
@@ -7297,6 +7416,11 @@ async def speech_queue_worker(vts, input_queue):
                 private = True
                 
             if not text:
+                continue
+            # 點歌應答說的是「答應了、準備中」：輪到它時歌已經開唱就不用講了
+            # （2026-10-25 實機：應答開唱後才輪到合成，主腦也早就答應過一次）
+            if isinstance(item, dict) and item.get("skip_if_singing") and is_singing():
+                log_print(f"⏭️ [語音佇列] 已經開唱，略過過時的點歌應答：{text[:20]}")
                 continue
                 
             # 計算這句話預估的秒數 (使用 TTS 文本長度)
@@ -7722,12 +7846,12 @@ async def idle_chatter_worker(vts, input_queue):
     while True:
         try:
             await asyncio.sleep(30.0)
-            if IS_SLEEPING:
+            if IS_SLEEPING or not IS_PROACTIVE_SPEAK_ENABLED:  # 後台「主動搭話」開關（舊碼沒讀，關了照樣閒聊）
                 continue
             if is_singing_active() or current_ai_state in ("SINGING", "TALKING", "THINKING"):
                 continue
             try:
-                _piano = bool(pe.is_piano_active)
+                _piano = bool(pe.is_piano_performing())  # 彈完待命不算在彈，不然要等 10 分鐘才閒聊
             except Exception:
                 _piano = False
             _now = time.time()
@@ -7778,6 +7902,7 @@ async def idle_chatter_worker(vts, input_queue):
             _IDLE_LAST_CHATTER = _now
             log_print(f"📻 [自主閒聊] 安靜 {_quiet_min} 分鐘，遞紙條請主腦找話題（冷卻 {_IDLE_COOLDOWN_SEC / 60:.0f} 分鐘）。")
         except Exception:
+            log_swallowed()
             await asyncio.sleep(5.0)
 
 
@@ -8805,6 +8930,10 @@ def _likely_needs_tools(text: str) -> bool:
     return any(k in t for k in _DESKTOP_TOOL_HINTS)
 
 
+_DESKTOP_DOWN_SEC = 300.0
+_DESKTOP_DOWN_UNTIL = 0.0
+
+
 async def _desktop_dad_reply(vts, input_queue, user_input: str, owner: str = "老爸"):
     """桌機代答老爸閒聊（2026-10-11 v3）：桌面只查料，開口的是 7L（紙條→主腦；唱歌中才 TTS 插播）。
     掛了走 Live 老路一句不丟。"""
@@ -8825,7 +8954,13 @@ async def _desktop_dad_reply(vts, input_queue, user_input: str, owner: str = "�
     try:
         ans = await asyncio.to_thread(_dh.get_answer, f"老爸說：{user_input}", 120.0)
     except Exception as e:
-        log_print(f"⚠️ [桌機代答失敗，走 Live 兜底]: {e}")
+        global _DESKTOP_DOWN_UNTIL
+        if "找不到" in str(e):
+            # 桌面版沒開：5 分鐘內不再試（舊碼每則訊息都試一次、印一次失敗）
+            _DESKTOP_DOWN_UNTIL = time.time() + _DESKTOP_DOWN_SEC
+            log_print(f"⚠️ [桌機代答] 桌面版 Gemini 沒開，{_DESKTOP_DOWN_SEC / 60:.0f} 分鐘內直接走 Live。")
+        else:
+            log_print(f"⚠️ [桌機代答失敗，走 Live 兜底]: {e}")
         _fallback_live_paper()
         return
     ans = (ans or "").strip()
@@ -8873,7 +9008,7 @@ async def process_chat_message(vts, input_queue, user_input: str, user_audio_b64
                 _cpu_tool, _ = parse_hard_command(user_input)
             except Exception:
                 _cpu_tool = None
-            _desk_on = os.getenv("DESKTOP_FIRST", "1").strip() != "0"
+            _desk_on = os.getenv("DESKTOP_FIRST", "1").strip() != "0" and time.time() >= _DESKTOP_DOWN_UNTIL
             if _desk_on and not _cpu_tool and not _likely_needs_tools(user_input):
                 asyncio.create_task(_desktop_dad_reply(vts, input_queue, user_input, owner))
                 log_print("📱 [桌機代答] 純閒聊走免費桌面版（省 Live 生成）。")
@@ -9419,6 +9554,9 @@ async def chat_processor_worker(vts, input_queue):
                 wake_keywords = ["起床", "醒醒", "醒來", "睜開眼", "早安", "早上好", "醒來吧", "別睡了", "/wake", "喚醒", "睜開眼睛", "別睡"]
                 is_dad_source = (source in ["mic", "text_file", "console", "web_console"] or user_audio_b64)
                 has_wake_word = any(w in user_input for w in wake_keywords)
+                # 老爸打字是刻意對她說話，不用喚醒詞也叫醒（麥克風才要喚醒詞，免得雜音吵醒）。
+                # 舊碼老爸打字被忽略，觀眾隨便留一句卻能叫醒她（2026-10-25 實機）
+                is_dad_typed = source in ("text_file", "console", "web_console") and not user_audio_b64
                 # 觀眾彈幕（不含點讚/進房等瑣碎動態）：睜眼即可，不強制說話，掉下去正常處理
                 is_audience_chat = source in ("tiktok", "tiktok_gift", "twitch", "youtube", "owner_interject")
 
@@ -9426,8 +9564,8 @@ async def chat_processor_worker(vts, input_queue):
                     log_print("👀 [彈幕喚醒] 觀眾有新留言，7L 睜眼（說不說話交給哨兵決定）...")
                     await set_sleep_mode(False)
                     # 不 task_done、不 continue：掉下去走正常觀眾軌道
-                elif is_dad_source and has_wake_word and operator_input_enabled():
-                    log_print(f"☀️ [語音喚醒] 收到老爸喚醒指令：「{user_input}」，7L 睜眼！")
+                elif is_dad_source and (has_wake_word or is_dad_typed) and operator_input_enabled():
+                    log_print(f"☀️ [語音喚醒] 收到老爸{'訊息' if is_dad_typed and not has_wake_word else '喚醒指令'}：「{user_input}」，7L 睜眼！")
                     await set_sleep_mode(False)
                     # 不強制招呼、不 continue：讓主腦直接回老爸的話
                 else:
@@ -9493,7 +9631,12 @@ async def chat_processor_worker(vts, input_queue):
                 else:
                     aud_u = "直播觀眾"
                     aud_c = user_input
-                
+                if aud_u == "直播觀眾" and source == "tiktok_gift":
+                    # 送禮／訂閱動態的名字在內文「」裡（觀眾「土豪哥」送出了…），舊碼記成一位叫「直播觀眾」的人
+                    _m_name = re.search(r'觀眾「([^」]{1,40})」', aud_c)
+                    if _m_name:
+                        aud_u = _m_name.group(1).strip()
+
                 # 提取觀眾暱稱與 ID / 帳號
                 raw_user_str = aud_u.strip()
                 id_match = re.search(r'^(.*?)\s*\(@?([a-zA-Z0-9_.\-]+)\)$', raw_user_str)

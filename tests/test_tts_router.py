@@ -310,7 +310,7 @@ def test_tts_cache_serves_repeat_without_resynth(tmp_path, monkeypatch):
             w.setnchannels(1)
             w.setsampwidth(2)
             w.setframerate(24000)
-            w.writeframes(b"\\x01\\x02" * int(24000 * 8.0))
+            w.writeframes(b"\x01\x02" * int(24000 * 8.0))  # 8 秒（舊寫法多了反斜線，實際產生 32 秒）
         return buf.getvalue()
 
     monkeypatch.setattr(t, "TTS_CACHE_DIR", str(tmp_path))

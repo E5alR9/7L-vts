@@ -22,6 +22,12 @@ def _const(name):
                 if isinstance(n, ast.Assign) and getattr(n.targets[0], "id", "") == name)
 
 
+def _const_pattern(name):
+    """re.compile(r"...") 這種模組常數：取出裡面的正則字串。"""
+    return next(n.value.args[0].value for n in TREE.body if isinstance(n, ast.Assign)
+                and getattr(n.targets[0], "id", "") == name)
+
+
 def _load(*names, **ns):
     ns.setdefault("log_print", lambda *a, **k: None)
     for n in names:
@@ -67,7 +73,8 @@ def _run_handler(cpu, nv, total_timeout=45.0, task="幫我查日圓匯率"):
     sess = _FakeSession()
     ns = _load("_handle_invoke_subagent", types=types, asyncio=asyncio, session=sess, ws_send_lock=asyncio.Lock(),
                background_tool_executor=background_tool_executor, nv_interpret_task=nv_interpret_task,
-               build_slip_text=build_slip_text, _SUBAGENT_TOTAL_TIMEOUT=total_timeout)
+               build_slip_text=build_slip_text, _SUBAGENT_TOTAL_TIMEOUT=total_timeout,
+               _SUBAGENT_VISION_TASK_RE=__import__('re').compile(_const_pattern('_SUBAGENT_VISION_TASK_RE')))
     asyncio.run(ns["_handle_invoke_subagent"]("invoke_subagent", "call-1", task))
     assert all(r.id == "call-1" for r in sess.sent)
     if cpu[0]:
@@ -177,3 +184,20 @@ def test_nv_model_is_configurable_and_404_pauses_nv(monkeypatch):
     assert not ns["_nv_subagent_down"]()
     ns["_nv_subagent_note_error"](pytypes.SimpleNamespace(status_code=404), "m")
     assert ns["_nv_subagent_down"]()
+
+
+def test_screen_task_gets_one_silent_reply():
+    import re as _re
+    from core.hard_command import build_slip_text
+
+    async def never(*a, **k):
+        raise AssertionError("看畫面不該跑 CPU 或副腦")
+
+    sess = _FakeSession()
+    ns = _load("_handle_invoke_subagent", types=types, asyncio=asyncio, session=sess, ws_send_lock=asyncio.Lock(),
+               background_tool_executor=never, nv_interpret_task=never, build_slip_text=build_slip_text,
+               _SUBAGENT_TOTAL_TIMEOUT=45.0, _SUBAGENT_VISION_TASK_RE=_re.compile(_const_pattern("_SUBAGENT_VISION_TASK_RE")))
+    asyncio.run(ns["_handle_invoke_subagent"]("invoke_subagent", "c1", "看老爸螢幕上面有什麼"))
+    assert len(sess.sent) == 1
+    assert sess.sent[0].scheduling == types.FunctionResponseScheduling.SILENT
+    assert "不要描述畫面" in sess.sent[0].response["result"]

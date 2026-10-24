@@ -1902,7 +1902,7 @@ class SevenLMonitorApp {
     if (role === 'ai') {
       content.className = 'bubble-content bubble-purple';
       const textSpan = document.createElement('span');
-      textSpan.textContent = text;
+      textSpan.textContent = this.stripControlTags(text) || '（保持安靜）';
       content.appendChild(textSpan);
       
       let cleanModel = (modelName || '').trim();
@@ -3539,6 +3539,14 @@ class SevenLMonitorApp {
       item.value = Boolean(value);
       this.renderSwitches(this.switchesList);
     }
+  }
+
+  // 7L 的回覆夾著給 TTS／表情用的控制標籤（[SPEED:+10%]、[EXPRESSION: 開心]…），對話框只顯示要說的話
+  stripControlTags(text) {
+    return String(text || '')
+      .replace(/\[(?:SPEED|PITCH|VOLUME|RATE|EXPRESSION|MOVE|LOOK|WINK|FROWN|SHOCK|SPATIAL|POSITION|WINDOW|TOOL|SILENCE|PASS|SKIP|INTERRUPT_SELF)\b[^\]]*\]/gi, '')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
   }
 
   escapeHtml(str) {

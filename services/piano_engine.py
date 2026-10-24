@@ -846,6 +846,11 @@ async def wait_piano_sounding(session_id: int, timeout: float = 8.0) -> bool:
     except Exception:
         return False
 
+def is_piano_performing() -> bool:
+    """正在彈一首曲子（暫停中那首也算）。彈完後鋼琴留在台上待命，is_piano_active 還是 True，但不算在彈。"""
+    return bool(is_piano_active and current_piano_song_title)
+
+
 def is_piano_active_and_alive() -> bool:
     """即時判定鋼琴是否真的在線活躍（必須同時滿足標記為 active 且近期有心跳或視窗/進程確實存活）"""
     global is_piano_active, LAST_PIANO_HEARTBEAT_TIME, current_piano_process

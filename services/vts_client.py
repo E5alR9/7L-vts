@@ -110,6 +110,7 @@ VTS_EXPRESSION_MAP = {
     # 可愛附加
     "吐舌": "吐舌.exp3.json",
     "略": "吐舌.exp3.json",
+    "調皮": "吐舌.exp3.json",   # 主腦常寫 [EXPRESSION: 調皮]（選單裡「調皮→吐舌」，她直接寫情境名）
     "比心": "比心.exp3.json",
     "愛你": "比心.exp3.json",
     "花花": "花花.exp3.json",
@@ -117,6 +118,7 @@ VTS_EXPRESSION_MAP = {
     "問號": "问号.exp3.json",
     "问号": "问号.exp3.json",
     "疑惑": "问号.exp3.json",
+    "思考": "问号.exp3.json",   # 主腦常寫 [EXPRESSION: 思考]，舊表沒有就整個被忽略
     "？": "问号.exp3.json",
 
     # 道具與動作 (麥克風、遊戲機、抬手、雙馬尾)
@@ -824,7 +826,7 @@ async def set_vts_expression(vts, exp_tag, is_instinct=False):
                         if f and str(f).endswith(".exp3.json") and not _is_protected_exp(f):
                             to_close.add(f)
             except Exception as qe:
-                log_print(f"⚠️ [Live2D 表情] 查臉失敗（用小本本硬關）: {qe}")
+                log_print(f"⚠️ [Live2D 表情] 查臉失敗（用小本本硬關）: {type(qe).__name__} {qe}".rstrip())  # 逾時的訊息是空字串，只印名字
             failed = []
             if to_close:
                 async with vts_lock:
@@ -868,6 +870,7 @@ async def set_vts_expression(vts, exp_tag, is_instinct=False):
         raw_tags = re.split(r'[+/, 、，&]+', clean_tag)
         
         target_filenames = set()
+        action_hit = False  # 眨眼／驚訝／皺眉／白眼是動作不是表情檔，有觸發就不算「未知表情」
         for t in raw_tags:
             t = t.strip()
             if not t: continue
@@ -876,16 +879,20 @@ async def set_vts_expression(vts, exp_tag, is_instinct=False):
             if any(k in t for k in ["wink", "眨眼", "單眼", "眨單眼", "单眼", "眨单眼"]):
                 wink_timer = time.time() + 0.55
                 wink_side = random.choice(["left", "right"])
+                action_hit = True
                 log_print(f"😉 [Live2D 動作] 觸發 Wink 單邊眨一下眼放電 ({wink_side})")
             if any(k in t for k in ["shock", "surprise", "驚訝", "惊讶", "震驚", "震惊", "驚", "惊", "瞳孔", "縮小", "缩小", "嚇到", "吓到", "恐懼", "害怕"]):
                 shock_timer = time.time() + 4.0
+                action_hit = True
                 log_print("😱 [Live2D 動作] 觸發驚訝縮瞳瞪大雙眼與物理顫抖")
             if any(k in t for k in ["frown", "皺眉", "皱眉", "八字眉", "困擾", "困扰", "委屈"]):
                 frown_timer = time.time() + 4.0
+                action_hit = True
                 log_print("🥺 [Live2D 動作] 觸發傲嬌八字皺眉/委屈表情")
             if any(k in t for k in ["eye_roll", "白眼", "翻白眼", "鄙視", "不屑", "無語"]):
                 eye_roll_timer = time.time() + 3.0
                 is_tracking_mouse = False
+                action_hit = True
                 log_print("🙄 [Live2D 動作] 觸發 7L 鄙視翻白眼")
 
             found = VTS_EXPRESSION_MAP.get(t)
@@ -898,7 +905,8 @@ async def set_vts_expression(vts, exp_tag, is_instinct=False):
                 target_filenames.add(found)
 
         if not target_filenames:
-            log_print(f"⚠️ [Live2D 表情] 未知表情標籤：「{clean_tag}」，已忽略（請確認模型內有對應 .exp3.json 或在 VTS_EXPRESSION_MAP 新增映射）")
+            if not action_hit:
+                log_print(f"⚠️ [Live2D 表情] 未知表情標籤：「{clean_tag}」，已忽略（請確認模型內有對應 .exp3.json 或在 VTS_EXPRESSION_MAP 新增映射）")
             return
 
         CURRENT_ACTIVE_EXP = list(target_filenames)[0] if target_filenames else None

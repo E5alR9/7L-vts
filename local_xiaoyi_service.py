@@ -36,6 +36,7 @@ from contextlib import contextmanager
 
 # SoVITS 切分策略（2026-10-11：cut5 把短句切成 N 小片，某一片會整片靜音且等長，
 # 時長守衛看不出來；直播都 ≤60 字，整段一坨最穩；XIAOYI_SPLIT 環境變數可調回）。
+# 2026-10-25 起長句由 _split_for_tts 在句末標點切段、每段自己檢查重抽；模型內部仍是 cut0。
 XIAOYI_SPLIT_METHOD = os.getenv("XIAOYI_SPLIT", "cut0")
 
 class _WebLogStream:
@@ -161,9 +162,73 @@ def capture_tts_output():
 
 _tts_pipeline = None
 _thread_lock = threading.Lock()
+_REF_ZH = None   # 實際用的中文參考音（停頓壓短版，見 _tight_ref）
+_REF_JA = None   # 日文同理：實測失敗率 4/12 → 1/12
+
+
+_SEGMENT_CHARS = int(os.getenv("XIAOYI_SEGMENT_CHARS", "22"))   # 0 = 不切段，整句合成
+_SEGMENT_TRIES = 3
+
+
+def _split_for_tts(text: str, limit: int = None) -> list:
+    """長句在句末標點（。！？）切成短段，太短的段併回前一段；不超過 limit 字就不切。"""
+    limit = _SEGMENT_CHARS if limit is None else limit
+    if limit <= 0 or len(text) <= limit:
+        return [text]
+    parts = [p for p in re.split(r"(?<=[。！？!?])", text) if p.strip()]
+    out = []
+    for p in parts:
+        if out and len(out[-1]) + len(p) <= limit:
+            out[-1] += p
+        else:
+            out.append(p)
+    return out or [text]
+
+
+def _segment_ok(audio, sr: int, n_chars: int) -> bool:
+    """一段合成結果像不像念完了：總長沒爆、有聲時間夠、中間沒有長空白。"""
+    a = audio.astype(np.float32)
+    if audio.dtype == np.int16:
+        a /= 32768.0
+    win = max(1, int(sr * 0.05))
+    k = len(a) // win
+    if k == 0:
+        return False
+    rms = np.sqrt(np.mean(a[: k * win].reshape(k, win) ** 2, axis=1))
+    voiced = rms > max(0.01, float(rms.max()) * 0.05)
+    idx = np.flatnonzero(voiced)
+    if len(idx) == 0:
+        return False
+    expect = max(1.0, n_chars * 0.22)
+    total = len(a) / sr
+    gap = float(np.max(np.diff(idx)) - 1) * 0.05 if len(idx) > 1 else 0.0
+    return total <= max(6.0, expect * 2.5) and voiced.sum() * 0.05 >= expect * 0.3 and gap <= 2.0
+
+
+def _tight_ref(path: str) -> str:
+    """回傳句間停頓壓到 0.25 秒的參考音（第一次用 ffmpeg 產生在原檔旁邊）；做不出來就用原檔。
+
+    原參考音 7.3 秒裡有一半是句間停頓，模型會學著「念一兩個字就停住、後面全是靜音」：
+    實測 12 次失敗 7 次；只壓停頓、音色不變，0/12 失敗，合成也從平均 10 秒變 2.5 秒（2026-10-25）。
+    XIAOYI_TIGHT_REF=0 可關掉，改回原檔。"""
+    if os.getenv("XIAOYI_TIGHT_REF", "1") == "0" or not path or not os.path.exists(path):
+        return path
+    root, ext = os.path.splitext(path)
+    out = f"{root}_tight{ext or '.wav'}"
+    if os.path.exists(out) and os.path.getmtime(out) >= os.path.getmtime(path):
+        return out
+    try:
+        import subprocess
+        subprocess.run(["ffmpeg", "-v", "quiet", "-y", "-i", path, "-af",
+                        "silenceremove=stop_periods=-1:stop_duration=0.25:stop_threshold=-40dB", out],
+                       check=True, timeout=30)
+        return out if os.path.exists(out) else path
+    except Exception as e:
+        print(f"⚠️ [GPT-SoVITS] 參考音停頓壓短失敗，改用原檔：{e}")
+        return path
 
 def init_gpt_sovits():
-    global _tts_pipeline
+    global _tts_pipeline, _REF_ZH, _REF_JA
     with _thread_lock:
         if _tts_pipeline is not None:
             return _tts_pipeline
@@ -185,8 +250,10 @@ def init_gpt_sovits():
             _tts_pipeline = TTS(config)
             
             #  核心預熱與常駐快取：初始化時即完成參考音與文字 BERT 萃取，使後續所有合成省去 80% 時間！
+            _REF_ZH = _tight_ref(REF_VOICE_ZH)
+            _REF_JA = _tight_ref(REF_VOICE_JA)
             try:
-                ref_audio = REF_VOICE_ZH
+                ref_audio = _REF_ZH
                 ref_text = "哇！真的假的？太棒了吧！今天也要一起加油喔！嘿嘿～"
                 with capture_tts_output():
                     _tts_pipeline.set_ref_audio(ref_audio)
@@ -247,7 +314,7 @@ def synthesize_xiaoyi_bytes(text: str) -> bytes:
             
             if is_real_japanese:
                 #  正統日語模式：採用高音甜美版曉伊日語提示音（360Hz 少女高音）
-                ref_audio = REF_VOICE_JA
+                ref_audio = _REF_JA or REF_VOICE_JA
                 ref_text = "お兄ちゃん、今日も一日頑張ろうね！大好きだよ！"
                 ref_lang = "all_ja"
                 text_lang = "ja" if num_hanzi == 0 else "auto"
@@ -258,7 +325,7 @@ def synthesize_xiaoyi_bytes(text: str) -> bytes:
             else:
                 #  中文主體模式：
                 # 採用中文參考音訊，若為純中文則鎖定 'zh' 避免被誤判為日文，若有日文夾雜則交由 'auto'
-                ref_audio = REF_VOICE_ZH
+                ref_audio = _REF_ZH or REF_VOICE_ZH
                 ref_text = "哇！真的假的？太棒了吧！今天也要一起加油喔！嘿嘿～"
                 ref_lang = "all_zh"
                 has_english = bool(re.search(r'[a-zA-Z]', text))
@@ -303,21 +370,39 @@ def synthesize_xiaoyi_bytes(text: str) -> bytes:
             except Exception:
                 pass
 
-            with capture_tts_output():
-                gen = _tts_pipeline.run(inputs)
-                chunks = list(gen)
-            if not chunks:
+            # 長句切段逐段合成：三、四十字的多子句長句整句合成約 1/3 會念一半停住，
+            # 切成 ≤22 字的短段後 24/24 成功、也比較快（2026-10-25 實測）。每段自己檢查、壞了只重抽那段。
+            sr = None
+            pieces = []
+            for seg in _split_for_tts(text):
+                seg_inputs = dict(inputs, text=seg)
+                first = None
+                for _attempt in range(_SEGMENT_TRIES):
+                    with capture_tts_output():
+                        chunks = list(_tts_pipeline.run(seg_inputs))
+                    if not chunks:
+                        continue
+                    sr = chunks[0][0]
+                    seg_audio = chunks[0][1] if len(chunks) == 1 else np.concatenate([c for _, c in chunks])
+                    if _segment_ok(seg_audio, sr, len(seg)):
+                        first = seg_audio
+                        break
+                    if first is None:
+                        first = seg_audio  # 都不合格就用第一次的，整句檢查（tts_router）會再把關
+                if first is not None:
+                    pieces.append(first)
+            if not pieces:
                 try:
                     import services.web_dashboard as web_dash
                     web_dash.broadcast_event("tts_progress", {"active": False, "stage": "完成", "percent": 100})
                 except Exception:
                     pass
                 return b""
-            sr = chunks[0][0]
-            if len(chunks) == 1:
-                audio = chunks[0][1]
+            if len(pieces) == 1:
+                audio = pieces[0]
             else:
-                audio = np.concatenate([c for _, c in chunks])
+                pause = np.zeros(int(sr * 0.08), dtype=pieces[0].dtype)   # 段與段之間留一點換氣
+                audio = np.concatenate([x for i, p in enumerate(pieces) for x in ((pause, p) if i else (p,))])
             
             # 轉為 16-bit PCM numpy 陣列
             if audio.dtype != np.int16:

@@ -1463,7 +1463,8 @@ async def start_web_dashboard(
     async def index(request):
         index_file = os.path.join(web_dir, "index.html")
         if os.path.exists(index_file):
-            return web.FileResponse(index_file)
+            # 首頁每次都要問一下有沒有更新：沒這行瀏覽器會自己快取舊首頁，連帶一直載入舊版 dashboard.js
+            return web.FileResponse(index_file, headers={"Cache-Control": "no-cache"})
         return web.Response(text="<h1>7L Web Dashboard Loading...</h1>", content_type="text/html")
 
     app.router.add_get("/", index)

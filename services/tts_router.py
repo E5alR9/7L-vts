@@ -472,22 +472,37 @@ def _quality_problem(text: str, data) -> str:
     """合成結果的品質檢查；合格回 ""。空音訊不算品質問題（交給呼叫端的「回傳音訊為空」）。"""
     if not data or len(data) <= 100:
         return ""
-    dur, gap = _audio_profile(data)
-    if dur is not None and len(text.strip()) >= 10:
-        expect = max(1.5, len(text.strip()) * 0.22)
+    dur, gap, voiced = _audio_profile_full(data)
+    if dur is None:
+        return ""
+    n = len(text.strip())
+    expect = max(1.5, n * 0.22)
+    # 念一兩個字就停住、後面全是靜音直到長度上限（實測總長 20~57 秒、真的有聲只有 0.5~2 秒）。
+    # 靜音在尾巴不在中段，舊檢查放行：7L 對著空氣講 20 幾秒，後面排隊的話全卡住（2026-10-25）
+    if dur > max(8.0, expect * 2.5):
+        return f"音訊過長疑似沒念完（{dur:.1f}s/預期{expect:.1f}s）"
+    if n >= 10:
         if dur < expect * 0.4:
             return f"音訊過短疑似缺段（{dur:.1f}s/預期{expect:.1f}s）"
+        if voiced is not None and voiced < expect * 0.3:
+            return f"有聲只有{voiced:.1f}s疑似沒念完（預期{expect:.1f}s）"
         if gap is not None and gap > MAX_SILENCE_SEC:
             return f"音訊中段靜音{gap:.1f}s疑似掉片（自娛自樂式缺段）"
     return ""
 
 
 def _audio_profile(data: bytes):
+    """回 (秒數|None, 最大靜音洞|None)；細節見 _audio_profile_full。"""
+    seconds, longest, _voiced = _audio_profile_full(data)
+    return seconds, longest
+
+
+def _audio_profile_full(data: bytes):
     """內容嗅探而非副檔名（2026-10-11 教訓：xiaoyi 掛 .wav 標回的卻是 MP3，
-    舊守衛 wave.open 直接炸＝失明）。回 (秒數|None, 最大靜音洞|None)。
-    wav 走標準庫；其他格式走 ffmpeg 解碼；都沒有就 (None, None) 跳過檢查。"""
+    舊守衛 wave.open 直接炸＝失明）。回 (秒數|None, 最大靜音洞|None, 有聲秒數|None)。
+    wav 走標準庫；其他格式走 ffmpeg 解碼；都沒有就 (None, None, None) 跳過檢查。"""
     if not data or len(data) <= 100:
-        return None, None
+        return None, None, None
     pcm = None
     rate = 0
     try:
@@ -507,20 +522,20 @@ def _audio_profile(data: bytes):
             import subprocess as _sp
             exe = _ffmpeg_exe()
             if not exe or not os.path.exists(exe):
-                return None, None
+                return None, None, None
             rate = 16000
             r = _sp.run([exe, "-v", "error", "-i", "pipe:0",
                          "-f", "s16le", "-ac", "1", "-ar", str(rate), "pipe:1"],
                         input=bytes(data), capture_output=True, timeout=30)
             if r.returncode != 0 or len(r.stdout) < rate * 2:
-                return None, None
+                return None, None, None
             import array as _ar
             a = _ar.array("h", r.stdout)
             if len(a) % 2:
                 a = a[:-1]
             pcm = a
         except Exception:
-            return None, None
+            return None, None, None
     try:
         seconds = len(pcm) / float(rate or 1)
         win = max(1, int(rate * 0.25))
@@ -529,10 +544,10 @@ def _audio_profile(data: bytes):
             seg = pcm[i:i + win]
             prof.append((sum(s * s for s in seg) / len(seg)) ** 0.5 if seg else 0.0)
         if not prof:
-            return seconds, None
+            return seconds, None, None
         peak = max(prof)
         floor = max(80.0, peak * 0.02)
-        longest = cur = 0.0
+        longest = cur = voiced = 0.0
         step = win / float(rate or 1)
         for v in prof:
             if v < floor:
@@ -540,16 +555,18 @@ def _audio_profile(data: bytes):
                 longest = max(longest, cur)
             else:
                 cur = 0.0
-        return seconds, longest
+                voiced += step
+        return seconds, longest, voiced
     except Exception:
-        return None, None
+        return None, None, None
 
 
 # ── 語句磁碟快取（2026-10-11：同樣的口頭禪別再花 3 秒合成一次）───────────────
 # 同文＋同引擎＋同語速命中約 50ms（測過：3.01s → 0.05s）。SoVITS 有採樣隨機性，
 # 快取等於把同一句的講法固定下來——對主播人設是加分（口頭禪每次同一個味道）。
 # 換聲線模型時 bump TTS_CACHE_VERSION，否則舊音色殘留。
-TTS_CACHE_VERSION = "v2"  # v1 混入過中段靜音毒檔＋錯標格式，2026-10-11 全面換血
+TTS_CACHE_VERSION = "v3"  # v1 混入過中段靜音毒檔＋錯標格式，2026-10-11 全面換血；
+# v3（2026-10-25）：參考音換成停頓壓短版，舊檔裡也有「念一兩字就停」的尾巴靜音檔漏網
 TTS_CACHE_DIR = os.getenv("TTS_CACHE_DIR") or os.path.join(BASE_DIR, "data", "tts_cache")
 TTS_CACHE_MAX_FILES = int(os.getenv("TTS_CACHE_MAX_FILES") or "500")
 TTS_CACHE_MAX_BYTES = int(os.getenv("TTS_CACHE_MAX_BYTES") or str(300 * 1024 * 1024))

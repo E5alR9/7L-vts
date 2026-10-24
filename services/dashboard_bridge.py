@@ -390,7 +390,7 @@ class DashboardBridge:
                 "name": "視覺陪伴主動搭話",
                 "category": "wander",
                 "category_name": " 自主行為與漫遊",
-                "description": "每隔 35~50 秒根據老爸目前視窗、聆聽音樂與操作動態，自主決定是否主動搭話或吐槽。關閉時轉為純被動（有問才答）。",
+                "description": "房間安靜約 3 分鐘（彈琴中 10 分鐘）時，看畫面與最近聊過的話自己找話題閒聊 1~2 句，聊完冷卻 7 分鐘。關閉時轉為純被動（有問才答）。",
                 "value": bool(c.IS_PROACTIVE_SPEAK_ENABLED),
                 "icon": "chat"
             },
