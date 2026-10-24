@@ -855,18 +855,20 @@ def is_piano_active_and_alive() -> bool:
     if current_piano_process is not None and current_piano_process.poll() is not None:
         _mark_piano_offline("進程已終止 (poll)")
         return False
-    # 心跳逾時檢查 (超過 2.5 秒沒有心跳)
+    # 心跳逾時檢查 (超過 2.5 秒沒有心跳)；剛發起演奏的 30 秒內視窗可能還沒開，跟看門狗一樣不判死
+    # （2026-10-24 實機：停止後再點一首，舊心跳早就逾時，新視窗還沒開就被這裡當成關閉，整首沒彈）
     now = time.time()
-    if LAST_PIANO_HEARTBEAT_TIME > 0 and (now - LAST_PIANO_HEARTBEAT_TIME > 2.5):
+    if now - LAST_PIANO_OPEN_TIME >= 30.0 and LAST_PIANO_HEARTBEAT_TIME > 0 and (now - LAST_PIANO_HEARTBEAT_TIME > 2.5):
         if not is_piano_window_alive():
             _mark_piano_offline("心跳超時且無視窗存活")
             return False
     return is_piano_active
 
 def _mark_piano_offline(reason: str = ""):
-    global is_piano_active, current_piano_song_title, GLOBAL_PIANO_REALTIME_STATE, current_piano_process, PIANO_NOTE_FOCUS_X
+    global is_piano_active, current_piano_song_title, GLOBAL_PIANO_REALTIME_STATE, current_piano_process, PIANO_NOTE_FOCUS_X, LAST_PIANO_HEARTBEAT_TIME
     was_active = is_piano_active or GLOBAL_PIANO_REALTIME_STATE.get("is_playing", False) or GLOBAL_PIANO_REALTIME_STATE.get("is_window_open", False)
     is_piano_active = False
+    LAST_PIANO_HEARTBEAT_TIME = 0.0  # 舊視窗的心跳不算數，下一首從頭等新視窗的心跳
     current_piano_song_title = ""
     PIANO_NOTE_FOCUS_X = 0.0
     current_piano_process = None
@@ -1444,6 +1446,7 @@ async def stop_virtual_piano() -> str:
     PIANO_SESSION_ID += 1  # 註銷所有先前或進行中的鋼琴 Session
     IS_PIANO_AUTO_RADIO_MODE = False  # 關閉無限隨機電台模式
     globals()["IS_PIANO_PAUSED"] = False
+    globals()["LAST_PIANO_HEARTBEAT_TIME"] = 0.0  # 舊視窗的心跳不算數，下一首從頭等新視窗的心跳
     is_piano_active = False
     current_piano_song_title = ""
     PIANO_REQUEST_QUEUE.clear()

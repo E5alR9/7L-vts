@@ -26,6 +26,9 @@ _TRAIL_MODAL = re.compile(r'(?:嗎|嘛|啊|吧|呢|喔|哦|呀|啦|嘿|哟|哈|�
 # 而且字面上無法和「唱晴天了」區分——一律不剝，避免把真歌名削壞。
 # （2026-10-11 教訓：曾試剝句尾搭訕「給你看」，結果真歌名就叫《放個大招給你看》；
 # CPU 無法區分搭訕和歌名，YT 模糊搜尋本來就容忍多餘字——寧可整串拿去搜，不要自作聰明削。）
+# 例外只有「給我聽」這種聽眾補語（2026-10-24：「彈一首小星星給我聽」→ 應答念成「小星星給我聽交給我」）：
+# 點歌句幾乎都這樣講；剝完不合格就退回原文，《唱歌給你聽》剝成「唱歌」是停用詞，照樣保留原名。
+_TRAIL_LISTENER = re.compile(r'給(?:我|你|妳|您|大家|老爸|我們|你們|妳們)聽(?:聽|一下)?$')
 _LEAD_QUANTITY = re.compile(r'^(?:一首|兩首|三首|點一首|來一首)')
 _LEAD_MEASURE = re.compile(r'^[:：\s]+')
 
@@ -92,7 +95,8 @@ _LEAD_OK = re.compile(
 )
 
 _SING_KW = re.compile(r'(?:點歌|唱)')
-_PIANO_KW = re.compile(r'(?:彈琴|彈鋼琴|彈)')
+# 「彈奏」要整個當關鍵字：只認「彈」的話「彈奏 小星星」會抽出「奏 小星星」（2026-10-24 實機）
+_PIANO_KW = re.compile(r'(?:彈琴|彈鋼琴|彈奏|彈)')
 _SEP = re.compile(r'^[:：\s]')
 _NEG_SING = re.compile(r'(?:不|別)唱')
 _NEG_PIANO = re.compile(r'(?:不|別)彈')
@@ -139,7 +143,11 @@ def _clean_title(raw: Optional[str]) -> Optional[str]:
     if _GENERIC.search(t0):
         return None
     base = _LEAD_QUANTITY.sub('', t0).strip()
-    for cand in (_TRAIL_MODAL.sub('', base), base):
+    no_modal = _TRAIL_MODAL.sub('', base)
+    no_listener = _TRAIL_JUNK.sub('', _TRAIL_LISTENER.sub('', no_modal))
+    if not no_listener:
+        return None  # 「唱給我聽」「彈琴給我聽」：只有聽眾補語、沒有歌名，交還主腦
+    for cand in (no_listener, no_modal, base):
         if cand and _title_ok(cand):
             return cand
     return None
@@ -275,10 +283,38 @@ def split_original_request(title: str):
     return t, src, bool(src)
 
 
+# —— 鋼琴控制：停止／暫停／繼續（2026-10-24）——
+# 主腦常只嘴上說「停下囉」卻沒呼叫工具，副腦判定又要 5 秒；這幾句很固定，CPU 直接接。
+# 整句去掉句尾語氣和標點後，結尾必須剛好是下面某一句、前面只能是祈使前綴（同句首門）：
+# 「他說別彈了」「不要停止彈琴」「繼續彈小星星」一律不攔，交還主腦。
+_PIANO_OBJ = r'(?:彈琴|彈鋼琴|鋼琴|演奏|彈奏)'
+_PIANO_CONTROLS = (
+    ("pe.stop_virtual_piano", re.compile(
+        r'(?:(?:停止|停掉|關掉|收起|收掉)' + _PIANO_OBJ + r'|(?:別|不要|不用)再?彈了|鋼琴(?:停止|停掉|關掉|收起來))了?$')),
+    ("pe.pause_virtual_piano", re.compile(r'(?:暫停' + _PIANO_OBJ + r'|鋼琴暫停)了?$')),
+    ("pe.resume_virtual_piano", re.compile(r'(?:繼續(?:彈|' + _PIANO_OBJ + r')|鋼琴繼續)了?$')),
+)
+PIANO_CONTROL_TOOLS = frozenset(t for t, _ in _PIANO_CONTROLS)
+
+
+def extract_piano_control(text: Optional[str]) -> Optional[str]:
+    """停止／暫停／繼續鋼琴的祈使句 → 工具名；其他回 None。"""
+    s = (text or "").strip()
+    for _ in range(2):  # 「別彈了啦！」：標點和語氣詞可能交錯
+        s = _TRAIL_MODAL.sub('', _TRAIL_JUNK.sub('', s))
+    if not s:
+        return None
+    for tool, pat in _PIANO_CONTROLS:
+        m = pat.search(s)
+        if m and _LEAD_OK.match(s[:m.start()]):
+            return tool
+    return None
+
+
 def parse_hard_command(text: Optional[str]) -> Tuple[Optional[str], Dict]:
     """B 架構入口：把純文字拆成 (工具名, 參數)。
 
-    只認點歌（唱歌/彈琴）。表情不歸 CPU（交還主腦/A 架構，避免誤觸搶戲）。
+    只認點歌（唱歌/彈琴）和鋼琴的停止／暫停／繼續。表情不歸 CPU（交還主腦/A 架構，避免誤觸搶戲）。
     混用句（彈X加唱Y）走 parse_mixed_command，不在這裡處理。
     桌機助手（問Gemini）最優先判定：顯式問句不跟唱歌搶。
     回 (None, {}) 代表無硬指令，交還 A 架構（Live 主腦 → invoke_subagent → NV 解讀）。
@@ -286,6 +322,9 @@ def parse_hard_command(text: Optional[str]) -> Tuple[Optional[str], Dict]:
     ask = extract_ask_desktop(text)
     if ask:
         return "ask_desktop", {"question": ask}
+    control = extract_piano_control(text)
+    if control:
+        return control, {}
     song = extract_sing_song(text)
     if song:
         return "auto_sing_song", {"song_name": song}

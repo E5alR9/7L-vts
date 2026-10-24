@@ -580,7 +580,7 @@ from core.utils import (
     speech_allowed, operator_input_enabled, to_tw
 )
 from core.identity import is_owner_account, claims_owner_identity
-from core.hard_command import parse_hard_command, build_slip_text, display_requester, parse_slip_for_song, strip_blob_noise, sanitize_search_query, rescue_claim, split_original_request
+from core.hard_command import parse_hard_command, build_slip_text, display_requester, parse_slip_for_song, strip_blob_noise, sanitize_search_query, rescue_claim, split_original_request, PIANO_CONTROL_TOOLS
 from core.subagent_router import resolve_subagent_chain
 from core.db import *
 from core.live_timer_sensor import live_timer_hub
@@ -2616,12 +2616,19 @@ _SONG_ACK_LINES = [
     "交給我，《{song}》正在找譜準備，稍等一下下！",
     "《{song}》收到！背景開工中，準備好立刻開唱！",
 ]
+# 彈琴用自己的一組：共用唱歌那組會說「好了就唱給你聽」（2026-10-24 實機）
+_PIANO_ACK_LINES = [
+    "好喔，《{song}》交給我，這就彈給你聽！",
+    "收到，《{song}》！琴譜翻好就開彈～",
+    "《{song}》是吧，沒問題，馬上彈！",
+]
 
 
-async def _song_ack(song: str, target: str = "dad"):
+async def _song_ack(song: str, target: str = "dad", piano: bool = False):
     global _SONG_ACK_IDX
     song = (song or "這首").strip() or "這首"
-    text = _SONG_ACK_LINES[_SONG_ACK_IDX % len(_SONG_ACK_LINES)].format(song=song)
+    lines = _PIANO_ACK_LINES if piano else _SONG_ACK_LINES
+    text = lines[_SONG_ACK_IDX % len(lines)].format(song=song)
     _SONG_ACK_IDX += 1
     try:
         speech_queue.put_nowait({"text": text, "expression": "星星眼", "action": "",
@@ -8661,7 +8668,7 @@ def _hard_cmd_seen_recently(fn_name: str, fn_args, now: float) -> bool:
 async def background_tool_executor(user_text: str, target: str = "dad", requester_name: str = "", from_brain: bool = False):
     """
     B 架構：純 CPU 文字指令拆解器（零 API、零幻覺、零成本，永遠不碰 AI）。
-    只認唱歌/鋼琴兩類硬指令並立即執行；其他一律交還。
+    只認唱歌/鋼琴兩類硬指令（含鋼琴的停止／暫停／繼續，觀眾不能用）並立即執行；其他一律交還。
     AI 解讀一律走 A 架構（Live invoke_subagent → NV 解讀），不在這裡燒錢。
     回傳 (是否命中, 工具名, 參數)，供調用方誠實回報。
     from_brain：主腦自己呼叫 invoke_subagent 進來的。工具回應已經告訴主腦結果，這裡就不再送紙條、
@@ -8674,6 +8681,10 @@ async def background_tool_executor(user_text: str, target: str = "dad", requeste
         #    2026-10-09：舊版只認關鍵字「唱」，把「你可以唱歌了？」抽成歌名「歌了？」、
         #    「? 又我唱了????」抽成「了????」，兩次都真的開跑 YT-DLP。改走 parse_hard_command。
         fn_name, fn_args = parse_hard_command(user_text)
+        if fn_name in PIANO_CONTROL_TOOLS and target == "audience":
+            # 觀眾留言也會進 CPU：鋼琴的停止／暫停／繼續只聽老爸的，不然一句「別彈了」就能把鋼琴收掉
+            log_print(f"🛑 [CPU 硬體直連] 觀眾不能控制鋼琴，不執行：{user_text[:30]}")
+            return False, "", {}
 
         # 搜尋指令：CPU 層不處理（搜尋是資訊型工具、結果無處可去，只能燒 API；
         # 統一交給 AI 子智能體/主腦走 function calling＋摘要後再說話）
@@ -8720,6 +8731,10 @@ async def background_tool_executor(user_text: str, target: str = "dad", requeste
         if fn_name and _hard_cmd_seen_recently(fn_name, fn_args, time.time()):
             log_print(f"⏭️ [CPU 硬體直連] {fn_name}({fn_args}) 剛剛已在處理，不重複執行")
             return True, fn_name, fn_args
+        if fn_name in PIANO_CONTROL_TOOLS:
+            # 去重只擋同一則訊息被執行兩次；「暫停→繼續→暫停」20 秒內換了指令，就把另外兩個的紀錄清掉
+            for _other in PIANO_CONTROL_TOOLS - {fn_name}:
+                _HARD_CMD_RECENT.pop(f"{_other}|{{}}", None)
         if fn_name:
             log_print(f"⚡ [CPU 硬體直連] 成功攔截指令: {fn_name}({fn_args})")
             # 自創曲歸隊（2026-10-11）：剝前綴＋找檔，後面執行/紙條/應答全用乾淨參數
@@ -8735,14 +8750,15 @@ async def background_tool_executor(user_text: str, target: str = "dad", requeste
                         _o_need_file = not _o_src
                 except Exception:
                     log_swallowed()
-            # CPU 只認點歌：一律走背景執行＋紙條（表情不歸 CPU，交主腦/A 架構）
+            # CPU 只認點歌和鋼琴控制：一律走背景執行＋紙條（表情不歸 CPU，交主腦/A 架構）
             asyncio.create_task(execute_tool_dispatch(fn_name, fn_args, caller_target=target, caller_user=requester_name))
             # 點歌強制應答：主腦常靜默，補一句 TTS 保證出聲（target 透傳，播出规则照舊）
             if fn_name in ("auto_sing_song", "sing_song", "pe.play_virtual_piano", "play_virtual_piano") and not from_brain:
                 if _o_need_file:
                     asyncio.create_task(_song_ack_missing_original((fn_args or {}).get("song_name", ""), target))
                 else:
-                    asyncio.create_task(_song_ack((fn_args or {}).get("song_name", ""), target))
+                    asyncio.create_task(_song_ack((fn_args or {}).get("song_name", ""), target,
+                                                  piano=fn_name in ("pe.play_virtual_piano", "play_virtual_piano")))
             # ⚠️ 紙條必須寫明「唱歌的是 7L 本人」，否則主腦會把點歌的人當成演唱者
             slip_text = build_slip_text(fn_name, fn_args, requester_name)
         else:

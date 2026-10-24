@@ -247,8 +247,18 @@ def test_mixed_play_sing():
         "auto_sing_song", {"song_name": "放個大招給你看"})
     assert parse_hard_command("唱晴天聽聽看") == (
         "auto_sing_song", {"song_name": "晴天聽聽看"})
+    # 例外：「給我聽」這種聽眾補語要剝（2026-10-24：應答念成「小星星給我聽交給我」）；剝完不合格退回原文
     assert parse_hard_command("彈月光給我聽") == (
-        "pe.play_virtual_piano", {"song_name": "月光給我聽"})
+        "pe.play_virtual_piano", {"song_name": "月光"})
+    assert parse_hard_command("彈一首小星星給大家聽啦") == (
+        "pe.play_virtual_piano", {"song_name": "小星星"})
+    assert parse_hard_command("唱 唱歌給你聽") == (
+        "auto_sing_song", {"song_name": "唱歌給你聽"})
+    assert parse_hard_command("唱給我聽") == (None, {})
+    assert parse_hard_command("彈琴給我聽") == (None, {})
+    # 「彈奏」整個當關鍵字（舊碼抽出「奏 小星星」）
+    assert parse_hard_command("彈奏 小星星") == (
+        "pe.play_virtual_piano", {"song_name": "小星星"})
 
 
 # --- 表情不歸 CPU（紙條分支保留給 A 架構 NV 用）---
@@ -366,3 +376,16 @@ def test_desktop_helper_normalize():
     assert normalize_question("x") == ""
     assert normalize_question("") == ""
     assert len(normalize_question("y" * 600)) == 500
+
+
+def test_piano_control_commands():
+    """停止／暫停／繼續鋼琴（2026-10-24）：主腦常只嘴上說「停下囉」沒呼叫工具，CPU 直接接。"""
+    for s in ("7L 停止彈琴", "停止彈琴！", "別彈了啦", "7L 不要再彈了", "幫老爸收起鋼琴", "你可以停止演奏了嗎"):
+        assert parse_hard_command(s) == ("pe.stop_virtual_piano", {}), s
+    for s in ("可以暫停鋼琴嗎", "鋼琴暫停"):
+        assert parse_hard_command(s) == ("pe.pause_virtual_piano", {}), s
+    for s in ("繼續彈", "7L 繼續彈吧", "鋼琴繼續"):
+        assert parse_hard_command(s) == ("pe.resume_virtual_piano", {}), s
+    # 不是對 7L 下的指令、意思相反、或後面還有別的要求：一律交還主腦
+    for s in ("他說別彈了", "不要停止彈琴", "我不想停止彈琴", "繼續彈小星星", "暫停", "先停一下"):
+        assert parse_hard_command(s) == (None, {}), s

@@ -82,3 +82,73 @@ def test_precise_sleep_exists_for_text_sheet_playback():
     t = time.perf_counter()
     pe.precise_sleep(0.02)
     assert 0.018 <= time.perf_counter() - t < 0.2
+
+
+def _run_executor(text, target, recent=None):
+    """跑 background_tool_executor（假的派發），回 (結果, 派發過的工具)。"""
+    import asyncio
+    import collections
+    from core.hard_command import parse_hard_command, build_slip_text, PIANO_CONTROL_TOOLS, split_original_request
+    dispatched = []
+
+    async def execute_tool_dispatch(fn, args, **k):
+        dispatched.append(fn)
+
+    async def _song_ack(*a, **k):
+        pass
+
+    ns = {"asyncio": asyncio, "time": time, "log_print": lambda *a, **k: None, "log_swallowed": lambda: None,
+          "parse_hard_command": parse_hard_command, "build_slip_text": build_slip_text,
+          "PIANO_CONTROL_TOOLS": PIANO_CONTROL_TOOLS, "split_original_request": split_original_request,
+          "execute_tool_dispatch": execute_tool_dispatch, "_song_ack": _song_ack,
+          "is_live_brain_active": lambda: False, "LIVE_API_SYSTEM_PROMPT_QUEUE": collections.deque(),
+          "_HARD_CMD_RECENT": {} if recent is None else recent, "_HARD_CMD_DEDUPE_SEC": 20.0}
+    for name in ("_hard_cmd_seen_recently", "background_tool_executor"):
+        exec(compile(ast.Module(body=[_fn(name)], type_ignores=[]), name, "exec"), ns)
+
+    async def go():
+        r = await ns["background_tool_executor"](text, target=target, requester_name="")
+        await asyncio.sleep(0)
+        return r
+    return asyncio.run(go()), dispatched
+
+
+def test_viewers_cannot_control_the_piano():
+    (hit, _, _), sent = _run_executor("7L 別彈了", "audience")
+    assert hit is False and sent == []
+    (hit, tool, _), sent = _run_executor("7L 別彈了", "dad")
+    assert hit is True and tool == "pe.stop_virtual_piano" and sent == ["pe.stop_virtual_piano"]
+
+
+def test_pause_resume_pause_is_not_blocked_by_dedupe():
+    recent = {}
+    for text, tool in (("暫停鋼琴", "pe.pause_virtual_piano"), ("繼續彈", "pe.resume_virtual_piano"),
+                       ("暫停鋼琴", "pe.pause_virtual_piano")):
+        _, sent = _run_executor(text, "dad", recent)
+        assert sent == [tool], text
+    _, sent = _run_executor("暫停鋼琴", "dad", recent)   # 同一則被主腦再送一次：照樣擋
+    assert sent == []
+
+
+def test_piano_ack_does_not_say_sing():
+    lines = next(ast.literal_eval(n.value) for n in TREE.body
+                 if isinstance(n, ast.Assign) and getattr(n.targets[0], "id", "") == "_PIANO_ACK_LINES")
+    assert lines and not any("唱" in l for l in lines)
+    src = ast.get_source_segment(MAIN, _fn("background_tool_executor"))
+    assert "piano=fn_name in (" in src
+
+
+def test_replay_after_stop_is_not_killed_by_stale_heartbeat(monkeypatch):
+    """停止後再點一首：舊心跳早就逾時，新視窗還沒開，不能被當成鋼琴已關閉（2026-10-24 實機整首沒彈）。"""
+    import services.piano_engine as pe
+    now = time.time()
+    monkeypatch.setattr(pe, "is_piano_active", True)
+    monkeypatch.setattr(pe, "current_piano_process", None)
+    monkeypatch.setattr(pe, "LAST_PIANO_HEARTBEAT_TIME", now - 60)   # 上一首的心跳
+    monkeypatch.setattr(pe, "LAST_PIANO_OPEN_TIME", now - 3)         # 剛發起這一首
+    monkeypatch.setattr(pe, "is_piano_window_alive", lambda: False)  # 新視窗還在路上
+    monkeypatch.setattr(pe, "save_persisted_piano_state", lambda *a, **k: None)
+    assert pe.is_piano_active_and_alive() is True
+    monkeypatch.setattr(pe, "LAST_PIANO_OPEN_TIME", now - 40)        # 過了寬限期還沒心跳：照樣判死
+    assert pe.is_piano_active_and_alive() is False
+    assert pe.LAST_PIANO_HEARTBEAT_TIME == 0.0                       # 判死時清掉舊心跳
