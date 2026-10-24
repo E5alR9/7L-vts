@@ -97,7 +97,7 @@ def _load(fx):
     for n in tree.body:
         if isinstance(n, ast.AsyncFunctionDef) and n.name in (
                 "_director_ensure_session", "_director_drop_session",
-                "live_api_direct_sentence_emotions"):
+                "live_api_direct_sentence_emotions", "_director_drain_then_release"):
             exec(compile(ast.Module(body=[n], type_ignores=[]), "x", "exec"), ns)
             funcs[n.name] = ns[n.name]
         if isinstance(n, ast.FunctionDef) and n.name == "_director_cache_key":
@@ -233,3 +233,22 @@ def test_cache_evicts_oldest():
 
     asyncio.run(go())
     assert len(ns["_DIRECTOR_TIMELINE_CACHE"]) == 2
+
+
+def test_tail_after_generation_complete_does_not_leak_into_next_sentence():
+    """2026-10-24 實機：generation_complete 後還有音訊與 turn_complete，舊碼留在連線上，
+    下一句先讀到上一句的尾巴→空結果、之後整個錯位。現在背景把尾巴讀完才放鎖。"""
+    funcs, ns, fx, logs = _load({"connects": 0, "gen_complete_tail": True})
+    f = funcs["live_api_direct_sentence_emotions"]
+
+    async def go():
+        r1 = await f("你這什麼問題啊，本少女活得好好的。", 4.0)
+        r2 = await f("謝謝你的禮物，超開心的喔喔。", 3.0)
+        await asyncio.sleep(0)  # 讓背景排空任務跑完
+        return r1, r2
+
+    r1, r2 = asyncio.run(go())
+    assert r1 == [(0.0, "EXPRESSION", "臉紅"), (1.2, "EXPRESSION", "吐舌")]
+    assert r2 == [(0.0, "EXPRESSION", "臉紅"), (1.2, "EXPRESSION", "吐舌")]   # 舊碼這裡會是 []
+    assert fx["connects"] == 1
+    assert not ns["_DIRECTOR_LOCK"].locked()

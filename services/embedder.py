@@ -44,7 +44,11 @@ def _get_local_model():
     name = os.getenv("RAG_EMBED_MODEL") or DEFAULT_LOCAL_MODEL
     try:
         from fastembed import TextEmbedding
-        _local_model = TextEmbedding(model_name=name)
+        # 快取放專案 models/ 底下：fastembed 預設放系統暫存資料夾，Windows 磁碟清理會清掉，
+        # 下次第一次查詢就得在對話當下重新下載 ~95MB（2026-10-24 實機：卡 18 秒）
+        cache_dir = os.getenv("FASTEMBED_CACHE_DIR") or os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "models", "fastembed")
+        _local_model = TextEmbedding(model_name=name, cache_dir=cache_dir)
         _local_model_name = name
         return _local_model
     except Exception as e:

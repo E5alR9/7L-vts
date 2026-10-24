@@ -879,6 +879,10 @@ class VirtualPianoGUI:
                             self.root.after(0, lambda t=title, p=midi_path: self.add_concurrent_track(t, p))
                     elif cmd == "stop":
                         self.root.after(0, self.stop_playback)
+                    elif cmd == "pause":
+                        self.root.after(0, self.ipc_pause)
+                    elif cmd == "resume":
+                        self.root.after(0, self.ipc_resume)
                     elif cmd == "set_volume":
                         vol = cmd_obj.get("volume", 100)
                         self.root.after(0, lambda v=vol: self.set_piano_volume(v))
@@ -1933,13 +1937,14 @@ class VirtualPianoGUI:
         self.local_midi_var.set(f" {os.path.basename(saved_path)}")
         self.start_midi_playback(title, saved_path)
 
-    def toggle_play_current(self):
-        """播放 / 暫停 切換 / 切換至選取歌曲"""
+    def toggle_play_current(self, ignore_selection: bool = False):
+        """播放 / 暫停 切換 / 切換至選取歌曲
+        ignore_selection：IPC 暫停／繼續用，略過「下拉選單選了別首就改播那首」"""
         selected_name = self.local_midi_var.get()
         selected_path = self.local_midi_files.get(selected_name)
-        
+
         # 若選取的曲目與當前曲目不同，立即切換播放新歌！
-        if selected_path and selected_path != self.current_midi_path:
+        if not ignore_selection and selected_path and selected_path != self.current_midi_path:
             self.start_midi_playback(selected_name, selected_path)
             return
 
@@ -1981,6 +1986,17 @@ class VirtualPianoGUI:
             else:
                 # 播放選取的本機曲目
                 self.play_selected_local()
+
+    def ipc_pause(self):
+        """IPC「pause」（7L 工具 pause_virtual_piano）：只在播放中才暫停，沿用按鈕的暫停邏輯。"""
+        if self.is_playing:
+            self.toggle_play_current(ignore_selection=True)
+
+    def ipc_resume(self):
+        """IPC「resume」（7L 工具 resume_virtual_piano）：只在有暫停進度時才繼續，絕不改播其他曲目。"""
+        if not self.is_playing and (self.active_tracks or self.playback_events) \
+                and self.paused_song_time < self.total_song_duration:
+            self.toggle_play_current(ignore_selection=True)
 
     def play_selected_local(self):
         name = self.local_midi_var.get()

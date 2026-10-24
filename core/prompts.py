@@ -142,7 +142,9 @@ class TextCleanEngine:
 
         # 3. 處理結構化劇本模式 (1. 心想 / 2. 動作 / 3. 說話)：
         # 若文字包含明確「3. **說話**：」或「說話：」標籤，將其前方所有規劃、心想與動作內容全數提取為心想
-        speech_split_m = re.search(r'(?:^|\n)(?:\d+[\.、]\s*)?\*{0,2}(?:說話|台詞|開口|回應|回答)\*{0,2}[：:]\s*', t, flags=re.IGNORECASE)
+        # 2026-10-24：補「開口說話：」「說出口：」（雲端規則「思考在大腦心想中完成，開口說話…」會引導模型寫成段落標題，
+        # 舊規則認不出，整段內心戲會被 TTS 念出來）
+        speech_split_m = re.search(r'(?:^|\n)(?:\d+[\.、]\s*)?\*{0,2}(?:開口說話|開口說|說出口|說話|台詞|開口|回應|回答)\*{0,2}[：:]\s*', t, flags=re.IGNORECASE)
         if speech_split_m:
             before_speech = t[:speech_split_m.start()].strip()
             after_speech = t[speech_split_m.end():].strip()
@@ -168,7 +170,7 @@ class TextCleanEngine:
 
         # 6. 清理殘留的心想/動作條目
         t = re.sub(r'(?:^|\n)(?:\d+[\.、]\s*)?\*{0,2}(?:心想|內心想|腦內思緒|動作|肢體|神態)\*{0,2}[：:][^\n]*', '', t, flags=re.IGNORECASE).strip()
-        t = re.sub(r'^(?:\d+[\.、]\s*)?\*{0,2}(?:說話|台詞|開口|回應|回答)\*{0,2}[：:]\s*', '', t, flags=re.IGNORECASE).strip()
+        t = re.sub(r'^(?:\d+[\.、]\s*)?\*{0,2}(?:開口說話|開口說|說出口|說話|台詞|開口|回應|回答)\*{0,2}[：:]\s*', '', t, flags=re.IGNORECASE).strip()
         t = re.sub(r'^(?:thought|thinking|心想)[：:\s]*', '', t, flags=re.IGNORECASE).strip()
 
         # 去重並保留次序

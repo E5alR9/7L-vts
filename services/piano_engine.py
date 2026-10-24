@@ -1123,6 +1123,19 @@ def play_piano_note(char_or_chord):
             SOUND_ENGINE.note_on(midi, 105)
             update_piano_focus_notes([midi])
 
+def precise_sleep(duration_sec):
+    """高精度睡眠（文字樂譜演奏的節拍用；在執行緒裡跑）。
+    2026-10-24 放回：ef252eb2c 當成死碼刪掉，但文字樂譜備用演奏路徑還在用，走到就 NameError。"""
+    if duration_sec <= 0:
+        return
+    target = time.perf_counter() + duration_sec
+    remain = target - time.perf_counter()
+    if remain > 0.004:
+        time.sleep(remain - 0.003)
+    while time.perf_counter() < target:
+        pass
+
+
 def parse_vp_sheet(sheet_text: str, base_bpm=160, note_mode="16th"):
     beat_sec = 60.0 / max(40.0, float(base_bpm))
     if note_mode == "16th":
@@ -1392,6 +1405,35 @@ def stop_midi_band():
         pass
 
 
+# 暫停狀態：鋼琴視窗暫停時心跳回報 is_playing=False，等待迴圈會誤判成「播完」而接下一首（2026-10-24 實機）
+IS_PIANO_PAUSED = False
+_PIANO_RESUME_GRACE_UNTIL = 0.0   # 剛繼續的前幾秒，視窗心跳可能還是舊的 is_playing=False
+
+
+async def pause_virtual_piano() -> str:
+    """暫停目前演奏、保留進度（resume_virtual_piano 繼續）。
+    2026-10-24 補上：工具清單一直有這個工具，但引擎從沒實作，呼叫就 AttributeError。"""
+    if not is_piano_window_alive():
+        return "（系統回報：鋼琴沒有開著，沒有可以暫停的演奏）"
+    global IS_PIANO_PAUSED
+    IS_PIANO_PAUSED = True
+    send_piano_ipc_command({"cmd": "pause"})
+    log_print("⏸️ [鋼琴] 已暫停演奏（進度保留）")
+    return "（系統回報：已暫停鋼琴演奏，進度保留，說「繼續彈」就會接著彈）"
+
+
+async def resume_virtual_piano() -> str:
+    """從暫停處繼續演奏；沒有暫停中的曲子就不動作（不會改彈別首）。"""
+    if not is_piano_window_alive():
+        return "（系統回報：鋼琴沒有開著，沒有可以繼續的演奏）"
+    global IS_PIANO_PAUSED, _PIANO_RESUME_GRACE_UNTIL
+    IS_PIANO_PAUSED = False
+    _PIANO_RESUME_GRACE_UNTIL = time.time() + 2.5
+    send_piano_ipc_command({"cmd": "resume"})
+    log_print("▶️ [鋼琴] 從暫停處繼續演奏")
+    return "（系統回報：已從暫停處繼續鋼琴演奏）"
+
+
 async def stop_virtual_piano() -> str:
     """收起鋼琴（停止演奏、關閉桌面鋼琴介面並讓 7L 回到原本位置）。"""
     global is_piano_active, current_piano_song_title, current_piano_task, current_piano_process, current_ai_state, PIANO_SESSION_ID, IS_PIANO_AUTO_RADIO_MODE, LAST_PIANO_OPEN_TIME
@@ -1401,6 +1443,7 @@ async def stop_virtual_piano() -> str:
         
     PIANO_SESSION_ID += 1  # 註銷所有先前或進行中的鋼琴 Session
     IS_PIANO_AUTO_RADIO_MODE = False  # 關閉無限隨機電台模式
+    globals()["IS_PIANO_PAUSED"] = False
     is_piano_active = False
     current_piano_song_title = ""
     PIANO_REQUEST_QUEUE.clear()
@@ -2042,8 +2085,16 @@ async def play_piano_worker(song_title: str, sheet_text: str, bpm: int, mode: st
                 # 🎹 即時鋼琴狀態驅動等待迴圈（以 UDP 即時播放狀態為第一優先，時間為極端斷線保底）
                 song_start_time = time.time()
                 has_started_playing = False
-                
+                globals()["IS_PIANO_PAUSED"] = False   # 新曲開始：清掉上一首殘留的暫停狀態
+
                 while session_id == PIANO_SESSION_ID and is_piano_active:
+                    # 暫停中／剛繼續：不判定「播完」，時長保底跟著往後延
+                    if IS_PIANO_PAUSED or time.time() < _PIANO_RESUME_GRACE_UNTIL:
+                        if current_piano_process and current_piano_process.poll() is not None:
+                            break
+                        song_start_time += 0.15
+                        await asyncio.sleep(0.15)
+                        continue
                     elapsed = time.time() - song_start_time
                     
                     # 1. 優先檢查鋼琴視窗的即時 UDP 播放狀態 (來自 test_virtual_piano.py Port 39281)

@@ -56,6 +56,13 @@ _rescue_probe: dict = {"at": 0.0}      # 鏈首試探時間戳：讓降級後的
 def _log(msg: str) -> None:
     """安全輸出：Windows cp950 主控台印不出 emoji 時自動降級，绝不讓 log 打斷合成流程"""
     try:
+        # 走 log_print：它會先清掉狀態列；直接 print 會黏在狀態列後面，錯誤訊息等於看不到（2026-10-24）
+        from core.utils import log_print
+        log_print(msg)
+        return
+    except Exception:
+        pass
+    try:
         print(msg)
     except Exception:
         try:
@@ -458,6 +465,21 @@ def _ffmpeg_exe() -> str:
 # 連續靜音超過幾秒判缺段（自娛自樂事故：18 秒音訊裡 14 秒數位靜音，時長反而超標）。
 # TTS 都是短句，正常標點停頓 <0.5s；2.0s 以上的洞一定是合成端掉片。
 MAX_SILENCE_SEC = 2.0
+QUALITY_RETRIES = int(os.getenv("TTS_QUALITY_RETRIES", "2"))   # 品質不合格時同引擎重抽次數
+
+
+def _quality_problem(text: str, data) -> str:
+    """合成結果的品質檢查；合格回 ""。空音訊不算品質問題（交給呼叫端的「回傳音訊為空」）。"""
+    if not data or len(data) <= 100:
+        return ""
+    dur, gap = _audio_profile(data)
+    if dur is not None and len(text.strip()) >= 10:
+        expect = max(1.5, len(text.strip()) * 0.22)
+        if dur < expect * 0.4:
+            return f"音訊過短疑似缺段（{dur:.1f}s/預期{expect:.1f}s）"
+        if gap is not None and gap > MAX_SILENCE_SEC:
+            return f"音訊中段靜音{gap:.1f}s疑似掉片（自娛自樂式缺段）"
+    return ""
 
 
 def _audio_profile(data: bytes):
@@ -638,17 +660,19 @@ async def get_tts_audio_bytes(text: str) -> bytes:
                     _active_engine = engine
                 _engine_errors.pop(engine, None)
                 return hit
-            data = await asyncio.wait_for(fn(text), timeout=ENGINE_TIMEOUT_SEC)
+            # 品質不合格（缺段／中段長靜音）時同引擎重試一次：GPT-SoVITS 取樣有隨機性，重抽通常就好。
+            # 舊碼直接換下一個引擎，但預設鏈只有 xiaoyi 一個，結果整句靜音（2026-10-24 實機：26.8s 靜音被擋、7L 沒出聲）
+            # 實測（「老爸。30秒到囉。快快，記得喝水喔…」）單次失敗率可到 1/3～5/8，所以最多抽 3 次
+            for _attempt in range(QUALITY_RETRIES + 1):
+                data = await asyncio.wait_for(fn(text), timeout=ENGINE_TIMEOUT_SEC)
+                quality_err = _quality_problem(text, data)
+                if not quality_err:
+                    break
+                if _attempt < QUALITY_RETRIES:
+                    _log(f"[TTS Router] {engine} 品質不合格（{quality_err}），同引擎重抽（第 {_attempt + 1} 次）")
+            if quality_err:
+                raise RuntimeError(f"{quality_err}，換引擎")
             if data and len(data) > 100:
-                dur, gap = _audio_profile(data)
-                if dur is not None and len(text.strip()) >= 10:
-                    expect = max(1.5, len(text.strip()) * 0.22)
-                    if dur < expect * 0.4:
-                        raise RuntimeError(
-                            f"音訊過短疑似缺段（{dur:.1f}s/預期{expect:.1f}s），換引擎")
-                    if gap is not None and gap > MAX_SILENCE_SEC:
-                        raise RuntimeError(
-                            f"音訊中段靜音{gap:.1f}s疑似掉片（自娛自樂式缺段），換引擎")
                 if _active_engine != engine:
                     _log(f"[TTS Router] 切換引擎 -> {engine}")
                     _active_engine = engine

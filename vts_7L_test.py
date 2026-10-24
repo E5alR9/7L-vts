@@ -155,6 +155,21 @@ INTERACTIONS_TOOLS = [
         }
     },
     {
+        # 2026-10-24 補上：派發器一直有 set_timer，但工具清單沒宣告，模型看不到，
+        # 「明天提醒我帶傘」會被子智能體亂丟給 search_knowledge，提醒從沒設成
+        "type": "function",
+        "name": "set_timer",
+        "description": "設定提醒或倒數計時：「10 分鐘後叫我」「一小時後提醒我喝水」「明天提醒我帶傘」都用這個。時間到 7L 會主動開口提醒",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "seconds": {"type": "number", "description": "距離現在幾秒後提醒（10 分鐘=600、1 小時=3600、明天同一時間=86400）"},
+                "message": {"type": "string", "description": "到時候要提醒的內容，例如「記得帶傘」"}
+            },
+            "required": ["seconds", "message"]
+        }
+    },
+    {
         "type": "function",
         "name": "generate_ai_image",
         "description": "繪製 AI 圖片",
@@ -1024,7 +1039,10 @@ async def execute_tool_dispatch(fn_name: str, fn_args: dict, caller_target: str 
         inst = fn_args.get("instrument", "")
         await pe.set_piano_instrument(inst)
     elif fn_name in ["set_timer", "pe.set_timer"]:
-        sec = int(fn_args.get("seconds", 60))
+        try:
+            sec = max(1, int(float(fn_args.get("seconds", 60))))   # 模型可能給 86400.0 或 "600"
+        except (TypeError, ValueError):
+            sec = 60
         msg = fn_args.get("message", "提醒時間到")
         asyncio.create_task(set_timer(sec, msg, GLOBAL_INPUT_QUEUE or input_queue, caller_user=caller_user))
     elif fn_name == "control_microphone":
@@ -3812,6 +3830,21 @@ async def _director_drop_session():
             pass
 
 
+async def _director_drain_then_release(session, timeout: float = 12.0):
+    """把導演這一輪剩下的訊息（音訊串流、turn_complete）讀完再放鎖，下一句才不會讀到上一句的尾巴。
+    讀不完（逾時或出錯）就丟掉這條連線，下一句重連。"""
+    try:
+        async with asyncio.timeout(timeout):
+            async for resp in session.receive():
+                c = resp.server_content
+                if c and c.turn_complete:
+                    break
+    except Exception:
+        await _director_drop_session()
+    finally:
+        _DIRECTOR_LOCK.release()
+
+
 _DIRECTOR_STATE = {"session": None, "cm": None, "key_idx": 0}
 _DIRECTOR_LOCK = asyncio.Lock()  # 主 loop 單例：導演問答成對序列化，互不插話
 _DIRECTOR_TIMELINE_CACHE = {}  # 文案 sha1 → (推導時長, [(分比, kind, 值), ...])
@@ -3849,12 +3882,16 @@ async def live_api_direct_sentence_emotions(clean_text: str, total_duration: flo
                 return _rescaled
 
     output_text = ""
-
-    output_text = ""
-    async with _DIRECTOR_LOCK:
+    # 鎖要等這一輪的訊息全部讀完才放：generation_complete 之後模型還會串流好幾秒音訊，最後才送
+    # turn_complete。舊碼在 generation_complete 就 break，剩下的留在常駐連線上，下一句先讀到上一句的
+    # 尾巴（空結果），之後整個錯位（2026-10-24 實機：導演 0 次成功）。現在拿到文字就回，尾巴交給背景讀完再放鎖。
+    await _DIRECTOR_LOCK.acquire()
+    lock_handed_off = False
+    try:
         session = await _director_ensure_session()
         if session is None:
             return []
+        turn_done = False
         try:
             async with asyncio.timeout(3.0):
                 await session.send_realtime_input(text=f"7L 正在發話：「{clean_text.strip()}」（語音總時長 {total_duration:.1f} 秒）")
@@ -3863,11 +3900,20 @@ async def live_api_direct_sentence_emotions(clean_text: str, total_duration: flo
                     if c:
                         if c.output_transcription and c.output_transcription.text:
                             output_text += c.output_transcription.text
-                        if c.turn_complete or getattr(c, 'generation_complete', False):
+                        if c.turn_complete:
+                            turn_done = True
+                            break
+                        if getattr(c, 'generation_complete', False):
                             break
         except Exception:
             await _director_drop_session()
             return []
+        if not turn_done:
+            asyncio.create_task(_director_drain_then_release(session))
+            lock_handed_off = True
+    finally:
+        if not lock_handed_off:
+            _DIRECTOR_LOCK.release()
 
     parsed_timeline = []
     for line in output_text.splitlines():
@@ -4863,7 +4909,7 @@ async def execute_actions(vts, text, input_queue, user_input_ctx: str = "", has_
             asyncio.create_task(update_custom_rule(rule_val))
             text = text.replace(lr.group(0), "")
 
-    for tm in re.finditer(r'\[(?:TIMER|SET_TIMER|ALARM|鬧鐘|計時器)[：:]\s*([0-9]+)\s*\|?\s*([^\]]*)\]', text, re.IGNORECASE):
+    for tm in re.finditer(r'\[(?:TOOL[：:]\s*)?(?:TIMER|SET_TIMER|ALARM|鬧鐘|計時器)[：:]\s*([0-9]+)\s*\|?\s*([^\]]*)\]', text, re.IGNORECASE):
         t_sec = int(tm.group(1))
         t_msg = tm.group(2).strip() or "計時時間到"
         log_print(f"⏱️ [計時器啟動] 設定 {t_sec} 秒後提醒: 「{t_msg}」")
@@ -4873,7 +4919,8 @@ async def execute_actions(vts, text, input_queue, user_input_ctx: str = "", has_
     #  檢測 7L 自我插話標籤 [INTERRUPT_SELF] / [CUT_IN] / [插話] / [中斷]
     if bool(re.search(r'\[(?:INTERRUPT_SELF|CUT_IN|INTERRUPT|SELF_INTERRUPT|插話|中斷|打斷自己)\]', text, re.IGNORECASE)):
         log_print("⚡ [7L 自我插話] 檢測到 [INTERRUPT_SELF] 標籤，立即秒級打斷當前正在說的話！")
-        asyncio.create_task(interrupt_current_speech(clear_queue=True, reason="7L 自由意志自我插話"))
+        # 必須 await：create_task 會晚一步執行，清掉的變成呼叫端剛排進佇列的「這一句」（7L 整句消失）
+        await interrupt_current_speech(clear_queue=True, reason="7L 自由意志自我插話")
 
     #  記住 VTS 模型基準位置與大小 (當老爸說「記住大小」、「記住位置」時即刻執行)
     if any(k in text or k in user_input_ctx for k in ["記住大小", "記住位置", "記住現在位置", "記住當前位置", "記住現在大小", "記錄位置", "記錄大小", "記住模型位置", "記住模型", "記錄基準大小", "記錄基準位置", "記住當前大小"]):
@@ -5388,28 +5435,30 @@ async def instinct_live_worker():
                 INSTINCT_LIVE_SESSION = session
                 log_print("🦊 [本能大腦] 連線成功，開始平行監聽環境...")
                 
-                async for resp in session.receive():
-                    c = resp.server_content
-                    if c and c.output_transcription and c.output_transcription.text:
-                        text = c.output_transcription.text
-                        import services.vts_client as vc
+                # SDK 的 receive() 收到 turn_complete 就結束迭代；不包迴圈的話每講完一句整條連線就關掉重連（2026-10-24）
+                while True:
+                    async for resp in session.receive():
+                        c = resp.server_content
+                        if c and c.output_transcription and c.output_transcription.text:
+                            text = c.output_transcription.text
+                            import services.vts_client as vc
                         
-                        exp_match = re.search(r'\[EXPRESSION[：:]\s*([^\]\[]+)\]', text, re.IGNORECASE)
-                        if exp_match:
-                            exp_tag = exp_match.group(1).strip()
-                            if any(k in exp_tag.upper() for k in ["WINK", "眨眼", "單眼", "眨單眼"]):
-                                asyncio.create_task(vc.trigger_wink(is_instinct=True))
-                            elif any(k in exp_tag for k in ["驚訝", "惊", "震驚", "SHOCK"]):
-                                asyncio.create_task(vc.trigger_shock(is_instinct=True))
-                            elif any(k in exp_tag for k in ["皺眉", "困擾", "委屈", "FROWN"]):
-                                asyncio.create_task(vc.trigger_frown(is_instinct=True))
-                            else:
-                                asyncio.create_task(vc.trigger_vts_expression(exp_tag, is_instinct=True))
+                            exp_match = re.search(r'\[EXPRESSION[：:]\s*([^\]\[]+)\]', text, re.IGNORECASE)
+                            if exp_match:
+                                exp_tag = exp_match.group(1).strip()
+                                if any(k in exp_tag.upper() for k in ["WINK", "眨眼", "單眼", "眨單眼"]):
+                                    asyncio.create_task(vc.trigger_wink(is_instinct=True))
+                                elif any(k in exp_tag for k in ["驚訝", "惊", "震驚", "SHOCK"]):
+                                    asyncio.create_task(vc.trigger_shock(is_instinct=True))
+                                elif any(k in exp_tag for k in ["皺眉", "困擾", "委屈", "FROWN"]):
+                                    asyncio.create_task(vc.trigger_frown(is_instinct=True))
+                                else:
+                                    asyncio.create_task(vc.trigger_vts_expression(exp_tag, is_instinct=True))
                         
-                        move_match = re.search(r'\[(?:MOVE|SPATIAL|POSITION)[：:]\s*([^\]\[]+)\]', text, re.IGNORECASE)
-                        if move_match:
-                            pos_tag = move_match.group(1).strip()
-                            asyncio.create_task(vc.apply_spatial_position(pos_tag, is_instinct=True))
+                            move_match = re.search(r'\[(?:MOVE|SPATIAL|POSITION)[：:]\s*([^\]\[]+)\]', text, re.IGNORECASE)
+                            if move_match:
+                                pos_tag = move_match.group(1).strip()
+                                asyncio.create_task(vc.apply_spatial_position(pos_tag, is_instinct=True))
                         
         except asyncio.CancelledError:
             break
@@ -5678,7 +5727,7 @@ async def continuous_live_worker(vts):
                                 # ⚠️ requester 傳空字串：task_ins 是主腦自己寫的指令，
                                 # 點歌人不一定是老爸（可能是轉述觀眾點的），紙條走中性文案
                                 try:
-                                    _hit, _tname, _targs = await background_tool_executor(_task_ins, target="dad", requester_name="")
+                                    _hit, _tname, _targs = await background_tool_executor(_task_ins, target="dad", requester_name="", from_brain=True)
                                 except Exception as _be:
                                     log_print(f"⚠️ [子智能體執行異常]: {_be}")
                                     _hit, _tname, _targs = False, "", {}
@@ -5711,119 +5760,127 @@ async def continuous_live_worker(vts):
                             log_print(f"⚠️ [子智能體任務異常]: {_e}")
 
                     try:
-                        async for resp in session.receive():
-                            c = resp.server_content
-                            global LAST_LIVE_RX_TS
-                            LAST_LIVE_RX_TS = time.time()
-                            if c:
-                                if getattr(c, 'model_turn', None) and c.model_turn.parts:
-                                    for part in c.model_turn.parts:
-                                        if getattr(part, 'function_call', None):
-                                            fn_name = part.function_call.name
-                                            fn_args = getattr(part.function_call, 'args', {}) or {}
-                                            fn_call_id = getattr(part.function_call, 'id', None)
-                                            log_print(f"🤖 [Live 主腦決策] 呼叫工具: {fn_name}({fn_args})")
-                                            global LAST_BRAIN_TOOL_TS
-                                            LAST_BRAIN_TOOL_TS = time.time()
+                        # SDK 的 receive() 收到 turn_complete 就結束迭代；不包迴圈的話每講完一句整條連線就關掉重連（2026-10-24）
+                        while True:
+                            async for resp in session.receive():
+                                c = resp.server_content
+                                global LAST_LIVE_RX_TS
+                                LAST_LIVE_RX_TS = time.time()
+                                # Live API 的工具呼叫走 resp.tool_call（沒有 server_content，c 是 None）；舊碼只看 model_turn.parts，
+                                # 主腦每次呼叫 invoke_subagent 都被漏掉、工具回應永遠不回，整輪卡到下一則訊息才被「打斷」（2026-10-24 實機發現）
+                                _fcs = list(getattr(getattr(resp, 'tool_call', None), 'function_calls', None) or [])
+                                if c and getattr(c, 'model_turn', None) and c.model_turn.parts:
+                                    _fcs += [p.function_call for p in c.model_turn.parts if getattr(p, 'function_call', None)]
+                                for _fc in _fcs:
+                                    fn_name = _fc.name
+                                    fn_args = getattr(_fc, 'args', {}) or {}
+                                    fn_call_id = getattr(_fc, 'id', None)
+                                    log_print(f"🤖 [Live 主腦決策] 呼叫工具: {fn_name}({fn_args})")
+                                    global LAST_BRAIN_TOOL_TS
+                                    LAST_BRAIN_TOOL_TS = time.time()
                                             
-                                            if fn_name == "invoke_subagent":
-                                                # 來幾個跑幾個、互不堵塞：每通呼叫獨立背景任務，
-                                                # 開多少量由主腦自己決定（不設上限，同時回報各做各的）。
-                                                _sub_t = asyncio.create_task(
-                                                    _handle_invoke_subagent(
-                                                        fn_name, fn_call_id,
-                                                        fn_args.get("task_instruction", "")))
-                                                _RUNNING_SUBAGENT_TASKS.add(_sub_t)
-                                                _sub_t.add_done_callback(_RUNNING_SUBAGENT_TASKS.discard)
-                                            else:
-                                                # 非子智能體工具（目前 LIVE_API_TOOLS 只有 invoke_subagent，此分支備而不用）
-                                                # 立刻回傳以解除主腦堵塞，讓她可以繼續講話
-                                                _fr_kwargs = {"name": fn_name, "response": {"result": "子智能體已在背景啟動！請妳立刻用口語回應，告訴對方妳正在準備了。"}}
-                                                if fn_call_id:
-                                                    _fr_kwargs["id"] = fn_call_id
-                                                asyncio.create_task(session.send_tool_response(
-                                                    function_responses=[
-                                                        types.FunctionResponse(**_fr_kwargs)
-                                                    ]
-                                                ))
+                                    if fn_name == "invoke_subagent":
+                                        # 來幾個跑幾個、互不堵塞：每通呼叫獨立背景任務，
+                                        # 開多少量由主腦自己決定（不設上限，同時回報各做各的）。
+                                        _sub_t = asyncio.create_task(
+                                            _handle_invoke_subagent(
+                                                fn_name, fn_call_id,
+                                                fn_args.get("task_instruction", "")))
+                                        _RUNNING_SUBAGENT_TASKS.add(_sub_t)
+                                        _sub_t.add_done_callback(_RUNNING_SUBAGENT_TASKS.discard)
+                                    else:
+                                        # 非子智能體工具（目前 LIVE_API_TOOLS 只有 invoke_subagent，此分支備而不用）
+                                        # 立刻回傳以解除主腦堵塞，讓她可以繼續講話
+                                        _fr_kwargs = {"name": fn_name, "response": {"result": "子智能體已在背景啟動！請妳立刻用口語回應，告訴對方妳正在準備了。"}}
+                                        if fn_call_id:
+                                            _fr_kwargs["id"] = fn_call_id
+                                        asyncio.create_task(session.send_tool_response(
+                                            function_responses=[
+                                                types.FunctionResponse(**_fr_kwargs)
+                                            ]
+                                        ))
 
-                                if getattr(c, 'interrupted', False):
-                                    log_print("🛑 [Live 大腦] 偵測到新對話/環境指令打斷，清空舊語音佇列！")
-                                    if CURRENT_PLAYING_VOICE_TASK and not CURRENT_PLAYING_VOICE_TASK.done():
-                                        CURRENT_PLAYING_VOICE_TASK.cancel()
+                                if c:
+                                    if getattr(c, 'interrupted', False):
+                                        log_print("🛑 [Live 大腦] 偵測到新對話/環境指令打斷，清空舊語音佇列！")
+                                        if CURRENT_PLAYING_VOICE_TASK and not CURRENT_PLAYING_VOICE_TASK.done():
+                                            CURRENT_PLAYING_VOICE_TASK.cancel()
                                         
-                                    if not speech_queue.empty():
-                                        from core.memory import UNIFIED_DIALOGUE_MEMORY
-                                        if UNIFIED_DIALOGUE_MEMORY and UNIFIED_DIALOGUE_MEMORY[-1].get("source") == "live_api" and UNIFIED_DIALOGUE_MEMORY[-1].get("speaker") == "7L":
-                                            removed = UNIFIED_DIALOGUE_MEMORY.pop()
-                                            log_print(f"🗑️ [Live 記憶修正] 移除未播報完畢的殘留記憶: {removed.get('content')}")
+                                        if not speech_queue.empty():
+                                            from core.memory import UNIFIED_DIALOGUE_MEMORY
+                                            if UNIFIED_DIALOGUE_MEMORY and UNIFIED_DIALOGUE_MEMORY[-1].get("source") == "live_api" and UNIFIED_DIALOGUE_MEMORY[-1].get("speaker") == "7L":
+                                                removed = UNIFIED_DIALOGUE_MEMORY.pop()
+                                                log_print(f"🗑️ [Live 記憶修正] 移除未播報完畢的殘留記憶: {removed.get('content')}")
                                             
-                                    while not speech_queue.empty():
-                                        speech_queue.get_nowait()
-                                    turn_buffer = ""
-                                    chunk_buffer = ""
-                                    
-                                if c.input_transcription and c.input_transcription.text:
-                                    user_transcription_buffer += c.input_transcription.text
-                                        
-                                if c.output_transcription and c.output_transcription.text:
-                                    if user_transcription_buffer.strip():
-                                        user_spoken = user_transcription_buffer.strip()
-                                        user_spoken = to_tw(user_spoken)
-                                            
-                                        from core.memory import append_to_unified_memory
-                                        append_to_unified_memory(speaker=owner, target=char_name, content=user_spoken, role="user", source="mic")
-                                        log_print(f"🎤 [老爸說話 (Live STT)] {user_spoken}")
-                                        try:
-                                            import services.web_dashboard as _wd
-                                            _wd.broadcast_event("chat_sent", {"text": user_spoken, "from": owner})
-                                        except Exception: log_swallowed()
-                                        user_transcription_buffer = ""
-
-                                    text_chunk = c.output_transcription.text
-                                    
-                                    import re
-                                    # 先拔 blob（腦偶爾會吐幾 MB 的 base64 音訊；不先清，正則橫跨、
-                                    # 日誌刷屏、搜尋燒額度、TTS 會去唸亂碼——一律視為雜訊）
-                                    text_chunk = strip_blob_noise(text_chunk)
-                                    search_match = re.search(r'\[TOOL:SEARCH\]\s*(.*?)(?=\[|$)', text_chunk)
-                                    if search_match:
-                                        query = sanitize_search_query(search_match.group(1))
-                                        text_chunk = text_chunk.replace(search_match.group(0), "").strip()
-                                        if query:
-                                            log_print(f"🌐 [攔截暗號] 啟動平行代理人：搜網專家！關鍵字：{query}")
-                                            asyncio.create_task(live_search_tool_task(session, query))
-                                        else:
-                                            log_print("⚠️ [攔截暗號] 搜尋關鍵字全是雜訊，跳過不搜。")
-                                    if "[TOOL:VISION]" in text_chunk:
-                                        log_print("⚡ [攔截暗號] 啟動平行代理人：視覺大腦！")
-                                        text_chunk = text_chunk.replace("[TOOL:VISION]", "").strip()
-                                        asyncio.create_task(live_vision_tool_task(session, vts))
-                                        
-                                    if "[TOOL:MIRROR]" in text_chunk:
-                                        log_print("🪞 [攔截暗號] 啟動平行代理人：照鏡子！")
-                                        text_chunk = text_chunk.replace("[TOOL:MIRROR]", "").strip()
-                                        asyncio.create_task(live_mirror_tool_task(session, vts))
-                                        
-                                    if text_chunk:
-                                        chunk_buffer += text_chunk
-                                        turn_buffer += text_chunk
-                                            
-                                if c.turn_complete or getattr(c, 'generation_complete', False):
-                                    if chunk_buffer.strip():
-                                        sentence = chunk_buffer.strip()
-                                        clean_sentence = await execute_actions(vts, sentence, input_queue, caller_target="dad", caller_user=owner)
-                                        if clean_sentence.strip() and not is_singing_active():
-                                            await speech_queue.put({"text": clean_sentence.strip(), "target": "dad", "raw_text": sentence})
+                                        while not speech_queue.empty():
+                                            speech_queue.get_nowait()
+                                        turn_buffer = ""
                                         chunk_buffer = ""
                                     
-                                    if turn_buffer.strip():
-                                        global LAST_BRAIN_TURN_TS
-                                        LAST_BRAIN_TURN_TS = time.time()
-                                        from core.memory import append_to_unified_memory
-                                        append_to_unified_memory(speaker="7L", target="dad", content=turn_buffer.strip(), role="assistant", source="live_api")
-                                        log_print(f"📝 [黑板紀錄] 7L Live 大腦: {turn_buffer.strip()}")
-                                        turn_buffer = ""
+                                    if c.input_transcription and c.input_transcription.text:
+                                        user_transcription_buffer += c.input_transcription.text
+                                        
+                                    if c.output_transcription and c.output_transcription.text:
+                                        if user_transcription_buffer.strip():
+                                            user_spoken = user_transcription_buffer.strip()
+                                            user_spoken = to_tw(user_spoken)
+                                            
+                                            from core.memory import append_to_unified_memory
+                                            append_to_unified_memory(speaker=owner, target=char_name, content=user_spoken, role="user", source="mic")
+                                            log_print(f"🎤 [老爸說話 (Live STT)] {user_spoken}")
+                                            try:
+                                                import services.web_dashboard as _wd
+                                                _wd.broadcast_event("chat_sent", {"text": user_spoken, "from": owner})
+                                            except Exception: log_swallowed()
+                                            user_transcription_buffer = ""
+
+                                        text_chunk = c.output_transcription.text
+                                    
+                                        import re
+                                        # 先拔 blob（腦偶爾會吐幾 MB 的 base64 音訊；不先清，正則橫跨、
+                                        # 日誌刷屏、搜尋燒額度、TTS 會去唸亂碼——一律視為雜訊）
+                                        text_chunk = strip_blob_noise(text_chunk)
+                                        search_match = re.search(r'\[TOOL:SEARCH\]\s*(.*?)(?=\[|$)', text_chunk)
+                                        if search_match:
+                                            query = sanitize_search_query(search_match.group(1))
+                                            text_chunk = text_chunk.replace(search_match.group(0), "").strip()
+                                            if query:
+                                                log_print(f"🌐 [攔截暗號] 啟動平行代理人：搜網專家！關鍵字：{query}")
+                                                asyncio.create_task(live_search_tool_task(session, query))
+                                            else:
+                                                log_print("⚠️ [攔截暗號] 搜尋關鍵字全是雜訊，跳過不搜。")
+                                        if "[TOOL:VISION]" in text_chunk:
+                                            log_print("⚡ [攔截暗號] 啟動平行代理人：視覺大腦！")
+                                            text_chunk = text_chunk.replace("[TOOL:VISION]", "").strip()
+                                            asyncio.create_task(live_vision_tool_task(session, vts))
+                                        
+                                        if "[TOOL:MIRROR]" in text_chunk:
+                                            log_print("🪞 [攔截暗號] 啟動平行代理人：照鏡子！")
+                                            text_chunk = text_chunk.replace("[TOOL:MIRROR]", "").strip()
+                                            asyncio.create_task(live_mirror_tool_task(session, vts))
+                                        
+                                        if text_chunk:
+                                            chunk_buffer += text_chunk
+                                            turn_buffer += text_chunk
+                                            
+                                    if c.turn_complete or getattr(c, 'generation_complete', False):
+                                        if chunk_buffer.strip():
+                                            sentence = chunk_buffer.strip()
+                                            clean_sentence = await execute_actions(vts, sentence, input_queue, caller_target="dad", caller_user=owner)
+                                            if clean_sentence.strip() and not is_singing_active():
+                                                await speech_queue.put({"text": clean_sentence.strip(), "target": "dad", "raw_text": sentence})
+                                            chunk_buffer = ""
+                                    
+                                        if turn_buffer.strip():
+                                            global LAST_BRAIN_TURN_TS
+                                            LAST_BRAIN_TURN_TS = time.time()
+                                            from core.memory import append_to_unified_memory
+                                            # 記憶會注入回 prompt：存原文的話，內心戲段落與 [INTERRUPT_SELF] 會被模型照著學（2026-10-24）
+                                            _mem_text = TextCleanEngine.extract_thought(turn_buffer.strip())[1]
+                                            _mem_text = re.sub(r'\[(?:INTERRUPT_SELF|CUT_IN|INTERRUPT|SELF_INTERRUPT|插話|中斷|打斷自己)\]', '', _mem_text, flags=re.IGNORECASE).strip()
+                                            append_to_unified_memory(speaker="7L", target="dad", content=_mem_text or turn_buffer.strip(), role="assistant", source="live_api")
+                                            log_print(f"📝 [黑板紀錄] 7L Live 大腦: {turn_buffer.strip()}")
+                                            turn_buffer = ""
                     except asyncio.CancelledError: pass
                     except Exception as e:
                         err_str = str(e).lower()
@@ -6571,7 +6628,8 @@ async def _ai_face_tracking_loop_impl(vts):
                     or ch6_busy 
                     or (current_ai_state == "SINGING") 
                     or (pygame.mixer.get_init() and pygame.mixer.music.get_busy())
-                    or yt_comp.IS_YT_SPEAKING
+                    # 原本還有 yt_comp.IS_YT_SPEAKING：yt_companion_service 從來沒定義過它，
+                    # 每幀都丟 AttributeError（以前被 except 吞掉），2026-10-24 移除
                 )
             except Exception:
                 log_swallowed()
@@ -8492,12 +8550,35 @@ async def _rescue_missed_song_requests():
         log_print(f"⚠️ [斷線救援異常]: {e}")
 
 
-async def background_tool_executor(user_text: str, target: str = "dad", requester_name: str = ""):
+_HARD_CMD_RECENT = {}          # (工具, 參數) → 上次執行時間
+_HARD_CMD_DEDUPE_SEC = 20.0
+
+
+def _hard_cmd_seen_recently(fn_name: str, fn_args, now: float) -> bool:
+    """同一個硬指令 20 秒內只執行一次（2026-10-24 實機：一則「彈小星星」被執行 4 次）。
+    老爸訊息先被 CPU 攔截執行一次，主腦接著呼叫 invoke_subagent 又是同一句；
+    舊碼主腦的工具呼叫全被漏接所以沒事，修好之後就重複了。沒看過就記帳並回 False。"""
+    import json as _json
+    try:
+        key = f"{fn_name}|{_json.dumps(fn_args or {}, ensure_ascii=False, sort_keys=True)}"
+    except Exception:
+        key = f"{fn_name}|{fn_args}"
+    for k in [k for k, t in _HARD_CMD_RECENT.items() if now - t >= _HARD_CMD_DEDUPE_SEC]:
+        _HARD_CMD_RECENT.pop(k, None)
+    if key in _HARD_CMD_RECENT:
+        return True
+    _HARD_CMD_RECENT[key] = now
+    return False
+
+
+async def background_tool_executor(user_text: str, target: str = "dad", requester_name: str = "", from_brain: bool = False):
     """
     B 架構：純 CPU 文字指令拆解器（零 API、零幻覺、零成本，永遠不碰 AI）。
     只認唱歌/鋼琴兩類硬指令並立即執行；其他一律交還。
     AI 解讀一律走 A 架構（Live invoke_subagent → NV 解讀），不在這裡燒錢。
     回傳 (是否命中, 工具名, 參數)，供調用方誠實回報。
+    from_brain：主腦自己呼叫 invoke_subagent 進來的。工具回應已經告訴主腦結果，這裡就不再送紙條、
+    不補念應答——舊碼會送紙條給主腦，主腦看到又呼叫一次，形成迴圈（2026-10-24 實機）。
     """
     try:
         log_print(f"🤖 [CPU 拆解] 掃描指令: {user_text}")
@@ -8523,6 +8604,9 @@ async def background_tool_executor(user_text: str, target: str = "dad", requeste
                 _mixed = _parse_mixed(user_text)
             except Exception:
                 _mixed = []
+            if _mixed and _hard_cmd_seen_recently("mixed", [list(x) for x in _mixed], time.time()):
+                log_print("⏭️ [CPU 硬體直連] 同一組混用指令剛剛已在處理，不重複執行")
+                return True, "mixed_play_sing", {"desc": "＋".join(a.get("song_name", "") for _, a in _mixed)}
             if _mixed:
                 # 鋼琴走會合（先開等翻唱），唱歌走正常管線；兩張紙條照發
                 _sing_title = next((a.get("song_name", "") for t, a in _mixed if t in ("auto_sing_song", "sing_song")), "")
@@ -8534,7 +8618,7 @@ async def background_tool_executor(user_text: str, target: str = "dad", requeste
                     else:
                         asyncio.create_task(execute_tool_dispatch(_tool, _args, caller_target=target, caller_user=requester_name))
                     _slip = build_slip_text(_tool, _args, requester_name)
-                    if _slip and is_live_brain_active():
+                    if _slip and is_live_brain_active() and not from_brain:
                         try:
                             LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait(_slip)
                             log_print(f"📥 [黑板同步] 透過紙條傳送給 Live 大腦: {_slip[:60]}...")
@@ -8543,8 +8627,12 @@ async def background_tool_executor(user_text: str, target: str = "dad", requeste
                 _titles = "＋".join([a.get("song_name", "") for _, a in _mixed])
                 _same = len({a.get("song_name", "") for _, a in _mixed}) == 1
                 _ack_song = f"{_mixed[0][1].get('song_name', '')}（邊彈邊唱）" if _same else f"{_titles}（混用）"
-                asyncio.create_task(_song_ack(_ack_song, target))
+                if not from_brain:
+                    asyncio.create_task(_song_ack(_ack_song, target))
                 return True, "mixed_play_sing", {"desc": _titles}
+        if fn_name and _hard_cmd_seen_recently(fn_name, fn_args, time.time()):
+            log_print(f"⏭️ [CPU 硬體直連] {fn_name}({fn_args}) 剛剛已在處理，不重複執行")
+            return True, fn_name, fn_args
         if fn_name:
             log_print(f"⚡ [CPU 硬體直連] 成功攔截指令: {fn_name}({fn_args})")
             # 自創曲歸隊（2026-10-11）：剝前綴＋找檔，後面執行/紙條/應答全用乾淨參數
@@ -8563,7 +8651,7 @@ async def background_tool_executor(user_text: str, target: str = "dad", requeste
             # CPU 只認點歌：一律走背景執行＋紙條（表情不歸 CPU，交主腦/A 架構）
             asyncio.create_task(execute_tool_dispatch(fn_name, fn_args, caller_target=target, caller_user=requester_name))
             # 點歌強制應答：主腦常靜默，補一句 TTS 保證出聲（target 透傳，播出规则照舊）
-            if fn_name in ("auto_sing_song", "sing_song", "pe.play_virtual_piano", "play_virtual_piano"):
+            if fn_name in ("auto_sing_song", "sing_song", "pe.play_virtual_piano", "play_virtual_piano") and not from_brain:
                 if _o_need_file:
                     asyncio.create_task(_song_ack_missing_original((fn_args or {}).get("song_name", ""), target))
                 else:
@@ -8577,7 +8665,7 @@ async def background_tool_executor(user_text: str, target: str = "dad", requeste
                 
         # 如果是 Live Session 啟動狀態，發送背景通知紙條給主腦
         # （經加鎖紙條佇列投遞，避免跟麥克風音訊流搶通道）
-        if slip_text and is_live_brain_active():
+        if slip_text and is_live_brain_active() and not from_brain:
             try:
                 LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait(slip_text)
                 log_print(f"📥 [黑板同步] 透過紙條傳送給 Live 大腦: {slip_text[:60]}...")
@@ -9557,6 +9645,16 @@ async def discord_mic_off(ctx):
     await control_mic(ctx, "off")
 
 # ⚠️ init_gpt_sovits() 內部會暫時 os.chdir(GPT-SoVITS)，此期間其他程式碼請使用絕對路徑
+def _prewarm_embedder():
+    """知識庫向量模型背景預載（2026-10-24）：第一次 search_knowledge 不用在對話當下載入／下載。"""
+    try:
+        from services import embedder
+        if embedder.use_local() and embedder._get_local_model() is not None:
+            log_print("🟢 [知識庫] 向量模型預載完成")
+    except Exception as e:
+        log_print(f"⚠️ [知識庫] 向量模型預載失敗（第一次查詢時再試）: {e}")
+
+
 def _prewarm_xiaoyi():
     try:
         import local_xiaoyi_service
@@ -9694,7 +9792,10 @@ async def main():
 
     # 🔥 GPT-SoVITS 曉伊模型預熱（提早至 main 最前端）：在背景 Thread 初始化，與 RAG / 記憶 / VTS 連線並行，避免第一句說話卡頓
     asyncio.create_task(asyncio.to_thread(_prewarm_xiaoyi))
-            
+
+    # 知識庫向量模型背景預載：第一次 search_knowledge 不用在對話當下載入／下載（2026-10-24 實機卡 18 秒）
+    asyncio.create_task(asyncio.to_thread(_prewarm_embedder))
+
     try:
         rag_service.init_rag(GEMINI_KEYS[0])
     except Exception as e:

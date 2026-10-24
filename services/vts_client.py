@@ -253,6 +253,9 @@ class RobustVTSClient:
             # 連線斷了：還在等回應的請求立刻失敗，不必各自乾等 timeout。
             # 若 connect() 已換上新連線，pending 裡可能是新連線的請求，不能動。
             if self.ws is ws:
+                code = getattr(ws, "close_code", None)
+                reason = getattr(ws, "close_reason", "") or ""
+                log_print(f"🔌 [VTS] 連線被關閉（code={code} {reason}）")
                 self._fail_pending(ConnectionError("VTS 連線已中斷"))
 
     def _fail_pending(self, exc):
@@ -394,6 +397,10 @@ class RobustVTSClient:
         finally:
             # 外層 wait_for 取消、send 失敗時也要清掉，避免 pending 越積越多
             self.pending_requests.pop(req_id, None)
+            # send 途中斷線：reader 已把 future 標成 ConnectionError，send 又自己丟錯，
+            # 這個 future 就沒人讀 → asyncio 會印「Future exception was never retrieved」
+            if future.done() and not future.cancelled():
+                future.exception()
 
     async def inject_parameters(self, param_values: list, face_found: bool = True, mode: str = "set"):
         """極速非同步注入參數，不阻塞接收佇列"""

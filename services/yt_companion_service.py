@@ -337,26 +337,28 @@ async def _yt_companion_session_loop(target_hwnd, initial_rect, initial_title):
             async def _receive_worker():
                 nonlocal session_running
                 full_turn_text = []
-                async for response in session.receive():
-                    if not session_running:
-                        break
-                    content = response.server_content
-                    if content is not None:
-                        # 🔇 關鍵：完全不播放 part.inline_data，保持安靜！
-                        if hasattr(content, "output_transcription") and content.output_transcription:
-                            if hasattr(content.output_transcription, "text") and content.output_transcription.text:
-                                full_turn_text.append(content.output_transcription.text)
+                # SDK 的 receive() 收到 turn_complete 就結束迭代；不包迴圈的話每講完一句整條連線就關掉重連（2026-10-24）
+                while session_running:
+                    async for response in session.receive():
+                        if not session_running:
+                            break
+                        content = response.server_content
+                        if content is not None:
+                            # 🔇 關鍵：完全不播放 part.inline_data，保持安靜！
+                            if hasattr(content, "output_transcription") and content.output_transcription:
+                                if hasattr(content.output_transcription, "text") and content.output_transcription.text:
+                                    full_turn_text.append(content.output_transcription.text)
 
-                        if getattr(content, "interrupted", False):
-                            full_turn_text.clear()
-
-                        if getattr(content, "turn_complete", False):
-                            if full_turn_text:
-                                complete_text = "".join(full_turn_text).strip()
-                                # 濾除非筆記的客套話
-                                if complete_text and len(complete_text) > 3:
-                                    add_perception_memory(complete_text)
+                            if getattr(content, "interrupted", False):
                                 full_turn_text.clear()
+
+                            if getattr(content, "turn_complete", False):
+                                if full_turn_text:
+                                    complete_text = "".join(full_turn_text).strip()
+                                    # 濾除非筆記的客套話
+                                    if complete_text and len(complete_text) > 3:
+                                        add_perception_memory(complete_text)
+                                    full_turn_text.clear()
 
             # 併發啟動
             v_task = asyncio.create_task(_video_worker())
