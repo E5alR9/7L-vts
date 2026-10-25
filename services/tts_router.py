@@ -28,6 +28,7 @@ import io
 import time
 
 from core.lang import KANA_RE, HAN_RE, has_kana, is_japanese_sentence
+from core.utils import log_swallowed
 from typing import Optional
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -606,7 +607,7 @@ def tts_cache_put(text: str, engine: str, data: bytes) -> None:
             f.write(data)
         _tts_cache_prune()
     except Exception:
-        pass
+        log_swallowed()
 
 
 def _tts_cache_prune() -> None:

@@ -5,7 +5,7 @@ import asyncio
 import websockets
 import random
 import re
-from core.utils import log_print
+from core.utils import log_print, log_swallowed
 
 # ── VTS 相關全域狀態與鎖 ────────────────────────────────────────────────────────
 vts_lock = asyncio.Lock()
@@ -246,11 +246,11 @@ class RobustVTSClient:
                         if not future.done():
                             future.set_result(data)
                 except Exception:
-                    pass
+                    log_swallowed()
         except asyncio.CancelledError:
             pass
         except Exception:
-            pass
+            log_swallowed()
         finally:
             # 連線斷了：還在等回應的請求立刻失敗，不必各自乾等 timeout。
             # 若 connect() 已換上新連線，pending 裡可能是新連線的請求，不能動。

@@ -20,6 +20,7 @@ import pygame
 from collections import deque
 
 import core.stage_state as stage
+from core.utils import log_swallowed
 
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
@@ -516,7 +517,7 @@ async def scan_originals_once():
             if os.path.exists(ready) and os.path.getsize(ready) > 100000:
                 continue
         except Exception:
-            pass
+            log_swallowed()
         _ORIG_PREPARING.add(safe)
         try:
             print(f"👀 [自創曲感測] 發現新檔《{f}》，背景自動 RVC（備好等點，不自動開唱）。")
@@ -788,7 +789,7 @@ async def prepare_cover_song(song_name: str, source_mp3: str = "", origin: str =
                     if info_7l.channels == info_v.channels and abs(os.path.getsize(cached_vocal) - os.path.getsize(vocal_raw)) < 1000:
                         is_fake = True
             except Exception:
-                pass
+                log_swallowed()
             if is_fake:
                 print(f"🧹 [清除無效假快取] 檢測到《{song_name}》為未經 RVC 置換之舊版原唱快取，立即刪除！")
                 try:

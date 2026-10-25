@@ -11,7 +11,7 @@ from collections import deque
 from typing import List, Dict, Any, Optional
 
 # Project imports
-from core.utils import log_print, sys_notify, get_current_time_string
+from core.utils import log_print, sys_notify, get_current_time_string, log_swallowed
 from core.identity import get_mode, get_owner_name, get_character_name, claims_owner_identity
 import services.piano_engine as pe
 import core.db as db_module
@@ -562,7 +562,7 @@ def init_unified_memory():
                 if isinstance(d_data, list):
                     loaded_dialogues = d_data[-500:]
         except Exception:
-            pass
+            log_swallowed()
 
     # 若尚無模式記憶，從舊檔按模式救援（companion 只吃擁有者檔，vtuber 只吃觀眾檔；一次性）
     if not loaded_dialogues:
@@ -596,7 +596,7 @@ def init_unified_memory():
                                     "source": "history"
                                 })
                 except Exception:
-                    pass
+                    log_swallowed()
         if recovered:
             if DIALOGUE_MEMORY_CAPACITY > 0:
                 loaded_dialogues = recovered[-DIALOGUE_MEMORY_CAPACITY:]
@@ -612,7 +612,7 @@ def init_unified_memory():
                 if isinstance(t_data, list):
                     loaded_thoughts = t_data[-150:]
         except Exception:
-            pass
+            log_swallowed()
 
     # 若無獨立 thought_memory.json，但有 unified_memory.json
     if not loaded_thoughts and os.path.exists(UNIFIED_MEMORY_FILE):
@@ -633,7 +633,7 @@ def init_unified_memory():
                         if DIALOGUE_MEMORY_CAPACITY > 0:
                             loaded_dialogues = loaded_dialogues[-DIALOGUE_MEMORY_CAPACITY:]
         except Exception:
-            pass
+            log_swallowed()
 
     # 賦值給雙軌 deque
     UNIFIED_DIALOGUE_MEMORY.clear()

@@ -753,7 +753,7 @@ async def summarize_search_to_speech(query: str, search_raw: str, user_role_name
             if ans and not ans.startswith("(") and len(ans) > 5:
                 return ans
     except Exception:
-        pass
+        log_swallowed()
 
     # 2. 第二防線：Groq 快答梯隊 (0.3s 提煉)
     if GROQ_CLIENTS:
@@ -2422,7 +2422,7 @@ async def _doze_one_liner(hint: str) -> str:
         if len(t) >= 6:
             return t[:80]
     except Exception:
-        pass
+        log_swallowed()
     line = _SLEEP_FALLBACKS[_DOZE_FALLBACK_IDX % len(_SLEEP_FALLBACKS)]
     _DOZE_FALLBACK_IDX += 1
     return line
@@ -2495,7 +2495,7 @@ async def _deliver_desktop_findings(vts, input_queue, user_text: str, findings: 
                 if _c and _c.strip():
                     _say = _c.strip()
             except Exception:
-                pass
+                log_swallowed()
         try:
             await speech_queue.put({"text": _say, "target": target, "raw_text": findings})
         except Exception:
@@ -2506,7 +2506,7 @@ async def _deliver_desktop_findings(vts, input_queue, user_text: str, findings: 
             f"[黑板同步] {owner}剛說「{user_text[:80]}」，桌面版查到：「{findings[:400]}」。"
             f"請用妳自己的口吻回覆（可愛一點，1~2句），免重複回答。")
     except Exception:
-        pass
+        log_swallowed()
 
 
 async def _desktop_ask_and_report(question: str, target: str = "dad", user: str = ""):
@@ -2860,14 +2860,14 @@ async def get_user_profile():
         try:
             doc = await db.collection("user_memory").document(DEFAULT_CHANNEL_ID).get()
             if doc.exists: profile = doc.to_dict()
-        except Exception: pass
+        except Exception: log_swallowed()
         
     if not profile:
         file_path = USER_PROFILE_FILE
         if os.path.exists(file_path):
             try:
                 with open(file_path, "r", encoding="utf-8") as f: profile = json.load(f)
-            except Exception: pass
+            except Exception: log_swallowed()
             
     return profile if profile else {"custom_name": DEFAULT_USER_TITLE, "impression": ""}
 
@@ -3449,7 +3449,7 @@ def update_subtitle(text):
         with open("subtitle.txt", "w", encoding="utf-8") as f:
             f.write(wrapped_text)
     except Exception:
-        pass
+        log_swallowed()
 
 CURRENT_PLAYING_VOICE_TASK = None
 SPEECH_PLAYBACK_LOCK = asyncio.Lock()
@@ -8029,7 +8029,7 @@ async def _nv_tool_pass(task_ins, target, requester_name, system_instruction_tex
         if fn_name in _rev:
             fn_name = _rev[fn_name]
     except Exception:
-        pass
+        log_swallowed()
     log_print(f"🛠️ [NV 解讀觸發] {fn_name}({fn_args})")
     return fn_name, fn_args
 
@@ -8307,13 +8307,13 @@ async def _rescue_missed_song_requests():
                     from core.hard_command import split_original_request as _split
                     _o_song, _o_src, _o_hit = _split(_om.group(1))
             except Exception:
-                pass
+                log_swallowed()
             if _o_hit and _o_src:
                 try:
                     if is_song_active(_o_song):
                         continue
                 except Exception:
-                    pass
+                    log_swallowed()
                 if not rescue_claim("orig:" + _o_song, now):
                     continue
                 log_print(f"🛟 [斷線救援] 撿回無人認領的自創曲《{_o_song}》，直接排入隊列。")
@@ -8327,7 +8327,7 @@ async def _rescue_missed_song_requests():
                         build_slip_text("auto_sing_song", {"song_name": _o_song,
                             "source_mp3": _o_src, "origin": "original"}, ""))
                 except Exception:
-                    pass
+                    log_swallowed()
                 rescued += 1
                 continue
             try:
@@ -8343,7 +8343,7 @@ async def _rescue_missed_song_requests():
                 if is_song_active(song):
                     continue
             except Exception:
-                pass
+                log_swallowed()
             if not rescue_claim(song, now):
                 continue
             log_print(f"🛟 [斷線救援] 撿回無人認領的點歌《{song}》，直接排入隊列。")
@@ -8356,7 +8356,7 @@ async def _rescue_missed_song_requests():
                 LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait(
                     build_slip_text("auto_sing_song", {"song_name": song}, ""))
             except Exception:
-                pass
+                log_swallowed()
             rescued += 1
         if rescued:
             log_print(f"🛟 [斷線救援] 共撿回 {rescued} 首點歌。")
@@ -8543,7 +8543,7 @@ async def _desktop_dad_reply(vts, input_queue, user_input: str, owner: str = "�
         try:
             LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait(f"[黑板同步] {owner}傳來文字訊息：{user_input}")
         except Exception:
-            pass
+            log_swallowed()
         log_print("⚡ [極速直通主腦] Live 模式下，控制台訊息已轉交 Live 大腦處理。")
 
     try:
@@ -8610,7 +8610,7 @@ async def process_chat_message(vts, input_queue, user_input: str, user_audio_b64
                 return
             try:
                 LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait(f"[黑板同步] {owner}傳來文字訊息：{user_input}")
-            except Exception: pass
+            except Exception: log_swallowed()
             return
         # （註：舊的 source == "tiktok_live" 分支已刪除——tiktok_listener 只會送出
         # tiktok / tiktok_gift / tiktok_ambient，從無此 source，屬死碼）
@@ -9800,7 +9800,7 @@ async def main():
         try:
             flush_unified_memory()
         except Exception:
-            pass
+            log_swallowed()
 
 if __name__ == "__main__":
     try:

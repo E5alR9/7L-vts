@@ -17,6 +17,7 @@ import re
 import shutil
 import threading
 import time
+from core.utils import log_swallowed
 
 MODEL_FILENAME = "model_bs_roformer_ep_317_sdr_12.9755.ckpt"
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -115,7 +116,7 @@ def _monitor(buf: _TqdmCapture, stop: threading.Event, song_name: str,
                 try:
                     progress_cb(pct)
                 except Exception:
-                    pass
+                    log_swallowed()
         if el - last_beat >= beat:
             last_beat = el
             tag = f" {pct}%" if pct is not None else ""
@@ -125,7 +126,7 @@ def _monitor(buf: _TqdmCapture, stop: threading.Event, song_name: str,
         try:
             progress_cb(pct)
         except Exception:
-            pass
+            log_swallowed()
 
 
 def preload_roformer(work_dir: str) -> bool:

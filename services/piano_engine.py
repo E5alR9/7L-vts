@@ -28,7 +28,7 @@ from services.vts_client import move_vts_spatial, set_vts_expression
 from core.hard_command import display_requester
 
 
-from core.utils import log_print, to_tw
+from core.utils import log_print, to_tw, log_swallowed
 from core.identity import get_owner_name
 from core.llm_engine import (GEMINI_KEYS, HIGH_IQ_GEMINI_MODELS, DEAD_GEMINI_MODELS, is_model_locked,
                              get_pingpong_alternating_index, get_pingpong_ring_indices)
@@ -913,7 +913,7 @@ def _mark_piano_offline(reason: str = ""):
             try:
                 cb(False)
             except Exception:
-                pass
+                log_swallowed()
 
 async def piano_liveness_watchdog_worker():
     """鋼琴心跳與存活狀態常駐看門狗 (每 1 秒巡檢一次，保證與主系統 100% 即時同步)"""
@@ -951,7 +951,7 @@ async def piano_liveness_watchdog_worker():
                     if int(now) % 2 == 0:
                         send_piano_ipc_command({"cmd": "ping", "time": now})
         except Exception:
-            pass
+            log_swallowed()
 
 async def auto_restore_piano_state_on_startup():
     """7L 重啟後自動檢查背景鋼琴視窗狀態（開機不自動彈奏，若視窗存活則僅同步狀態）"""
@@ -1097,7 +1097,7 @@ async def piano_focus_udp_worker():
                                         try:
                                             cb(True)
                                         except Exception:
-                                            pass
+                                            log_swallowed()
                             elif not is_playing:
                                 current_piano_song_title = ""
                                 if not pkg.get("is_window_open", True) or not is_piano_window_alive():
@@ -1110,7 +1110,7 @@ async def piano_focus_udp_worker():
                             if "instrument" in pkg and pkg["instrument"]:
                                 GLOBAL_PIANO_INSTRUMENT_NAME = pkg["instrument"]
                     except Exception:
-                        pass
+                        log_swallowed()
                 else:
                     try:
                         val = float(raw_str)
@@ -1383,7 +1383,7 @@ async def play_midi_band(midi_path: str, band_map: dict = None, speed: float = 1
                 events += _load_events(lp, (layer or {}).get("channel_shift", 0), (layer or {}).get("program"))
                 n_files += 1
         except Exception:
-            pass
+            log_swallowed()
     if not events:
         return f"（系統回報：樂譜無可演奏事件）"
     events.sort(key=lambda e: (e[0], e[1]))

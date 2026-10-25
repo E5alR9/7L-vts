@@ -38,7 +38,7 @@ except Exception:
 # WebSocket 握手補丁
 import core.websocket_patch
 from core.llm_engine import GEMINI_KEYS
-from core.utils import log_print, sys_notify
+from core.utils import log_print, sys_notify, log_swallowed
 from google import genai
 from google.genai import types
 
@@ -291,7 +291,7 @@ async def _yt_companion_session_loop(target_hwnd, initial_rect, initial_title):
                             video=types.Blob(data=jpeg_bytes, mime_type="image/jpeg")
                         )
                     except Exception:
-                        pass
+                        log_swallowed()
                     await asyncio.sleep(1.0)
 
             # 任務 2: 系統音訊採集 (加入持續靜音推流防斷線機制)
@@ -315,7 +315,7 @@ async def _yt_companion_session_loop(target_hwnd, initial_rect, initial_title):
                                 audio=types.Blob(data=silent_chunk, mime_type="audio/pcm;rate=16000")
                             )
                         except Exception:
-                            pass
+                            log_swallowed()
                         await asyncio.sleep(0.04)
                     except Exception:
                         await asyncio.sleep(0.04)
@@ -330,7 +330,7 @@ async def _yt_companion_session_loop(target_hwnd, initial_rect, initial_title):
                         await session.send_realtime_input(text="請用繁體中文，用一句話記錄剛剛畫面中發生的動作或人物台詞：")
                         await session.send_realtime_input(activity_end=types.ActivityEnd())
                     except Exception:
-                        pass
+                        log_swallowed()
                     await asyncio.sleep(18.0) # 每 18 秒沉澱一次記憶
 
             # 任務 4: 接收字幕筆記 (純文字沉澱，不播放任何聲音！)
