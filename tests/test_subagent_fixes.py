@@ -33,6 +33,7 @@ def _const_pattern(name):
 def _load(*names, **ns):
     ns.setdefault("log_print", lambda *a, **k: None)
     ns.setdefault("resolve_tool_name", resolve_tool_name)
+    ns.setdefault("_SUBAGENT_MIRROR_TASK_RE", __import__("re").compile(_const_pattern("_SUBAGENT_MIRROR_TASK_RE")))
     for n in names:
         exec(compile(ast.Module(body=[_fn(n)], type_ignores=[]), n, "exec"), ns)
     return ns
@@ -428,3 +429,23 @@ def test_tool_names_the_subagent_made_up_are_mapped_or_dropped():
     assert resolve_tool_name("pe_stop_virtual_piano") == "pe.stop_virtual_piano"  # 點寫成底線
     assert resolve_tool_name("make_coffee") == "" and resolve_tool_name("") == ""
     assert all(resolve_tool_name(n) == n for n in DECLARED_TOOL_NAMES)
+
+
+def test_mirror_task_is_handed_to_the_mirror_once():
+    """她說「照鏡子」又同時叫子智能體：子智能體不會照鏡子，以前白跑一趟再請她答應一次（2026-10-26 實機）。"""
+    async def never(*a, **k):
+        raise AssertionError("照鏡子不該跑 CPU 或副腦")
+    started = []
+
+    def run(can_start):
+        sess = _FakeSession()
+        ns = _load("_run_subagent_task", "_handle_invoke_subagent", types=types, asyncio=asyncio, time=time,
+                   background_tool_executor=never, nv_interpret_task=never,
+                   _SUBAGENT_VISION_TASK_RE=__import__("re").compile(_const_pattern("_SUBAGENT_VISION_TASK_RE")),
+                   _start_mirror=lambda: started.append(1) or can_start)
+        asyncio.run(ns["_handle_invoke_subagent"](sess, asyncio.Lock(), "invoke_subagent", "c1", "7L 照鏡子看今天的穿搭"))
+        return sess.sent
+    sent = run(True)
+    assert len(sent) == 1 and sent[0].scheduling == types.FunctionResponseScheduling.WHEN_IDLE and "我照照看" in sent[0].response["result"]
+    sent = run(False)                                    # 已經在照：安靜等回報
+    assert len(sent) == 1 and sent[0].scheduling == types.FunctionResponseScheduling.SILENT and len(started) == 2

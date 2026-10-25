@@ -562,3 +562,18 @@ def test_companion_notes_reach_the_live_brain_without_a_reply():
         if yc.YT_PERCEPTION_LOG and yc.YT_PERCEPTION_LOG[-1]["content"] == "男生在大象前講話（測試）":
             yc.YT_PERCEPTION_LOG.pop()
     assert got == [("大象", "男生在大象前講話（測試）")]
+
+def test_mirror_report_does_not_retrigger_the_mirror():
+    """照完鏡子她講描述時又帶 [TOOL:MIRROR]，以前會再照一次、再講一次（2026-10-26 實機）；看畫面早就有這個防護。"""
+    import re
+    started = []
+    ns = {"re": re, "time": time, "log_print": lambda *a: None, "_VISION_STATE": {"report_ts": 0.0, "mirror_ts": 0.0},
+          "VISION_REPORT_QUIET_SEC": 15.0, "strip_blob_noise": lambda t: t, "sanitize_search_query": lambda q: q,
+          "spawn": lambda c: started.append(c), "live_mirror_tool_task": lambda: "mirror",
+          "live_vision_tool_task": lambda: "vision", "live_search_tool_task": lambda q: "search"}
+    for n in ("_vision_report_recent", "_start_mirror", "_start_marker_tools"):
+        exec(compile(ast.Module(body=[_fn(n)], type_ignores=[]), n, "exec"), ns)
+    assert ns["_start_marker_tools"]("我照照看～[TOOL:MIRROR]") == "我照照看～" and started == ["mirror"]
+    ns["_VISION_STATE"]["mirror_ts"] = time.time()
+    assert ns["_start_marker_tools"]("白髮紅眼超可愛[TOOL:MIRROR]") == "白髮紅眼超可愛" and started == ["mirror"]
+    assert ns["_start_marker_tools"]("我看看～[TOOL:VISION]") == "我看看～" and started == ["mirror", "vision"]

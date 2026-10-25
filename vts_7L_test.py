@@ -2934,15 +2934,27 @@ VISION_TOOL_TIMEOUT_SEC = 45.0   # 她說了「我看看」之後最多等這麼
 # 看完畫面送回報後，她回答時常順手又寫 [TOOL:VISION]，於是看完又看、每 10 秒循環一次
 # （2026-10-25 實機：視覺修好、幾秒就回來之後才冒出來）。回報後這段時間內的 [TOOL:VISION] 不觸發。
 VISION_REPORT_QUIET_SEC = 15.0
-_VISION_STATE = {"report_ts": 0.0}
+_VISION_STATE = {"report_ts": 0.0, "mirror_ts": 0.0}
 
 
-def _vision_report_recent(now: float) -> bool:
-    return now - _VISION_STATE["report_ts"] < VISION_REPORT_QUIET_SEC
+def _vision_report_recent(now: float, kind: str = "report_ts") -> bool:
+    """剛看過畫面（kind="mirror_ts"：剛照過鏡子）：她正在講剛看到的，話裡又帶了標籤也不重看。"""
+    return now - _VISION_STATE[kind] < VISION_REPORT_QUIET_SEC
 
 
 # 主腦有時把「看螢幕」也丟給子智能體；子智能體看不到畫面，交給 [TOOL:VISION] 處理
 _SUBAGENT_VISION_TASK_RE = re.compile(r"螢幕|屏幕|畫面|截圖|桌面上")
+_SUBAGENT_MIRROR_TASK_RE = re.compile(r"鏡子|照鏡")
+
+
+def _start_mirror() -> bool:
+    """照鏡子：剛開始照或剛照完（15 秒內）就不重照，回 False。標籤和子智能體兩條路都走這裡。"""
+    now = time.time()
+    if _vision_report_recent(now, "mirror_ts"):
+        return False
+    _VISION_STATE["mirror_ts"] = now
+    spawn(live_mirror_tool_task())
+    return True
 
 
 def _start_marker_tools(text: str) -> str:
@@ -2967,9 +2979,12 @@ def _start_marker_tools(text: str) -> str:
             spawn(live_vision_tool_task())
 
     if "[TOOL:MIRROR]" in text:
-        log_print("🪞 [攔截暗號] 啟動平行代理人：照鏡子！")
         text = text.replace("[TOOL:MIRROR]", "").strip()
-        spawn(live_mirror_tool_task())
+        if _start_mirror():
+            log_print("🪞 [攔截暗號] 啟動平行代理人：照鏡子！")
+        else:
+            # 2026-10-26 實機：照完鏡子她講描述時又帶 [TOOL:MIRROR]，再照一次、再講一次
+            log_print("🪞 [照鏡子] 剛照過或正在照，這次的 [TOOL:MIRROR] 不重照")
     return text
 
 
@@ -3027,7 +3042,9 @@ async def live_mirror_tool_task():
         if not reply_text:
             raise Exception("視覺模型未回傳")
         log_print(f"🪞 [鏡子回報] {reply_text[:50]}...")
-        send_brain_slip(f"[系統提示：鏡子裡映出的妳長這樣，請自然地把這段觀察說出來：] {_clean_result_for_brain(reply_text)}")
+        _VISION_STATE["mirror_ts"] = time.time()   # 回報後再擋 15 秒：她講描述時又帶 [TOOL:MIRROR] 不重照
+        send_brain_slip(f"[系統提示：鏡子裡映出的妳長這樣（已經照完了，直接用這段說，不要再輸出 [TOOL:MIRROR]），"
+                        f"請自然地把這段觀察說出來：] {_clean_result_for_brain(reply_text)}")
     except Exception as e:
         log_print(f"❌ [鏡子錯誤] {e}")
         fallback_prompt = "[系統提示：鏡子功能暫時失敗。請依憑身為高智商 AI 的設定，自信地用言語描述自己的外貌，並找個藉口說鏡子碎了或起霧了！請每次換個說法。]"
@@ -3368,6 +3385,15 @@ async def _run_subagent_task(_task_ins, _intent, _respond):
                 spawn(live_vision_tool_task())
                 await _respond("[系統底層：已經請視覺大腦去看畫面，幾秒後回報。在那之前不要描述畫面內容，"
                                "可以先說一句「我看看～」。]", _speak)
+            return
+        if _task_ins and _SUBAGENT_MIRROR_TASK_RE.search(_task_ins):
+            # 子智能體不會照鏡子：以前白跑一趟再請她答應一次（2026-10-26 實機她多講一句「人家正在照呢」）
+            if _start_mirror():
+                log_print("🪞 [子智能體] 照鏡子交給鏡子代理人")
+                await _respond("[系統底層：已經去照鏡子了，幾秒後回報。在那之前不要描述自己的樣子，"
+                               "可以先說一句「我照照看～」。]", _speak)
+            else:
+                await _respond("[系統底層：鏡子已經在照了（或剛照完），等鏡子的回報就好，不用再叫。]", _quiet)
             return
         if _task_ins:
             _who = _BRAIN_INPUT_ORIGIN["who"]   # 這輪是觀眾觸發的，就照觀眾的權限
