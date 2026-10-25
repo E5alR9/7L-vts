@@ -1072,6 +1072,41 @@ async def api_reset_prompts(request):
     except Exception as e:
         return web.json_response({"ok": False, "error": str(e)}, status=500)
 
+_JSON_TYPE_UI = {"integer": "number", "number": "number", "boolean": "boolean"}
+_TOOL_ALIASES = {"auto_sing_song": "sing_song"}   # 宣告名 → 手寫目錄裡的同一個工具
+
+
+def full_tools_catalog() -> list:
+    """後台工具目錄＝手寫的（有預設值、選項）＋主腦能叫、手寫目錄卻沒列的（照工具宣告自動補）。
+    以前只有手寫的 22 個：曲庫清單、點播看片、知識庫這些後台根本叫不到（2026-10-25 健檢）。"""
+    have = {t["name"].split(".")[-1] for t in DEFAULT_TOOLS_CATALOG}
+    out = list(DEFAULT_TOOLS_CATALOG)
+    try:
+        from core.tool_schema import INTERACTIONS_TOOLS
+    except Exception:
+        return out
+    for t in INTERACTIONS_TOOLS:
+        name = t.get("name", "")
+        tail = name.split(".")[-1]
+        if not name or tail in have or _TOOL_ALIASES.get(tail) in have:
+            continue
+        desc = (t.get("description") or "").strip()
+        schema = t.get("parameters") or {}
+        req = set(schema.get("required") or [])
+        params = []
+        for k, v in (schema.get("properties") or {}).items():
+            p_desc = (v.get("description") or "").strip()
+            params.append({"name": k, "label": p_desc.split("（")[0][:20] or k,
+                           "type": _JSON_TYPE_UI.get(v.get("type"), "string"),
+                           "default": v.get("default", False if v.get("type") == "boolean" else ""),
+                           "placeholder": p_desc, "required": k in req})
+        out.append({"name": name, "category": "more", "category_name": "更多工具",
+                    "label": desc.split("：")[0].split("（")[0][:16] or name, "description": desc,
+                    "parameters": params})
+        have.add(name.split(".")[-1])
+    return out
+
+
 async def api_get_tools(request):
     """取得 7L 可用工具目錄與參數清單"""
     try:
@@ -1079,7 +1114,7 @@ async def api_get_tools(request):
             custom_catalog = GET_TOOLS_CALLBACK()
             if custom_catalog:
                 return web.json_response({"ok": True, "tools": custom_catalog})
-        return web.json_response({"ok": True, "tools": DEFAULT_TOOLS_CATALOG})
+        return web.json_response({"ok": True, "tools": full_tools_catalog()})
     except Exception as e:
         return web.json_response({"ok": False, "error": str(e)}, status=500)
 

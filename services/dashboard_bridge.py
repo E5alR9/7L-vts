@@ -12,9 +12,12 @@
 """
 import asyncio
 import os
+import re
 import time
 
 from core.utils import log_print, get_silence_ticks, get_uptime_ticks, format_ticks_to_human, spawn
+
+_TAG_RE = re.compile(r"\[[A-Z_]+(?:[:：][^\]]*)?\]")   # 回給後台顯示前拿掉 [EXPRESSION: …] 這類標籤
 
 # 本檔經 core 讀寫的主程式名稱（新增 c.<名稱> 用法時一併登記）
 CORE_ATTRS = (
@@ -38,7 +41,7 @@ CORE_ATTRS = (
     "set_ai_state", "get_api_stress_metrics", "set_vts_expression", "shutdown_7l", "apply_spatial_position",
     "control_microphone", "set_sleep_mode", "set_timer", "search_google",
     "update_cloud_prompt_field", "clear_all_memories", "generate_ai_image",
-    "request_cover_song", "stop_singing", "execute_local_python_code",
+    "request_cover_song", "stop_singing", "execute_local_python_code", "execute_tool_dispatch",
     "execute_punish_action", "execute_reward_action",
 )
 
@@ -246,79 +249,20 @@ class DashboardBridge:
         log_print("👋 [系統] 收到 Web 控制台關機指令，正在安全退出 7L 系統...")
         self.core.shutdown_7l()
 
+    # 後台專屬（主派發器沒有，或後台要等結果顯示）；其他工具一律走主程式同一個派發器
+    _BRIDGE_ONLY_TOOLS = {"set_sleep_mode", "open_browser", "trigger_vts_expression",
+                          "execute_local_python_code", "generate_ai_image", "draw_illustration"}
+
     async def execute_tool_manually(self, tool_name: str, args: dict):
+        """後台手動呼叫工具。以前這裡另寫一份派發器：少 13 個工具（曲庫清單、點播看片、知識庫…），
+        行為也跟主程式不同步（收鋼琴的 force 要改兩處）。現在除了後台專屬的，都走 execute_tool_dispatch。"""
         c = self.core
-        pe = c.pe
+        args = dict(args or {})
         log_print(f"🛠️ [老爸手動調用] 正在執行工具: {tool_name}，參數: {args}")
-        if tool_name in ["pe.play_virtual_piano", "play_virtual_piano"]:
-            song_name = args.get("song_name", "鐘")
-            force_online = bool(args.get("force_online", False))
-            await pe.play_virtual_piano(song_name, force_online=force_online, target="dad", requester_name="老爸", is_direct_song_name=True)
-            return f"已成功為老爸排播/演奏鋼琴曲目《{song_name}》"
-        elif tool_name in ["pe.compose_and_play_original_piano", "compose_and_play_original_piano"]:
-            theme = args.get("theme_or_title", "星空漫步")
-            style = args.get("mood_or_style", "治癒抒情")
-            await pe.compose_and_play_original_piano(theme_or_title=theme, mood_or_style=style, target="dad", requester_name="老爸")
-            return f"已完成現場即興創作並演奏《{theme}》（風格：{style}）"
-        elif tool_name in ["pe.mashup_virtual_piano", "mashup_virtual_piano"]:
-            s1 = args.get("song_name1", "冬風")
-            s2 = args.get("song_name2", "")
-            if s2:
-                await pe.mashup_virtual_piano(s1, s2)
-                return f"已啟動多曲極限串燒演奏：《{s1}》 x 《{s2}》"
-            else:
-                await pe.mashup_virtual_piano(s1)
-                return f"已啟動多曲極限串燒演奏：《{s1}》"
-        elif tool_name in ["pe.insert_virtual_piano", "insert_virtual_piano"]:
-            s = args.get("song_name", "少女的祈禱")
-            await pe.insert_virtual_piano(s)
-            return f"已成功插播追加曲目：《{s}》"
-        elif tool_name in ["pe.set_piano_instrument", "set_piano_instrument"]:
-            inst = args.get("instrument", "鋼琴")
-            await pe.set_piano_instrument(inst)
-            return f"已將鋼琴發聲音色切換為：{inst}"
-        elif tool_name in ["pe.set_piano_speed", "set_piano_speed"]:
-            spd = float(args.get("speed", 1.0))
-            await pe.set_piano_speed(spd)
-            return f"已將鋼琴演奏速度調整為：{spd:.2f}x"
-        elif tool_name in ["pe.set_piano_volume", "set_piano_volume"]:
-            vol = int(args.get("volume", 85))
-            await pe.set_piano_volume(vol)
-            return f"已將鋼琴演奏音量調整為：{vol}%"
-        elif tool_name in ["pe.open_virtual_piano", "open_virtual_piano"]:
-            await pe.open_virtual_piano()
-            return "已在桌面打開 88 鍵鋼琴介面待命"
-        elif tool_name in ["pe.pause_virtual_piano", "pause_virtual_piano"]:
-            await pe.pause_virtual_piano()
-            return "已暫停當前鋼琴演奏"
-        elif tool_name in ["pe.resume_virtual_piano", "resume_virtual_piano"]:
-            await pe.resume_virtual_piano()
-            return "已恢復繼續鋼琴演奏"
-        elif tool_name in ["pe.stop_virtual_piano", "stop_virtual_piano"]:
-            await pe.stop_virtual_piano(force=True)
-            return "已停止鋼琴演奏並關閉鋼琴"
-        elif tool_name == "move_spatial_position":
-            pos = args.get("target_position", "正中間")
-            await c.apply_spatial_position(pos)
-            return f"已平滑移動 7L 站位至：{pos}"
-        elif tool_name == "trigger_vts_expression":
-            expr = args.get("expression_name", "自然")
-            if self.vts:
-                await c.set_vts_expression(self.vts, expr)
-            return f"已觸發 VTS 表情：{expr}"
-        elif tool_name == "control_microphone":
-            enabled = bool(args.get("is_enabled", True))
-            c.control_microphone(enabled)
-            return f"已{'開啟' if enabled else '靜音關閉'}麥克風收音"
-        elif tool_name == "set_sleep_mode":
+        if tool_name == "set_sleep_mode":
             enable = bool(args.get("enable", False))
             await c.set_sleep_mode(enable)
             return f"已切換為{'深層休眠 (0 API)' if enable else '全速運作喚醒狀態'}"
-        elif tool_name == "set_timer":
-            sec = int(args.get("seconds", 60))
-            msg = args.get("message", "提醒時間到！")
-            spawn(c.set_timer(sec, msg, self.input_queue, caller_user="老爸"))
-            return f"已設定 {sec} 秒後鬧鐘提醒：「{msg}」"
         elif tool_name == "open_browser":
             url = args.get("url", "https://www.google.com")
             if not url.startswith("http"):
@@ -326,34 +270,32 @@ class DashboardBridge:
             import webbrowser
             webbrowser.open(url)
             return f"已在預設瀏覽器中開啟網頁：{url}"
-        elif tool_name == "search_google":
-            q = args.get("query", "")
-            res = await asyncio.to_thread(c.search_google, q)
-            return res or f"已搜尋「{q}」"
-        elif tool_name == "update_cloud_knowledge":
-            cat = args.get("category", "facts")
-            content = args.get("content", "")
-            await c.update_cloud_prompt_field(cat, content)
-            return f"已成功將新認知寫入雲端大腦 [{cat}]：{content}"
-        elif tool_name == "clear_all_memories":
-            await c.clear_all_memories()
-            return "已清空 7L 當前短期記憶中樞"
-        elif tool_name in ["generate_ai_image", "draw_illustration"]:
+        elif tool_name == "trigger_vts_expression":
+            # 主派發器這個工具只回表情標籤、由說話流程去做；後台要直接做
+            expr = args.get("expression_name", "自然")
+            if self.vts:
+                await c.set_vts_expression(self.vts, expr)
+            return f"已觸發 VTS 表情：{expr}"
+        elif tool_name == "execute_local_python_code":
+            res = await c.execute_local_python_code(args.get("code_string", ""))
+            return res or "Python 程式碼執行完成"
+        elif tool_name in ("generate_ai_image", "draw_illustration"):
             p = args.get("prompt", "")
             res = await c.generate_ai_image(p)
             return res or f"已生成 AI 插畫：「{p}」"
-        elif tool_name in ["sing_song", "auto_sing_song"]:
-            s = args.get("song_name", "")
-            return c.request_cover_song(s, "老爸")
-        elif tool_name in ["stop_singing_song", "stop_singing", "stop_cover"]:
-            c.stop_singing()
-            return "已停止唱歌"
-        elif tool_name == "execute_local_python_code":
-            code = args.get("code_string", "")
-            res = await c.execute_local_python_code(code)
-            return res or "Python 程式碼執行完成"
-        else:
-            raise ValueError(f"未知的工具名稱: {tool_name}")
+
+        import services.web_dashboard as _wd
+        if tool_name.split(".")[-1] not in {t["name"].split(".")[-1] for t in _wd.full_tools_catalog()}:
+            raise ValueError(f"未知的工具名稱: {tool_name}")   # 主派發器遇到不認得的會安靜略過，這裡先擋
+        if tool_name.split(".")[-1] == "stop_virtual_piano":
+            args["force"] = True   # 後台按的就是老爸本人，不受「剛拿出 3.5 秒」防護擋
+        try:
+            from core.identity import get_owner_name
+            owner = get_owner_name()
+        except Exception:
+            owner = "老爸"
+        res = await c.execute_tool_dispatch(tool_name, args, caller_target="dad", caller_user=owner)
+        return _TAG_RE.sub("", str(res or "")).strip() or f"已執行 {tool_name}"
 
     def get_switches(self):
         c = self.core

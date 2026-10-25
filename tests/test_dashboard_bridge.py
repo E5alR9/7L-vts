@@ -134,3 +134,52 @@ def test_callbacks_match_dashboard_signature():
     assert keys <= params
     # 原 main() 交出去的 callback 一個都不能少
     assert params - keys == {"port", "get_tools_cb"}
+
+
+# —— 後台手動工具走主派發器（2026-10-25 健檢）：以前另寫一份，少 13 個工具、行為也不同步 ——
+
+def _manual(tool, args=None):
+    sent = []
+
+    async def execute_tool_dispatch(fn, a, caller_target="", caller_user=""):
+        sent.append((fn, dict(a), caller_target))
+        return " [EXPRESSION: 星星眼] 曲庫有 239 首"
+    core, _ = _fake_core(execute_tool_dispatch=execute_tool_dispatch)
+    b = db.DashboardBridge(core, vts=None, input_queue=None, run_mode="companion")
+    return asyncio.run(b.execute_tool_manually(tool, args or {})), sent
+
+
+def test_manual_tools_go_through_the_main_dispatcher():
+    res, sent = _manual("list_piano_sheets")                      # 舊後台派發器沒有這個
+    assert sent == [("list_piano_sheets", {}, "dad")] and res == "曲庫有 239 首"
+    _, sent = _manual("pe.stop_virtual_piano")
+    assert sent[0][1] == {"force": True}                         # 後台按的就是老爸本人
+    _, sent = _manual("video.request_watch", {"url": "youtu.be/jNQXAC9IVRw"})
+    assert sent[0][0] == "video.request_watch"
+
+
+def test_unknown_manual_tool_is_rejected():
+    import pytest
+    with pytest.raises(ValueError):
+        _manual("no_such_tool")
+
+
+def test_catalog_lists_every_tool_the_brain_can_call():
+    import services.web_dashboard as wd
+    from core.tool_schema import INTERACTIONS_TOOLS
+    names = [t["name"].split(".")[-1] for t in wd.full_tools_catalog()]
+    assert len(names) == len(set(names))
+    declared = {wd._TOOL_ALIASES.get(n, n) for n in (t["name"].split(".")[-1] for t in INTERACTIONS_TOOLS)}
+    assert declared <= set(names)
+    assert "auto_sing_song" not in names                          # 跟手寫目錄的 sing_song 是同一個
+
+
+def test_catalog_tools_are_all_handled_by_the_dispatcher():
+    import re
+    import services.web_dashboard as wd
+    tree = ast.parse(_src("vts_7L_test.py"))
+    fn = next(n for n in ast.walk(tree) if isinstance(n, ast.AsyncFunctionDef) and n.name == "execute_tool_dispatch")
+    handled = {s.split(".")[-1] for s in re.findall(r'"([\w.]+)"', ast.get_source_segment(_src("vts_7L_test.py"), fn))}
+    missing = [t["name"] for t in wd.full_tools_catalog()
+               if t["name"].split(".")[-1] not in handled | db.DashboardBridge._BRIDGE_ONLY_TOOLS]
+    assert not missing, missing
