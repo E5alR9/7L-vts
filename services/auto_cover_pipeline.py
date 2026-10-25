@@ -929,16 +929,13 @@ async def play_cover_audio(vocal_path: str, song_name: str, inst_path: str = Non
         snd_inst = pygame.mixer.Sound(inst_path) if (inst_path and os.path.exists(inst_path)) else None
 
         # 👄 自動同步【純人聲】口型波形包絡至 Live2D 對嘴中樞（徹底杜絕伴奏重低音/鼓點干擾對嘴）
-        if core_vts:
-            try:
-                extract_fn = getattr(core_vts, "extract_audio_mouth_envelope", None)
-                if extract_fn:
-                    envelope = await asyncio.to_thread(extract_fn, snd_vocal, 25)
-                    stage.CURRENT_MOUTH_ENVELOPE = envelope
-                    stage.CURRENT_SMOOTH_MOUTH = 0.0
-                    print("👄 [口型同步] 成功將【純人聲音軌】波形包絡同步至 Live2D 對嘴中樞（100% 精準對嘴，零伴奏雜音干擾）！")
-            except Exception as env_err:
-                print(f"⚠️ [口型波形提取警告]: {env_err}")
+        try:
+            from services.audio_analysis import extract_audio_mouth_envelope
+            stage.CURRENT_MOUTH_ENVELOPE = await asyncio.to_thread(extract_audio_mouth_envelope, snd_vocal, 25)
+            stage.CURRENT_SMOOTH_MOUTH = 0.0
+            print("👄 [口型同步] 成功將【純人聲音軌】波形包絡同步至 Live2D 對嘴中樞（100% 精準對嘴，零伴奏雜音干擾）！")
+        except Exception as env_err:
+            print(f"⚠️ [口型波形提取警告]: {env_err}")
 
         # 🎛️ 專業立體聲即時動態混音平衡：人聲清晰飽滿 (0.67)，伴奏音樂襯托 (0.55)
         ch_vocal.set_volume(0.67)

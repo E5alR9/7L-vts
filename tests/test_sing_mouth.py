@@ -39,16 +39,8 @@ def test_real_vocal_envelope_moves():
         pytest.skip("cover_cache 無 RVC 成品")
     if not pygame.mixer.get_init():
         pygame.mixer.init(frequency=44100)
-    tree = ast.parse(_vts_src())
-    ns = {"pygame": pygame}
-    import numpy as _np
-    ns["numpy"] = _np
-    ns["np"] = _np
-    funcs = {}
-    for n in tree.body:
-        if isinstance(n, ast.FunctionDef) and n.name == "extract_audio_mouth_envelope":
-            exec(compile(ast.Module(body=[n], type_ignores=[]), "x", "exec"), ns)
-            funcs[n.name] = ns[n.name]
+    from services.audio_analysis import extract_audio_mouth_envelope
+    funcs = {"extract_audio_mouth_envelope": extract_audio_mouth_envelope}
     snd = pygame.mixer.Sound(cands[-1])
     env = funcs["extract_audio_mouth_envelope"](snd, fps=25)
     assert len(env) > 100, f"包絡太短: {len(env)}"

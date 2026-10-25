@@ -19,3 +19,15 @@ def test_stage_actions_not_left_in_main():
     for name in ("parse_action_timeline", "execute_action_timeline", "execute_speech_visual_actions",
                  "expression_keeper_worker", "move_spatial_position"):
         assert f"def {name}(" not in main
+
+
+def test_audio_helpers_moved_out_of_main():
+    """音訊分析 2026-10-25 搬到 services/audio_analysis.py；翻唱對嘴直接 import，不再從主程式模組撈。"""
+    main = open(os.path.join(ROOT, "vts_7L_test.py"), encoding="utf-8").read()
+    for name in ("extract_audio_mouth_envelope", "_load_sound_with_envelope", "normalize_text_for_echo",
+                 "check_is_echo_by_waveform"):
+        assert f"def {name}(" not in main
+    cover = open(os.path.join(ROOT, "services", "auto_cover_pipeline.py"), encoding="utf-8").read()
+    assert 'getattr(core_vts, "extract_audio_mouth_envelope"' not in cover
+    from services.audio_analysis import normalize_text_for_echo
+    assert normalize_text_for_echo("ＡＢＣ，你好！") == normalize_text_for_echo("abc你好")
