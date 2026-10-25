@@ -175,23 +175,20 @@ def test_fallback_prompt_is_built_only_when_live_brain_is_away():
     assert src.index("send_brain_slip(slip_text") < src.index("await _streamer_mind_prompt(")
 
 
-def test_gemini_contents_builder():
-    """fetch_ai_response 開頭的輸入組裝抽成函式（2026-10-25 健檢）；組完沒人用的 interaction_input 拿掉。"""
+def test_image_parts_keep_labels_before_each_image():
+    """看畫面送 7 張圖：每張前面的標籤（時序幀、象限）要跟著送，模型才分得出哪張是哪張。"""
     import base64
     from google.genai import types
     tree = ast.parse(MAIN_SRC)
-    fn = next(x for x in tree.body if isinstance(x, ast.FunctionDef) and x.name == "_build_gemini_contents")
-    ns = {"types": types, "base64": base64, "log_print": lambda *a: None}
+    fn = next(x for x in tree.body if isinstance(x, ast.FunctionDef) and x.name == "_image_parts")
+    ns = {"types": types, "base64": base64}
     exec(compile(ast.Module(body=[fn], type_ignores=[]), "x", "exec"), ns)
     img = base64.b64encode(b"\xff\xd8fakejpeg").decode()
-    out = ns["_build_gemini_contents"]([{"role": "system", "content": "妳是 7L。"},
-                                        {"role": "user", "content": "早安"},
-                                        {"role": "assistant", "content": "早～"},
-                                        {"role": "user", "content": "看這張"}], image_base64=img)
-    assert [c.role for c in out] == ["user", "model", "user"]
-    assert out[0].parts[0].text.startswith("妳是 7L。") and out[0].parts[0].text.endswith("早安")
-    assert len(out[-1].parts) == 2 and out[-1].parts[1].inline_data.mime_type == "image/jpeg"
-    assert "interaction_input = []" not in MAIN_SRC
+    parts = ns["_image_parts"]([("【時序動態幀 1】", img), img])
+    assert [bool(p.text) for p in parts] == [True, False, False]
+    assert "時序動態幀 1" in parts[0].text and parts[1].inline_data.mime_type == "image/jpeg"
+    assert len(ns["_image_parts"](img)) == 1 and ns["_image_parts"](None) == []
+    assert "def fetch_ai_response" not in MAIN_SRC
 
 
 def test_tool_results_go_through_slip_exit_and_vision_is_kept_short():

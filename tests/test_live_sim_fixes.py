@@ -83,21 +83,28 @@ def test_tight_reference_shortens_pauses(tmp_path, monkeypatch):
 
 # ── 看螢幕 ────────────────────────────────────────────────────────────
 
-def test_vision_is_tool_free_time_limited_and_not_routed_as_code():
-    src = _src("live_vision_tool_task")
-    assert "use_tools=False" in src and "VISION_TOOL_TIMEOUT_SEC" in src
+def test_looking_at_images_is_tool_free_and_time_limited():
+    """看畫面、照鏡子只要描述：不給工具（以前競速的每個通道都會各自執行模型回的工具，2026-10-25 星星眼一開一關抵銷），
+    整段限時；圖片跟著文字送，不走 Groq。"""
+    import asyncio
+    import base64
+    from google.genai import types
+    calls = []
+
+    async def rest_chat(system, prompt, **k):
+        calls.append(k)
+        return pytypes.SimpleNamespace(text="老爸在看鋼琴影片")
+    ns = {"types": types, "base64": base64, "rest_chat": rest_chat, "GEMINI_MODELS": ["m"], "VISION_TOOL_TIMEOUT_SEC": 45.0}
+    for n in ("_image_parts", "describe_images"):
+        exec(compile(ast.Module(body=[_fn(n)], type_ignores=[]), n, "exec"), ns)
+    img = base64.b64encode(b"\xff\xd8jpeg").decode()
+    assert asyncio.run(ns["describe_images"]("描述這個畫面", [("【全景】", img), img])) == "老爸在看鋼琴影片"
+    k = calls[0]
+    assert "tools" not in k and k["total_timeout"] == 45.0 and len(k["extra_parts"]) == 3
     prompt = next(n.value for n in ast.walk(_fn("live_vision_tool_task"))
                   if isinstance(n, ast.Constant) and isinstance(n.value, str) and "描述這個畫面" in n.value)
-    for kw in ("程式碼", "寫程式", "寫代碼", "分析"):     # 會被 get_prioritized_gemini_models 當高智商任務
+    for kw in ("程式碼", "寫程式", "寫代碼", "分析"):     # 讓她把畫面講成程式碼（2026-10-25 實機）
         assert kw not in prompt
-    assert "use_tools=False" in _src("live_mirror_tool_task")
-
-
-def test_fetch_ai_response_can_skip_tools_and_races_other_models():
-    src = _src("fetch_ai_response")
-    assert "use_tools: bool = True" in src
-    assert 'if use_tools:\n                config_kwargs["tools"] = active_tools' in src
-    assert "running_models" in src and "ch[1] not in running_models" in src
 
 
 # ── Live 續接 ─────────────────────────────────────────────────────────
@@ -241,9 +248,18 @@ def test_gift_events_keep_the_giver_name():
 
 
 def test_vision_reply_uses_whole_text_not_first_char():
-    for name in ("live_vision_tool_task", "live_mirror_tool_task"):
-        assert "reply_text = resp[0]" not in _src(name)
-        assert "isinstance(resp, str)" in _src(name)
+    """舊碼取 resp[0] 只拿到第一個字，主腦只收到「這」（2026-10-25 實機）。"""
+    import asyncio
+    slips = []
+
+    async def describe_images(prompt, images):
+        return "這是鋼琴影片和 Minecraft"
+    ns = {"log_print": lambda *a: None, "describe_images": describe_images, "get_combined_temporal_screen_snapshot": lambda: ["x"],
+          "_VISION_STATE": {"report_ts": 0.0}, "time": time, "send_brain_slip": slips.append,
+          "_clean_result_for_brain": lambda t: t, "asyncio": asyncio, "VISION_TOOL_TIMEOUT_SEC": 45.0}
+    exec(compile(ast.Module(body=[_fn("live_vision_tool_task")], type_ignores=[]), "v", "exec"), ns)
+    asyncio.run(ns["live_vision_tool_task"]())
+    assert len(slips) == 1 and slips[0].endswith("這是鋼琴影片和 Minecraft")
 
 
 def test_vision_report_does_not_retrigger_vision():

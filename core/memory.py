@@ -74,7 +74,6 @@ UNIFIED_THOUGHT_MEMORY: deque = deque(maxlen=150)
 UNIFIED_LIVE_MEMORY: deque = deque(maxlen=None if DIALOGUE_MEMORY_CAPACITY <= 0 else (DIALOGUE_MEMORY_CAPACITY + 200))
 _LAST_UNIFIED_SAVE_TIME = 0.0
 
-TIKTOK_CHATROOM_MEMORY: List[Dict[str, Any]] = []
 STREAMER_MIND_BOARD: deque = deque(maxlen=200)
 
 DEFAULT_CHANNEL_ID = f"vts_{MODE}_user"
@@ -319,8 +318,6 @@ async def clear_all_memories() -> str:
             except Exception:
                 pass
     try:
-        if 'TIKTOK_CHATROOM_MEMORY' in globals() and isinstance(TIKTOK_CHATROOM_MEMORY, list):
-            TIKTOK_CHATROOM_MEMORY.clear()
         if 'STREAMER_MIND_BOARD' in globals() and hasattr(STREAMER_MIND_BOARD, 'clear'):
             STREAMER_MIND_BOARD.clear()
         if 'UNIFIED_DIALOGUE_MEMORY' in globals() and hasattr(UNIFIED_DIALOGUE_MEMORY, 'clear'):
@@ -483,7 +480,7 @@ def append_to_unified_memory(speaker: str, target: str, content: str, role: str 
     - 💭 內心流動（7L 背景連續思緒、腦內心想）：寫入 UNIFIED_THOUGHT_MEMORY（依字數限制管理，約 1000 字）
     - 兩軌徹底分開計算與儲存，心流不再擠佔對話配額，對話可永遠追溯最近幾百句！
     """
-    global UNIFIED_LIVE_MEMORY, UNIFIED_DIALOGUE_MEMORY, UNIFIED_THOUGHT_MEMORY, _LAST_UNIFIED_SAVE_TIME, TIKTOK_CHATROOM_MEMORY
+    global UNIFIED_LIVE_MEMORY, UNIFIED_DIALOGUE_MEMORY, UNIFIED_THOUGHT_MEMORY, _LAST_UNIFIED_SAVE_TIME
     clean_c = content.strip()
     if not clean_c:
         return
@@ -524,11 +521,6 @@ def append_to_unified_memory(speaker: str, target: str, content: str, role: str 
         UNIFIED_THOUGHT_MEMORY.append(entry)
     else:
         UNIFIED_DIALOGUE_MEMORY.append(entry)
-        # 保持向後相容 TIKTOK_CHATROOM_MEMORY
-        if "觀眾" in speaker or source == "tiktok_live":
-            TIKTOK_CHATROOM_MEMORY.append({"user": speaker, "content": clean_c, "time": now_t})
-            if len(TIKTOK_CHATROOM_MEMORY) > 200:
-                TIKTOK_CHATROOM_MEMORY.pop(0)
 
     UNIFIED_LIVE_MEMORY.append(entry)
 
@@ -834,131 +826,6 @@ def get_recent_thoughts_by_chars(max_chars: int = 1000) -> List[Dict[str, Any]]:
 
     collected.reverse()
     return collected
-
-class MemoryDemandLevel:
-    INSTANT = "INSTANT"       # ⚡ 極速直通 (突發電擊/摸頭/擁抱、按鈕事件、緊急口令：0歷史記憶、單圖快照、0新聞，1.2s秒級開口)
-    LIGHT = "LIGHT"           # 🌸 輕量即時 (簡短問候、看畫面在幹嘛、超短句日常互動：極簡脈絡)
-    STANDARD = "STANDARD"     # 💬 標準常規 (日常對話、當下連續互動：適量平衡記憶)
-    DEEP = "DEEP"             # 📜 深度追憶 (問過去、算舊帳、回憶細節：調取 100 句記憶庫，滿足上百句回憶需求)
-    ULTRA_DEEP = "ULTRA_DEEP" # 🌌 究極全域回溯 (回顧今天全部、從頭想、上百句歷史對話：調取 150~180 句超長記憶)
-
-class MemoryDemandDecision:
-    def __init__(self, level: str, u_lim: int, h_lim: int, th_lim: int, need_news: bool, single_screen: bool, reason: str):
-        self.level = level
-        self.u_lim = u_lim
-        self.h_lim = h_lim
-        self.th_lim = th_lim
-        self.need_news = need_news
-        self.single_screen = single_screen
-        self.reason = reason
-
-    # 支援元組解構 (向下相容)
-    def __iter__(self):
-        yield self.level
-        yield self.u_lim
-        yield self.h_lim
-        yield self.th_lim
-        yield self.reason
-
-    def __getitem__(self, item):
-        return getattr(self, item)
-
-def evaluate_memory_demand(user_input: str, is_voice_input: bool = False, source: str = "mic") -> MemoryDemandDecision:
-    """
-    🧠 7L 自主記憶需求深度裁決器：
-    由 7L 根據老爸發話意圖與當前情境，自主判斷本次開口需要的記憶窗口深度：
-    - 按鈕/突發事件：0 記憶秒級響應
-    - 常規聊天：輕量平衡記憶
-    - 追溯過往/深層回憶：最高調取 100 ~ 180 句超長時序記憶！
-    """
-    raw = (user_input or "").strip()
-    low = raw.lower()
-
-    # 0. 究極全域回溯模式 (ULTRA_DEEP)：明確要求回顧今天全部、查所有聊天、從頭想、上百句
-    ultra_keywords = [
-        "上百句", "幾百句", "全部記憶", "所有記憶", "回顧今天", "今天聊了什麼", "今天說了什麼", 
-        "從頭想", "從頭說", "完整回憶", "所有對話", "全部對話", "深層記憶", "徹底回想", "翻箱倒櫃",
-        "回想所有", "全部回想", "今天所有", "今天都聊了"
-    ]
-    if any(k in low for k in ultra_keywords):
-        return MemoryDemandDecision(
-            level=MemoryDemandLevel.ULTRA_DEEP,
-            u_lim=180,          # 全景時序 180 句 (超長時序覆蓋整場直播/整日交流)
-            h_lim=80,           # 歷史對話 80 輪
-            th_lim=1200,        # 心流 1200 字
-            need_news=False,
-            single_screen=False,
-            reason="收到深層全域回溯指令，調取 180 句全景時序超長記憶（最高回憶達數百句）"
-        )
-
-    # 1. 深度記憶模式 (DEEP)：用戶明確在查驗過去、算舊帳、追問剛才/之前的細節（調取 100 句！）
-    deep_keywords = [
-        "還記得", "还记得", "之前", "昨天", "上次", "上一次", "剛才那", "刚才那",
-        "剛剛那", "刚刚那", "剛才說", "刚才说", "剛剛說", "刚刚说", "剛才發生", "刚才发生",
-        "剛剛發生", "刚刚发生", "妳不是說", "你不是说", "不是說過", "不是说过",
-        "為啥剛才", "为什么刚才", "剛剛那個", "刚才那个", "以前", "回憶", "回忆", "算帳", "算账",
-        "歷史", "历史", "上一把", "上局", "剛那局", "刚才那局", "昨天那", "記不記得", "记不记得",
-        "剛才聊", "剛才講", "剛聊到", "剛剛聊到", "回想", "想起來"
-    ]
-    if any(k in low for k in deep_keywords):
-        return MemoryDemandDecision(
-            level=MemoryDemandLevel.DEEP,
-            u_lim=100,          # 全景時序 100 句（滿足老爸要求：最高回憶能達上百句！）
-            h_lim=40,           # 歷史對話 40 輪
-            th_lim=800,         # 心流 800 字
-            need_news=False,    # 回憶無需外掛新聞
-            single_screen=False,# 完整時序畫面
-            reason="偵測到追溯過往/回憶求證關鍵意圖，啟動深度記憶庫檢索（100 句全景時序脈絡）"
-        )
-
-    # 2. 極速直通模式 (INSTANT)：控制台突發物理刺激、電擊/摸頭/擁抱按鈕、極短指令
-    is_console_event = (
-        raw.startswith("【⚡") or raw.startswith("【💖") or raw.startswith("【系統")
-        or source in ["web_console", "system", "console"]
-        or any(k in low for k in ["微電", "大電", "強力電擊", "電擊", "電一下", "摸頭", "擁抱", "揉頭", "關機", "重開"])
-    )
-    if is_console_event:
-        return MemoryDemandDecision(
-            level=MemoryDemandLevel.INSTANT,
-            u_lim=0,            # 0 句全景記憶（不被舊對話拖累）
-            h_lim=0,            # 0 輪對話歷史（專注當前突發事件）
-            th_lim=0,           # 0 字心流干擾
-            need_news=False,    # 0 新聞
-            single_screen=True, # 單圖即時快照（省去多圖編碼傳輸延遲）
-            reason="控制台按鈕/突發電擊獎勵事件，啟動零負擔極速直通（0歷史、1.2s即時開口）"
-        )
-
-    # 3. 輕量即時模式 (LIGHT)：單純短問候、短打招呼、問螢幕當前畫面
-    instant_commands = [
-        "早", "晚安", "嗨", "哈囉", "hello", "hi", "hey",
-        "停", "別動", "安靜", "閉嘴", "笑一個", "乖", "看螢幕", "看這裡", "好棒", "真乖", "笨蛋"
-    ]
-    is_short_prompt = len(raw) <= 8 and any(c in low for c in instant_commands)
-    is_pure_vision = len(raw) <= 15 and any(k in low for k in ["在幹嘛", "在玩啥", "在玩什麼", "這什麼", "這是啥", "看老爸"])
-    
-    if is_short_prompt or is_pure_vision:
-        return MemoryDemandDecision(
-            level=MemoryDemandLevel.LIGHT,
-            u_lim=2,            # 僅需最近 2 句時序
-            h_lim=1,            # 僅需最近 1 輪對話
-            th_lim=50,          # 50 字輕量輔助
-            need_news=False,
-            single_screen=True, # 單圖快照
-            reason="日常短指令/單純視覺互動，啟動輕量記憶窗口（低負擔流暢對話）"
-        )
-
-    # 4. 標準流暢模式 (STANDARD)：一般常規互動
-    news_keywords = ["新聞", "时事", "時事", "今天有啥大事", "國際", "國際焦點", "熱搜"]
-    need_news = any(k in low for k in news_keywords)
-    return MemoryDemandDecision(
-        level=MemoryDemandLevel.STANDARD,
-        u_lim=8,                # 全景時序 8 句（涵蓋最近幾分鐘互動）
-        h_lim=4,                # 歷史對話 4 輪（保持對話連貫）
-        th_lim=180,             # 心流 180 字
-        need_news=need_news,    # 依話題動態決定是否查新聞
-        single_screen=False,    # 完整視覺感知
-        reason="常規日常交流，啟動標準平衡記憶窗口（兼顧上下文脈絡與低延遲）"
-    )
 
 def get_unified_memory_context(limit: int = 100, thought_char_limit: int = 1000, include_dialogue: bool = True) -> str:
     """提取雙軌全景時序記憶：

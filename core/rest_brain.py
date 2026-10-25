@@ -3,7 +3,7 @@
 
 兩種時候會用到：Live 主腦斷線太久；VTuber 模式（不開 Live 主腦，觀眾留言全靠這裡回）。
 一次呼叫：純文字先試 Groq（快、不吃 Gemini 額度），不行再輪 Gemini 的 (key, model)。
-要給工具、帶聲音的不走 Groq（Groq 的工具呼叫不可靠，也不收聲音）。
+要給工具、帶聲音或圖片的不走 Groq（Groq 的工具呼叫不可靠，也不收聲音圖片）。
 以前這段在主程式抄了三份（看板備援、老爸 REST 路、觀眾 Live 管道），各自輪金鑰、各自處理限流。
 """
 import asyncio
@@ -71,14 +71,15 @@ def _reply_from(resp, model: str) -> RestReply:
 
 
 async def rest_chat(system_text: str, user_text: str, *, models, keys=None, tools=None, audio_wav: bytes = b"",
+                    extra_parts=(),
                     temperature: float = 0.8, max_tokens: int = 500, groq_first: bool = True,
                     attempts: int = 6, timeout: float = 6.0, total_timeout: float = 25.0) -> Optional[RestReply]:
     """系統提示詞＋這次的話 → RestReply；Groq 和 Gemini 全部失敗或超過 total_timeout 回 None。
-    提示詞照舊併成一則 user 訊息送（看板備援的提示詞是照這個格式調出來的）。"""
+    提示詞照舊併成一則 user 訊息送（看板備援的提示詞是照這個格式調出來的）；extra_parts（圖片）接在後面。"""
     prompt = f"{system_text}\n\n{user_text}" if system_text else user_text
     try:
         async with asyncio.timeout(total_timeout):
-            if groq_first and not tools and not audio_wav:
+            if groq_first and not tools and not audio_wav and not extra_parts:
                 try:
                     r = await _groq_once(prompt, temperature, max_tokens)
                     if r:
@@ -88,6 +89,7 @@ async def rest_chat(system_text: str, user_text: str, *, models, keys=None, tool
             parts = [types.Part(text=prompt)]
             if audio_wav:
                 parts.append(types.Part.from_bytes(data=audio_wav, mime_type="audio/wav"))
+            parts.extend(extra_parts)
             cfg = types.GenerateContentConfig(temperature=temperature, max_output_tokens=max_tokens,
                                               safety_settings=UNRESTRICTED_SAFETY_SETTINGS, tools=tools or None)
             for key, model in gemini_pairs(models, attempts, keys):

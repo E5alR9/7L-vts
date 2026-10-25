@@ -104,12 +104,11 @@ try:
 except ImportError:
     msvcrt = None
 
-VM_AGENT_CLIENT = None
 GLOBAL_INPUT_QUEUE: Optional[asyncio.Queue] = None
 input_queue: Optional[asyncio.Queue] = None
 
 import logging
-from core.tool_schema import (INTERACTIONS_TOOLS, LIVE_API_TOOLS, REST_BRAIN_TOOLS, GENAI_TOOLS, GENAI_PROACTIVE_TOOLS,
+from core.tool_schema import (INTERACTIONS_TOOLS, LIVE_API_TOOLS, REST_BRAIN_TOOLS, GENAI_TOOLS,
                               resolve_tool_name)
 from core.rest_brain import rest_chat
 
@@ -190,110 +189,27 @@ import services.yt_companion_service as yt_comp
 from core.llm_engine import (
     GEMINI_KEYS,
     GEMINI_MODELS, IMAGE_GEN_MODELS, LIVE_MODEL, LIVE_MAIN_MODELS,
-    FAST_TEXT_MODEL, FAST_MULTIMODAL_MODEL, AUDIO_MODEL,
+    AUDIO_MODEL,
     KEYS_AUDIENCE_LIVE,
     KEYS_VISION,
-    DEAD_GEMINI_MODELS,
     STREAMER_MIND_MODELS, REST_BRAIN_MODELS,
     HIGH_IQ_GEMINI_MODELS,
-    PROACTIVE_EXCLUDED_MODELS,
     GROQ_CLIENTS,
     get_dynamic_live_key_candidates,
-    track_key, sort_keys_by_load, key_load,
-    cool_key, key_cooling,
-    parse_cooldown_seconds, get_seconds_until_pt_midnight, report_gemini_key_error,
-    live_one_shot, get_pingpong_alternating_index, get_pingpong_ring_indices,
+    track_key, sort_keys_by_load,
+    key_cooling,
+    report_gemini_key_error,
+    live_one_shot,
     KEYS_MIC_LIVE, KEYS_PROACTIVE, KEYS_DAD_MAIN,
-    API_LOCKS, save_api_locks, is_locked, lock_target, is_model_locked, lock_entire_model,
-    MODEL_FAIL_COUNT, record_model_failure,
+    API_LOCKS, save_api_locks, is_locked,
     UNRESTRICTED_SAFETY_SETTINGS
 )
 from core.input_sources import (parse_input_item, classify, sleep_wake_decision, is_operator,
                                 VIEWER_SOURCES, WAKE_WORDS)
-from core.memory import init_unified_memory, flush_unified_memory, fetch_from_long_term_memory, save_to_long_term_memory, append_to_unified_memory, clear_all_memories, get_recent_100_memory_context, get_viewer_profile, save_viewer_profile, record_bot_message, get_cloud_knowledge, update_cloud_prompt_field, TIKTOK_CHATROOM_MEMORY, STREAMER_MIND_BOARD, DEFAULT_CHANNEL_ID, save_cloud_knowledge, get_unified_memory_context, RECENT_BOT_MESSAGES, evaluate_memory_demand, USER_PROFILE_FILE
+from core.memory import init_unified_memory, flush_unified_memory, fetch_from_long_term_memory, save_to_long_term_memory, append_to_unified_memory, clear_all_memories, get_recent_100_memory_context, get_viewer_profile, save_viewer_profile, record_bot_message, get_cloud_knowledge, update_cloud_prompt_field, STREAMER_MIND_BOARD, DEFAULT_CHANNEL_ID, save_cloud_knowledge, get_unified_memory_context, RECENT_BOT_MESSAGES, USER_PROFILE_FILE
 
 
 
-
-
-
-
-
-
-def get_prioritized_gemini_models(user_query: str = "", has_image: bool = False, is_proactive: bool = False) -> list:
-    """根據老爸當前的對話指令與多模態情境，動態計算專屬的模型升級排程佇列"""
-    q = (user_query or "").lower()
-    
-    #  高智商需求識別：找歌/點歌、寫代碼、數學邏輯、哲學推理、複雜指令等，倒序由 3.8 頂配大腦領銜！
-    high_iq_keywords = [
-        "寫程式", "寫代碼", "python", "程式碼", "找歌", "點歌", "彈琴", "彈一首", "鋼琴", "曲名", "分析",
-        "為什麼", "哲學", "算一下", "計算", "深度思考", "邏輯", "推理", "詳細解說", "找譜", "查歌",
-        "搜尋", "查一下", "上網查", "深奧", "解釋", "差別", "冬風", "蕭邦", "李斯特", "貝多芬", "巴哈"
-    ]
-    is_high_iq = any(k in q for k in high_iq_keywords)
-    
-    if is_high_iq:
-        priority_heads = list(HIGH_IQ_GEMINI_MODELS)
-    else:
-        # 根據老爸確認實際有額度的模型優先級排列
-        priority_heads = list(GEMINI_MODELS)
-        
-    ordered = []
-    for m in priority_heads:
-        if m in GEMINI_MODELS and m not in ordered and m not in DEAD_GEMINI_MODELS:
-            ordered.append(m)
-            
-    for m in GEMINI_MODELS:
-        if m not in ordered and m not in DEAD_GEMINI_MODELS:
-            ordered.append(m)
-            
-    if is_proactive:
-        ordered = [m for m in ordered if m not in PROACTIVE_EXCLUDED_MODELS]
-        
-    return ordered
-
-
-
-def get_available_gemini_channels(limit=1, user_query="", has_image=False, is_proactive=False):
-    
-    available = []
-    target_keys = KEYS_PROACTIVE if is_proactive and KEYS_PROACTIVE else GEMINI_KEYS
-    num_keys = len(target_keys)
-    if num_keys == 0: return available
-    
-    #  智能任務定向分流：取得階梯排程模型佇列
-    target_models = get_prioritized_gemini_models(user_query=user_query, has_image=has_image, is_proactive=is_proactive)
-    valid_models = [m for m in target_models if m not in DEAD_GEMINI_MODELS and not is_model_locked(m)]
-    if not valid_models:
-        valid_models = [m for m in GEMINI_MODELS if m not in DEAD_GEMINI_MODELS]
-        
-    ring_indices = get_pingpong_ring_indices(num_keys, CURRENT_GEMINI_KEY_STEP)
-    #  同斥分散：同一個 key 不被多工具同時打，空閒優先（只排序不阻擋，全忙照打）
-    ring_indices = sorted(ring_indices, key=lambda i: key_load(target_keys[i]))
-    
-    #  階梯升級輪派策略：依序為各階模型挑選最優可用金鑰，每次失敗或超時立即升級至下一階更高級模型！
-    for m_idx, g_model in enumerate(valid_models):
-        short_m = g_model.replace("gemini-", "")
-        for idx in ring_indices:
-            target_id = f"G{idx}_{short_m}"
-            if not is_locked(target_id) and not key_cooling(target_keys[idx], g_model) and (target_keys[idx], g_model, target_id) not in available:
-                available.append((target_keys[idx], g_model, target_id))
-                break # 每一階挑選一把最佳金鑰後，優先為下一階模型排入通道！
-        if len(available) >= limit:
-            return available
-
-    # 若尚未填滿 limit，補充其他未鎖定通道
-    if len(available) < limit:
-        for g_model in valid_models:
-            short_m = g_model.replace("gemini-", "")
-            for idx in ring_indices:
-                target_id = f"G{idx}_{short_m}"
-                if not is_locked(target_id) and not key_cooling(target_keys[idx], g_model) and (target_keys[idx], g_model, target_id) not in available:
-                    available.append((target_keys[idx], g_model, target_id))
-                    if len(available) >= limit:
-                        return available
-
-    return available
 
 
 
@@ -632,17 +548,6 @@ async def execute_tool_dispatch(fn_name: str, fn_args: dict, caller_target: str 
     return extracted_text
 
 
-def build_rag_section(query: str, k: int = 3) -> str:
-    """PROVIDER: LOCAL-RAG（chromadb＋fastembed；多模態幀走 embedding-2 API；見 docs/AI_SOURCES.md）"""
-    """ 同步 RAG 檢索 -> 可直接拼進 prompt 的段落（失敗或無命中回空字串）"""
-    if not query or not str(query).strip():
-        return ""
-    try:
-        from services.rag_store import rag_prompt_block
-        return rag_prompt_block(str(query), k=k)
-    except Exception:
-        return ""
-
 VISION_TIME_BUDGET_SEC = 15.0   # 餘光視覺一次最多花這麼久（超過看到的也是舊畫面）
 
 
@@ -747,516 +652,26 @@ async def get_lightweight_gemini_vision(image_base64: str, temporal_frames: list
         
     return ""
 
-def _build_gemini_contents(messages, image_base64=None, audio_base64=None) -> list:
-    """對話訊息＋圖片／音訊 → Gemini 的 contents（所有併發通道共用）。"""
-    chat_contents = []
-    system_text = ""
-    for msg in messages:
-        if msg["role"] == "system":
-            system_text += msg["content"] + "\n\n"
-            
-    for msg in messages:
-        if msg["role"] == "system": continue
-        raw_content = msg["content"]
-        if isinstance(raw_content, list):
-            text = " ".join([p["text"] for p in raw_content if p.get("type") == "text"])
-        else:
-            text = raw_content
-            
-        if not chat_contents and system_text:
-            text = system_text + text
-            
-        role = "user" if msg["role"] == "user" else "model"
-        chat_contents.append(types.Content(role=role, parts=[types.Part.from_text(text=text)]))
-
-    if image_base64:
-        user_parts = []
-        if isinstance(image_base64, list):
-            for item in image_base64:
-                if isinstance(item, tuple):
-                    label, img_b64 = item
-                    img_bytes = base64.b64decode(img_b64)
-                    user_parts.append(types.Part.from_text(text=f"\n{label}："))
-                    user_parts.append(types.Part.from_bytes(data=img_bytes, mime_type="image/jpeg"))
-                else:
-                    user_parts.append(types.Part.from_bytes(data=base64.b64decode(item), mime_type="image/jpeg"))
-        else:
-            image_bytes = base64.b64decode(image_base64)
-            user_parts.append(types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg"))
-
-        if user_parts:
-            if chat_contents and chat_contents[-1].role == "user":
-                chat_contents[-1].parts.extend(user_parts)
-            else:
-                chat_contents.append(types.Content(role="user", parts=user_parts))
-
-    if audio_base64:
-        try:
-            if isinstance(audio_base64, str):
-                raw_audio_bytes = base64.b64decode(audio_base64)
-            else:
-                raw_audio_bytes = audio_base64
-            
-            audio_part = types.Part.from_bytes(data=raw_audio_bytes, mime_type="audio/wav")
-            if chat_contents and chat_contents[-1].role == "user":
-                chat_contents[-1].parts.append(audio_part)
-            else:
-                chat_contents.append(types.Content(role="user", parts=[audio_part]))
-        except Exception as e_aud:
-            log_print(f"⚠️ [音訊多模態封裝異常]: {e_aud}")
-    return chat_contents
+def _image_parts(images) -> list:
+    """看圖請求的圖片 → Gemini parts。單張 base64，或 [(標籤, base64) 或 base64, ...]；標籤放在圖前面。"""
+    if not images:
+        return []
+    parts = []
+    for item in (images if isinstance(images, list) else [images]):
+        label, b64 = item if isinstance(item, tuple) else ("", item)
+        if label:
+            parts.append(types.Part.from_text(text=f"\n{label}："))
+        parts.append(types.Part.from_bytes(data=base64.b64decode(b64), mime_type="image/jpeg"))
+    return parts
 
 
-async def fetch_ai_response(messages, image_base64=None, audio_base64=None, is_proactive=False, request_start_time: Optional[float] = None, is_mouth_stream=False, use_tools: bool = True):
-    """PROVIDER: GEMINI（主腦 generate_content＋Live；純文字正遷 Groq；見 docs/AI_SOURCES.md）"""
-    """
-     多模態大腦推理總入口 (文字 + 視覺 + 音訊 + 工具調用)
-    
-    Args:
-        messages: 對話歷史紀錄陣列
-        image_base64: 五方多視角螢幕截圖 Base64 列表或單張圖片
-        audio_base64: 麥克風音訊資料 Base64
-        is_proactive: 是否為主動巡邏/主動找話題發話
-        request_start_time: 請求發起的時間戳記（計算精確總延遲）
-        use_tools: 給模型工具。看螢幕／照鏡子這種只要描述的請求要關掉：競速的每個通道都會各自執行
-            模型回傳的工具，2026-10-25 實機兩個通道各觸發一次「星星眼」，一開一關抵銷
-    """
-    global current_ai_status_str, current_model_tag, CURRENT_GEMINI_KEY_STEP, TOTAL_API_CALLS
-    try:
-        TOTAL_API_CALLS += 1
-    except Exception:
-        log_swallowed()
-    overall_start_time = request_start_time if request_start_time else time.time()
-
-    # 防卡死機制：讓渡運算權，確保皮套滑順
-    await asyncio.sleep(0.05)
-
-    # 提取最新的使用者指令以供智能任務分流
-    user_query = ""
-    for msg in reversed(messages):
-        if msg.get("role") == "user":
-            c = msg.get("content", "")
-            if isinstance(c, str):
-                user_query = c
-            elif isinstance(c, list):
-                user_query = " ".join([p.get("text", "") for p in c if isinstance(p, dict) and p.get("type") == "text"])
-            break
-
-    # ── 1. 建構通用多模態輸入（共用給所有併發通道）──
-    # （舊的 Interactions API 輸入 interaction_input 組完沒人用，2026-10-25 拿掉）
-    chat_contents = _build_gemini_contents(messages, image_base64, audio_base64)
-
-    # ── 單一 Gemini 通道執行器 ──
-    async def _call_single_gemini(g_key, g_model, target_id):
-        temp_google_client = genai.Client(api_key=g_key)
-        api_call_start = time.time()
-        extracted_text = ""
-        used_engine_tag = "一體化"
-
-        try:
-            active_tools = GENAI_PROACTIVE_TOOLS if is_proactive else GENAI_TOOLS
-            config_kwargs = {
-                "temperature": 0.85,
-                "safety_settings": UNRESTRICTED_SAFETY_SETTINGS
-            }
-            if use_tools:
-                config_kwargs["tools"] = active_tools
-            
-            #  深度思考調度：日常對話、電擊/摸頭事件與即時互動預設思考預算為 0，達成 1.2s~1.8s 極速秒回！
-            # 只有當老爸提出明確的寫程式碼、數學邏輯、哲學深度推理等高智商問題時，才開啟 thinking_budget=-1
-            is_complex_query = any(k in (user_query or "").lower() for k in ["寫程式", "寫代碼", "python", "計算", "哲學", "詳細分析", "深度思考", "邏輯推理"])
-            if "3.6-flash" in g_model:
-                try:
-                    config_kwargs["thinking_config"] = types.ThinkingConfig(thinking_budget=0)
-                except Exception:
-                    log_swallowed()
-            elif any(k in g_model for k in ["3.8", "3.7", "2.5", "3-flash", "3.1-pro"]):
-                try:
-                    config_kwargs["thinking_config"] = types.ThinkingConfig(thinking_budget=-1 if is_complex_query else 0)
-                except Exception:
-                    log_swallowed()
-
-            gen_config = types.GenerateContentConfig(**config_kwargs)
-
-            #  放寬單通道等待時間至 120 秒，讓 3.8 / 3.7-flash 深度思考、多模態與工具調用在背景充裕完成，絕不 premature timeout！
-            async with track_key(g_key):
-                response = await asyncio.wait_for(
-                    temp_google_client.aio.models.generate_content(
-                        model=g_model,
-                        contents=chat_contents,
-                        config=gen_config
-                    ),
-                    timeout=120.0
-                )
-
-            had_tool_calls = False
-            tool_results_map = {}
-            if hasattr(response, 'function_calls') and response.function_calls:
-                had_tool_calls = True
-                call_names = [getattr(fc, 'name', '') for fc in response.function_calls]
-                for fc in response.function_calls:
-                    fn_name = getattr(fc, 'name', '')
-                    fn_args = getattr(fc, 'args', {}) or {}
-                    if fn_name == "pe.stop_virtual_piano" and "open_virtual_piano" in call_names:
-                        log_print("🛡️ [工具衝突過濾] 同回合同時包含 open_virtual_piano 與 pe.stop_virtual_piano，已自動過濾 pe.stop_virtual_piano！")
-                        continue
-                    log_print(f"🛠️ [大腦調用工具] {fn_name}({fn_args})")
-                    tool_out = await execute_tool_dispatch(fn_name, fn_args, caller_target="dad", caller_user="老爸")
-                    tool_results_map[fn_name] = tool_out
-                    #  資訊查詢與系統提示類資料僅供大腦吸收，請勿拼入 extracted_text 作為口語！
-                    if fn_name not in ["search_google"] and tool_out and "[EXPRESSION:" in tool_out:
-                        extracted_text += f" {tool_out}"
-
-            model_speech = ""
-            thought_text = ""
-            try:
-                if response.candidates and response.candidates[0].content and response.candidates[0].content.parts:
-                    for p in response.candidates[0].content.parts:
-                        if getattr(p, 'thought', False) and getattr(p, 'text', ''):
-                            thought_text += p.text + " "
-                        elif getattr(p, 'text', '') and not getattr(p, 'thought', False):
-                            model_speech += p.text + " "
-                if not model_speech.strip() and response.text:
-                    model_speech = response.text.strip()
-            except Exception:
-                try:
-                    if response.text:
-                        model_speech = response.text.strip()
-                except Exception:
-                    log_swallowed()
-
-            # 7L 已有獨立背景即時心流協程，對話回覆不再包裹 [THOUGHT: ...]
-
-            #  當調用了資訊類工具 (如 search_google) 或第一輪未輸出台詞時：
-            # 立即發起第二輪 Function Response 請求，將搜尋結果反饋給大腦進行深度思考、消化整理並輸出自然口語！
-            if had_tool_calls:
-                needs_stage2 = any(getattr(fc, 'name', '') == 'search_google' for fc in response.function_calls) or not model_speech.strip()
-                if needs_stage2:
-                    stage2_done = False
-                    try:
-                        followup_contents = list(chat_contents)
-                        if response.candidates and response.candidates[0].content:
-                            followup_contents.append(response.candidates[0].content)
-                        else:
-                            call_parts = [types.Part.from_function_call(name=getattr(fc, 'name', ''), args=getattr(fc, 'args', {}) or {}) for fc in response.function_calls]
-                            followup_contents.append(types.Content(role="model", parts=call_parts))
-
-                        fn_resp_parts = []
-                        for fc in response.function_calls:
-                            f_name = getattr(fc, 'name', '')
-                            f_res = tool_results_map.get(f_name, "執行成功")
-                            fn_resp_parts.append(types.Part.from_function_response(
-                                name=f_name,
-                                response={
-                                    "result": str(f_res),
-                                    "instruction": "請根據以上查詢結果，以 7L 招牌自然隨性口吻（1~3句短句，40~80字以內）直接對老爸提煉並說明重點，請轉化為口語對話！"
-                                }
-                            ))
-                        followup_contents.append(types.Content(role="user", parts=fn_resp_parts))
-
-                        async with track_key(g_key):
-                            stage2_resp = await asyncio.wait_for(
-                                temp_google_client.aio.models.generate_content(
-                                    model=g_model,
-                                    contents=followup_contents,
-                                    config=types.GenerateContentConfig(
-                                        temperature=0.85,
-                                        safety_settings=UNRESTRICTED_SAFETY_SETTINGS
-                                    )
-                                ),
-                                timeout=25.0
-                            )
-                        s2_speech = ""
-                        s2_thought = ""
-                        if stage2_resp and stage2_resp.candidates and stage2_resp.candidates[0].content and stage2_resp.candidates[0].content.parts:
-                            for p in stage2_resp.candidates[0].content.parts:
-                                if getattr(p, 'thought', False) and getattr(p, 'text', ''):
-                                    s2_thought += p.text + " "
-                                elif getattr(p, 'text', '') and not getattr(p, 'thought', False):
-                                    s2_speech += p.text + " "
-                        if not s2_speech.strip() and stage2_resp and stage2_resp.text:
-                            s2_speech = stage2_resp.text.strip()
-
-                        if s2_speech.strip():
-                            model_speech = s2_speech.strip()
-                            stage2_done = True
-                    except Exception as e_s2:
-                        log_print(f"⚠️ [搜尋情報第二輪主通道整合異常]: {e_s2} ➔ 即刻切換極速備份模型整理")
-
-                    # 若第二輪主通道因 503 等原因失敗，且調用了 search_google，立即啟動極速提煉器整理成自然口語
-                    if not stage2_done and any(getattr(fc, 'name', '') == 'search_google' for fc in response.function_calls):
-                        s_query = next((getattr(fc, 'args', {}).get('query', '') for fc in response.function_calls if getattr(fc, 'name', '') == 'search_google'), user_query)
-                        s_raw = tool_results_map.get("search_google", "")
-                        model_speech = await summarize_search_to_speech(s_query, s_raw, user_role_name="老爸")
-
-            #  採用 Gemini 生成的口語回覆；若調用工具帶有標籤則一併保留
-            if model_speech:
-                tags_in_tool = " ".join(re.findall(r'\[[A-Z_]+(?::\s*[^\]]+)?\]', extracted_text))
-                valid_tags = [t for t in tags_in_tool.split() if not any(x in t for x in ["HAD_TOOL_CALL", "SEARCH", "GOOGLE"])]
-                clean_tags_str = " ".join(valid_tags)
-                extracted_text = f"{model_speech} {clean_tags_str}".strip()
-            else:
-                if any(getattr(fc, 'name', '') == 'search_google' for fc in response.function_calls):
-                    s_query = next((getattr(fc, 'args', {}).get('query', '') for fc in response.function_calls if getattr(fc, 'name', '') == 'search_google'), user_query)
-                    s_raw = tool_results_map.get("search_google", "")
-                    extracted_text = await summarize_search_to_speech(s_query, s_raw, user_role_name="老爸")
-                elif "pe.play_virtual_piano" in tool_results_map:
-                    piano_fc = next((fc for fc in response.function_calls if getattr(fc, 'name', '') == 'pe.play_virtual_piano'), None)
-                    p_name = pe.clean_song_title_for_speech(getattr(piano_fc, 'args', {}).get('song_name', '')) if piano_fc else ''
-                    if pe.is_piano_active and pe.current_piano_song_title:
-                        extracted_text = f"[EXPRESSION: 星星眼] 老爸，沒問題！《{p_name or '這首'}》我先幫你排進清單，等現在這首彈完馬上幫你彈喔！"
-                    else:
-                        extracted_text = f"[EXPRESSION: 星星眼] 老爸，這就來為你彈《{p_name or '這首'}》！"
-                elif "pe.compose_and_play_original_piano" in tool_results_map:
-                    extracted_text = "[EXPRESSION: 星星眼] 老爸，收到！我現在就現場為你創作一首原創鋼琴曲，聽聽看喔！"
-                elif "pe.mashup_virtual_piano" in tool_results_map:
-                    extracted_text = "[EXPRESSION: 星星眼] 老爸，收到！雙曲狂暴合奏這就來！"
-                else:
-                    extracted_text = TextCleanEngine.remove_system_hints(extracted_text).strip()
-
-            if extracted_text.strip() or had_tool_calls:
-                api_duration = time.time() - api_call_start
-                return (extracted_text.strip(), used_engine_tag, api_duration, g_model, target_id)
-            raise ValueError(f"通道 {target_id} 未回傳有效文字內容")
-
-        except asyncio.CancelledError:
-            return None
-        except (asyncio.TimeoutError, TimeoutError):
-            #  單通道內部超時
-            log_print(f"⌛ [通道無回應] 通道 {target_id} ({g_model}) 超時未回傳 ➔ 釋放通道轉交備用金鑰")
-            return None
-        except Exception as e:
-            if isinstance(e, (asyncio.TimeoutError, TimeoutError)) or "timeout" in type(e).__name__.lower():
-                log_print(f"⌛ [通道無回應] 通道 {target_id} ({g_model}) 超時無回應 ➔ 釋放通道")
-                return None
-            err_str = str(e).lower()
-            record_model_failure(g_model, err_str)
-            if "503" in err_str or "unavailable" in err_str or "high demand" in err_str:
-                log_print(f"⚠️ [伺服器超載 503] 通道 {target_id} ({g_model}): 官方模型高負載/忙碌中 ➔ 暫時冷卻 180s")
-                lock_target(target_id, "503 high demand", key=g_key, model=g_model)
-            elif "404" in err_str or "not_found" in err_str or "no longer available" in err_str:
-                if 'DEAD_GEMINI_MODELS' in globals():
-                    DEAD_GEMINI_MODELS.add(g_model)
-                log_print(f"❌ [模型下架 404] 通道 {target_id} ({g_model}): 模型未開通或已下架 ➔ 封印至午夜")
-                lock_entire_model(g_model, duration=get_seconds_until_pt_midnight(), reason="404 下架/未開通")
-                lock_target(target_id, "404 not found", key=g_key, model=g_model)
-            elif any(k in err_str for k in ["per day", "requests per day", "daily requests", "rpd", "tokens per day", "tpd", "exceeded your current quota", "quota exceeded"]):
-                log_print(f"🛑 [今日額度用盡] 通道 {target_id} ({g_model}): 此 API Key 今日免費額度已滿 (RPD/Quota) ➔ 封印至 PT 午夜，自動切換下一把金鑰")
-                lock_target(target_id, str(e), key=g_key, model=g_model)
-            elif "429" in err_str or "rate limit" in err_str or "resource" in err_str or "quota" in err_str:
-                err_summary = err_str[:120] + "..." if len(err_str) > 120 else err_str
-                log_print(f"⚠️ [頻率超限 429] 通道 {target_id} ({g_model}): 呼叫過於頻繁 (RPM/TPM) ➔ 短暫冷卻 60s ({err_summary})")
-                lock_target(target_id, str(e), key=g_key, model=g_model)
-            elif "timeouterror" in err_str or "timeout" in err_str:
-                log_print(f"⌛ [通道連線逾時] 通道 {target_id} ({g_model}) 連線中斷或逾時")
-            else:
-                clean_err = str(e).replace('\n', ' ').strip()[:70]
-                display_err = clean_err if clean_err else type(e).__name__
-                log_print(f"⚠️ [大腦異常/無回應] 通道 {target_id} ({g_model}): {display_err} ➔ 自動切換下一把金鑰")
-                lock_target(target_id, "wait 30s", key=g_key, model=g_model)
-            return None
-
-    #  第零防線：Groq 極速前鋒（純文字請求；實測 0.4s 級）
-    #   有圖片/音訊的多模態請求直接跳過，交給 Gemini 視覺與音訊管線。
-    #   Groq 不傳 tools（實戰證明它家工具調用不可靠：白燒 token 不說，
-    #   回來的 function_calls 還可能是幻覺，派發出去會誤觸真工具）。
-    #   要調工具一律走下方 Gemini 完整管線。
-    if not is_mouth_stream and not image_base64 and not audio_base64:
-        try:
-            from core.groq_router import groq_chat, contents_to_messages
-            g_msgs = contents_to_messages(chat_contents)
-            if g_msgs:
-                g_t0 = time.time()
-                g_resp = await groq_chat(
-                    g_msgs,
-                    temperature=0.8, max_tokens=900, timeout=8.0,
-                )
-                if g_resp and g_resp.text:
-                    g_text = (g_resp.text or "").strip()
-                    if g_text:
-                        g_dur = time.time() - g_t0
-                        total_duration = time.time() - overall_start_time
-                        record_api_call_latency(total_duration)
-                        time_stat = f" [總耗時: {total_duration:.2f}s | 深度思考: {g_dur:.2f}s]"
-                        current_model_tag = f" {g_resp.model} (Groq 前鋒){time_stat}"
-                        log_print(f"⚡ [Groq 前鋒秒答] {current_model_tag}")
-                        return g_text.strip()
-        except Exception as _g_err:
-            log_print(f"⚠️ [Groq 前鋒暫時失敗，交回 Gemini]: {str(_g_err)[:100]}")
-
-    if is_mouth_stream:
-        g_model = FAST_TEXT_MODEL if not image_base64 and not audio_base64 else FAST_MULTIMODAL_MODEL
-        gen_config = types.GenerateContentConfig(temperature=0.85, safety_settings=UNRESTRICTED_SAFETY_SETTINGS)
-        
-        async def _stream_wrapper():
-            global CURRENT_GEMINI_KEY_STEP
-            attempts = 0
-            while attempts < 10:
-                k_idx = get_pingpong_alternating_index(len(GEMINI_KEYS), CURRENT_GEMINI_KEY_STEP)
-                g_key = GEMINI_KEYS[k_idx]
-                CURRENT_GEMINI_KEY_STEP += 1
-                temp_client = genai.Client(api_key=g_key)
-                attempts += 1
-                try:
-                    async with track_key(g_key):
-                        stream = await temp_client.aio.models.generate_content_stream(
-                            model=g_model,
-                            contents=chat_contents,
-                            config=gen_config
-                        )
-                        async for chunk in stream:
-                            yield chunk
-                    return  # 成功串流完畢則退出
-                except Exception as e:
-                    err_str = str(e).lower()
-                    if "429" in err_str or "quota" in err_str or "limit" in err_str or "503" in err_str:
-                        log_print(f"⚠️ [串流生成異常] 金鑰超限或忙碌 (429/503)，自動切換下一把金鑰 ({attempts}/10) ({type(e).__name__})")
-                        await asyncio.sleep(0.1)
-                        continue
-                    else:
-                        log_print(f"⚠️ [串流生成異常] 伺服器錯誤 ({type(e).__name__}): {e}")
-                        break
-                        
-        return _stream_wrapper()
-        
-    
-    #  第一防線：主力 Gemini 旗艦大腦（5 秒階梯式併發競速：5秒未回覆時原請求不中斷，加開新通道雙軌/多軌搶答！）
-    max_gemini_attempts = 45 
-    active_gemini_tasks = {}  # task -> (target_id, g_model, start_time)
-    launched_gemini_targets = set()
-
-    while len(launched_gemini_targets) < max_gemini_attempts:
-        await asyncio.sleep(0.01)
-        
-        # 嚴格限制同時進行的通道數最多為 2 個，杜絕同時爆發 20 個併發把所有金鑰配額瞬間打滿
-        if len(active_gemini_tasks) < 2:
-            channels = get_available_gemini_channels(limit=5, user_query=user_query, has_image=bool(image_base64), is_proactive=is_proactive)
-            # 先挑還沒在跑的模型：模型卡住不回（不算錯誤、不會被鎖）時，換金鑰還是同一個模型、一樣卡。
-            # 2026-10-25 實機：看螢幕請求一直加開 3.8-flash，等了將近 4 分鐘
-            running_models = {m for (_tid, m, _st) in active_gemini_tasks.values()}
-            candidate = next((ch for ch in channels if ch[2] not in launched_gemini_targets and ch[1] not in running_models), None)
-            if candidate is None:
-                candidate = next((ch for ch in channels if ch[2] not in launched_gemini_targets), None)
-
-            if candidate:
-                g_key, g_model, target_id = candidate
-                launched_gemini_targets.add(target_id)
-                
-                # 每次依序派發一個通道，立即推進交替序輪指針至下一回步數
-                CURRENT_GEMINI_KEY_STEP += 1
-
-                task = asyncio.create_task(_call_single_gemini(g_key, g_model, target_id))
-                active_gemini_tasks[task] = (target_id, g_model, time.time())
-                
-                status_prefix = "" if image_base64 else ""
-                concurrent_count = len(active_gemini_tasks)
-                concur_tag = f" [雙軌搶答: {concurrent_count}]" if concurrent_count > 1 else ""
-                current_ai_status_str = f"{status_prefix} {g_model} [{target_id}]{concur_tag} 思考中..."
-                if concurrent_count > 1:
-                    log_print(f"🚀 [雙軌競速] 依序輪流加開新通道 {target_id} 搶答 (目前共 2 個通道併發)")
-
-        if not active_gemini_tasks:
-            break
-
-        # 等待深度思考模型完成（充裕等待，不 premature timeout 搶截深度推理）
-        done, _ = await asyncio.wait(
-            active_gemini_tasks.keys(),
-            timeout=12.0,
-            return_when=asyncio.FIRST_COMPLETED
-        )
-
-        if done:
-            for finished_task in done:
-                t_id, m_name, t_start = active_gemini_tasks.pop(finished_task)
-                try:
-                    res = finished_task.result()
-                    if res:
-                        extracted_text, used_engine_tag, api_duration, win_model, win_tid = res
-                        #  率先成功奪冠！取消其他所有背景併發中的任務
-                        for rem_task in list(active_gemini_tasks.keys()):
-                            rem_task.cancel()
-                        active_gemini_tasks.clear()
-
-                        total_duration = time.time() - overall_start_time
-                        record_api_call_latency(total_duration)
-                        time_stat = f" [總耗時: {total_duration:.2f}s | 深度思考: {api_duration:.2f}s]"
-                        MODEL_FAIL_COUNT[win_model] = 0
-                        if image_base64 and audio_base64:
-                            current_model_tag = f" {win_model} ({used_engine_tag} 全模態){time_stat}"
-                        elif audio_base64:
-                            current_model_tag = f" {win_model} ({used_engine_tag} 音訊直連){time_stat}"
-                        elif image_base64:
-                            current_model_tag = f" {win_model} ({used_engine_tag} 視覺){time_stat}"
-                        else:
-                            current_model_tag = f" {win_model} ({used_engine_tag}){time_stat}"
-                        return extracted_text.strip()
-                except Exception:
-                    log_swallowed()
-        else:
-            # 12 秒到期：日誌提示，原任務未逾時未報錯、仍在背景深度思考，依序輪流加開雙軌熱備搶答！
-            running_names = [active_gemini_tasks[t][0] for t in active_gemini_tasks]
-            log_print(f"⏱️ [思考中/尚未回應] 通道 {', '.join(running_names)} 仍在深度推理中 (未報錯無異常) ➔ 原請求不中斷繼續跑，加開新金鑰通道搶答！")
-
-    # 若所有通道均已啟動，等待仍在運行的任務
-    if active_gemini_tasks:
-        try:
-            done, _ = await asyncio.wait(
-                active_gemini_tasks.keys(),
-                timeout=10.0,
-                return_when=asyncio.FIRST_COMPLETED
-            )
-            for finished_task in done:
-                t_id, m_name, t_start = active_gemini_tasks.pop(finished_task)
-                try:
-                    res = finished_task.result()
-                    if res:
-                        extracted_text, used_engine_tag, api_duration, win_model, win_tid = res
-                        for rem_task in list(active_gemini_tasks.keys()):
-                            rem_task.cancel()
-                        active_gemini_tasks.clear()
-                        total_duration = time.time() - overall_start_time
-                        record_api_call_latency(total_duration)
-                        time_stat = f" [總耗時: {total_duration:.2f}s | 思考: {api_duration:.2f}s]"
-                        MODEL_FAIL_COUNT[win_model] = 0
-                        if image_base64 and audio_base64:
-                            current_model_tag = f" {win_model} ({used_engine_tag} 全模態){time_stat}"
-                        elif audio_base64:
-                            current_model_tag = f" {win_model} ({used_engine_tag} 音訊直連){time_stat}"
-                        elif image_base64:
-                            current_model_tag = f" {win_model} ({used_engine_tag} 視覺){time_stat}"
-                        else:
-                            current_model_tag = f" {win_model} ({used_engine_tag}){time_stat}"
-                        return extracted_text.strip()
-                except Exception:
-                    log_swallowed()
-        except Exception:
-            log_swallowed()
-        for rem_task in list(active_gemini_tasks.keys()):
-            rem_task.cancel()
-        active_gemini_tasks.clear()
-
-    #  第二防線：若 Gemini 旗艦大腦全部不可用且有畫面，嘗試輕量雲端餘光
-    if image_base64:
-        current_ai_status_str = " 備用視覺提取中 (雲端輕量版)..."
-        local_desc = ""
-        if not is_system_overloaded():
-            try: 
-                local_desc = await get_lightweight_gemini_vision(image_base64)
-            except Exception: 
-                log_swallowed()
-                
-        if local_desc:
-            if messages and messages[-1]["role"] == "user": 
-                inject_text = f"\n\n【備用視覺情報】：畫面描述: {local_desc}\n【鐵律】：畫面上的白色箭頭代表老爸當前的滑鼠游標。請注意：【除非滑鼠正指著某個你覺得很有趣、或特別值得注意的東西，否則請自然看待，不需要刻意強調滑鼠位置】。挑一兩個重點、一兩句話講完（40 字內），不要把畫面上的東西全念一遍。"
-                
-                if isinstance(messages[-1]["content"], list):
-                    messages[-1]["content"].append({"type": "text", "text": inject_text})
-                else:
-                    messages[-1]["content"] += inject_text
-
-    log_print("⚠️ [大腦提示] 本輪所有 Gemini 通道皆繁忙/超時，為維持純淨發話，本輪靜默略過。")
-    return ""
-
+async def describe_images(prompt: str, images) -> str:
+    """PROVIDER: GEMINI（看畫面、照鏡子；見 docs/AI_SOURCES.md）。描述圖片，回一段文字；看不了回空字串。
+    以前走 450 行的 fetch_ai_response（多通道競速、Groq 前鋒、串流嘴巴、工具第二輪），
+    老爸 REST 路拿掉後只剩看圖兩個呼叫點，改用跟 REST 大腦同一個 rest_chat（2026-10-26）。"""
+    r = await rest_chat("", prompt, models=GEMINI_MODELS, extra_parts=_image_parts(images), max_tokens=800,
+                        attempts=4, timeout=20.0, total_timeout=VISION_TOOL_TIMEOUT_SEC)
+    return r.text if r else ""
 
 
 def normalize_silence_token(text: str) -> str:
@@ -1441,7 +856,6 @@ def save_local_audio_clip(audio_base64: str) -> Optional[str]:
 
 
 
-CURRENT_GEMINI_KEY_STEP = 0
 
 
 # ────────────────────────────────────────────────────────
@@ -1495,7 +909,6 @@ except Exception:
     cur_scr_w, cur_scr_h = get_screen_resolution()
     system_specs = f"螢幕解析度: {cur_scr_w}x{cur_scr_h} / 高階硬體設備"
 
-USER_NAME = "E5alR9"
 from core.identity import get_owner_name as _owner_name
 DEFAULT_USER_TITLE = _owner_name()  # 跟 core.prompts、鋼琴同一個來源（env OWNER_NAME，預設老爸）
 
@@ -1547,7 +960,6 @@ latest_screen_cache = None
 LATEST_HD_SCREEN_BYTES = None  #  原生 100% 超高清全解析度截圖緩存 (4K/原生，供燈箱放大檢視)
 SCREEN_TEMPORAL_HISTORY = deque(maxlen=60)  #  螢幕時序動態連續影格緩衝區（每 1.8s 一幀，保留最多 60 幀 ≈ 108 秒歷史）
 LAST_VISION_LOOK_TIME = 0.0  #  上次餘光「認真看」的時間，用於切取時序動態幀
-last_spoken_text = ""
 
 IS_MIC_ENABLED = False
 IS_AUTO_WANDER_ENABLED = True
@@ -1562,10 +974,6 @@ TOTAL_API_CALLS = 0
 API_LATENCY_HISTORY = deque(maxlen=20)
 CURRENT_VISION_CHANGE_LEVEL = "none"
 CURRENT_VISION_CHANGE_SCORE = 0
-
-def record_api_call_latency(duration_sec: float):
-    if duration_sec and duration_sec > 0.05:
-        API_LATENCY_HISTORY.append(round(duration_sec, 2))
 
 def get_api_stress_metrics():
     """計算大腦 API 平均耗時與壓力指標 (Stress Level)"""
@@ -1857,7 +1265,6 @@ current_mic_volume_str = "[ 麥克風就緒]"
 CURRENT_MIC_VOL_PERCENT = 0
 current_ai_status_str = "正常運作中"
 current_mic_action_str = "待命"
-current_model_tag = " 初始化中"
 current_screen_context = "目前沒有特別的畫面動態。"
 VISION_HISTORY_STREAM = deque(maxlen=60)
 
@@ -1892,7 +1299,6 @@ CURRENT_SPEAKING_TARGET = "none"
 
 current_system_notification = ""
 notification_expire_time = 0.0
-active_timers = set()
 speech_queue = asyncio.Queue()  
 LIVE_API_SYSTEM_PROMPT_QUEUE = asyncio.Queue()
 # 不用她回話的背景資料（YouTube 伴看筆記）：send_client_content(turn_complete=False) 悄悄放進主腦的對話，
@@ -2061,50 +1467,11 @@ async def update_custom_rule(rule_desc: str):
     await update_cloud_prompt_field("custom_rules", rule_desc)
 
 
-def extract_text_from_content(content):
-    if isinstance(content, str): return content
-    if isinstance(content, list): return " ".join([p.get("text", "") for p in content if p.get("type") == "text"])
-    return ""
-
 # ────────────────────────────────────────────────────────
 #  6. Live2D / VTube Studio 表情與姿態控制 & 雙軌空間走位系統 (Spatial Movement)
 # ────────────────────────────────────────────────────────
 
 # ──  7L 即時時事與熱搜情報中樞 (Trending News Engine) ────────────────────────
-LATEST_TRENDING_NEWS_SUMMARY = ""
-LAST_TRENDING_NEWS_FETCH_TIME = 0.0
-
-async def get_trending_news_briefing() -> str:
-    """取得今日最新即時時事與熱搜快訊（背景快取，每 2 小時自動刷新）"""
-    global LATEST_TRENDING_NEWS_SUMMARY, LAST_TRENDING_NEWS_FETCH_TIME
-    now = time.time()
-    if LATEST_TRENDING_NEWS_SUMMARY and (now - LAST_TRENDING_NEWS_FETCH_TIME < 7200.0):
-        return LATEST_TRENDING_NEWS_SUMMARY
-
-    try:
-        if tavily_client:
-            res = await asyncio.to_thread(
-                tavily_client.search,
-                query="台灣 今天重大時事新聞 熱門焦點",
-                topic="news",
-                search_depth="advanced"
-            )
-            if isinstance(res, dict) and "results" in res:
-                items = []
-                for idx, item in enumerate(res["results"][:4], 1):
-                    t = item.get("title", "").strip()
-                    c = item.get("content", "").strip()[:120]
-                    if t:
-                        items.append(f"{idx}. {t}：{c}")
-                if items:
-                    LATEST_TRENDING_NEWS_SUMMARY = "【 7L 掌握的今日即時重大時事快訊】：\n" + "\n".join(items)
-                    LAST_TRENDING_NEWS_FETCH_TIME = now
-                    log_print("📰 [時事情報中樞] 已自動更新今日最新即時重大時事快訊！")
-                    return LATEST_TRENDING_NEWS_SUMMARY
-    except Exception as e:
-        log_print(f"⚠️ [時事情報獲取異常]: {e}")
-    return LATEST_TRENDING_NEWS_SUMMARY
-
 
 # ────────────────────────────────────────────────────────
 #  7. 7L 本機遊樂場沙盒 (7L_Playground)
@@ -3253,34 +2620,6 @@ async def check_screen_change_via_live_api(img_bytes: bytes, current_context: st
 # ────────────────────────────────────────────────────────
 #  13. 使用者指令、電腦控制與計時器動作
 # ────────────────────────────────────────────────────────
-def get_system_performance():
-    try:
-        cpu_usage = psutil.cpu_percent(interval=0.3)
-        memory = psutil.virtual_memory()
-        memory_usage = memory.percent
-
-        process_list = []
-        for proc in psutil.process_iter(['name', 'memory_percent']):
-            try:
-                pinfo = proc.info
-                ignore_list = ['svchost.exe', 'csrss.exe', 'wininit.exe', 'services.exe', 'lsass.exe', 'System Idle Process', 'System', 'Registry', 'smss.exe']
-                if pinfo['name'] and pinfo['name'] not in ignore_list and pinfo['memory_percent'] is not None:
-                    clean_name = pinfo['name'].replace('.exe', '')
-                    process_list.append((clean_name, pinfo['memory_percent']))
-            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-                pass
-        
-        process_list.sort(key=lambda x: x[1], reverse=True)
-        seen_apps = []
-        for p_name, _ in process_list:
-            if p_name not in seen_apps: seen_apps.append(p_name)
-            if len(seen_apps) >= 3: break
-            
-        app_str = f"，目前佔用最多資源的軟體是：{', '.join(seen_apps)}" if seen_apps else ""
-        return f"CPU 使用率: {cpu_usage}%, 記憶體: {memory_usage}%{app_str}"
-    except Exception as e:
-        return f"無法讀取系統狀態: {e}"
-
 async def set_timer(seconds: int, message: str, target_queue: Optional[asyncio.Queue] = None, caller_user: str = ""):
     """設定定時感測提醒 (已全面升級至 API Live 定時感測中樞)"""
     # ⚠️ 定時人不一定是老爸：caller 原樣透傳，未知就空著，提醒文案走中性
@@ -3855,24 +3194,16 @@ def _brain_text_for_memory(text: str) -> str:
 
 
 async def live_vision_tool_task():
-    """背景視覺打工人：使用現有 fetch_ai_response 備援機制分析截圖"""
+    """背景視覺打工人：截圖交給 describe_images 看，結果遞紙條給主腦。"""
     try:
         log_print("👁️ [視覺大腦啟動] 正在背景截圖並分析畫面...")
         current_screen_snapshot = get_combined_temporal_screen_snapshot()
-        # 提示詞避開「程式碼／寫程式」：fetch_ai_response 看到這些字會改走高智商梯隊（3.8-flash 打頭），
-        # 舊提示詞因此每次都排到最慢的模型，還讓她把畫面講成程式碼（2026-10-25 實機：畫面是鋼琴影片和 Minecraft）
-        messages = [{"role": "user", "content": "請簡短描述這個畫面：開著哪些視窗、老爸主要在看什麼或做什麼。若是在寫 code，說出檔名與重點。用繁體中文。"}]
-        resp = await asyncio.wait_for(fetch_ai_response(
-            messages=messages,
-            image_base64=current_screen_snapshot,
-            is_proactive=False,
-            use_tools=False,
-        ), timeout=VISION_TOOL_TIMEOUT_SEC)
-        if not resp:
+        # 提示詞避開「程式碼／寫程式」：舊碼看到這些字會改走最慢的高智商梯隊，
+        # 還讓她把畫面講成程式碼（2026-10-25 實機：畫面是鋼琴影片和 Minecraft）
+        prompt = "請簡短描述這個畫面：開著哪些視窗、老爸主要在看什麼或做什麼。若是在寫 code，說出檔名與重點。用繁體中文。"
+        reply_text = await describe_images(prompt, current_screen_snapshot)
+        if not reply_text:
             raise Exception("視覺模型未回傳任何內容或請求失敗")
-        # fetch_ai_response 回的是字串；舊碼取 resp[0] 只拿到第一個字，主腦只收到「這」，
-        # 只好自己猜畫面（2026-10-25 實機：她說「螢幕上只有一個這字」、上一輪講成程式碼）
-        reply_text = resp if isinstance(resp, str) else resp[0]
         log_print(f"👁️ [視覺大腦回報] 分析完成: {reply_text[:50]}...")
         _VISION_STATE["report_ts"] = time.time()
         send_brain_slip(f"[系統提示：視覺大腦回報畫面內容（已經看完了，直接用這段回答，不要再輸出 [TOOL:VISION]）。挑一兩個最有意思的點，一兩句話講完（40 字內），不要把畫面上的東西全念一遍] {_clean_result_for_brain(reply_text)}")
@@ -3901,16 +3232,11 @@ async def live_mirror_tool_task():
         with open(img_path, "rb") as f:
             b64_str = base64.b64encode(f.read()).decode("utf-8")
             
-        messages = [{"role": "user", "content": "這是妳自己（7L）的全身 V-tuber 造型圖片。請仔細觀察並用活潑、自豪的語氣，向老爸描述妳現在穿什麼衣服、髮色、瞳孔顏色、髮飾、鞋子，以及身上有哪些可愛或性感的特徵，字數不要超過 150 字。"}]
-        resp = await asyncio.wait_for(fetch_ai_response(
-            messages=messages,
-            image_base64=b64_str,
-            is_proactive=False,
-            use_tools=False,
-        ), timeout=VISION_TOOL_TIMEOUT_SEC)
-        if not resp:
+        reply_text = await describe_images(
+            "這是妳自己（7L）的全身 V-tuber 造型圖片。請仔細觀察並用活潑、自豪的語氣，向老爸描述妳現在穿什麼衣服、髮色、"
+            "瞳孔顏色、髮飾、鞋子，以及身上有哪些可愛或性感的特徵，字數不要超過 150 字。", b64_str)
+        if not reply_text:
             raise Exception("視覺模型未回傳")
-        reply_text = resp if isinstance(resp, str) else resp[0]  # 同上：舊碼只拿到第一個字
         log_print(f"🪞 [鏡子回報] {reply_text[:50]}...")
         send_brain_slip(f"[系統提示：鏡子裡映出的妳長這樣，請自然地把這段觀察說出來：] {_clean_result_for_brain(reply_text)}")
     except Exception as e:
@@ -4629,7 +3955,6 @@ async def continuous_live_worker(vts):
 
                                         text_chunk = c.output_transcription.text
                                     
-                                        import re
                                         # 先拔 blob（腦偶爾會吐幾 MB 的 base64 音訊；不先清，正則橫跨、
                                         # 日誌刷屏、搜尋燒額度、TTS 會去唸亂碼——一律視為雜訊）
                                         text_chunk = _start_marker_tools(text_chunk)
@@ -5050,7 +4375,6 @@ async def screen_capture_worker():
             
         await asyncio.sleep(sleep_time)
 
-LAST_SCREEN_MD5_HASH = None
 HAS_INITIAL_VISION_LOOK = False
 
 async def peripheral_vision_worker():
@@ -6225,18 +5549,6 @@ def is_piano_song_request(user_input: str) -> bool:
     # 其餘無「彈」且不明顯是歌名者，一律回傳 False！
     return False
 
-async def prefetch_song_midi_background(song_query: str):
-    """背景非同步預熱/預查 MIDI 曲庫與 AI 語意匹配（100% 由 Gemini 高智商大腦判定）"""
-    try:
-        if not is_piano_song_request(song_query):
-            return
-        available_files = [os.path.basename(p) for p in glob.glob(os.path.join(pe.MIDI_SHEETS_DIR, "*.mid"))]
-        ai_intent = await pe.resolve_piano_intent_by_ai(song_query, available_files)
-        if ai_intent.get("is_song_request") and ai_intent.get("song_title"):
-            await pe.resolve_local_midi_file(ai_intent["song_title"])
-    except Exception:
-        log_swallowed()
-
 # ────────────────────────────────────────────────────────
 #  15. 全集中全景時序記憶中樞與對話派發系統 (Unified Mind-Stream Architecture)
 # ────────────────────────────────────────────────────────
@@ -6338,23 +5650,6 @@ def add_to_streamer_mind_board(user_display: str, unique_id: str, content: str, 
             except Exception:
                 log_swallowed()
         spawn(evaluate_and_queue_with_gemini(content))
-
-def mark_streamer_mind_board_as_read(unique_id: str = None, content: str = None):
-    """ 將 7L 記憶腦袋看板中的指定留言/對話標記為已讀"""
-    marked_cnt = 0
-    for m in STREAMER_MIND_BOARD:
-        if m.get("status") == "unread":
-            if unique_id and m.get("unique_id") == unique_id:
-                m["status"] = "read"
-                marked_cnt += 1
-            elif content and m.get("content") == content:
-                m["status"] = "read"
-                marked_cnt += 1
-            elif not unique_id and not content:
-                m["status"] = "read"
-                marked_cnt += 1
-    if marked_cnt > 0:
-        log_print(f"📖 [記憶腦袋 已讀] 已將 {marked_cnt} 筆看板項目標記為已讀")
 
 # 8 大大腦優先順序梯隊 (頂配高智商旗艦大腦優先)
 
@@ -6838,8 +6133,6 @@ async def streamer_mind_loop_worker(vts, input_queue):
 
 
 current_dad_task = None
-current_audience_task = None
-current_chat_task = None
 CURRENT_PROCESSING_USER_INPUT = ""
 
 def _extract_think_reply(text: str):

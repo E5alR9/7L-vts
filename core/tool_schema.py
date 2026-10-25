@@ -2,7 +2,7 @@
 """給模型看的工具宣告（2026-10-25 從主程式搬出來）。
 
 INTERACTIONS_TOOLS：專案格式的函式工具清單（主腦 REST、Groq、NV 共用；core.groq_router 會轉成 OpenAI 格式）。
-build_genai_declarations：轉成 Gemini FunctionDeclaration；GENAI_TOOLS／GENAI_PROACTIVE_TOOLS 是轉好的。
+build_genai_declarations：轉成 Gemini FunctionDeclaration；GENAI_TOOLS 是轉好的（子智能體用）。
 LIVE_API_TOOLS：Live 主腦只拿一個 invoke_subagent（非阻塞），實際操作交給子智能體。
 工具的執行在主程式的 execute_tool_dispatch。
 """
@@ -465,7 +465,6 @@ LIVE_API_TOOLS = [types.Tool(function_declarations=[_invoke_subagent_declaration
 REST_BRAIN_TOOLS = [types.Tool(function_declarations=[_invoke_subagent_declaration(False)])]
 
 GENAI_TOOLS = build_genai_declarations(is_proactive=False)
-GENAI_PROACTIVE_TOOLS = build_genai_declarations(is_proactive=True)
 
 DECLARED_TOOL_NAMES = frozenset(t["name"] for t in INTERACTIONS_TOOLS)
 # 副腦偶爾回宣告裡沒有的工具名（2026-10-26 實機：查匯率回 search_query），常見的搜尋說法對回 search_google
