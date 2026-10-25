@@ -378,6 +378,7 @@ async def groq_chat(
     max_tokens: int = 500,
     timeout: float = 4.0,
     models: Optional[List[str]] = None,
+    total_timeout: Optional[float] = None,
 ) -> Optional[GroqResponse]:
     """
     以 Groq 進行一次文字補全。成功回傳 GroqResponse，全部失敗回傳 None（呼叫端自行降級）。
@@ -407,6 +408,9 @@ async def groq_chat(
 
     now = time.time()
     _call_step += 1
+    # 總時限：timeout 只管單次；梯隊 × 金鑰全逾時的話，舊碼最壞要好幾分鐘才回 None（2026-10-25 健檢）
+    budget = total_timeout if total_timeout is not None else max(timeout * 3, 10.0)
+    deadline = time.monotonic() + budget
 
     # 依序嘗試：模型梯隊 × 金鑰輪詢
     for m_name in ladder:
@@ -417,6 +421,10 @@ async def groq_chat(
             key = GROQ_KEYS[idx] if idx < len(GROQ_KEYS) else ""
             if key and _key_cooldown.get(key, 0) > now:
                 continue
+            remaining = deadline - time.monotonic()
+            if remaining <= 0.3:
+                _log(f"[Groq Router] 超過總時限 {budget:.0f}s，這次放棄（呼叫端自行降級）")
+                return None
             client = clients[idx]
             try:
                 kwargs: Dict[str, Any] = {
@@ -428,8 +436,9 @@ async def groq_chat(
                 if wire_tools:
                     kwargs["tools"] = wire_tools
 
-                await throttle_rpm()   # 每分鐘請求上限（GROQ_REQUESTS_PER_MINUTE）
-                raw = await asyncio.wait_for(client.chat.completions.create(**kwargs), timeout=timeout)
+                await asyncio.wait_for(throttle_rpm(), timeout=remaining)   # 每分鐘請求上限（GROQ_REQUESTS_PER_MINUTE）
+                raw = await asyncio.wait_for(client.chat.completions.create(**kwargs),
+                                             timeout=max(0.3, min(timeout, deadline - time.monotonic())))
 
                 if not raw or not raw.choices:
                     continue

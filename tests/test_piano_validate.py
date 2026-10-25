@@ -124,3 +124,30 @@ def test_composer_uses_ai_notes_when_groq_answers(monkeypatch, tmp_path):
     asyncio.run(pe.compose_and_play_original_piano("午後", "輕快"))
     assert played["title"] == "7L原創_午後" and pe.is_midi_playable(played["midi"])
     assert not any("保底" in m for m in logs)
+
+
+def test_piano_intent_gives_up_within_budget(monkeypatch):
+    """Groq 沒回、Gemini 一直逾時：舊碼模型 × 3 把金鑰 × 4 秒，最壞 84 秒才有反應（2026-10-25 健檢）。"""
+    import asyncio, time as _t
+    import core.groq_router as gr
+
+    async def no_groq(*a, **k):
+        return None
+
+    class _Slow:
+        def __init__(self, api_key=""):
+            self.aio = self
+            self.models = self
+
+        async def generate_content(self, **k):
+            await asyncio.sleep(5)
+    logs = []
+    monkeypatch.setattr(gr, "groq_chat", no_groq)
+    monkeypatch.setattr(pe, "get_piano_gemini_keys", lambda: ["k1", "k2", "k3"])
+    monkeypatch.setattr(pe.genai, "Client", _Slow)
+    monkeypatch.setattr(pe, "PIANO_INTENT_GEMINI_BUDGET_SEC", 0.8)
+    monkeypatch.setattr(pe, "log_print", lambda m, *a, **k: logs.append(m))
+    t0 = _t.time()
+    r = asyncio.run(pe.resolve_piano_intent_by_ai("小星星", ["小星星.mid"]))
+    assert _t.time() - t0 < 2.0 and r.get("_from_ai") is False
+    assert any("照曲名直接找" in m for m in logs)

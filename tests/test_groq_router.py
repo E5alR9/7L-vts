@@ -156,3 +156,31 @@ def test_contents_to_messages_returns_none_for_multimodal():
     assert gr.contents_to_messages([]) is None
     # 全無文字 → None
     assert gr.contents_to_messages([SimpleNamespace(role="user", parts=[])]) is None
+
+
+def test_groq_chat_gives_up_at_the_total_deadline(monkeypatch):
+    """單次逾時之外要有總時限：梯隊 × 26 把金鑰全卡住時，舊碼最壞好幾分鐘才回 None（2026-10-25 健檢）。"""
+    import asyncio
+    import time as _t
+    calls = []
+
+    class _Slow:
+        class chat:
+            class completions:
+                @staticmethod
+                async def create(**kw):
+                    calls.append(kw["model"])
+                    await asyncio.sleep(5)
+
+    monkeypatch.setattr(gr, "_get_clients", lambda: [_Slow() for _ in range(26)])
+    monkeypatch.setattr(gr, "GROQ_KEYS", [f"k{i}" for i in range(26)])
+    monkeypatch.setattr(gr, "MODEL_LADDER", ["m1", "m2", "m3"])
+
+    async def keep(ladder):
+        return ladder
+    monkeypatch.setattr(gr, "_filter_unavailable", keep)
+    monkeypatch.setattr(gr, "_log", lambda *a: None)
+    t0 = _t.monotonic()
+    r = asyncio.run(gr.groq_chat([{"role": "user", "content": "hi"}], timeout=0.2, total_timeout=0.7))
+    assert r is None
+    assert _t.monotonic() - t0 < 1.5 and len(calls) <= 5

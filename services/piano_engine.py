@@ -101,6 +101,8 @@ CURRENT_SPEAKING_TARGET = "none"
 current_ai_state = "IDLE"
 CURRENT_GEMINI_KEY_STEP = 0
 LAST_PLAY_REQUEST_TIME: Dict[str, float] = {}
+PIANO_INTENT_GEMINI_BUDGET_SEC = 12.0   # 點曲意圖判斷：Groq 沒回之後，Gemini 兜底最多再花這麼久
+COMPOSE_BUDGET_SEC = 60.0              # AI 作曲：Groq 跟 Gemini 各自最多花這麼久
 # 點曲先後：AI 判斷意圖要好幾秒，先點的還在判斷、後點的已經開彈，先點的判斷完不能把後點的蓋掉
 _PLAY_REQ_SEQ = 0        # 每次 play_virtual_piano 進來就 +1
 _PLAY_STARTED_SEQ = 0    # 最後一個真的開彈（或開始抓譜）的請求編號
@@ -1719,11 +1721,17 @@ async def resolve_piano_intent_by_ai(
     active_keys = get_piano_gemini_keys()
     if active_keys:
         # 👑 倒序高智商模型梯隊：3.8 ➔ 3.7 ➔ 3.6 ➔ 3.5 ➔ 3.1-pro ➔ 3-flash ➔ 3.5-flash-lite
+        # 總時限：模型 × 3 把金鑰 × 4 秒，舊碼最壞 84 秒點曲才有反應，而且一行日誌都沒有（2026-10-25 健檢）
+        deadline = time.time() + PIANO_INTENT_GEMINI_BUDGET_SEC
         for m in HIGH_IQ_GEMINI_MODELS:
             if m in DEAD_GEMINI_MODELS or is_model_locked(m):
                 continue
             ring_indices = get_pingpong_ring_indices(len(active_keys), CURRENT_GEMINI_KEY_STEP)[:3]
             for idx in ring_indices:
+                remaining = deadline - time.time()
+                if remaining <= 0.5:
+                    log_print(f"⌛ [鋼琴意圖] Groq 和 Gemini 都沒在 {PIANO_INTENT_GEMINI_BUDGET_SEC:.0f} 秒內判斷完，照曲名直接找《{clean_q}》")
+                    return default_res
                 g_key = active_keys[idx]
                 try:
                     temp_client = genai.Client(api_key=g_key)
@@ -1733,7 +1741,7 @@ async def resolve_piano_intent_by_ai(
                             contents=prompt,
                             config=types.GenerateContentConfig(temperature=0.1, response_mime_type="application/json")
                         ),
-                        timeout=4.0
+                        timeout=min(4.0, remaining)
                     )
                     if resp and resp.text:
                         data = json.loads(resp.text.strip())
@@ -2868,14 +2876,16 @@ async def compose_and_play_original_piano(theme_or_title: str = "", mood_or_styl
     data = {}
     try:
         from core.groq_router import groq_chat
-        g_resp = await groq_chat([{"role": "user", "content": prompt}], temperature=0.85, max_tokens=6000, timeout=40.0)
+        g_resp = await groq_chat([{"role": "user", "content": prompt}], temperature=0.85, max_tokens=6000,
+                                 timeout=40.0, total_timeout=COMPOSE_BUDGET_SEC)
         if g_resp and g_resp.text:
             data = _parse_score(g_resp.text)
     except Exception as e:
         log_print(f"⚠️ [7L 原創作曲] Groq 沒寫成（{type(e).__name__} {str(e)[:60]}），改問 Gemini")
     active_keys = get_piano_gemini_keys()
+    compose_deadline = time.time() + COMPOSE_BUDGET_SEC
     for model_name in [m for m in HIGH_IQ_GEMINI_MODELS if m not in DEAD_GEMINI_MODELS and not is_model_locked(m)][:3]:
-        if data or not active_keys:
+        if data or not active_keys or compose_deadline - time.time() < 3.0:
             break
         target_k_idx = get_pingpong_alternating_index(len(active_keys), CURRENT_GEMINI_KEY_STEP)
         client = genai.Client(api_key=active_keys[target_k_idx])
@@ -2887,7 +2897,7 @@ async def compose_and_play_original_piano(theme_or_title: str = "", mood_or_styl
             resp = await asyncio.wait_for(
                 client.aio.models.generate_content(model=model_name, contents=prompt,
                                                    config=types.GenerateContentConfig(**cfg)),
-                timeout=45.0)
+                timeout=min(45.0, compose_deadline - time.time()))
             data = _parse_score(resp.text or "")
         except Exception as e:
             log_print(f"⚠️ [7L 原創作曲] {model_name} 沒寫成（{type(e).__name__} {str(e)[:60]}），換下一個")
