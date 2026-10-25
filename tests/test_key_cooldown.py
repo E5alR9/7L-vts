@@ -1,12 +1,8 @@
 """金鑰冷卻統一（2026-10-22）：以前只有 fetch_ai_response 會在 429 時封印通道，
 其他 11 個 Gemini 呼叫點看不到，被限流的 key 會被一直重打。
 現在共用 core.llm_engine 的 (key, model) 冷卻表，候選池據此把冷卻中的 key 排到最後。"""
-import ast
 import os
-import re
 import time
-from datetime import datetime, timedelta
-from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -55,37 +51,30 @@ def test_candidates_all_cooling_still_returned():
     assert le.get_dynamic_live_key_candidates(["K1", "K2"]) == ["K1", "K2"]  # 不餓死
 
 
-def _load_main_funcs():
-    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    tree = ast.parse(open(os.path.join(root, "vts_7L_test.py"), encoding="utf-8").read())
+def test_report_429_cools_key_model(monkeypatch):
     logs = []
-    ns = {"re": re, "time": time, "datetime": datetime, "timedelta": timedelta, "ZoneInfo": ZoneInfo,
-          "cool_key": le.cool_key, "log_print": logs.append}
-    wanted = {"get_seconds_until_pt_midnight", "parse_cooldown_seconds", "report_gemini_key_error"}
-    for n in tree.body:
-        if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "_KEY_LIMIT_MARKERS" for t in n.targets):
-            exec(compile(ast.Module(body=[n], type_ignores=[]), "x", "exec"), ns)
-        if isinstance(n, ast.FunctionDef) and n.name in wanted:
-            exec(compile(ast.Module(body=[n], type_ignores=[]), "x", "exec"), ns)
-    return ns, logs
-
-
-def test_report_429_cools_key_model():
-    ns, logs = _load_main_funcs()
-    assert ns["report_gemini_key_error"]("KEY_ABCDEF", Exception("429 RESOURCE_EXHAUSTED retry in 20s"), "flash") is True
+    monkeypatch.setattr(le, "log_print", logs.append)
+    assert le.report_gemini_key_error("KEY_ABCDEF", Exception("429 RESOURCE_EXHAUSTED retry in 20s"), "flash") is True
     assert le.key_cooling("KEY_ABCDEF", "flash")
     assert not le.key_cooling("KEY_ABCDEF", "pro")
     assert logs and "ABCDEF" in logs[0]
 
 
 def test_report_ignores_non_limit_errors():
-    ns, _ = _load_main_funcs()
-    assert ns["report_gemini_key_error"]("K1", Exception("invalid argument: bad image"), "flash") is False
-    assert ns["report_gemini_key_error"]("", Exception("429"), "flash") is False
+    assert le.report_gemini_key_error("K1", Exception("invalid argument: bad image"), "flash") is False
+    assert le.report_gemini_key_error("", Exception("429"), "flash") is False
     assert le._KEY_COOLDOWN == {}
 
 
 def test_daily_quota_cools_until_pt_midnight():
-    ns, _ = _load_main_funcs()
-    ns["report_gemini_key_error"]("K1", Exception("Quota exceeded: requests per day"), "flash")
+    le.report_gemini_key_error("K1", Exception("Quota exceeded: requests per day"), "flash")
     assert le._KEY_COOLDOWN[("K1", "flash")] - time.time() >= 59  # 至少到 PT 午夜（最少 60 秒）
+
+
+def test_cooldown_helpers_only_in_llm_engine():
+    """2026-10-25 搬家：冷卻剖析／回報只留 core.llm_engine 一份，主程式 import 來用。"""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    main = open(os.path.join(root, "vts_7L_test.py"), encoding="utf-8").read()
+    for name in ("get_seconds_until_pt_midnight", "parse_cooldown_seconds", "report_gemini_key_error"):
+        assert f"def {name}(" not in main
+    assert "_KEY_LIMIT_MARKERS = " not in main

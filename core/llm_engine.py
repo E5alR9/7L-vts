@@ -3,6 +3,8 @@ import re
 import time
 import random
 import contextlib
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 import groq
 from typing import List, Dict, Tuple, AsyncIterator
 from google.genai import types
@@ -136,6 +138,86 @@ def get_dynamic_live_key_candidates(preferred_pool: List[str]) -> List[str]:
             seen.add(k)
     candidates.sort(key=key_cooling_any)  # 穩定排序：健康的保持原順序在前
     return candidates
+
+
+# ── 限流／配額錯誤 → 冷卻多久（2026-10-25 從主程式搬來：所有 Gemini 呼叫點共用）──
+def get_seconds_until_pt_midnight() -> float:
+    """計算從現在到美國太平洋時間 (PT) 下一個午夜 00:00 還剩多少秒（用於每日配額 RPD 刷新）"""
+    try:
+        pt_zone = ZoneInfo("America/Los_Angeles")
+        now_pt = datetime.now(pt_zone)
+        tomorrow_pt = (now_pt + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        diff = (tomorrow_pt - now_pt).total_seconds()
+        return max(60.0, diff)
+    except Exception:
+        return 3600.0
+
+
+def parse_cooldown_seconds(error_text: str, headers=None) -> float:
+    if headers:
+        retry_after = headers.get("Retry-After") or headers.get("retry-after")
+        if retry_after:
+            try: return max(15.0, float(retry_after) + 5.0)
+            except ValueError: pass
+
+    total_seconds = 60.0 
+    if not error_text: return total_seconds
+        
+    error_lower = error_text.lower()
+
+    # 1. 優先精準捕獲 Google GenAI / Groq API 返回的重試秒數或時間字串 (如 "retry in 53.5s", "retryDelay: '53s'")
+    match_retry_in = re.search(r'retry (?:in|after|delay)[:\s\']*([0-9.]+)\s*s', error_lower)
+    if match_retry_in:
+        try: return max(10.0, float(match_retry_in.group(1)) + 5.0)
+        except ValueError: pass
+
+    match_hms = re.search(r'(?:try again in|retry in|wait)\s+(?:(\d+)h)?(?:(\d+)m)?([0-9.]+)s', error_lower)
+    if match_hms:
+        hours = int(match_hms.group(1)) if match_hms.group(1) else 0
+        minutes = int(match_hms.group(2)) if match_hms.group(2) else 0
+        seconds = float(match_hms.group(3)) if match_hms.group(3) else 0.0
+        return max(10.0, hours * 3600 + minutes * 60 + seconds + 5.0) 
+        
+    match_sec = re.search(r'(?:retry-after|wait|in|please wait)\s+([0-9.]+)\s*(?:s|sec|second|seconds)?', error_lower)
+    if match_sec:
+        try: return max(10.0, float(match_sec.group(1)) + 5.0)
+        except ValueError: pass
+
+    # 2. 404 或未開通 / 下架模型，鎖定至 PT 午夜 (並永久記錄至 DEAD_GEMINI_MODELS)
+    if "404" in error_lower or "not_found" in error_lower or "no longer available" in error_lower:
+        return get_seconds_until_pt_midnight()
+
+    # 3. 每日總配額耗盡 (Per Day / Daily / RequestsPerDay / RPD / Quota Exceeded) 封印至 PT 午夜 (隔天重置)
+    is_daily_exhausted = any(k in error_lower for k in ["per day", "requests per day", "daily requests", "rpd", "tokens per day", "tpd", "exceeded your current quota", "quota exceeded"]) and not any(k in error_lower for k in ["per minute", "minute", "rpm", "tpm"])
+    if is_daily_exhausted:
+        return get_seconds_until_pt_midnight()
+
+    # 4. 503 暫時性伺服器超載 (鎖定 3 分鐘 / 180 秒)
+    if "503" in error_lower or "unavailable" in error_lower or "high demand" in error_lower:
+        return 180.0
+
+    # 5. 429 瞬間速率超速 / 頻率限制 (預設短暫冷卻 60 秒)
+    if "429" in error_lower or "rate limit" in error_lower or "resource" in error_lower or "quota" in error_lower:
+        return 60.0  
+
+    return max(30.0, total_seconds)
+
+
+_KEY_LIMIT_MARKERS = ("429", "resource_exhausted", "resource exhausted", "rate limit", "quota",
+                      "per day", "503", "unavailable", "high demand")
+
+
+def report_gemini_key_error(key: str, err, model: str = "") -> bool:
+    """fetch_ai_response 以外的 Gemini 呼叫點遇錯時呼叫：限流／配額／過載就把 (key, model) 冷卻，
+    之後候選池會把這把 key 排到最後，其他呼叫點不會再先撞它。回傳是否有冷卻。"""
+    err_low = str(err).lower()
+    if not key or not any(m in err_low for m in _KEY_LIMIT_MARKERS):
+        return False
+    secs = parse_cooldown_seconds(err_low)
+    cool_key(key, secs, model)
+    log_print(f"🔒 [金鑰冷卻] ...{key[-6:]} {model or '(整把)'} 冷卻 {int(secs)}s：{err_low[:80]}")
+    return True
+
 
 DEAD_GEMINI_MODELS = set()
 
