@@ -2440,7 +2440,9 @@ async def play_virtual_piano(song_name: str = "", custom_sheet: str = "", auto_r
                 log_print(f"🎹 [Gemini 意圖分流] 判定《{clean_q}》為拿出/打開鋼琴指令，立即執行 open_virtual_piano()！")
                 await open_virtual_piano()
                 return "（系統回報：已交由 Gemini 識別為打開鋼琴指令，已為您拿出 88 鍵鋼琴待命）"
-            elif action_type == "stop_piano":
+            elif action_type == "stop_piano" and not is_direct_song_name:
+                # 明確點曲（工具帶了曲名）不採用：「彈 安靜」被判成叫鋼琴安靜、直接收琴（2026-10-26 實機）；
+                # 觀眾點這種歌名還能藉此把鋼琴收掉。要收琴有自己的工具，這裡照曲名找
                 log_print(f"🛑 [Gemini 意圖分流] 判定《{clean_q}》為收起/停止彈琴指令，立即執行 stop_virtual_piano()！")
                 await stop_virtual_piano()
                 return "（系統回報：已交由 Gemini 識別為停止/收起鋼琴指令，已停止演奏並收起鋼琴）"

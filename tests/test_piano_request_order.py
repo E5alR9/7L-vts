@@ -158,3 +158,29 @@ def test_every_start_goes_through_take_stage(monkeypatch):
 
 
 _REAL_START = pe._start_piano_worker
+
+
+def test_song_named_like_a_command_is_still_played(monkeypatch):
+    """「彈 安靜」（周杰倫〈安靜〉）被 AI 判成叫鋼琴安靜、直接收琴；觀眾點這首還能藉此收掉鋼琴（2026-10-26 實機）。"""
+    started, _ = _setup(monkeypatch, {})
+    stopped = []
+
+    async def intent(q, files, **k):
+        return {"_from_ai": True, "is_song_request": False, "action_type": "stop_piano", "song_title": "",
+                "matched_files": ["小星星.mid"]}
+
+    async def fake_stop(*a, **k):
+        stopped.append(True)
+        return ""
+    monkeypatch.setattr(pe, "resolve_piano_intent_by_ai", intent)
+    monkeypatch.setattr(pe, "stop_virtual_piano", fake_stop)
+
+    async def go(direct):
+        await pe.play_virtual_piano("小星星", is_direct_song_name=direct)
+        if pe.current_piano_task:
+            pe.current_piano_task.cancel()
+    asyncio.run(go(True))
+    assert stopped == [] and started == ["小星星"]          # 明確點曲：照曲名彈
+    pe.LAST_PLAY_REQUEST_TIME.clear()
+    asyncio.run(go(False))
+    assert stopped == [True]                                # 自由文字才照 AI 分流
