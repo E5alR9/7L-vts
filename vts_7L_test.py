@@ -730,7 +730,6 @@ except ImportError:
 # 導入 Google 官方 GenAI SDK (主力視覺與大腦)
 from google import genai
 
-from realtime_tasks.task_manager import realtime_task_mgr
 from mic_live_plugin import mic_live_analyzer, voiceprint_verifier  # noqa: F401
 
 # ────────────────────────────────────────────────────────
@@ -1406,8 +1405,7 @@ if FIREBASE_CRED_JSON and _FIREBASE_ON:
         cred_dict = json.loads(FIREBASE_CRED_JSON)
         import core.db as db_module
         db = db_module.init_firestore(cred_dict)
-        realtime_task_mgr.set_db(db)
-        print("【💾 系統通知】Firebase Firestore 雲端永久大腦就緒（實時任務中樞已連線雲端）！")
+        print("【💾 系統通知】Firebase Firestore 雲端永久大腦就緒！")
     except Exception as e:
         print(f"【⚠️ 系統警告】Firebase 連線失敗: {e}，將僅使用本地快取。")
 else:
@@ -4434,7 +4432,6 @@ async def peripheral_vision_worker():
                 init_desc = await get_lightweight_gemini_vision(sample_img)
                 if init_desc:
                     record_vision_history_entry(init_desc, "初次認知")
-                    realtime_task_mgr.update_vision_context(current_screen_context)
                     HAS_INITIAL_VISION_LOOK = True
                     LAST_VISION_LOOK_TIME = time.time()
                 continue
@@ -4454,7 +4451,6 @@ async def peripheral_vision_worker():
                 detailed_desc = await get_lightweight_gemini_vision(sample_img, temporal_frames=since_frames)
                 if detailed_desc:
                     record_vision_history_entry(detailed_desc, "畫面動態")
-                    realtime_task_mgr.update_vision_context(current_screen_context)
                     LAST_VISION_LOOK_TIME = time.time()
                     
                     try:
@@ -4478,7 +4474,6 @@ async def identify_system_music_and_sound(wav_bytes: bytes) -> str:
         current_system_audio_context = f"7L 正在為老爸演奏鋼琴：《{song_t}》"
         LATEST_SYSTEM_MUSIC_INFO = f"《{song_t}》"
         LATEST_SYSTEM_MUSIC_TIME = now
-        realtime_task_mgr.update_audio_context(current_system_audio_context)
         return LATEST_SYSTEM_MUSIC_INFO
 
     if stage.IS_MP3_PLAYING:
@@ -4574,7 +4569,6 @@ async def identify_system_music_and_sound(wav_bytes: bytes) -> str:
             LATEST_SYSTEM_MUSIC_INFO = res_text
             LATEST_SYSTEM_MUSIC_TIME = time.time()
             current_system_audio_context = f"電腦正在播放音樂/音效：{res_text}"
-            realtime_task_mgr.update_audio_context(current_system_audio_context)
             if not is_duplicate:
                 log_print(f"🎵 [電腦音樂感知] 7L 聽出電腦正在播放: 「{res_text}」")
             return res_text
@@ -4592,7 +4586,6 @@ async def identify_system_music_and_sound(wav_bytes: bytes) -> str:
                 LATEST_SYSTEM_MUSIC_INFO = fallback_info[:25]
                 LATEST_SYSTEM_MUSIC_TIME = time.time()
                 current_system_audio_context = f"電腦正在播放音樂/音效：{LATEST_SYSTEM_MUSIC_INFO}"
-                realtime_task_mgr.update_audio_context(current_system_audio_context)
                 return LATEST_SYSTEM_MUSIC_INFO
         except Exception:
             log_swallowed()
@@ -4657,7 +4650,6 @@ async def system_audio_worker():
                         current_system_audio_context = "7L 本人正在演唱翻唱歌曲（Live2D 舞台開唱中；演唱者是 7L，不是老爸也不是觀眾）"
                         LATEST_SYSTEM_MUSIC_INFO = "7L 本人翻唱歌曲"
                         LATEST_SYSTEM_MUSIC_TIME = time.time()
-                        realtime_task_mgr.update_audio_context(current_system_audio_context)
                         await asyncio.sleep(0.08)
                         continue
 
@@ -4667,7 +4659,6 @@ async def system_audio_worker():
                         current_system_audio_context = f"7L 正在為老爸演奏鋼琴：《{song_t}》"
                         LATEST_SYSTEM_MUSIC_INFO = f"《{song_t}》"
                         LATEST_SYSTEM_MUSIC_TIME = time.time()
-                        realtime_task_mgr.update_audio_context(current_system_audio_context)
                         await asyncio.sleep(0.08)
                         continue
 
@@ -4717,7 +4708,6 @@ async def system_audio_worker():
                                 LATEST_SYSTEM_MUSIC_INFO = ""
                                 LAST_MUSIC_IDENTIFY_TIME = 0.0  # 靜音後重置冷卻，下一首新歌進來能迅速感知
                                 current_system_audio_context = "電腦目前沒有播放特別的聲音。"
-                                realtime_task_mgr.update_audio_context(current_system_audio_context)
         except asyncio.CancelledError:
             break
         except Exception:
@@ -6900,9 +6890,6 @@ async def process_chat_message(vts, input_queue, user_input: str, user_audio_b64
         pass
     except Exception as e:
         log_print(f"❌ [老爸訊息處理異常]: {e!r}")
-    finally:
-        realtime_task_mgr.finish_dad_task()
-        realtime_task_mgr.mark_dad_input_read()
 
 
 async def execute_punish_action(reason: str = "", is_severe: bool = None):
@@ -7181,7 +7168,6 @@ async def chat_processor_worker(vts, input_queue):
                 
                 CURRENT_PROCESSING_USER_INPUT = user_input
                 #  立即啟動主腦深度思考任務（帶入被打斷的前文）
-                realtime_task_mgr.start_dad_task(user_input)
                 current_dad_task = asyncio.create_task(
                     process_chat_message(
                         vts, input_queue, user_input, user_audio_b64, 
@@ -7637,9 +7623,7 @@ async def main():
     # 嘗試將本地因配額限制未上傳的資料補傳上雲端
     import core.db as db_module
     spawn(db_module.flush_offline_queue())
-    
-    #  系統啟動防殘留：立即向雲端與本地同步乾淨待命狀態（徹底消除重開機殘留）
-    await realtime_task_mgr.sync_to_cloud()
+
     #  載入或初始化全集中全景時序記憶中樞
     init_unified_memory()
 

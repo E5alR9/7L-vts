@@ -32,7 +32,6 @@ from core.utils import log_print, to_tw, log_swallowed, spawn
 from core.identity import get_owner_name
 from core.llm_engine import (GEMINI_KEYS, HIGH_IQ_GEMINI_MODELS, DEAD_GEMINI_MODELS, is_model_locked,
                              get_pingpong_alternating_index, get_pingpong_ring_indices)
-from realtime_tasks.task_manager import realtime_task_mgr
 
 # —— 主程式交進來的東西（2026-10-25）——
 # 以前用 MainProxy 從 __main__ 動態撈：撈不到（改名、換啟動方式）就默默變成什麼都不做的空函式。
@@ -1097,7 +1096,6 @@ async def piano_focus_udp_worker():
                             GLOBAL_PIANO_REALTIME_STATE.update(pkg)
                             GLOBAL_PIANO_REALTIME_STATE["is_window_open"] = pkg.get("is_window_open", True)
                             GLOBAL_PIANO_REALTIME_STATE["last_update_time"] = time.time()
-                            realtime_task_mgr.update_piano_state(pkg)
                             
                             is_playing = pkg.get("is_playing", False)
                             song_title = pkg.get("title", "")

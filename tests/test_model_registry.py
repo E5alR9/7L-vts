@@ -19,7 +19,7 @@ def _literals(path):
 
 def test_model_names_live_only_in_llm_engine():
     files = [os.path.join(ROOT, "vts_7L_test.py")]
-    for d in ("core", "services", "mic_live_plugin", "realtime_tasks"):
+    for d in ("core", "services", "mic_live_plugin"):
         files += glob.glob(os.path.join(ROOT, d, "*.py"))
     bad = {os.path.relpath(f, ROOT): hits for f in files
            if not f.endswith(os.path.join("core", "llm_engine.py")) and (hits := _literals(f))}

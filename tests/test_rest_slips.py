@@ -185,7 +185,6 @@ def _dad_message(source, text, audio=None):
                    _owner_name=lambda: "老爸", live_timer_hub=pytypes.SimpleNamespace(detect_timer_intent=lambda t: None),
                    add_to_streamer_mind_board=lambda **k: board.append(k), background_tool_executor=background_tool_executor,
                    spawn=spawn, send_brain_slip=lambda s, **k: slips.append((s, k)),
-                   realtime_task_mgr=pytypes.SimpleNamespace(finish_dad_task=lambda: None, mark_dad_input_read=lambda: None),
                    asyncio=asyncio, IS_MIC_ENABLED=True, Optional=__import__("typing").Optional)
         await ns["process_chat_message"](None, None, text, audio, source=source)
         await asyncio.sleep(0)
