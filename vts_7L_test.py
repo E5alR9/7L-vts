@@ -8810,10 +8810,9 @@ async def main():
         import traceback
         print(f"\n❌ [底層系統異常崩潰]: {e}")
         traceback.print_exc(file=sys.__stderr__)   # sys.stderr 可能正被 TTS 攔截到網頁後台，印到真終端才看得到
-        try:
-            flush_unified_memory()
-        except Exception:
-            log_swallowed()
+        # 主迴圈都沒了就整個收掉（存記憶、關鋼琴、結束進程）：舊版只存記憶就返回，背景執行緒還活著，
+        # 程序掛著不動卻佔住鋼琴埠、麥克風，下一個 7L 收不到鋼琴心跳（2026-10-25 實機）
+        shutdown_7l()
 
 if __name__ == "__main__":
     try:

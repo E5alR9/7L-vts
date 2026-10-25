@@ -422,3 +422,12 @@ def test_status_bar_error_does_not_kill_7l():
         except asyncio.TimeoutError:
             return "still running"
     assert asyncio.run(run()) == "still running" and len(calls) >= 3 and len(swallowed) == len(calls)
+
+
+def test_main_crash_exits_instead_of_lingering():
+    """主迴圈崩潰後要走 shutdown_7l 結束進程：只存記憶就返回的話背景執行緒還活著，
+    殘留程序佔住鋼琴埠，下一個 7L 收不到鋼琴心跳（2026-10-25 實機）。"""
+    src = _src("main")
+    tail = src[src.index("await _status_bar_loop()"):]
+    handler = tail[tail.index("except Exception as e:"):]
+    assert "shutdown_7l()" in handler[:600]
