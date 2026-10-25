@@ -23,7 +23,7 @@ def test_language_rules_are_not_duplicated():
     for f in ("services/tts_router.py", "local_xiaoyi_service.py", "core/prompts.py"):
         src = open(os.path.join(root, f), encoding="utf-8").read()
         assert "的了嗎吧呢這那是在說" not in src, f       # 中文虛詞清單只在 core.lang
-    for f in ("services/tts_router.py", "local_xiaoyi_service.py"):
+    for f in ("services/tts_router.py", "local_xiaoyi_service.py", "core/prompts.py"):
         src = open(os.path.join(root, f), encoding="utf-8").read()
         assert KANA_RANGE_ESCAPED not in src, f          # 假名正則只在 core.lang
         assert chr(0x3040) + "-" not in src, f
