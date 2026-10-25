@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 """core.hard_command — CPU 硬指令拆解精度（2026-10-09 直播誤觸回歸）"""
+import pytest
+
 from conftest import ROOT  # noqa: F401
 from core.hard_command import (
     extract_sing_song, extract_piano_song, parse_hard_command, parse_mixed_command,
@@ -19,7 +21,7 @@ FALSE_POSITIVES = [
     "我今天不想唱歌",
     "你會唱幾首？",
     "唱一首歌給大家聽就好",      # 泛指，無具體歌名 → 交還主腦
-    "別唱了啦",
+    # 「別唱了啦」2026-10-25 起是停止唱歌（不是點歌），見 test_stop_singing_is_a_hard_command
     "不要唱那首",
     "他彈琴比我還快",
     "你可以彈琴了？",
@@ -389,3 +391,21 @@ def test_piano_control_commands():
     # 不是對 7L 下的指令、意思相反、或後面還有別的要求：一律交還主腦
     for s in ("他說別彈了", "不要停止彈琴", "我不想停止彈琴", "繼續彈小星星", "暫停", "先停一下"):
         assert parse_hard_command(s) == (None, {}), s
+
+
+@pytest.mark.parametrize("text,expect", [
+    ("7L 停止唱歌", "stop_singing"), ("別唱了", "stop_singing"), ("7L 不要唱了啦！", "stop_singing"),
+    ("不唱了", "stop_singing"), ("歌先停一下", "stop_singing"), ("停止翻唱", "stop_singing"),
+    ("他說別唱了", None), ("不要停止唱歌", None),                       # 轉述、雙重否定不攔
+    ("停止彈琴", "pe.stop_virtual_piano"), ("唱晴天", "auto_sing_song"),
+])
+def test_stop_singing_is_a_hard_command(text, expect):
+    """「停止唱歌」以前沒人接，子智能體把它解讀成點一首叫《停止》的歌（2026-10-25 實機）。"""
+    assert parse_hard_command(text)[0] == expect
+
+
+def test_stop_singing_is_declared_and_owner_only():
+    from core.hard_command import STAGE_CONTROL_TOOLS
+    from core.tool_schema import INTERACTIONS_TOOLS
+    assert "stop_singing" in [t["name"] for t in INTERACTIONS_TOOLS]      # 子智能體解讀時有正確的工具可選
+    assert "stop_singing" in STAGE_CONTROL_TOOLS                          # 觀眾一句「別唱了」不能把歌停掉

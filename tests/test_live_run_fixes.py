@@ -107,7 +107,8 @@ def _run_executor(text, target, recent=None):
     """跑 background_tool_executor（假的派發），回 (結果, 派發過的工具)。"""
     import asyncio
     import collections
-    from core.hard_command import parse_hard_command, build_slip_text, PIANO_CONTROL_TOOLS, split_original_request
+    from core.hard_command import (parse_hard_command, build_slip_text, PIANO_CONTROL_TOOLS, STAGE_CONTROL_TOOLS,
+                                   split_original_request)
     dispatched = []
 
     async def execute_tool_dispatch(fn, args, **k):
@@ -118,7 +119,8 @@ def _run_executor(text, target, recent=None):
 
     ns = {"asyncio": asyncio, "time": time, "log_print": lambda *a, **k: None, "log_swallowed": lambda: None,
           "parse_hard_command": parse_hard_command, "build_slip_text": build_slip_text,
-          "PIANO_CONTROL_TOOLS": PIANO_CONTROL_TOOLS, "split_original_request": split_original_request,
+          "PIANO_CONTROL_TOOLS": PIANO_CONTROL_TOOLS, "STAGE_CONTROL_TOOLS": STAGE_CONTROL_TOOLS,
+          "split_original_request": split_original_request,
           "execute_tool_dispatch": execute_tool_dispatch, "_song_ack": _song_ack,
           "is_live_brain_active": lambda: False, "LIVE_API_SYSTEM_PROMPT_QUEUE": collections.deque(),
           "_HARD_CMD_RECENT": {} if recent is None else recent, "_HARD_CMD_DEDUPE_SEC": 20.0}
@@ -137,6 +139,10 @@ def test_viewers_cannot_control_the_piano():
     assert hit is False and sent == []
     (hit, tool, _), sent = _run_executor("7L 別彈了", "dad")
     assert hit is True and tool == "pe.stop_virtual_piano" and sent == ["pe.stop_virtual_piano"]
+    (hit, _, _), sent = _run_executor("7L 別唱了", "audience")               # 停止唱歌也只聽老爸的
+    assert hit is False and sent == []
+    (hit, tool, _), sent = _run_executor("7L 別唱了", "dad")
+    assert hit is True and tool == "stop_singing" and sent == ["stop_singing"]
 
 
 def test_pause_resume_pause_is_not_blocked_by_dedupe():

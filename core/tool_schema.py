@@ -283,6 +283,16 @@ INTERACTIONS_TOOLS = [
     },
     {
         "type": "function",
+        "name": "stop_singing",
+        "description": "停止 7L 正在唱的歌（老爸說『停止唱歌』『別唱了』『不要唱了』『歌停一下』時用）。這不是點歌：不要把『停止』『暫停』當成歌名去呼叫 auto_sing_song。",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": []
+        }
+    },
+    {
+        "type": "function",
         "name": "list_piano_sheets",
         "description": "【只有當老爸或觀眾明確要求『列出所有曲庫/查看歌單』時才調用】列出所有內建鋼琴曲目清單。注意：若只是問『這首是什麼歌』，直接回答當前曲名即可，無需列出全部曲庫。",
         "parameters": {

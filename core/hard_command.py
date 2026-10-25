@@ -296,15 +296,26 @@ _PIANO_CONTROLS = (
 )
 PIANO_CONTROL_TOOLS = frozenset(t for t, _ in _PIANO_CONTROLS)
 
+# —— 翻唱控制：停止唱歌（2026-10-25）——
+# 以前只有鋼琴有 CPU 直接接；「停止唱歌」沒人接，交給子智能體又被解讀成點一首叫《停止》的歌（實機）。
+# 規則同鋼琴：句尾剛好是這幾句、前面只能是祈使前綴；「他說別唱了」「不要停止唱歌」不攔。
+_SING_OBJ = r'(?:唱歌|翻唱|演唱|唱)'
+_SING_CONTROLS = (
+    ("stop_singing", re.compile(
+        r'(?:(?:停止|停掉|先停|關掉)' + _SING_OBJ + r'|(?:別|不要|不用)再?唱了|不唱了|歌(?:先)?(?:停|停掉|停止)(?:一下|下來)?)了?$')),
+)
+SING_CONTROL_TOOLS = frozenset(t for t, _ in _SING_CONTROLS)
+STAGE_CONTROL_TOOLS = PIANO_CONTROL_TOOLS | SING_CONTROL_TOOLS   # 只聽老爸的（觀眾一句「別唱了」不能把歌停掉）
 
-def extract_piano_control(text: Optional[str]) -> Optional[str]:
-    """停止／暫停／繼續鋼琴的祈使句 → 工具名；其他回 None。"""
+
+def extract_piano_control(text: Optional[str], controls=_PIANO_CONTROLS) -> Optional[str]:
+    """停止／暫停／繼續鋼琴的祈使句 → 工具名；其他回 None。controls 換成 _SING_CONTROLS 就是翻唱控制。"""
     s = (text or "").strip()
     for _ in range(2):  # 「別彈了啦！」：標點和語氣詞可能交錯
         s = _TRAIL_MODAL.sub('', _TRAIL_JUNK.sub('', s))
     if not s:
         return None
-    for tool, pat in _PIANO_CONTROLS:
+    for tool, pat in controls:
         m = pat.search(s)
         if m and _LEAD_OK.match(s[:m.start()]):
             return tool
@@ -314,7 +325,7 @@ def extract_piano_control(text: Optional[str]) -> Optional[str]:
 def parse_hard_command(text: Optional[str]) -> Tuple[Optional[str], Dict]:
     """B 架構入口：把純文字拆成 (工具名, 參數)。
 
-    只認點歌（唱歌/彈琴）和鋼琴的停止／暫停／繼續。表情不歸 CPU（交還主腦/A 架構，避免誤觸搶戲）。
+    只認點歌（唱歌/彈琴）、鋼琴的停止／暫停／繼續、停止唱歌。表情不歸 CPU（交還主腦/A 架構，避免誤觸搶戲）。
     混用句（彈X加唱Y）走 parse_mixed_command，不在這裡處理。
     桌機助手（問Gemini）最優先判定：顯式問句不跟唱歌搶。
     回 (None, {}) 代表無硬指令，交還 A 架構（Live 主腦 → invoke_subagent → NV 解讀）。
@@ -322,7 +333,7 @@ def parse_hard_command(text: Optional[str]) -> Tuple[Optional[str], Dict]:
     ask = extract_ask_desktop(text)
     if ask:
         return "ask_desktop", {"question": ask}
-    control = extract_piano_control(text)
+    control = extract_piano_control(text) or extract_piano_control(text, _SING_CONTROLS)
     if control:
         return control, {}
     song = extract_sing_song(text)
@@ -506,6 +517,7 @@ _TOOL_LABELS = {
     "pe.pause_virtual_piano": "暫停鋼琴",
     "pe.resume_virtual_piano": "繼續彈鋼琴",
     "pe.stop_virtual_piano": "停止鋼琴",
+    "stop_singing": "停止唱歌",
     "list_piano_sheets": "列出鋼琴曲目",
     "set_piano_volume": "調整鋼琴音量",
     "set_piano_speed": "調整鋼琴速度",

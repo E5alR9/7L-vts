@@ -181,7 +181,7 @@ from core.utils import (
 )
 from core.identity import is_owner_account, claims_owner_identity
 import core.stage_state as stage
-from core.hard_command import parse_hard_command, build_slip_text, display_requester, parse_slip_for_song, strip_blob_noise, sanitize_search_query, rescue_claim, split_original_request, PIANO_CONTROL_TOOLS
+from core.hard_command import parse_hard_command, build_slip_text, display_requester, parse_slip_for_song, strip_blob_noise, sanitize_search_query, rescue_claim, split_original_request, PIANO_CONTROL_TOOLS, STAGE_CONTROL_TOOLS
 from core.subagent_router import resolve_subagent_chain
 from core.db import *
 from core.live_timer_sensor import live_timer_hub
@@ -7623,9 +7623,9 @@ async def background_tool_executor(user_text: str, target: str = "dad", requeste
         #    2026-10-09：舊版只認關鍵字「唱」，把「你可以唱歌了？」抽成歌名「歌了？」、
         #    「? 又我唱了????」抽成「了????」，兩次都真的開跑 YT-DLP。改走 parse_hard_command。
         fn_name, fn_args = parse_hard_command(user_text)
-        if fn_name in PIANO_CONTROL_TOOLS and target == "audience":
-            # 觀眾留言也會進 CPU：鋼琴的停止／暫停／繼續只聽老爸的，不然一句「別彈了」就能把鋼琴收掉
-            log_print(f"🛑 [CPU 硬體直連] 觀眾不能控制鋼琴，不執行：{user_text[:30]}")
+        if fn_name in STAGE_CONTROL_TOOLS and target == "audience":
+            # 觀眾留言也會進 CPU：鋼琴的停止／暫停／繼續、停止唱歌只聽老爸的，不然一句「別彈了」就能把鋼琴收掉
+            log_print(f"🛑 [CPU 硬體直連] 觀眾不能控制鋼琴／唱歌，不執行：{user_text[:30]}")
             return False, "", {}
 
         # 搜尋指令：CPU 層不處理（搜尋是資訊型工具、結果無處可去，只能燒 API；
