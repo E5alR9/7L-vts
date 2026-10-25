@@ -1,6 +1,6 @@
 # ARCHITECTURE — 7L 整體架構
 
-> 2026-10-25 整理，10-26 更新。想知道「某件事在哪裡處理」先看這頁；AI 供應商與配額看 [AI_SOURCES.md](AI_SOURCES.md)，開播步驟看 [GETTING_STARTED.md](GETTING_STARTED.md)。
+> 2026-10-25 整理，10-26 更新（第三輪：REST 大腦、舊 STT 備援）。想知道「某件事在哪裡處理」先看這頁；AI 供應商與配額看 [AI_SOURCES.md](AI_SOURCES.md)，開播步驟看 [GETTING_STARTED.md](GETTING_STARTED.md)。
 
 ## 1. 一則輸入的旅程
 
@@ -13,12 +13,15 @@ flowchart TD
     D --> S[看板＋哨兵<br/>streamer_mind_loop_worker]
     D --> L[Live 主腦<br/>continuous_live_worker・gemini-3.8-live]
     S -- 紙條 --> L
+    S -. 沒有 Live 主腦時 .-> R[REST 大腦<br/>core/rest_brain・rest_slip_worker]
+    R -- invoke_subagent --> T
     H --> T[工具派發<br/>execute_tool_dispatch]
     L -- invoke_subagent --> T
     T --> P[鋼琴 piano_engine]
     T --> V[翻唱 auto_cover_pipeline]
     T --> W[搜尋・計時・看片・作曲…]
     L --> O[說話與舞台<br/>TTS → 播放 → VTS 對嘴・表情]
+    R --> O
     P --> O
     V --> O
 ```
@@ -26,15 +29,16 @@ flowchart TD
 1. **進來**：所有輸入都丟進同一個 `input_queue`，由 `chat_processor_worker` 用 `core/input_sources.classify()` 分流：
    `operator`（老爸）／`audience`（觀眾彈幕）／`owner_interject`（主持插話）／`ambient`（點讚進房）／`unknown`。休眠中誰能叫醒她由 `sleep_wake_decision()` 決定。
 2. **CPU 硬指令**（`core/hard_command.parse_hard_command`）：點歌、彈琴、彈加唱、鋼琴停止／暫停／繼續、停止唱歌，純正則、零 API。觀眾不能控制鋼琴和停歌（`STAGE_CONTROL_TOOLS`）。
-3. **老爸的話**：Live 模式直通 Live 主腦；Live 沒連上時走 REST 備援大腦 `fetch_ai_response`（多模型梯隊＋金鑰輪替）。
-4. **觀眾的話**：寫進看板 `STREAMER_MIND_BOARD`，`judge_subconscious_intent_via_live_api`（哨兵）判斷要不要回，要回就把紙條塞給 Live 主腦。
+3. **老爸的話**：麥克風由 Live 主腦的原生音訊直接聽；打字、`chat_input.txt`、直播間老爸帳號由 `process_chat_message` 寫進記憶、跑 CPU 硬指令、遞紙條（`send_brain_slip`，老爸身分）。
+   - Live 主腦斷線超過 `LIVE_FALLBACK_AFTER_SEC`（8 秒）時，麥克風改走舊 STT `mic_worker`（Google 語音辨識＋聲紋＋回音過濾），聽到的話一樣遞紙條；Live 回來就交回。
+4. **觀眾的話**：寫進看板 `STREAMER_MIND_BOARD`，`judge_subconscious_intent_via_live_api`（哨兵）判斷要不要回。要回時：Live 主腦在就把紙條塞給它；不在（`use_rest_brain()`：斷線太久，或 **VTuber 模式本來就不開 Live 主腦**）就用看板專用的提示詞叫 `rest_chat` 直接回。
 5. **Live 主腦**只有一個工具 `invoke_subagent`（非阻塞）。
    - 舞台動作（彈、唱、彈加唱、停／暫停／繼續鋼琴、停歌、看片）她直接填 `action`＋`song`／`url`，`structured_stage_command` 轉成工具，交給 `run_stage_commands` 執行。權限、去重、應答都在 `run_stage_commands`，CPU 硬指令也走它。
    - 她自己要彈唱時，`stage_request_unasked` 先對照觸發這輪的那句人話有沒有人點歌：Live 續接的對話會讓她翻出舊點歌。
    - 其他事填 `other`：先試 CPU 硬指令，不中再交 NV／Gemini 解讀（`nv_interpret_task`），最後由 `execute_tool_dispatch` 執行。要看螢幕的交給視覺大腦。
    - 用誰的權限、替誰做事，照 `_BRAIN_INPUT_ORIGIN`（觸發這輪的是老爸還是觀眾、是誰）。
 6. **給主腦的資料**：
-   - 要她回話的走 `send_brain_slip`，是唯一出口，送出那一刻記下是誰觸發的。
+   - 要她回話的走 `send_brain_slip`，是唯一出口，送出那一刻記下是誰觸發的。紙條有兩個收件人：Live 主腦在線時是 `send_system_prompts_to_live`；沒有 Live 主腦時是 `rest_slip_worker`，交給 REST 大腦（系統提示詞跟 Live 同一份 `build_brain_system_prompt`，另帶最近對話和鋼琴狀態；可以呼叫同一個 `invoke_subagent`，子智能體本體是共用的 `_run_subagent_task`）。
    - 不用她回話的背景資料（YouTube 伴看筆記）走 `add_brain_context`，用 `send_client_content(turn_complete=False)` 放進對話，不觸發回話，也不會打斷她。
 7. **出去**：
    - 要說的話依序經過 `speech_queue` → `speech_queue_worker` → `play_voice_complete`。
@@ -48,16 +52,17 @@ flowchart TD
 | 協調者 | `vts_7L_test.py` | 啟動約 30 個背景工作、對話分派、Live 主腦連線、REST 備援大腦、子智能體、工具派發、說話播放 | 只做串接；能獨立的功能搬去 services／core |
 | 功能 | `services/` | 鋼琴、翻唱、TTS、VTS、後台、彈幕監聽、搜尋… | 需要主程式的東西用參數或 `bind_host` 明確交進來，不從 `__main__` 撈 |
 | 共用底層 | `core/` | 金鑰與模型、記憶、提示詞、工具宣告、硬指令、輸入分類、身分、語言判斷 | 不 import 主程式 |
-| 插件 | `mic_live_plugin/`、`realtime_tasks/` | 麥克風語意分析、聲紋、桌面視窗感測；任務狀態與 Firebase 同步 | 同 services |
+| 插件 | `mic_live_plugin/` | 麥克風語意分析、聲紋、桌面視窗感測 | 同 services |
 
 ### core/
 
 | 模組 | 內容 |
 |---|---|
-| `llm_engine.py` | 模型名稱登記（`LIVE_MODEL`、`FAST_TEXT_MODEL`…，換模型只改這裡）、Gemini 金鑰池分工（觀眾哨兵／麥克風／視覺／Proactive／主腦）、(key, model) 冷卻表、通道與模型熔斷鎖（存 `data/api_locks_cache.json`）、限流回報 `report_gemini_key_error`、Live 單次呼叫 `live_one_shot`、模型梯隊 |
+| `rest_brain.py` | REST 大腦的那一次呼叫 `rest_chat`：純文字先 Groq，不行輪 Gemini (key, model)；可帶工具、聲音、圖片，整段限時。看板 REST 回覆、紙條 REST 大腦、看畫面／照鏡子（`describe_images`）共用 |
+| `llm_engine.py` | 模型名稱登記（`LIVE_MODEL`、`FAST_TEXT_MODEL`、`REST_BRAIN_MODELS`…，換模型只改這裡）、Gemini 金鑰池分工（觀眾哨兵／麥克風／視覺／Proactive／主腦）、(key, model) 冷卻表、通道與模型熔斷鎖（存 `data/api_locks_cache.json`）、限流回報 `report_gemini_key_error`、Live 單次呼叫 `live_one_shot`、模型梯隊 |
 | `memory.py` | 統一記憶（對話＋思考雙軌）、長期記憶、觀眾檔案、看板 |
 | `prompts.py` | 系統提示詞、TTS 前的文字清洗 `TextCleanEngine` |
-| `tool_schema.py` | 給模型看的工具宣告：`INTERACTIONS_TOOLS`、`GENAI_TOOLS`、`LIVE_API_TOOLS` |
+| `tool_schema.py` | 給模型看的工具宣告：`INTERACTIONS_TOOLS`／`GENAI_TOOLS`（子智能體）、`LIVE_API_TOOLS`／`REST_BRAIN_TOOLS`（主腦唯一的 `invoke_subagent`，Live 版非阻塞）、`resolve_tool_name`（模型回的工具名對回宣告） |
 | `hard_command.py` | CPU 硬指令、彈加唱拆解、主腦的結構化舞台動作、翻舊點歌檢查、給主腦的紙條文案 |
 | `input_sources.py` | 輸入來源分類、休眠喚醒規則 |
 | `groq_router.py` | Groq 文字快線（多金鑰、梯隊降級、OpenAI 格式工具轉換） |
@@ -89,8 +94,9 @@ flowchart TD
 
 ## 4. 背景工作（`main()` 啟動）
 
-- **輸入**：`text_file_listener_worker`、`console_keyboard_input_worker`、TikTok／Twitch／YouTube 監聽；麥克風走 Live 主腦的原生音訊串流（`mic_worker` 這條舊 STT 路程式碼還在，但 main() 目前沒啟動，見 [REDESIGN.md](REDESIGN.md) H-1）
-- **大腦**：`continuous_live_worker`（Live 主腦）、`instinct_live_worker`（身體本能反射）、`chat_processor_worker`、`streamer_mind_loop_worker`、`idle_chatter_worker`
+- **輸入**：`text_file_listener_worker`、`console_keyboard_input_worker`、TikTok／Twitch／YouTube 監聽；麥克風平常走 Live 主腦的原生音訊串流，Live 斷線超過 8 秒才由 `mic_worker`（舊 STT）收
+- **大腦**：`continuous_live_worker`（Live 主腦）、`rest_slip_worker`（沒有 Live 主腦時接紙條）、`instinct_live_worker`（身體本能反射）、`chat_processor_worker`、`streamer_mind_loop_worker`、`idle_chatter_worker`
+- 操作者輸入關閉時（VTuber 模式強制關）不啟動 Live 主腦、本能腦、`mic_worker`、打字監聽：觀眾留言全由看板 REST 回覆、紙條全由 REST 大腦接（見 REDESIGN P）
 - **說話與舞台**：`speech_queue_worker`、`expression_keeper_worker`、`busy_expression_worker`、`autonomous_wander_worker`、`ai_face_tracking_loop`、`anti_watermark_worker`、`vts_health_worker`
 - **感知**：`screen_capture_worker`、`peripheral_vision_worker`、`system_audio_worker`、`mic_volume_worker`
 - **鋼琴與翻唱**：鋼琴心跳接收、存活看門狗、啟動時恢復狀態；原創曲資料夾監看
@@ -98,7 +104,7 @@ flowchart TD
 
 ## 5. 還沒理順的地方
 
-- 主程式還有幾個大函式跟全域狀態綁得很緊：`continuous_live_worker`（約 440 行）、`fetch_ai_response`（約 450 行）、`streamer_mind_loop_worker`（約 300 行）、`process_chat_message`（約 340 行）、`play_voice_complete`（約 290 行）。要拆得先把散在模組層的狀態收成物件。
+- 主程式還有幾個大函式跟全域狀態綁得很緊：`continuous_live_worker`（約 390 行）、臉部追蹤（約 310 行）、`play_voice_complete`（約 290 行）、`execute_tool_dispatch`／`execute_actions`（各約 220 行）、`streamer_mind_loop_worker`（約 200 行）。要拆得先把散在模組層的狀態收成物件（REDESIGN C）。
 - `services/piano_engine.py` 將近 3,000 行，點曲意圖、排隊、電台、作曲、合奏都在一起。
 - 主程式內部的段落編號（`# 1.`、`# 12.` 那些）跟實際內容已對不上，找東西請用函式名稱搜。
 
@@ -113,3 +119,10 @@ flowchart TD
 - **穩定性**：背景任務統一走 `spawn()`。外部 AI 呼叫加總時限。鋼琴新場次只有 `_take_stage` 一個入口。VTS 沒開時鋼琴照彈。
 - **整理**：模型名稱集中到 `core/llm_engine`。翻唱、看片模組改由 `bind_host` 注入。後台手動工具走同一個派發器。
 - 主檔 9,007 行。
+
+**2026-10-26 第三輪**（[REDESIGN.md](REDESIGN.md) 的 H）：
+- **舊 STT 接回**：Live 主腦斷線超過 8 秒時麥克風改走 `mic_worker`，回來就交回。
+- **REST 大腦**：`core/rest_brain.py` 一個呼叫函式，三條 REST 路（看板備援、老爸 REST 路、觀眾 Live 管道）收成一條；紙條在沒有 Live 主腦時由 `rest_slip_worker` 接。發現 VTuber 模式不開 Live 主腦，看板 REST 回覆其實是觀眾回覆的主要路。
+- **刪掉**：`fetch_ai_response`（看畫面、照鏡子改走 `describe_images`）、老爸 REST 路、觀眾 Live 管道、`realtime_tasks/`、一串只有舊 REST 路在用的函式。
+- **順手修**：`chat_input.txt` 的字照老爸身分給主腦；子智能體回不存在的工具名時對回；TTS「查查」念成「喳喳」、小數點被念成空格。
+- 主檔 7,791 行。

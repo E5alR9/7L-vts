@@ -1,6 +1,6 @@
 # REDESIGN — 7L 換個想法的地方
 
-> 2026-10-26 看完整體後寫的構想書，**還沒動手**。前兩輪（見 [ARCHITECTURE.md](ARCHITECTURE.md) 第 6 節）是在原架構裡修；這份列的是「不修了，換個做法」划算的地方。每一項都寫：現在怎麼做 → 問題的根 → 新做法 → 怎麼驗證 → 失敗怎麼退 → 規模。最後有建議順序。照老規矩：一項一個（或幾個）commit，實機測，不行就 revert。
+> 2026-10-26 看完整體後寫的構想書。**H 已做完**（2026-10-26，見第 7 節），其餘照第 3 節順序進行。前兩輪（見 [ARCHITECTURE.md](ARCHITECTURE.md) 第 6 節）是在原架構裡修；這份列的是「不修了，換個做法」划算的地方。每一項都寫：現在怎麼做 → 問題的根 → 新做法 → 怎麼驗證 → 失敗怎麼退 → 規模。最後有建議順序。照老規矩：一項一個（或幾個）commit，實機測，不行就 revert。
 
 ## 0. 體檢數字
 
@@ -18,7 +18,7 @@
 | 第一聲延遲 | 主腦轉寫一直累在 `chunk_buffer`，**只在 `turn_complete` 才送 speech_queue**；她講話時麥克風資料被換成全 0 | 模型講三句，她等三句都生成完才開口；她講話中老爸說的話整句消失（見第 6 節 L、M） |
 | 測試 | 64 個測試檔、532 通過；**0 個能 import 主檔**、10 個用 `ast` 把函式摳出來 `exec` | 主檔一 import 就拉起 pyaudio／pygame／genai，單元測試只能繞 |
 | 實機工具 | `sim_run.py`、`ft.py`、`live_up.sh` 全在 `%TEMP%\vtslint`，不在 repo | 換台機器、清暫存，實機測試方法就沒了 |
-| 沒在跑的路 | `mic_worker`（Google STT 整條路，含聲紋、回音比對，約 350 行）**main() 沒啟動**；REST 備援約 1,100 行只在 Live 斷線才走 | 前者要接回來當 Live 斷線備援（H-1）；後者只在斷線時用，卻有自己一整套 |
+| 沒在跑的路 | `mic_worker`（Google STT 整條路，含聲紋、回音比對，約 350 行）**main() 沒啟動**；REST 路約 1,100 行自成一套 | 前者要接回來當 Live 斷線備援（H-1）。後者原以為只在 Live 斷線才走，做 H 時發現 **VTuber 模式根本不開 Live 主腦**，看板的 REST 回覆是觀眾回覆的主要路（見 P） |
 
 ## 1. 目標長相
 
@@ -186,15 +186,28 @@ class Speaker:
 
 **退路**：每條線一個開關常數。
 
-### H. 死路清掉、備援瘦身
+### H. 死路清掉、備援瘦身（2026-10-26 已完成）
 
-這項是「少寫程式」，但最省以後的維護，所以放第一。
+這項是「少寫程式」，但最省以後的維護，所以放第一。實際做法和結果見第 7 節。
 
 1. **mic_worker 整條路**（`mic_worker`、`listen_once_fast`、聲紋 verify、`is_7l_voice_echo`、`is_computer_audio_echo`、`GLOBAL_SPEECH_AUDIO_BUFFER` 波形回音比對，約 350 行）程式碼完整還在，但 `spawn(mic_worker(...))` 早在 commit 4a3c539 就被拿掉，main() 還建著 `recognizer` 卻沒人用；麥克風現在只走 Live 原生音訊。**已決定（2026-10-26）：接回來當 Live 斷線時的舊 STT 架構**——`mic_worker` 只在 `is_live_brain_active()` 為假時收音，Live 一回來就停（不然同一句話 Live 聽一次、STT 再送一次）。順手把裡面 5 個條件的「正在講話」判斷換成 Stage（見 C）。ARCHITECTURE.md 第 4 節同步改。
 2. **REST 備援**（`fetch_ai_response` 449、`call_gemini_live_audience_reply` 300、`process_chat_message` 後半 ~250、`_build_gemini_contents`、搜尋二階段整合、寫死的點歌罐頭句，約 1,100 行）只在 Live 斷線才走，卻有自己的一套：十幾個工具的 `GENAI_TOOLS`、多通道競速、兩階段搜尋、另一份記憶注入邏輯。新做法：**備援腦只做一件事**——一個 REST 呼叫，產一段話 + 最多一個等價於 `invoke_subagent` 的結構化動作；執行走和 Live 一樣的 `run_stage_commands`／`nv_interpret_task`。一支 ~120 行的 `core/rest_brain.py`，刪 ~900 行。Live 斷線時觀眾由同一支接（哨兵 → 備援腦 → Speaker），`call_gemini_live_audience_reply` 整個不要。
 3. 順手：`TIKTOK_CHATROOM_MEMORY`（只剩上面那個讀者）、`GENAI_PROACTIVE_TOOLS`、`execute_tool_dispatch` 裡只有 REST 路會到的分支，一起看。
 
 **退路**：一個 commit 一個 revert。
+
+### P. VTuber 模式也開 Live 主腦（要老爸決定）
+
+**現在**：`continuous_live_worker` 跟麥克風一起放在 `if operator_input_enabled():` 裡，VTuber 模式（`OPERATOR_INPUT` 強制關）**整場沒有 Live 主腦**：
+- 觀眾留言靠看板哨兵 → REST 大腦（Groq／Gemini 一次呼叫）回，品質和延遲都跟伴侶模式的 Live 主腦不一樣，兩種模式等於兩個 7L。
+- 給主腦的紙條（唱完謝幕、點歌失敗、子智能體結果）以前在 VTuber 模式全部堆在佇列裡沒人收；H 之後改由 REST 大腦接，至少會講了。
+- 這不像是刻意的：2026-10-07 把 `mic_worker` 換成 `continuous_live_worker` 時直接放在麥克風原本的位置（「操作者輸入」區塊）。
+
+**新做法**：VTuber 模式也開 Live 主腦，但**不送麥克風**（`send_mic_audio` 在 VTuber 模式一律送靜音，跟現在麥克風開關關掉時一樣），只吃紙條。兩種模式就是同一個主腦、同一套行為；REST 大腦回到真正的備援。
+
+**風險**：VTuber 模式的人設、提示詞是不是要跟伴侶模式分開（現在看板 REST 提示詞是專為直播間調過的，Live 主腦的提示詞偏老爸）；Live 額度多一條常駐線。
+
+**驗證**：VTuber 模式實機：觀眾留言、點歌、謝幕都由 Live 主腦接；Live 斷線時看板照樣走 REST。
 
 ### I. 主檔只剩組裝：可 import、可測、可重播
 
@@ -257,6 +270,7 @@ class Speaker:
 | A 要不要等 B 一起上？ | 都可以 → 照順序：B 先量半天，A 再上 | 第 3 節 |
 | **（待決定）她講話時老爸插話，要能聽到嗎？怎麼做？** | 見第 6 節 M 的三個選項 | M |
 | **（待勾選）第 6 節 N 列的功能，哪些還在用？** | 還用的留、不用的刪、不確定的加日誌看一個月 | N |
+| **（待決定）VTuber 模式要不要也開 Live 主腦（不收麥克風）？** | 見 P | P |
 
 ## 6. 第二遍：換四個角度再看（2026-10-26）
 
@@ -285,7 +299,7 @@ class Speaker:
 
 ### N. 只在 Live 斷線才活的子系統，和實測沒碰過的功能
 
-- `realtime_tasks/task_manager.py`（333 行）：`get_realtime_summary()` **只有 REST 路在讀**；每 10 秒把狀態同步到 Firebase。Live 模式下它只在燒 Firestore。→ 併進 H：Firestore 純備份後，這個同步變成 D 的同步 worker 的一部分；summary 併進 `rest_brain` 的 prompt 組裝。
+- `realtime_tasks/task_manager.py`（333 行）：`get_realtime_summary()` **只有 REST 路在讀**；每 10 秒把狀態同步到 Firebase。Live 模式下它只在燒 Firestore。→ **已在 H 拿掉**（程式裡沒有任何讀者，Firestore 只當備份）。
 - **日誌掃描**：主檔 214 種日誌標籤，78 份實機日誌（22 MB）裡 **123 種從沒出現**。錯誤路徑沒出現是好事；但這些是功能：斷線救援、麥克風控制（「關麥／開麥」關鍵字）、認人、Discord、時事情報中樞、計時器、鏡子、搜網專家、自主甦醒、自主彈琴、電擊／獎勵、哨兵點名應答、Gemini 意圖確認（彈琴中觀眾點歌）、TikTok 降級、老爸幕後指令。**實測沒碰過不等於沒人用**（這些日誌是測試，不是真開台），列出來是請老爸勾：還用的留、不用的刪、不確定的加日誌看一個月再說。
 
 ### O. 無硬體乾跑 + 情境測試（從 I 提前）
@@ -298,3 +312,26 @@ class Speaker:
 
 - **每個模型呼叫點一個計數器**（主腦、哨兵、導演、本能、視覺、子智能體、Groq）：每小時幾次、幾個 token、幾次 429，後台一張表。現在只有 `TOTAL_API_CALLS` 一個總數和 CMA 的金鑰健康；**閒著一小時燒多少，沒人知道**。閒置期固定在跑的：餘光哨兵 5～20 秒一次（每次新建 WebSocket）、系統音辨識、閒聊檢查 30 秒一次、導演每句 ≥ 7 字問一次。
 - **紙條分類審計**：哪些 `send_brain_slip` 其實不用她回話（例：`[環境動態]` 畫面變了要不要每次都回？），改走 `add_brain_context`，她就少講廢話、少燒 TTS。
+
+## 7. 進度紀錄
+
+### 2026-10-26：H 完成
+
+一項一個 commit，每項跑完整測試（532 → 554 通過）和實機。主檔 9,009 → 7,791 行，`realtime_tasks/` 整個拿掉，新增 `core/rest_brain.py`（105 行）。
+
+| commit | 做了什麼 | 實機 |
+|---|---|---|
+| H-1 | 舊 STT（`mic_worker`）接回：Live 主腦斷線超過 8 秒才收音，回來就交回。`chat_input.txt` 打的字改照老爸身分遞紙條（以前被看板當觀眾留言，只有觀眾權限） | 切換正常；麥克風開關在老爸設定裡是關的，沒有實際收音 |
+| H-2a | `core/rest_brain.py`：Groq 先、Gemini (key, model) 輪替、整段限時。看板備援改用它；Live 在不在改看「斷線多久」（以前看 `GLOBAL_LIVE_SESSION`，斷線後不會清掉，Live 斷多久都在遞紙條、沒人回） | Live 停掉時觀眾留言由 REST 回 |
+| — | 看板 REST 提示詞補「不跳戲」（她說過「我是 AI 沒有嘴巴」） | 同上，改說想吃草莓蛋糕 |
+| H-2b | 沒有 Live 主腦時紙條由 `rest_slip_worker` 接，系統提示詞跟 Live 同一份，可以呼叫同一套子智能體。老爸的話一律走紙條；刪掉老爸 REST 路（影子大腦＋串流嘴巴）和觀眾 Live 管道（300 行，沒有路會走到） | Live 真的停掉：打字聊天、謝幕、點歌、收鋼琴都由 REST 接；接回 Live 照常 |
+| — | REST 大腦帶工具改 3.6-flash 打頭（實測 3/3 會叫子智能體；3.5-lite 0/3）。子智能體回不存在的工具名（`search_query`）時對回 `search_google` | REST 查天氣講出結果、計時、聊天正常 |
+| — | TTS：「查查」不再念成「喳喳」；小數點念「點」（0.21 以前念成「零 二十一」） | GPT-SoVITS 前端確認音素 |
+| H-2c | 看畫面、照鏡子改走 `rest_chat`（`describe_images`），刪 `fetch_ai_response`（450 行）和舊 REST 路留下的孤兒 | 照鏡子 4 秒；看畫面同一條路，沒實機看螢幕 |
+| H-3 | 拿掉 `realtime_tasks`：沒有讀者，只剩每 10 秒推 Firestore、開機先等它 | 開機、彈琴、觀眾留言、收鋼琴正常 |
+
+**做 H 時看到、還沒處理的**：
+- VTuber 模式沒有 Live 主腦 → 新增 P，要老爸決定。
+- 主腦把 `[TOOL:MIRROR]` 照完鏡子又說一次，會再照一次（看畫面有防重看，照鏡子沒有）。A 改成工具後一起處理。
+- 「老爸」有時被寫成「妳」（模型用字），「開心」偶爾被寫成韓文字「開심」導致表情對不上。
+- 點歌時 CPU 罐頭應答＋主腦應答，常講兩次（Live 模式本來就這樣）。
