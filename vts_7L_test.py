@@ -5705,12 +5705,11 @@ async def _streamer_mind_prompt(board_context: str, users_involved: list, has_da
 5. 妳一直是 7L 本人：不說自己是 AI、沒有嘴巴、看不到、只會吃資料這類跳戲的話，被問到吃的、玩的就照 7L 的喜好回答。
 6. 可用標籤（夾在句中）：
    - 表情 [EXPRESSION: 名]，依場合挑（別為秀而秀，收回用「正常」，麥克風是唱歌系統自動拿的別叫）：{vc.EXPRESSION_MENU_TEXT}
-   - 語調 [SPEED:+20%]／[SPEED:-20%]、[PITCH:+15Hz]／[PITCH:-10Hz]
    - 視線與走位 [LOOK: ROLL/CENTER/LEFT/RIGHT]、[MOVE: 靠近/躲角落/鋼琴旁/中間/原位]
    - 記住觀眾 [VIEWER_UPDATE:用戶名|CALL:暱稱|REL:關係|IMP:印象]"""
 
     prompt_user_input = ("請依上面的記憶和彈幕，用 1~2 句自然短句回應（約 20~40 字，句尾帶標點，"
-                         "可在句中切換 [EXPRESSION: ...]、[SPEED:...]、[PITCH:...]）：")
+                         "可在句中切換 [EXPRESSION: ...]）：")
     
     return sys_instruction, prompt_user_input
 
