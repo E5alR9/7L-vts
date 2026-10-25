@@ -310,6 +310,17 @@ def _note_brain_origin(who: str) -> None:
     _BRAIN_INPUT_ORIGIN["who"], _BRAIN_INPUT_ORIGIN["ts"] = who, time.time()
 
 
+def _owner_text_slip(owner: str, user_input: str) -> str:
+    """老爸打字轉給 Live 主腦的紙條。YouTube 伴看中就把影片筆記一起附上：
+    筆記以前只在 REST 備援大腦那條路注入，Live 主腦看不到，問她影片在演什麼只能靠舊記憶亂接（2026-10-25 實機）。"""
+    slip = f"[黑板同步] {owner}傳來文字訊息：{user_input}"
+    if yt_comp.IS_YT_COMPANION_ACTIVE:
+        ctx = yt_comp.get_yt_memory_context()
+        if ctx:
+            slip += "\n" + ctx
+    return slip
+
+
 async def execute_tool_dispatch(fn_name: str, fn_args: dict, caller_target: str = "", caller_user: str = "") -> str:
     """集中式工具調用派發器 (100% 執行底層動作，完全由 AI 自由發揮台詞，絕不硬塞罐頭文字)"""
     #  觀眾不可觸發破壞性工具（清記憶/改人格/睡眠/開瀏覽器/麥克風），也不能停鋼琴、停歌
@@ -7609,7 +7620,7 @@ async def _desktop_dad_reply(vts, input_queue, user_input: str, owner: str = "�
         except Exception:
             pass
         try:
-            LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait(f"[黑板同步] {owner}傳來文字訊息：{user_input}")
+            LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait(_owner_text_slip(owner, user_input))
             _note_brain_origin("dad")
         except Exception:
             log_swallowed()
@@ -7678,7 +7689,7 @@ async def process_chat_message(vts, input_queue, user_input: str, user_audio_b64
                 log_print("📱 [桌機代答] 純閒聊走免費桌面版（省 Live 生成）。")
                 return
             try:
-                LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait(f"[黑板同步] {owner}傳來文字訊息：{user_input}")
+                LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait(_owner_text_slip(owner, user_input))
                 _note_brain_origin("dad")
             except Exception: log_swallowed()
             return

@@ -438,3 +438,17 @@ def test_nothing_is_spoken_while_asleep():
     src = _src("speech_queue_worker")
     assert "if IS_SLEEPING:" in src
     assert src.index("if IS_SLEEPING:") < src.index('set_ai_state("TALKING"')
+
+
+def test_owner_text_carries_companion_notes_to_the_live_brain():
+    """伴看筆記以前只給 REST 備援大腦，Live 主腦看不到，問影片在演什麼只能靠舊記憶亂接（2026-10-25 實機）。"""
+    import types as _t
+    main = open(os.path.join(ROOT, "vts_7L_test.py"), encoding="utf-8").read()
+    fn = next(n for n in ast.walk(ast.parse(main)) if isinstance(n, ast.FunctionDef) and n.name == "_owner_text_slip")
+    yt = _t.SimpleNamespace(IS_YT_COMPANION_ACTIVE=True, get_yt_memory_context=lambda: "【影片筆記】男生在大象前講話")
+    ns = {"yt_comp": yt}
+    exec(compile(ast.Module(body=[fn], type_ignores=[]), "f", "exec"), ns)
+    assert ns["_owner_text_slip"]("E5", "這部在演什麼") == "[黑板同步] E5傳來文字訊息：這部在演什麼\n【影片筆記】男生在大象前講話"
+    yt.IS_YT_COMPANION_ACTIVE = False
+    assert ns["_owner_text_slip"]("E5", "早安") == "[黑板同步] E5傳來文字訊息：早安"
+    assert 'f"[黑板同步] {owner}傳來文字訊息：{user_input}")' not in main   # 兩個送紙條的地方都改走它
