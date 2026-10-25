@@ -270,3 +270,19 @@ def test_background_tool_failures_are_logged(monkeypatch):
         await asyncio.sleep(0.01)
     asyncio.run(go())
     assert logged and "pe.play_virtual_piano" in logged[0] and "小星星" in logged[0] and "壞掉了" in logged[0]
+
+
+def test_brain_slips_have_one_exit_and_origin_is_noted_on_send():
+    """紙條以前 14 處各自 put_nowait，「這張是誰觸發的」又在別處另外記（2026-10-25 健檢）。"""
+    import collections
+    q = collections.deque()
+    ns = _load("send_brain_slip", "_note_brain_origin", time=time, log_swallowed=lambda: None,
+               LIVE_API_SYSTEM_PROMPT_QUEUE=type("Q", (), {"put_nowait": q.append})(),
+               _BRAIN_INPUT_ORIGIN={"who": "dad", "ts": 0.0})
+    assert ns["send_brain_slip"]("觀眾說收起鋼琴", origin="audience") is True
+    assert ns["send_brain_slip"]("[系統底層：計時到了]") is True
+    assert list(q) == [("觀眾說收起鋼琴", "audience"), "[系統底層：計時到了]"]
+    assert ns["_BRAIN_INPUT_ORIGIN"]["who"] == "dad"          # 排隊中不改身分，送出那一刻才記
+    assert MAIN.count("LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait(") == 1   # 只剩出口裡那一處
+    sender = ast.get_source_segment(MAIN, _fn("send_system_prompts_to_live"))
+    assert sender.index("send_realtime_input(text=prompt)") < sender.index("_note_brain_origin(origin)")

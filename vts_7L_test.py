@@ -312,6 +312,19 @@ def _note_brain_origin(who: str) -> None:
     _BRAIN_INPUT_ORIGIN["who"], _BRAIN_INPUT_ORIGIN["ts"] = who, time.time()
 
 
+def send_brain_slip(text: str, origin: str = "") -> bool:
+    """給 Live 主腦遞紙條的唯一出口（以前 14 處各自 put_nowait，「這張是誰觸發的」又在別處另外記）。
+    進紙條佇列，由 send_system_prompts_to_live 統一去重、加鎖、掛看門狗。
+    origin："audience"（觀眾彈幕、哨兵轉述）／"dad"（老爸打字、主持插話）；系統通知留空，不改「這輪算誰的」。
+    真的送出那一刻才記，排隊中的紙條不會搶先改掉身分。"""
+    try:
+        LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait((text, origin) if origin else text)
+        return True
+    except Exception:
+        log_swallowed()
+        return False
+
+
 def _owner_text_slip(owner: str, user_input: str) -> str:
     """老爸打字轉給 Live 主腦的紙條。YouTube 伴看中就把影片筆記一起附上：
     筆記以前只在 REST 備援大腦那條路注入，Live 主腦看不到，問她影片在演什麼只能靠舊記憶亂接（2026-10-25 實機）。"""
@@ -1234,10 +1247,9 @@ async def call_gemini_live_audience_reply(vts, input_queue, audience_user: str, 
         append_to_unified_memory(speaker=f"TikTok 觀眾「{id_display}」", target=recorded_target, content=audience_content, role="user", source="tiktok_live")
         try:
             if recorded_target == "7L":
-                LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait(f"[黑板同步] TikTok 觀眾 {id_display} 對妳說：{audience_content}")
+                send_brain_slip(f"[黑板同步] TikTok 觀眾 {id_display} 對妳說：{audience_content}", origin="audience")
             else:
-                LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait(f"[黑板同步] TikTok 觀眾 {id_display} 在聊天室說：{audience_content}")
-            _note_brain_origin("audience")
+                send_brain_slip(f"[黑板同步] TikTok 觀眾 {id_display} 在聊天室說：{audience_content}", origin="audience")
         except Exception: log_swallowed()
 
         # 整理近期聊天室動態字串
@@ -1942,7 +1954,7 @@ async def _deliver_desktop_findings(vts, input_queue, user_text: str, findings: 
             pass
         return
     try:
-        LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait(
+        send_brain_slip(
             f"[黑板同步] {owner}剛說「{user_text[:80]}」，桌面版查到：「{findings[:400]}」。"
             f"請用妳自己的口吻回覆（可愛一點，1~2句），免重複回答。")
     except Exception:
@@ -4295,7 +4307,7 @@ async def _slip_watchdog(prompt: str, sent_ts: float, timeout: float = 20.0):
         if not rescue_claim(_key, _t.time()):
             return
         try:
-            LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait(prompt)
+            send_brain_slip(prompt)
             log_print("🛟 [紙條撿回] 已重發一次，等主腦回應。")
         except Exception:
             log_swallowed()
@@ -4758,6 +4770,7 @@ async def continuous_live_worker(vts):
                                 prompt = _LIVE_SLIP_RETRY.popleft()
                             else:
                                 prompt = await LIVE_API_SYSTEM_PROMPT_QUEUE.get()
+                            prompt, origin = prompt if isinstance(prompt, tuple) else (prompt, "")
                             try:
                                 if _slip_is_dupe(prompt, time.time()):
                                     log_print("📄 [紙條去重] 10 秒內相同紙條已送過，跳過（一次點歌三張同字紙條會自斷風暴）。")
@@ -4769,6 +4782,8 @@ async def continuous_live_worker(vts):
                                 async with ws_send_lock:
                                     await session.send_realtime_input(text=prompt)
                                     sent_ts = time.time()
+                                    if origin:
+                                        _note_brain_origin(origin)
                                     LIVE_CONTEXT_MEMORY.append((sent_ts, prompt))
                                     if len(LIVE_CONTEXT_MEMORY) > 10:
                                         LIVE_CONTEXT_MEMORY.pop(0)
@@ -4784,7 +4799,7 @@ async def continuous_live_worker(vts):
                                 log_print(f"⚠️ [黑板同步] 發送失敗 ({inner_e})，訊息已退回佇列等待重連...")
                                 # 沒送成功的紙條排到最前面，並撤銷去重記帳，重連後才不會被當重複丟掉
                                 _slip_forget(prompt)
-                                _LIVE_SLIP_RETRY.appendleft(prompt)
+                                _LIVE_SLIP_RETRY.appendleft((prompt, origin) if origin else prompt)
                                 raise inner_e
                     except asyncio.CancelledError: pass
                     except Exception as e:
@@ -5179,7 +5194,7 @@ async def peripheral_vision_worker():
                     LAST_VISION_LOOK_TIME = time.time()
                     
                     try:
-                        LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait(f"[環境動態] 電腦畫面剛剛發生變化：{detailed_desc}")
+                        send_brain_slip(f"[環境動態] 電腦畫面剛剛發生變化：{detailed_desc}")
                     except Exception:
                         log_swallowed()
         except Exception:
@@ -6545,7 +6560,7 @@ async def idle_chatter_worker(vts, input_queue):
                      f"規則：像跟老爸/觀眾搭話，不要自言自語，不要重複剛講過的話；"
                      f"若在彈琴就邊彈邊隨性聊兩句。實在沒話題就輸出 [SILENCE] 保持安靜，不要硬擠。]")
             try:
-                LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait(_slip)
+                send_brain_slip(_slip)
             except Exception:
                 continue
             _IDLE_LAST_CHATTER = _now
@@ -6785,13 +6800,9 @@ async def streamer_mind_loop_worker(vts, input_queue):
                 try:
                     slip_text = f"[系統提示：背景潛意識哨兵偵測到直播間最新動態！目標：{log_target}，事件焦點：{log_focus}。剛才收到的觀眾留言：\n{board_context}\n請妳綜合上述留言，直接用語音開口回應，或呼叫對應的工具幫老爸處理！（停鋼琴、暫停鋼琴、停止唱歌只聽老爸的，觀眾要求的話俏皮帶過，不要答應。）]"
                     log_print(f"🚨 [哨兵攔截] 已將動態化作紙條塞給 Live 主腦，由主腦接管發言！(紙條：{slip_text[:50]}...)")
-                    if 'LIVE_API_SYSTEM_PROMPT_QUEUE' in globals():
-                        LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait(slip_text)
-                    else:
-                        await GLOBAL_LIVE_SESSION.send_realtime_input(text=slip_text)
                     # 只有主持插話的那批照老爸的權限；夾了任何觀眾留言就當觀眾
-                    _note_brain_origin("dad" if all(m.get("source") == "owner_interject" for m in batch_to_process)
-                                       else "audience")
+                    send_brain_slip(slip_text, origin="dad" if all(m.get("source") == "owner_interject"
+                                                                   for m in batch_to_process) else "audience")
                     for m in batch_to_process:
                         m["status"] = "read"
                     continue # 成功交棒給主腦，直接進入下一輪監控
@@ -7392,7 +7403,7 @@ async def _rescue_missed_song_requests():
                     log_print(f"⚠️ [斷線救援] 排入失敗: {_re}")
                     continue
                 try:
-                    LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait(
+                    send_brain_slip(
                         build_slip_text("auto_sing_song", {"song_name": _o_song,
                             "source_mp3": _o_src, "origin": "original"}, ""))
                 except Exception:
@@ -7422,7 +7433,7 @@ async def _rescue_missed_song_requests():
                 log_print(f"⚠️ [斷線救援] 排入失敗: {_re}")
                 continue
             try:
-                LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait(
+                send_brain_slip(
                     build_slip_text("auto_sing_song", {"song_name": song}, ""))
             except Exception:
                 log_swallowed()
@@ -7507,7 +7518,7 @@ async def background_tool_executor(user_text: str, target: str = "dad", requeste
                     _slip = build_slip_text(_tool, _args, requester_name)
                     if _slip and is_live_brain_active() and not from_brain:
                         try:
-                            LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait(_slip)
+                            send_brain_slip(_slip)
                             log_print(f"📥 [黑板同步] 透過紙條傳送給 Live 大腦: {_slip[:60]}...")
                         except Exception as _e:
                             log_print(f"⚠️ [平行副腦紙條傳遞失敗]: {_e}")
@@ -7562,7 +7573,7 @@ async def background_tool_executor(user_text: str, target: str = "dad", requeste
         # （經加鎖紙條佇列投遞，避免跟麥克風音訊流搶通道）
         if slip_text and is_live_brain_active() and not from_brain:
             try:
-                LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait(slip_text)
+                send_brain_slip(slip_text)
                 log_print(f"📥 [黑板同步] 透過紙條傳送給 Live 大腦: {slip_text[:60]}...")
             except Exception as e:
                 log_print(f"⚠️ [平行副腦紙條傳遞失敗]: {e}")
@@ -7613,8 +7624,7 @@ async def _desktop_dad_reply(vts, input_queue, user_input: str, owner: str = "�
         except Exception:
             pass
         try:
-            LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait(_owner_text_slip(owner, user_input))
-            _note_brain_origin("dad")
+            send_brain_slip(_owner_text_slip(owner, user_input), origin="dad")
         except Exception:
             log_swallowed()
         log_print("⚡ [極速直通主腦] Live 模式下，控制台訊息已轉交 Live 大腦處理。")
@@ -7682,8 +7692,7 @@ async def process_chat_message(vts, input_queue, user_input: str, user_audio_b64
                 log_print("📱 [桌機代答] 純閒聊走免費桌面版（省 Live 生成）。")
                 return
             try:
-                LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait(_owner_text_slip(owner, user_input))
-                _note_brain_origin("dad")
+                send_brain_slip(_owner_text_slip(owner, user_input), origin="dad")
             except Exception: log_swallowed()
             return
         # （註：舊的 source == "tiktok_live" 分支已刪除——tiktok_listener 只會送出
@@ -7812,9 +7821,7 @@ async def process_chat_message(vts, input_queue, user_input: str, user_audio_b64
             if source == "tiktok_dad":
                 # 老爸直播間留言的硬指令同樣先過 CPU（零成本），再遞紙條給 Live 主腦接話
                 spawn(background_tool_executor(user_input, target="dad", requester_name=current_custom_name))
-                if 'LIVE_API_SYSTEM_PROMPT_QUEUE' in globals():
-                    LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait(f"[文字輸入] {current_custom_name} (在直播間留言)：{user_input}")
-                    _note_brain_origin("dad")
+                send_brain_slip(f"[文字輸入] {current_custom_name} (在直播間留言)：{user_input}", origin="dad")
             elif source == "mic" or user_audio_b64:
                 # mic 走 A：原生音訊 Live 直接聽見，由模型自主決定是否呼叫子智能體。
                 # 這裡刻意不跑 B（CPU 無條件開火只適合乾淨文本；STT 雜訊太多會誤觸唱歌/彈琴）。

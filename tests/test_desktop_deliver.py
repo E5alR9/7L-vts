@@ -37,9 +37,11 @@ def _load(execute=None):
 
     ns = {"execute_actions": _fake_execute,
           "speech_queue": _Q(),
-          "LIVE_API_SYSTEM_PROMPT_QUEUE": _PaperBox()}
+          "LIVE_API_SYSTEM_PROMPT_QUEUE": _PaperBox(), "log_swallowed": lambda: None}
     funcs = {}
     for n in tree.body:
+        if isinstance(n, ast.FunctionDef) and n.name == "send_brain_slip":   # 紙條唯一出口
+            exec(compile(ast.Module(body=[n], type_ignores=[]), "x", "exec"), ns)
         if isinstance(n, ast.AsyncFunctionDef) and n.name == "_deliver_desktop_findings":
             exec(compile(ast.Module(body=[n], type_ignores=[]), "x", "exec"), ns)
             funcs[n.name] = ns[n.name]
