@@ -38,9 +38,8 @@ def test_timer_tag_with_tool_prefix_is_parsed():
 
 
 def test_set_timer_is_declared_to_the_model():
-    it = next(n for n in TREE.body if isinstance(n, ast.Assign) and getattr(n.targets[0], "id", "") == "INTERACTIONS_TOOLS")
-    names = [t["name"] for t in ast.literal_eval(it.value)]
-    assert "set_timer" in names
+    from core.tool_schema import INTERACTIONS_TOOLS
+    assert "set_timer" in [t["name"] for t in INTERACTIONS_TOOLS]
 
 
 def test_main_brain_reads_tool_call_messages():

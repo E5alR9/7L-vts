@@ -47,9 +47,10 @@ def test_think_reply_uses_text_after_think_not_the_thinking():
 
 
 def test_invoke_subagent_is_non_blocking():
-    src = ast.get_source_segment(MAIN, next(n for n in TREE.body if isinstance(n, ast.Assign)
-                                            and getattr(n.targets[0], "id", "") == "LIVE_API_TOOLS"))
-    assert "behavior=types.Behavior.NON_BLOCKING" in src
+    from google.genai import types
+    from core.tool_schema import LIVE_API_TOOLS
+    decl = LIVE_API_TOOLS[0].function_declarations[0]
+    assert decl.name == "invoke_subagent" and decl.behavior == types.Behavior.NON_BLOCKING
 
 
 class _FakeSession:

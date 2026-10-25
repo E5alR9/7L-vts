@@ -117,13 +117,8 @@ def test_prompts_teach_silence_not_pass():
 
 # ── 2026-10-24：google_search 拿掉、看板大腦新版 prompt ──
 def _build_decls():
-    from google.genai import types
-    tree = ast.parse(MAIN_SRC)
-    it = next(n for n in tree.body if isinstance(n, ast.Assign) and getattr(n.targets[0], "id", "") == "INTERACTIONS_TOOLS")
-    ns = {"INTERACTIONS_TOOLS": ast.literal_eval(it.value), "types": types, "log_swallowed": lambda *a, **k: None}
-    fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "build_genai_declarations")
-    exec(compile(ast.Module(body=[fn], type_ignores=[]), "x", "exec"), ns)
-    return ns["build_genai_declarations"]
+    from core.tool_schema import build_genai_declarations   # 2026-10-25 從主程式搬出來
+    return build_genai_declarations
 
 
 def test_proactive_tools_have_no_google_search():
