@@ -17,7 +17,9 @@
 #    背景工作            mic_worker、peripheral_vision_worker、system_audio_worker、speech_queue_worker、
 #                        autonomous_wander_worker、busy_expression_worker、vts_health_worker …
 #    看板與哨兵          add_to_streamer_mind_board、judge_subconscious_intent_via_live_api、streamer_mind_loop_worker
-#    子智能體            nv_interpret_task、_gemini_tool_pass、_nv_tool_pass、background_tool_executor（CPU 硬指令）
+#    子智能體            _handle_invoke_subagent、nv_interpret_task、_gemini_tool_pass、_nv_tool_pass、
+#                        background_tool_executor（CPU 硬指令）、run_stage_commands（舞台動作共用執行）
+#    給主腦的資料        send_brain_slip（要她回話）、add_brain_context（不用回話的背景資料）
 #    老爸對話            process_chat_message
 #    對話分派器          chat_processor_worker（來源分類在 core/input_sources.py）
 #    狀態面板、Discord   cma_monitor_worker、show_cma_panel、safe_discord_runner
