@@ -26,6 +26,10 @@ import time
 import asyncio
 from typing import Any, Dict, List, Optional
 
+from core.env_config import load_project_env
+
+load_project_env()   # 下面載入時就讀 GROQ 金鑰：誰先 import 本模組都一樣
+
 # ── 模型梯隊（越前面越快；可用 GROQ_TEXT_MODELS 環境變數覆寫）────────────────
 # 實測本帳號 /models 只有 11 個，其中可自由對話的僅下列 4 個
 # （whisper-large-v3*、meta-llama/llama-prompt-guard-*、canopylabs/orpheus-*

@@ -27,3 +27,21 @@ def test_language_rules_are_not_duplicated():
         src = open(os.path.join(root, f), encoding="utf-8").read()
         assert KANA_RANGE_ESCAPED not in src, f          # 假名正則只在 core.lang
         assert chr(0x3040) + "-" not in src, f
+
+
+def test_key_modules_load_dotenv_themselves():
+    """llm_engine／groq_router 載入時就讀金鑰：以前只有主程式開頭讀 .env，
+    別的入口先 import 就是空金鑰池（2026-10-25 測試時本能腦因此崩潰）。新程序、清掉環境變數再 import 驗證。"""
+    import os
+    import subprocess
+    import sys
+    from conftest import ROOT
+    env_path = os.path.join(ROOT, ".env")
+    if not os.path.exists(env_path) or "GEMINI_API_KEY" not in open(env_path, encoding="utf-8", errors="replace").read():
+        import pytest
+        pytest.skip("這台沒有含 Gemini 金鑰的 .env")
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("GEMINI_API_KEY", "GROQ_"))}
+    out = subprocess.run([sys.executable, "-c", "import core.groq_router as g, core.llm_engine as le;"
+                          "print(len(le.GEMINI_KEYS) > 0, len(g.GROQ_KEYS) > 0)"],
+                         cwd=ROOT, env=env, capture_output=True, text=True, timeout=120)
+    assert out.stdout.strip().splitlines()[-1] == "True True", out.stderr[-500:]

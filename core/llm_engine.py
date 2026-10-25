@@ -14,6 +14,9 @@ from google.genai import types
 
 import core.websocket_patch  # 🔧 修復 Live API additional_headers 相容性
 from core.utils import log_print, sys_notify
+from core.env_config import load_project_env
+
+load_project_env()   # 下面就要讀金鑰：不管誰先 import 本模組，都先把 .env 讀進來
 
 # --- LLM Engine Configuration & Standby Manager ---
 # PROVIDER: GEMINI（google-genai；視覺＋Live 全雙工；見 docs/AI_SOURCES.md）

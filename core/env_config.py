@@ -17,6 +17,22 @@ from typing import Any, Dict, List, Tuple
 ENV_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
 
 _KEY_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=")
+_PROJECT_ENV_LOADED = False
+
+
+def load_project_env() -> None:
+    """把專案根目錄的 .env 讀進環境變數（已經有的不蓋；只讀一次）。
+    llm_engine、groq_router 這些模組載入時就讀金鑰：誰先被 import，金鑰池就照當時的環境決定。
+    以前只有主程式開頭讀 .env，別的入口先 import 它們就是空金鑰池（2026-10-25 測試時本能腦因此崩潰）。"""
+    global _PROJECT_ENV_LOADED
+    if _PROJECT_ENV_LOADED:
+        return
+    _PROJECT_ENV_LOADED = True
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(ENV_PATH, override=False)
+    except Exception:
+        pass
 
 # type: str / int / float / bool / choice    restart: 是否要重啟 V7 才生效
 SETTINGS_SPECS: List[Dict[str, Any]] = [
