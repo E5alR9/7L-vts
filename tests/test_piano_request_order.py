@@ -131,3 +131,30 @@ def test_piano_does_not_wait_on_a_missing_vts(monkeypatch):
     for fn in (pe.play_piano_worker, pe.open_virtual_piano, pe.stop_virtual_piano):
         src = inspect.getsource(fn)
         assert "await move_vts_spatial(" not in src and "await set_vts_expression(" not in src, fn.__name__
+
+
+def test_every_start_goes_through_take_stage(monkeypatch):
+    """開新場次只有一個入口；彈唱同步這類不經點曲的開彈也要登記，還在判斷的舊點曲不能蓋掉它（2026-10-25 健檢）。"""
+    import inspect
+    src = inspect.getsource(pe)
+    assert src.count("PIANO_SESSION_ID += 1") == 2          # _take_stage 一處＋收鋼琴作廢一處
+    started, fetched = _setup(monkeypatch, {"不存在的測試曲": 0.3})
+    monkeypatch.setattr(pe, "_start_piano_worker", _REAL_START)            # 這裡要用真的開場
+
+    async def fake_worker(**k):
+        await asyncio.sleep(30)
+    monkeypatch.setattr(pe, "play_piano_worker", fake_worker)
+
+    async def go():
+        older = asyncio.create_task(pe.play_virtual_piano("不存在的測試曲", is_direct_song_name=True))
+        await asyncio.sleep(0.05)
+        pe._start_piano_worker("Faded", "C:/x/Faded_piano.mid", start_at=1.0)   # 彈唱同步直接開彈
+        r = await older
+        await asyncio.sleep(0.05)
+        pe.current_piano_task.cancel()
+        return r
+    r = asyncio.run(go())
+    assert pe.current_piano_song_title == "Faded" and "排入下一首" in r
+
+
+_REAL_START = pe._start_piano_worker

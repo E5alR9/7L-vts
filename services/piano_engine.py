@@ -2302,19 +2302,28 @@ import bitmidi_engine
 import onlinesequencer_engine
 import pianist_midi_engine
 
-def _start_piano_worker(song_title: str, midi_file: str, custom_sheet: str = "", start_at: float = 0.0):
-    """有譜直接開彈：開新場次、記下台上曲目、換掉舊的演奏協程。"""
-    global current_piano_task, PIANO_SESSION_ID, is_piano_active, current_piano_song_title, current_piano_midi_file
+def _take_stage(title: str, midi_file: str = "", note: str = "") -> int:
+    """開新場次的唯一入口：舊場次作廢、舊演奏協程取消、記下台上曲目、登記「有人開彈了」。
+    以前直接開彈、抓譜後開彈、多曲合奏各寫一份，只有一般點曲會登記開彈，
+    彈唱同步、合奏開彈時還在判斷的舊點曲照樣能把它們蓋掉（2026-10-25 健檢）。回傳新場次編號。"""
+    global PIANO_SESSION_ID, is_piano_active, current_piano_song_title, current_piano_midi_file, _PLAY_STARTED_SEQ, _PLAY_REQ_SEQ
     PIANO_SESSION_ID += 1
-    session_id = PIANO_SESSION_ID
     is_piano_active = True
-    current_piano_song_title = song_title
+    current_piano_song_title = title
     current_piano_midi_file = midi_file
-    _remember(f"鋼琴開始演奏《{song_title}》")
-
+    # 開彈本身也算一次最新的請求：之前進來、還在判斷的點曲都會排到後面，不會蓋掉這次
+    _PLAY_REQ_SEQ += 1
+    _PLAY_STARTED_SEQ = _PLAY_REQ_SEQ
     if current_piano_task and not current_piano_task.done():
         current_piano_task.cancel()
+    _remember(note or f"鋼琴開始演奏《{title}》")
+    return PIANO_SESSION_ID
 
+
+def _start_piano_worker(song_title: str, midi_file: str, custom_sheet: str = "", start_at: float = 0.0):
+    """有譜直接開彈：開新場次、換上新的演奏協程。"""
+    global current_piano_task
+    session_id = _take_stage(song_title, midi_file)
     current_piano_task = asyncio.create_task(
         play_piano_worker(
             song_title=song_title,
@@ -2639,16 +2648,8 @@ async def play_virtual_piano(song_name: str = "", custom_sheet: str = "", auto_r
         return "[EXPRESSION: 星星眼]"
 
     # 🌐 若指定 YouTube 或本地無樂譜 ➔ 啟動非阻塞背景線上抓譜並接續開彈協程
-    PIANO_SESSION_ID += 1
-    session_id = PIANO_SESSION_ID
-    is_piano_active = True
     final_search_query = clean_search_target if is_explicit_yt else (clean_q or "鋼琴名曲")
-    current_piano_song_title = final_search_query
-    current_piano_midi_file = ""
-    _remember(f"鋼琴準備線上搜尋演奏《{final_search_query}》")
-    
-    if current_piano_task and not current_piano_task.done():
-        current_piano_task.cancel()
+    session_id = _take_stage(final_search_query, "", note=f"鋼琴準備線上搜尋演奏《{final_search_query}》")
 
     async def async_fetch_and_play_worker(song_q: str, sid: int, c_sheet: str):
         global current_piano_song_title, current_piano_midi_file, is_piano_active
@@ -2789,11 +2790,7 @@ async def mashup_virtual_piano(*songs, song_name1: str = "", song_name2: str = "
     
     # 4. 啟動或透過 IPC 發送多音軌即時並發演奏指令 (真正多音軌同時執行，無數量限制！)
     global current_piano_task, PIANO_SESSION_ID, is_piano_active, current_piano_song_title, current_piano_midi_file, current_piano_process, current_ai_state
-    PIANO_SESSION_ID += 1
-    session_id = PIANO_SESSION_ID
-    is_piano_active = True
-    current_piano_song_title = titles_display
-    current_piano_midi_file = multi_path_str
+    _take_stage(titles_display, multi_path_str, note=f"鋼琴開始多曲合奏 {titles_display}")
     
     if is_piano_window_alive():
         log_print(f"🔥 [神仙打架多軌並發] 88 鍵鋼琴視窗已在桌面上，立即置頂並發送多軌並發指令: {titles_display} (共 {len(resolved_tracks)} 首曲目同時演奏)")
