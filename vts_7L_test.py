@@ -6623,6 +6623,10 @@ async def streamer_mind_loop_worker(vts, input_queue):
                 if u_id == 'dad' or is_operator(u_source):
                     has_dad_message = True
                     board_lines.append(f"- [{m['time_str']}] 【老爸】：{m['content']}")
+                elif u_source == "owner_interject":
+                    # 主持插話以前被標成「TikTok 直播觀眾「E5（主持）」」，哨兵當路人閒聊就略過了（2026-10-25 實機）
+                    _host_nm = u_name.replace("（主持）", "") or "主持"
+                    board_lines.append(f"- [{m['time_str']}] 【主持「{_host_nm}」】：{m['content']}")
                 else:
                     board_lines.append(f"- [{m['time_str']}] 【TikTok 直播觀眾「{u_name}」】：{m['content']}")
                     if u_name not in users_involved:
@@ -6655,10 +6659,16 @@ async def streamer_mind_loop_worker(vts, input_queue):
             #  階段一：由 Live API 潛意識哨兵以無限額度進行實時發言決策
             board_context_for_sentry = board_context
 
+            _host_msgs = [m for m in batch_to_process if m.get("source") == "owner_interject"]
             if _ping_focus:
                 sentry_decision = {"should_speak": True,
                                    "target": (batch_to_process[0].get("user", "") or "觀眾"),
                                    "focus": _ping_focus}
+            elif _host_msgs:
+                # 主持是特地在後台打字公開對直播間說話，一定接話，不交哨兵審
+                log_print("📢 [哨兵] 主持插話，不審直接交主腦接話。")
+                sentry_decision = {"should_speak": True, "target": _host_msgs[-1].get("user", "") or "主持",
+                                   "focus": "接主持的話：" + (_host_msgs[-1].get("content", "") or "")[:30]}
             else:
                 sentry_decision = await judge_subconscious_intent_via_live_api(memory_100_context, board_context_for_sentry)
             if not sentry_decision["should_speak"]:

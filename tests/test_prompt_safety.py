@@ -145,3 +145,12 @@ def test_streamer_prompt_v2_shape():
     assert "不用事事問老爸" in t                                     # 寫明聊天自己回
     assert "不要自己呼叫工具" in t                                   # 點歌由背景副腦處理
     assert t.count("！") <= 5
+
+
+def test_host_interject_is_labeled_as_host_and_always_answered():
+    """主持插話以前被標成 TikTok 觀眾「E5（主持）」，哨兵當路人閒聊就 PASS 了，主持講話沒人理（2026-10-25 實機）。"""
+    tree = ast.parse(MAIN_SRC)
+    fn = next(x for x in ast.walk(tree) if isinstance(x, ast.AsyncFunctionDef) and x.name == "streamer_mind_loop_worker")
+    src = ast.get_source_segment(MAIN_SRC, fn)
+    assert '【主持「{_host_nm}」】' in src
+    assert "elif _host_msgs:" in src and src.index("elif _host_msgs:") < src.index("judge_subconscious_intent_via_live_api(")
