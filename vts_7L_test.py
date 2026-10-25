@@ -6087,6 +6087,15 @@ async def speech_queue_worker(vts, input_queue):
                 
             if not text:
                 continue
+            # 睡著了就不開口：按下休眠時主腦已經在想的回覆，幾秒後才進佇列
+            # （2026-10-25 實機：狀態從 SLEEP 直接跳 TALKING，閉著眼講完一整句）
+            if IS_SLEEPING:
+                log_print(f"🌙 [語音佇列] 7L 睡著了，略過：{text[:30]}")
+                try:
+                    await asyncio.to_thread(update_subtitle, "")
+                except Exception:
+                    log_swallowed()
+                continue
             # 點歌應答說的是「答應了、準備中」：輪到它時歌已經開唱就不用講了
             # （2026-10-25 實機：應答開唱後才輪到合成，主腦也早就答應過一次）
             if isinstance(item, dict) and item.get("skip_if_singing") and is_singing():

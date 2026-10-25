@@ -431,3 +431,10 @@ def test_main_crash_exits_instead_of_lingering():
     tail = src[src.index("await _status_bar_loop()"):]
     handler = tail[tail.index("except Exception as e:"):]
     assert "shutdown_7l()" in handler[:600]
+
+
+def test_nothing_is_spoken_while_asleep():
+    """按下休眠時主腦已經在想的回覆幾秒後才進佇列，舊碼照講（SLEEP → TALKING，2026-10-25 實機）。"""
+    src = _src("speech_queue_worker")
+    assert "if IS_SLEEPING:" in src
+    assert src.index("if IS_SLEEPING:") < src.index('set_ai_state("TALKING"')
