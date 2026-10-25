@@ -191,6 +191,38 @@ def transliterate_kana_to_zh(text: str) -> str:
     return "".join(out)
 
 
+def split_for_streaming(text: str, max_len: int = 30, first_min: int = 4) -> list:
+    """長回覆切成幾段，第一段合成好就先念、邊念邊合成後面（2026-10-25）。
+    以前整段一次合成，60 字以上要等 6～17 秒才出聲；合成約每字 0.1 秒、講話約每字 0.2 秒，
+    第一段念的時候後面早就合成好，段落之間只剩本來就有的句間、逗號停頓。
+    只在標點切：第一段湊滿 first_min 字就切（「哇。」「收到。」會帶上下一個子句），讓她盡快開口；
+    之後相鄰子句併到不超過 max_len。短句原樣一段。"""
+    t = (text or "").strip()
+    if len(t) <= max_len:
+        return [t] if t else []
+    clauses = re.findall(r"[^，,、；;。！？!?～~…]+[，,、；;。！？!?～~…]*", t)
+    if not clauses:
+        return [t]
+    first, i = "", 0
+    while i < len(clauses) and len(first) < first_min:
+        first += clauses[i]
+        i += 1
+    chunks = [first]
+    cur = ""
+    for c in clauses[i:]:
+        if cur and len(cur) + len(c) > max_len:
+            chunks.append(cur)
+            cur = c
+        else:
+            cur += c
+    if cur:
+        if len(cur) < 4 and len(chunks) > 1:
+            chunks[-1] += cur
+        else:
+            chunks.append(cur)
+    return [c.strip() for c in chunks if c.strip()]
+
+
 def detect_language(text: str) -> str:
     """回傳 'ja' 或 'zh'（假名/漢字啟發式，中文語境優先）。
 

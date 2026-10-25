@@ -441,3 +441,27 @@ def test_clause_segmentation_keeps_words():
     # 整管：回報句不斷詞
     out = C.clean_for_tts("呼～這首《world.execute(me);》老爸你還滿意嗎？觀眾朋友們覺得好不好聽呀？給點尖叫聲！")
     assert "好不好聽呀" in out and "好不好，" not in out
+
+
+def test_long_replies_are_split_at_punctuation_for_streaming():
+    """長回覆以前整段一次合成，60 字以上要等 6～17 秒才出聲（2026-10-25 實測）：切段後第一段先念。"""
+    from services.tts_router import split_for_streaming as f
+    t = "報告老爸。台北今天陰時多雲，氣溫25到27度，體感舒適。不過有短暫陣雨機會，出門記得帶把雨傘喔～"
+    parts = f(t)
+    assert "".join(parts) == t and len(parts) >= 2
+    assert len(parts[0]) <= 16 and all(len(p) <= 30 for p in parts[1:])
+    assert all(p[-1] in "，。！？～" for p in parts[:-1])          # 只在標點切
+    assert f("好的老爸。") == ["好的老爸。"] and f("收到。晴天來囉～這首我也超喜歡的，彈給老爸聽。") == [
+        "收到。晴天來囉～這首我也超喜歡的，彈給老爸聽。"]           # 30 字內整段
+    assert f("哇。老爸你也太狠了吧。邊寫還能邊玩Roblox跟看VTuber？都不會錯亂喔？")[0] == "哇。老爸你也太狠了吧。"   # 太短的開頭帶上下一句
+    assert f("") == []
+
+
+def test_voice_playback_streams_split_chunks():
+    import ast
+    import os
+    main = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "vts_7L_test.py"),
+                encoding="utf-8").read()
+    fn = next(n for n in ast.walk(ast.parse(main)) if isinstance(n, ast.AsyncFunctionDef) and n.name == "play_voice_complete")
+    src = ast.get_source_segment(main, fn)
+    assert "split_for_streaming(clean_for_tts_text)" in src and '"text": clean_for_tts_text' not in src

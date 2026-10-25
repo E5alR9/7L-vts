@@ -2942,17 +2942,19 @@ async def play_voice_complete(text, target: str = "dad", raw_actions_text: str =
             base_proj_dir = os.path.dirname(os.path.abspath(__file__))
             output_file = os.path.join(base_proj_dir, f"temp_reply_{int(time.time() * 1000)}_{random.randint(100, 999)}.mp3")
             
-            #  語音合成前置解析：不再由 Python 端手動切句碎塊化
-            # 老爸指示：Live API 給出的整段（黑板紀錄）已經是最佳的語意區塊，直接整段送給 TTS 引擎。
-            # GPT-SoVITS 底層 (cut5) 會自動按標點進行批次 (batch) 合成，這樣速度最快且絕不會有碎音停頓！
+            #  語音合成前置解析：長回覆在標點處切段，第一段合成好就先念、邊念邊合成後面（2026-10-25）。
+            # 以前照老爸指示整段一次合成（怕碎音停頓），但 60 字以上要等 6～17 秒才出聲；
+            # 現在只在標點切，段落之間是本來就有的句間、逗號停頓。短句（30 字內）照舊整段。
+            import services.tts_router as _tts_router
             chunks = []
             if clean_for_tts_text.strip() and re.search(r'[\u4e00-\u9fa5a-zA-Z0-9\u3040-\u309F\u30A0-\u30FF\uAC00-\uD7AF]', clean_for_tts_text):
-                chunks.append({
-                    "text": clean_for_tts_text,
-                    "voice": "local_xiaoyi",
-                    "rate": "+0%",
-                    "pitch": "+0Hz"
-                })
+                for _seg in _tts_router.split_for_streaming(clean_for_tts_text):
+                    chunks.append({
+                        "text": _seg,
+                        "voice": "local_xiaoyi",
+                        "rate": "+0%",
+                        "pitch": "+0Hz"
+                    })
                 
             if not chunks:
                 return
@@ -3031,10 +3033,14 @@ async def play_voice_complete(text, target: str = "dad", raw_actions_text: str =
                 await asyncio.to_thread(update_subtitle, text)
                 first_chunk = True
 
+                _prev_part_end = 0.0
                 while True:
                     item = await audio_stream_queue.get()
                     if item is None:
                         break
+                    if _prev_part_end and time.time() - _prev_part_end > 0.3:
+                        log_print(f"⏸️ [分段播音] 第 {item['idx'] + 1}/{item['total']} 段晚了 "
+                                  f"{time.time() - _prev_part_end:.1f} 秒才合成好")
 
                     part_file = item["file"]
                     snd_obj, part_dur, part_env = load_sound_with_envelope(part_file, item["text"])
@@ -3109,6 +3115,7 @@ async def play_voice_complete(text, target: str = "dad", raw_actions_text: str =
                             await asyncio.sleep(0.04)
 
                     total_actual_spoken_time += part_dur
+                    _prev_part_end = time.time()
                     if is_singing_now and backup_envelope is not None:
                         stage.CURRENT_MOUTH_ENVELOPE = backup_envelope
                         stage.CURRENT_SPEECH_START_TIME = backup_start_time
