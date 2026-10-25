@@ -198,10 +198,12 @@ def parse_live_chat_response(data):
 
 
 def build_queue_item(user: str, message: str, message_id: str = "", avatar: str = "", channel_id: str = "") -> dict:
-    """與 TikTok/Twitch 相容的格式（軌道2 正則可解析；無 (@id) 時自動用暱稱當 id）
-    text 格式凍結不可改；多出 message_id/avatar/user 欄位給控制台顯示用。"""
+    """與 TikTok/Twitch 相容的格式（text 給日誌、後台看；沒有 (@id)，主程式用暱稱當 id）。
+    主程式直接用 viewer／content；message_id/avatar/user 給控制台顯示用。"""
     return {
         "text": f"【YouTube 直播觀眾 {user}】：{message}",
+        "viewer": user,
+        "content": message,
         "platform_uid": channel_id or "",   # YouTube 頻道 ID（唯一）；顯示名稱可以亂取，認老爸只信這個
         "audio_base64": None,
         "timestamp": time.time(),

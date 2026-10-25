@@ -7001,19 +7001,10 @@ async def chat_processor_worker(vts, input_queue):
             #  軌道 2：TikTok 直播專屬「記憶腦袋」滾動黑板 (tiktok / tiktok_gift)
             # -------------------------------------------------------------
             elif route == "audience":
-                # 提取觀眾用戶名與留言內容
-                m_aud = re.search(r'【\w+ (?:直播觀眾|官方提問箱|直播動態)\s*([^\】]*?)\s*(?:留言|送禮|動態|提問)?】[：:]\s*(.*)', user_input)
-                if m_aud:
-                    aud_u = m_aud.group(1).strip() or "直播觀眾"
-                    aud_c = m_aud.group(2).strip()
-                else:
-                    aud_u = "直播觀眾"
-                    aud_c = user_input
-                if aud_u == "直播觀眾" and source == "tiktok_gift":
-                    # 送禮／訂閱動態的名字在內文「」裡（觀眾「土豪哥」送出了…），舊碼記成一位叫「直播觀眾」的人
-                    _m_name = re.search(r'觀眾「([^」]{1,40})」', aud_c)
-                    if _m_name:
-                        aud_u = _m_name.group(1).strip()
+                # 誰、說了什麼：監聽器直接給（2026-10-26 起）。以前從「【TikTok 直播觀眾 X 留言】：…」用正則拆回來，
+                # 提問箱的發問者拆不出來（記成「直播觀眾」），暱稱裡有「】」整則拆壞
+                aud_u = item.viewer or "直播觀眾"
+                aud_c = item.content or user_input
 
                 # 提取觀眾暱稱與 ID / 帳號
                 raw_user_str = aud_u.strip()

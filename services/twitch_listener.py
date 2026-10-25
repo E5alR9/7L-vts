@@ -63,11 +63,13 @@ def parse_channels(raw: str) -> list:
 
 
 def build_queue_item(user: str, display: str, message: str, message_id: str = "") -> dict:
-    """組成與 TikTok 相容的格式：【Twitch 直播觀眾 顯示名 (@id)】：內容
-    （主程式軌道2 的正則靠這個格式抓出暱稱與 ID；text 格式凍結不可改）"""
+    """組成與 TikTok 相容的格式：【Twitch 直播觀眾 顯示名 (@id)】：內容（給日誌、後台看）。
+    主程式直接用 viewer／content，不再從 text 拆。"""
     who = f"{display} (@{user})" if display and display.lower() != user.lower() else user
     return {
         "text": f"【Twitch 直播觀眾 {who}】：{message}",
+        "viewer": who,
+        "content": message,
         "platform_uid": user or "",   # Twitch 登入名（唯一），認老爸只信這個
         "audio_base64": None,
         "timestamp": time.time(),

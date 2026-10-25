@@ -274,6 +274,7 @@ async def tiktok_live_worker(input_queue):
                         pass
                     await input_queue.put({
                         "text": f"【TikTok 直播觀眾 {user_name} 留言】：{comment_text}",
+                        "viewer": user_name, "content": comment_text,   # 主程式直接用，不從上面那行拆
                         "audio_base64": None,
                         "timestamp": time.time(),
                         "source": "tiktok",
@@ -311,6 +312,7 @@ async def tiktok_live_worker(input_queue):
                     log_print(f"💬 [TikTok 飄屏彈幕] {u_name}: {b_text}")
                     await input_queue.put({
                         "text": f"【TikTok 直播觀眾 {u_name} 留言】：{b_text}",
+                        "viewer": u_name, "content": b_text,
                         "audio_base64": None,
                         "timestamp": time.time(),
                         "source": "tiktok",
@@ -337,6 +339,7 @@ async def tiktok_live_worker(input_queue):
                 log_print(f"💬 [TikTok 表情] {u_name}: {e_text}")
                 await input_queue.put({
                     "text": f"【TikTok 直播觀眾 {u_name} 留言】：{e_text}",
+                    "viewer": u_name, "content": e_text,
                     "audio_base64": None,
                     "timestamp": time.time(),
                     "source": "tiktok",
@@ -425,6 +428,8 @@ async def tiktok_live_worker(input_queue):
                         log_print(f"❓ [TikTok 提問箱] {user_name} 提問: {q_text}")
                         await input_queue.put({
                             "text": f"【TikTok 官方提問箱】：觀眾「{user_name}」提問：『{q_text}』。（是否回答由妳自由決定）",
+                            # 以前拆這行只拆得出「直播觀眾」，發問的人是誰丟了
+                            "viewer": user_name, "content": f"（官方提問箱）{q_text}",
                             "audio_base64": None,
                             "timestamp": time.time(),
                             "source": "tiktok"
@@ -440,6 +445,7 @@ async def tiktok_live_worker(input_queue):
                     sys_notify(f"👑 [TikTok 訂閱] {user_name} 訂閱成為會員！")
                     await input_queue.put({
                         "text": f"【TikTok 直播動態】：觀眾「{user_name}」付費訂閱成為專屬會員！（是否慶祝/感謝由妳自由決定）",
+                        "viewer": user_name, "content": "付費訂閱成為專屬會員！（是否慶祝/感謝由妳自由決定）",
                         "audio_base64": None,
                         "timestamp": time.time(),
                         "source": "tiktok_gift"
@@ -468,6 +474,7 @@ async def tiktok_live_worker(input_queue):
                         gift_desc = f"連續送出了 {tot_count} 個 {g_name}！" if tot_count > 1 else f"送出了 1 個 {g_name}！"
                         await input_queue.put({
                             "text": f"【TikTok 直播觀眾 {u_name} 送禮】：{gift_desc}請向他熱情道謝並給予即時互動！",
+                            "viewer": u_name, "content": f"{gift_desc}請向他熱情道謝並給予即時互動！",
                             "audio_base64": None,
                             "timestamp": time.time(),
                             "source": "tiktok_gift"

@@ -240,11 +240,12 @@ def test_stale_song_ack_is_skipped_once_singing():
 
 
 def test_gift_events_keep_the_giver_name():
-    import re
-    seg = next(l for l in MAIN.splitlines() if "_m_name = re.search(" in l)
-    pat = re.search(r"re\.search\(r'(.+?)', aud_c\)", seg).group(1)
-    m = re.search(pat, "觀眾「土豪哥」送出了 嘉年華 x1（價值 30000 鑽石）！")
-    assert m and m.group(1) == "土豪哥"
+    """送禮、訂閱、提問箱的人是誰：TikTok 監聽器直接帶 viewer，主程式不再從「觀眾「X」」這種內文撈名字。"""
+    src = open(os.path.join(ROOT, "services", "tiktok_listener.py"), encoding="utf-8").read()
+    for item in ('"viewer": u_name, "content": f"{gift_desc}', '"viewer": user_name, "content": "付費訂閱',
+                 '"viewer": user_name, "content": f"（官方提問箱）{q_text}"'):
+        assert item in src, item
+    assert "aud_u = item.viewer or" in MAIN and "_m_name = re.search(" not in MAIN
 
 
 def test_vision_reply_uses_whole_text_not_first_char():

@@ -26,6 +26,8 @@ class InputItem:
     timestamp: float = 0.0
     platform_uid: str = ""   # 監聽器給的平台唯一帳號（不在觀眾可控的文字裡）；認老爸只信這個
     user: str = ""
+    viewer: str = ""    # 觀眾留言：誰（照平台顯示的名字，Twitch 是「顯示名 (@帳號)」）
+    content: str = ""   # 觀眾留言：說了什麼（不含「【TikTok 直播觀眾 X 留言】：」這層包裝）
 
 
 def parse_input_item(raw):
@@ -38,7 +40,8 @@ def parse_input_item(raw):
         audio = raw.get("audio_base64")
         item = InputItem(text=text, source=raw.get("source") or ("mic" if audio else "unknown"), audio_b64=audio,
                          timestamp=raw.get("timestamp") or time.time(),
-                         platform_uid=str(raw.get("platform_uid") or ""), user=str(raw.get("user") or ""))
+                         platform_uid=str(raw.get("platform_uid") or ""), user=str(raw.get("user") or ""),
+                         viewer=str(raw.get("viewer") or "").strip(), content=str(raw.get("content") or "").strip())
     else:
         item = InputItem(text=str(raw).strip(), timestamp=time.time())
     return item if item.text else None

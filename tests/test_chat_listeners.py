@@ -186,3 +186,14 @@ def test_youtube_queue_item_matches_track2_regex():
     assert m.group(1).strip() == "路人甲"      # 無 (@id) → 主程式會用暱稱當 id
     assert m.group(2) == "早啊"
     assert item["source"] == "youtube"
+
+
+def test_queue_items_carry_who_and_what_separately():
+    """主程式直接用 viewer／content（2026-10-26），不再從 text 那行用正則拆。"""
+    from core.input_sources import parse_input_item
+    tw = parse_input_item(tw_item("someuser", "小夏子", "彈一首卡農！"))
+    assert (tw.viewer, tw.content) == ("小夏子 (@someuser)", "彈一首卡農！")
+    yt = parse_input_item(yt_item("路人甲", "早啊"))
+    assert (yt.viewer, yt.content) == ("路人甲", "早啊")
+    old = parse_input_item({"text": "【TikTok 直播觀眾 阿呆 留言】：嗨", "source": "tiktok"})
+    assert (old.viewer, old.content) == ("", "")          # 沒帶欄位：主程式記成「直播觀眾」、內容用整行
