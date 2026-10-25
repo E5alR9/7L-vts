@@ -9,7 +9,7 @@ from aiohttp import web
 
 from datetime import datetime
 import logging
-from core.utils import record_interaction_tick
+from core.utils import record_interaction_tick, spawn
 
 # 🔇 關閉 aiohttp.access 日誌，避免輪詢視覺畫面或狀態時在終端洗版
 logging.getLogger("aiohttp.access").setLevel(logging.WARNING)
@@ -494,7 +494,7 @@ def broadcast_event(event_type: str, data: Dict[str, Any], keep_history: bool = 
     def _send_all():
         for ws in list(CONNECTED_CLIENTS):
             if not ws.closed:
-                asyncio.create_task(_safe_send(ws, msg))
+                spawn(_safe_send(ws, msg))
 
     try:
         current_loop = asyncio.get_running_loop()
@@ -519,7 +519,7 @@ def broadcast_telemetry():
             for ws in list(CONNECTED_CLIENTS):
                 if not ws.closed:
                     await _safe_send(ws, msg)
-    asyncio.create_task(_push())
+    spawn(_push())
 
 async def _safe_send(ws: web.WebSocketResponse, msg: str):
     try:
@@ -623,10 +623,10 @@ async def ws_handler(request):
                         broadcast_event("tools_cleared", {})
                     elif action == "restart":
                         broadcast_event("system_restart", {"message": "7L 系統正在重新啟動中..."})
-                        asyncio.create_task(perform_restart())
+                        spawn(perform_restart())
                     elif action == "shutdown":
                         broadcast_event("system_shutdown", {"message": "7L 系統正在安全關機退出..."})
-                        asyncio.create_task(perform_shutdown())
+                        spawn(perform_shutdown())
                     elif action == "approve_yt_companion":
                         if APPROVE_YT_COMPANION_CALLBACK:
                             ok = bool(APPROVE_YT_COMPANION_CALLBACK())
@@ -1160,7 +1160,7 @@ async def api_restart(request):
     """重新啟動 7L 系統 API"""
     try:
         broadcast_event("system_restart", {"message": "7L 系統正在重新啟動中..."})
-        asyncio.create_task(perform_restart())
+        spawn(perform_restart())
         return web.json_response({"ok": True, "message": "7L 系統正在重新啟動中..."})
     except Exception as e:
         return web.json_response({"ok": False, "error": str(e)}, status=500)
@@ -1190,7 +1190,7 @@ async def api_shutdown(request):
     """安全關閉 7L 系統 API"""
     try:
         broadcast_event("system_shutdown", {"message": "7L 系統正在安全關機退出..."})
-        asyncio.create_task(perform_shutdown())
+        spawn(perform_shutdown())
         return web.json_response({"ok": True, "message": "7L 系統正在安全關機退出..."})
     except Exception as e:
         return web.json_response({"ok": False, "error": str(e)}, status=500)
@@ -1330,7 +1330,7 @@ async def telemetry_broadcast_worker():
                 }, ensure_ascii=False)
                 for ws in list(CONNECTED_CLIENTS):
                     if not ws.closed:
-                        asyncio.create_task(_safe_send(ws, msg))
+                        spawn(_safe_send(ws, msg))
             await asyncio.sleep(0.8)
         except asyncio.CancelledError:
             break
@@ -1456,7 +1456,7 @@ async def start_web_dashboard(
             await site.start()
             print(f"\n🌐 [7L Web 後台] 已成功在 http://127.0.0.1:{bind_port} 啟動！")
             print(f"👉 本機瀏覽器請開啟：http://localhost:{bind_port}\n")
-            asyncio.create_task(telemetry_broadcast_worker())
+            spawn(telemetry_broadcast_worker())
             return
         except OSError as e:
             if getattr(e, 'errno', None) in (10048, 48, 98) or "10048" in str(e):
@@ -1472,7 +1472,7 @@ async def start_web_dashboard(
                         await site.start()
                         print(f"\n🌐 [7L Web 後台] 連接埠 {port} 佔用，已自動切換至備援連接埠 http://127.0.0.1:{bind_port} 啟動！")
                         print(f"👉 本機瀏覽器請開啟：http://localhost:{bind_port}\n")
-                        asyncio.create_task(telemetry_broadcast_worker())
+                        spawn(telemetry_broadcast_worker())
                         return
                     except Exception:
                         pass

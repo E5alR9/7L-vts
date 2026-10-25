@@ -139,7 +139,8 @@ def test_audience_turn_cannot_stop_the_stage_through_the_subagent():
 
     async def tool_pass(*a, **k):
         return "pe.stop_virtual_piano", {}
-    ns = _load("nv_interpret_task", "_dispatch_in_background", asyncio=asyncio, resolve_subagent_chain=lambda: ["gemini"],
+    from core.utils import spawn
+    ns = _load("nv_interpret_task", "_dispatch_in_background", spawn=spawn, asyncio=asyncio, resolve_subagent_chain=lambda: ["gemini"],
                load_prompt=lambda n: "", execute_tool_dispatch=dispatch, is_stage_control=is_stage_control,
                build_slip_text=build_slip_text, _gemini_tool_pass=tool_pass)
 
@@ -253,18 +254,19 @@ def test_screen_task_gets_one_silent_reply():
     assert "不要描述畫面" in sess.sent[0].response["result"]
 
 
-def test_background_tool_failures_are_logged():
-    """演奏中點小星星，CPU 有攔截，之後整個不見、日誌一行都沒有（2026-10-25 實機）：背景工具出錯要留日誌。"""
+def test_background_tool_failures_are_logged(monkeypatch):
+    """演奏中點小星星，CPU 有攔截，之後整個不見、日誌一行都沒有（2026-10-25 實機）：背景工具出錯要留日誌，帶工具名和參數。"""
+    import core.utils as u
     logged = []
+    monkeypatch.setattr(u, "log_print", lambda m, *a, **k: logged.append(m))
+    u._BG_FAIL_LOG.clear()
 
     async def boom(*a, **k):
         raise RuntimeError("壞掉了")
-    ns = _load("_dispatch_in_background", asyncio=asyncio, execute_tool_dispatch=boom,
-               log_print=lambda m, *a, **k: logged.append(m))
+    ns = _load("_dispatch_in_background", asyncio=asyncio, execute_tool_dispatch=boom, spawn=u.spawn)
 
     async def go():
-        t = ns["_dispatch_in_background"]("pe.play_virtual_piano", {"song_name": "小星星"}, caller_target="dad")
+        ns["_dispatch_in_background"]("pe.play_virtual_piano", {"song_name": "小星星"}, caller_target="dad")
         await asyncio.sleep(0.01)
-        return t
     asyncio.run(go())
-    assert logged and "pe.play_virtual_piano" in logged[0] and "壞掉了" in logged[0] and "Traceback" in logged[0]
+    assert logged and "pe.play_virtual_piano" in logged[0] and "小星星" in logged[0] and "壞掉了" in logged[0]

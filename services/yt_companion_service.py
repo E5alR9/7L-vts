@@ -38,7 +38,7 @@ except Exception:
 # WebSocket 握手補丁
 import core.websocket_patch
 from core.llm_engine import GEMINI_KEYS
-from core.utils import log_print, sys_notify, log_swallowed
+from core.utils import log_print, sys_notify, log_swallowed, spawn
 from google import genai
 from google.genai import types
 
@@ -402,7 +402,7 @@ def approve_pending_video():
     if PENDING_VIDEO_REQUEST and not IS_YT_COMPANION_ACTIVE:
         hwnd, rect, title = PENDING_VIDEO_REQUEST
         PENDING_VIDEO_REQUEST = None
-        asyncio.create_task(_yt_companion_session_loop(hwnd, rect, title))
+        spawn(_yt_companion_session_loop(hwnd, rect, title))
         return True
     return False
 

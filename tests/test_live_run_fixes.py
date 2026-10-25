@@ -121,7 +121,7 @@ def _run_executor(text, target, recent=None):
           "parse_hard_command": parse_hard_command, "build_slip_text": build_slip_text,
           "PIANO_CONTROL_TOOLS": PIANO_CONTROL_TOOLS, "STAGE_CONTROL_TOOLS": STAGE_CONTROL_TOOLS,
           "split_original_request": split_original_request,
-          "execute_tool_dispatch": execute_tool_dispatch, "_song_ack": _song_ack,
+          "execute_tool_dispatch": execute_tool_dispatch, "_song_ack": _song_ack, "spawn": __import__("core.utils", fromlist=["spawn"]).spawn,
           "is_live_brain_active": lambda: False, "LIVE_API_SYSTEM_PROMPT_QUEUE": collections.deque(),
           "_HARD_CMD_RECENT": {} if recent is None else recent, "_HARD_CMD_DEDUPE_SEC": 20.0}
     for name in ("_hard_cmd_seen_recently", "_dispatch_in_background", "background_tool_executor"):

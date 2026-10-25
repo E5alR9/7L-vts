@@ -168,7 +168,7 @@ if sys.platform == "win32":
 from core.utils import (
     log_print, log_swallowed, sys_notify, get_current_time_string,
     record_interaction_tick, get_silence_ticks,
-    speech_allowed, operator_input_enabled, to_tw
+    speech_allowed, operator_input_enabled, to_tw, spawn
 )
 from core.identity import is_owner_account, claims_owner_identity
 import core.stage_state as stage
@@ -322,19 +322,8 @@ def _owner_text_slip(owner: str, user_input: str) -> str:
 
 
 def _dispatch_in_background(fn_name: str, fn_args: dict, **kw) -> asyncio.Task:
-    """工具丟背景跑，出錯要留日誌：create_task 的例外沒人接就無聲無息
-    （2026-10-25 實機：演奏中點「小星星」，CPU 有攔截，之後整個不見，日誌一行都沒有）。"""
-    task = asyncio.create_task(execute_tool_dispatch(fn_name, fn_args, **kw))
-
-    def _done(t):
-        if t.cancelled() or t.exception() is None:
-            return
-        import traceback
-        e = t.exception()
-        log_print(f"⚠️ [背景工具失敗] {fn_name}({fn_args}): {type(e).__name__}: {e}\n"
-                  + "".join(traceback.format_exception(e))[-1500:])
-    task.add_done_callback(_done)
-    return task
+    """工具丟背景跑；失敗日誌帶上工具名和參數（2026-10-25 實機：演奏中點「小星星」，之後整個不見、日誌一行都沒有）。"""
+    return spawn(execute_tool_dispatch(fn_name, fn_args, **kw), label=f"{fn_name}({fn_args})")
 
 
 async def execute_tool_dispatch(fn_name: str, fn_args: dict, caller_target: str = "", caller_user: str = "") -> str:
@@ -357,14 +346,14 @@ async def execute_tool_dispatch(fn_name: str, fn_args: dict, caller_target: str 
     elif fn_name in ["ask_desktop", "ask_gemini_desktop"]:
         q = (fn_args.get("question", "") or "").strip()
         req_t = caller_target or ("audience" if CURRENT_SPEAKING_TARGET == "audience" else "dad")
-        asyncio.create_task(_desktop_ask_and_report(q, req_t, caller_user))
+        spawn(_desktop_ask_and_report(q, req_t, caller_user))
         return " （系統回報：已請桌面版 Gemini 查問，答案稍後播報，不要自己編答案。）"
     elif fn_name in ["generate_ai_image", "draw_illustration"]:
         p = fn_args.get("prompt", "")
-        asyncio.create_task(generate_ai_image(p))
+        spawn(generate_ai_image(p))
     elif fn_name == "execute_local_python_code":
         c = fn_args.get("code_string", "")
-        asyncio.create_task(execute_local_python_code(c))
+        spawn(execute_local_python_code(c))
     elif fn_name == "move_spatial_position":
         t_pos = fn_args.get("target_position", "自由漫遊")
         sf = fn_args.get("scale_factor")
@@ -372,7 +361,7 @@ async def execute_tool_dispatch(fn_name: str, fn_args: dict, caller_target: str 
         dy = fn_args.get("delta_y")
         ds = fn_args.get("delta_size")
         dur = float(fn_args.get("duration", 2.0))
-        asyncio.create_task(apply_spatial_position(
+        spawn(apply_spatial_position(
             position_name=t_pos, 
             delta_x=dx,
             delta_y=dy,
@@ -532,7 +521,7 @@ async def execute_tool_dispatch(fn_name: str, fn_args: dict, caller_target: str 
         except (TypeError, ValueError):
             sec = 60
         msg = fn_args.get("message", "提醒時間到")
-        asyncio.create_task(set_timer(sec, msg, GLOBAL_INPUT_QUEUE or input_queue, caller_user=caller_user))
+        spawn(set_timer(sec, msg, GLOBAL_INPUT_QUEUE or input_queue, caller_user=caller_user))
     elif fn_name == "control_microphone":
         is_en = fn_args.get("is_enabled", True)
         control_microphone(is_en)
@@ -541,7 +530,7 @@ async def execute_tool_dispatch(fn_name: str, fn_args: dict, caller_target: str 
     elif fn_name == "update_cloud_knowledge":
         cat = fn_args.get("category", "memes")
         cnt = fn_args.get("content", "")
-        asyncio.create_task(update_cloud_prompt_field(cat, cnt))
+        spawn(update_cloud_prompt_field(cat, cnt))
         extracted_text += " [KNOWLEDGE_UPDATED]"
     elif fn_name == "search_knowledge":
         #  本地 RAG 檢索（chromadb + fastembed，離線可用；同步部分丟執行緒）
@@ -1342,7 +1331,7 @@ async def call_gemini_live_audience_reply(vts, input_queue, audience_user: str, 
         log_print(f"🚨 [Live 哨兵喚醒主力] 判定應開口回應觀眾！目標: {log_target} | 焦點: {log_focus}")
 
         # 預熱背景鋼琴曲譜（若觀眾發言包含歌名）
-        asyncio.create_task(prefetch_song_midi_background(audience_content))
+        spawn(prefetch_song_midi_background(audience_content))
 
         #  階段 2：喚醒 7 大高智商主力模型梯隊 (3.1 Flash Lite ➔ 3.5 Flash Lite ➔ 3 Flash ➔ 3.1 Pro ➔ 3.5 ➔ 3.6 ➔ 3.7) 讀取 100 句記憶精準開口
         sys_instruction_with_100m = f"""{sys_instruction}
@@ -1482,7 +1471,7 @@ async def call_gemini_live_audience_reply(vts, input_queue, audience_user: str, 
             vu_call = v_match.group(2).strip() if v_match.group(2) else None
             vu_rel  = v_match.group(3).strip() if v_match.group(3) else None
             vu_imp  = v_match.group(4).strip() if v_match.group(4) else None
-            asyncio.create_task(save_viewer_profile(vu_name, call=vu_call, relationship=vu_rel, impression=vu_imp))
+            spawn(save_viewer_profile(vu_name, call=vu_call, relationship=vu_rel, impression=vu_imp))
             log_print(f"👥 [認人] 記住觀眾 {vu_name}：稱={vu_call} 關係={vu_rel} 印象={vu_imp}")
 
         spoken = await execute_actions(vts, clean_reply, input_queue, user_input_ctx=audience_content, has_dispatched_tool=bool(tool_output_text.strip()), caller_target="audience", caller_user=id_display)
@@ -1501,7 +1490,7 @@ async def call_gemini_live_audience_reply(vts, input_queue, audience_user: str, 
             fresh_hist = await fetch_from_long_term_memory("tiktok_live_stream")
             fresh_hist.append({"role": "user", "content": f"【TikTok 觀眾 {id_display}】：{audience_content}"})
             fresh_hist.append({"role": "assistant", "content": clean_spoken})
-            asyncio.create_task(save_to_long_term_memory("tiktok_live_stream", fresh_hist))
+            spawn(save_to_long_term_memory("tiktok_live_stream", fresh_hist))
             
         realtime_task_mgr.finish_audience_task(audience_user)
         return True
@@ -2913,7 +2902,7 @@ async def live_api_direct_sentence_emotions(clean_text: str, total_duration: flo
             await _director_drop_session()
             return []
         if not turn_done:
-            asyncio.create_task(_director_drain_then_release(session))
+            spawn(_director_drain_then_release(session))
             lock_handed_off = True
     finally:
         if not lock_handed_off:
@@ -3086,9 +3075,9 @@ async def play_voice_complete(text, target: str = "dad", raw_actions_text: str =
                                 try:
                                     live_tl = await asyncio.wait_for(asyncio.shield(director_task), timeout=2.0)
                                     if live_tl and target_vts and not timeline_cancel_event.is_set():
-                                        asyncio.create_task(execute_action_timeline(target_vts, live_tl, timeline_cancel_event))
+                                        spawn(execute_action_timeline(target_vts, live_tl, timeline_cancel_event))
                                 except Exception: pass
-                            asyncio.create_task(_attach_live_timeline())
+                            spawn(_attach_live_timeline())
 
                     #  無縫播放：使用 Sound Channel + queue() 消除分段拼接停頓感
                     # 首段直接播，後續段等待前段結束前 0.1s 預先 queue 進去
@@ -3659,7 +3648,7 @@ async def execute_actions(vts, text, input_queue, user_input_ctx: str = "", has_
         f_name = up.group(1).strip()
         f_val = up.group(2).strip()
         if f_name and f_val:
-            asyncio.create_task(update_cloud_prompt_field(f_name, f_val))
+            spawn(update_cloud_prompt_field(f_name, f_val))
             text = text.replace(up.group(0), "")
 
     for ae in re.finditer(r'\[(?:ADD_EXAMPLE|LEARN_EXAMPLE)[：:]\s*([^|\]]+)\|([^|\]]+)\|([^\]]+)\]', text, re.IGNORECASE):
@@ -3667,32 +3656,32 @@ async def execute_actions(vts, text, input_queue, user_input_ctx: str = "", has_
         ui = ae.group(2).strip()
         rp = ae.group(3).strip()
         if sc and rp:
-            asyncio.create_task(add_few_shot_example(sc, ui, "", rp))
+            spawn(add_few_shot_example(sc, ui, "", rp))
             text = text.replace(ae.group(0), "")
 
     for lm in re.finditer(r'\[LEARN_MEME[：:]\s*([^\]]+)\]', text, re.IGNORECASE):
         meme_val = lm.group(1).strip()
         if meme_val:
-            asyncio.create_task(learn_new_meme(meme_val))
+            spawn(learn_new_meme(meme_val))
             text = text.replace(lm.group(0), "")
 
     for lf in re.finditer(r'\[LEARN_FACT[：:]\s*([^\]]+)\]', text, re.IGNORECASE):
         fact_val = lf.group(1).strip()
         if fact_val:
-            asyncio.create_task(learn_new_fact(fact_val))
+            spawn(learn_new_fact(fact_val))
             text = text.replace(lf.group(0), "")
 
     for lr in re.finditer(r'\[(?:UPDATE_RULE|SET_RULE|LEARN_RULE)[：:]\s*([^\]]+)\]', text, re.IGNORECASE):
         rule_val = lr.group(1).strip()
         if rule_val:
-            asyncio.create_task(update_custom_rule(rule_val))
+            spawn(update_custom_rule(rule_val))
             text = text.replace(lr.group(0), "")
 
     for tm in re.finditer(r'\[(?:TOOL[：:]\s*)?(?:TIMER|SET_TIMER|ALARM|鬧鐘|計時器)[：:]\s*([0-9]+)\s*\|?\s*([^\]]*)\]', text, re.IGNORECASE):
         t_sec = int(tm.group(1))
         t_msg = tm.group(2).strip() or "計時時間到"
         log_print(f"⏱️ [計時器啟動] 設定 {t_sec} 秒後提醒: 「{t_msg}」")
-        asyncio.create_task(set_timer(t_sec, t_msg, input_queue, caller_user=caller_user))
+        spawn(set_timer(t_sec, t_msg, input_queue, caller_user=caller_user))
         text = text.replace(tm.group(0), "")
 
     #  檢測 7L 自我插話標籤 [INTERRUPT_SELF] / [CUT_IN] / [插話] / [中斷]
@@ -3704,7 +3693,7 @@ async def execute_actions(vts, text, input_queue, user_input_ctx: str = "", has_
     #  記住 VTS 模型基準位置與大小 (當老爸說「記住大小」、「記住位置」時即刻執行)
     if any(k in text or k in user_input_ctx for k in ["記住大小", "記住位置", "記住現在位置", "記住當前位置", "記住現在大小", "記錄位置", "記錄大小", "記住模型位置", "記住模型", "記錄基準大小", "記錄基準位置", "記住當前大小"]):
         log_print("📐 [VTS 模型記憶] 正在向 VTube Studio 讀取並保存當前模型座標與大小為基準...")
-        asyncio.create_task(vc.fetch_vts_base_model_pos(vc.GLOBAL_VTS))
+        spawn(vc.fetch_vts_base_model_pos(vc.GLOBAL_VTS))
 
     #  翻唱手動終止指令 (當老爸或觀眾說「別唱了」、「停止唱歌」、「不要唱了」時即刻終止)
     if any(k in text or k in user_input_ctx for k in ["別唱了", "停止唱歌", "不要唱了", "別唱歌了", "停唱", "停止翻唱", "關閉音樂", "不要唱歌"]):
@@ -3843,7 +3832,7 @@ async def execute_actions(vts, text, input_queue, user_input_ctx: str = "", has_
                         web_dash.record_tool_call(name_s, {"command": cmd_s}, None, caller="7L (大腦自主)", status="error", duration_ms=dur, error=str(err))
                     except Exception:
                         pass
-            asyncio.create_task(_safe_run_intercepted_tool(func(match), cmd_name, t_name, t_call_start))
+            spawn(_safe_run_intercepted_tool(func(match), cmd_name, t_name, t_call_start))
             text = text.replace(match.group(0), "")
 
     url_match = re.search(r'\[OPEN_BROWSER:\s*([^\]]+)\]', text, re.IGNORECASE)
@@ -4253,18 +4242,18 @@ async def instinct_live_worker():
                             if exp_match:
                                 exp_tag = exp_match.group(1).strip()
                                 if any(k in exp_tag.upper() for k in ["WINK", "眨眼", "單眼", "眨單眼"]):
-                                    asyncio.create_task(vc.trigger_wink(is_instinct=True))
+                                    spawn(vc.trigger_wink(is_instinct=True))
                                 elif any(k in exp_tag for k in ["驚訝", "惊", "震驚", "SHOCK"]):
-                                    asyncio.create_task(vc.trigger_shock(is_instinct=True))
+                                    spawn(vc.trigger_shock(is_instinct=True))
                                 elif any(k in exp_tag for k in ["皺眉", "困擾", "委屈", "FROWN"]):
-                                    asyncio.create_task(vc.trigger_frown(is_instinct=True))
+                                    spawn(vc.trigger_frown(is_instinct=True))
                                 else:
-                                    asyncio.create_task(vc.trigger_vts_expression(exp_tag, is_instinct=True))
+                                    spawn(vc.trigger_vts_expression(exp_tag, is_instinct=True))
                         
                             move_match = re.search(r'\[(?:MOVE|SPATIAL|POSITION)[：:]\s*([^\]\[]+)\]', text, re.IGNORECASE)
                             if move_match:
                                 pos_tag = move_match.group(1).strip()
-                                asyncio.create_task(vc.apply_spatial_position(pos_tag, is_instinct=True))
+                                spawn(vc.apply_spatial_position(pos_tag, is_instinct=True))
                         
         except asyncio.CancelledError:
             break
@@ -4485,7 +4474,7 @@ async def continuous_live_worker(vts):
                 # 🛟 斷線救援：上個 session 吞掉的點歌紙條，在這裡撿回來
                 # （只救確定無人認領的點歌；去重＋120 秒案底保證不重複執行）
                 try:
-                    asyncio.create_task(_rescue_missed_song_requests())
+                    spawn(_rescue_missed_song_requests())
                 except Exception:
                     log_swallowed()
                 
@@ -4677,7 +4666,7 @@ async def continuous_live_worker(vts):
                                         _fr_kwargs = {"name": fn_name, "response": {"result": "子智能體已在背景啟動！請妳立刻用口語回應，告訴對方妳正在準備了。"}}
                                         if fn_call_id:
                                             _fr_kwargs["id"] = fn_call_id
-                                        asyncio.create_task(session.send_tool_response(
+                                        spawn(session.send_tool_response(
                                             function_responses=[
                                                 types.FunctionResponse(**_fr_kwargs)
                                             ]
@@ -4730,7 +4719,7 @@ async def continuous_live_worker(vts):
                                             text_chunk = text_chunk.replace(search_match.group(0), "").strip()
                                             if query:
                                                 log_print(f"🌐 [攔截暗號] 啟動平行代理人：搜網專家！關鍵字：{query}")
-                                                asyncio.create_task(live_search_tool_task(session, query))
+                                                spawn(live_search_tool_task(session, query))
                                             else:
                                                 log_print("⚠️ [攔截暗號] 搜尋關鍵字全是雜訊，跳過不搜。")
                                         if "[TOOL:VISION]" in text_chunk:
@@ -4739,12 +4728,12 @@ async def continuous_live_worker(vts):
                                                 log_print("👁️ [視覺] 她正在回答剛看到的畫面，這次的 [TOOL:VISION] 不重看（防看完又看的迴圈）")
                                             else:
                                                 log_print("⚡ [攔截暗號] 啟動平行代理人：視覺大腦！")
-                                                asyncio.create_task(live_vision_tool_task(session, vts))
+                                                spawn(live_vision_tool_task(session, vts))
                                         
                                         if "[TOOL:MIRROR]" in text_chunk:
                                             log_print("🪞 [攔截暗號] 啟動平行代理人：照鏡子！")
                                             text_chunk = text_chunk.replace("[TOOL:MIRROR]", "").strip()
-                                            asyncio.create_task(live_mirror_tool_task(session, vts))
+                                            spawn(live_mirror_tool_task(session, vts))
                                         
                                         if text_chunk:
                                             chunk_buffer += text_chunk
@@ -4810,7 +4799,7 @@ async def continuous_live_worker(vts):
                                     #  所有紙條都掛看門狗（聊天紙條裸奔會靜默丟失）；
                                     #  自主閒聊除外（[SILENCE] 是合法答案，盯了只會狼來了）。
                                     if "【自主閒聊】" not in (prompt or ""):
-                                        asyncio.create_task(_slip_watchdog(prompt, sent_ts))
+                                        spawn(_slip_watchdog(prompt, sent_ts))
                             except Exception as inner_e:
                                 log_print(f"⚠️ [黑板同步] 發送失敗 ({inner_e})，訊息已退回佇列等待重連...")
                                 # 沒送成功的紙條排到最前面，並撤銷去重記帳，重連後才不會被當重複丟掉
@@ -5461,7 +5450,7 @@ async def system_audio_worker():
                                 finally:
                                     is_transcribing = False
 
-                            asyncio.create_task(_do_bg_transcribe(speech_chunks, music_chunks))
+                            spawn(_do_bg_transcribe(speech_chunks, music_chunks))
                     elif rms <= 0.003:
                         if now - last_transcribe_time > 3.0 and (now - LAST_TTS_END_TIME > 2.0):
                             if now - LATEST_SYSTEM_AUDIO_TEXT_TIME > 10.0 and now - LATEST_SYSTEM_MUSIC_TIME > 10.0:
@@ -5892,7 +5881,7 @@ async def vts_health_worker(vts):
                         if vts.is_authenticated:
                             _VTS_LAST_AUTH_TIME = time.time()
                             log_print("✅ [系統通知] VTube Studio 重新連線與授權成功！身體控制權已恢復！")
-                            asyncio.create_task(vc.sync_expression_state(vts))
+                            spawn(vc.sync_expression_state(vts))
                         else:
                             log_print("⚠️ [VTS 心跳] 認證未成功，稍後自動重試")
                     except Exception as reconn_err:
@@ -6411,7 +6400,7 @@ def add_to_streamer_mind_board(user_display: str, unique_id: str, content: str, 
                     await pe.play_virtual_piano(target_song, midi_file=cand_midi, requester_name=user_display, target="audience", is_direct_song_name=True)
             except Exception:
                 log_swallowed()
-        asyncio.create_task(evaluate_and_queue_with_gemini(content))
+        spawn(evaluate_and_queue_with_gemini(content))
 
 def mark_streamer_mind_board_as_read(unique_id: str = None, content: str = None):
     """ 將 7L 記憶腦袋看板中的指定留言/對話標記為已讀"""
@@ -6954,7 +6943,7 @@ async def streamer_mind_loop_worker(vts, input_queue):
                 vu_call = v_match.group(2).strip() if v_match.group(2) else None
                 vu_rel  = v_match.group(3).strip() if v_match.group(3) else None
                 vu_imp  = v_match.group(4).strip() if v_match.group(4) else None
-                asyncio.create_task(save_viewer_profile(vu_name, call=vu_call, relationship=vu_rel, impression=vu_imp))
+                spawn(save_viewer_profile(vu_name, call=vu_call, relationship=vu_rel, impression=vu_imp))
                 log_print(f"👥 [認人] 記住觀眾 {vu_name}：稱={vu_call} 關係={vu_rel} 印象={vu_imp}")
             
             spoken = await execute_actions(vts, clean_reply, input_queue, user_input_ctx=board_context, has_dispatched_tool=bool(tool_output_text.strip()), caller_target="audience", caller_user=log_target)
@@ -6976,7 +6965,7 @@ async def streamer_mind_loop_worker(vts, input_queue):
                 fresh_hist = await fetch_from_long_term_memory("tiktok_live_stream")
                 fresh_hist.append({"role": "user", "content": f"【觀眾留言群】：\n{board_context}"})
                 fresh_hist.append({"role": "assistant", "content": clean_spoken})
-                asyncio.create_task(save_to_long_term_memory("tiktok_live_stream", fresh_hist))
+                spawn(save_to_long_term_memory("tiktok_live_stream", fresh_hist))
                 
         except Exception as e:
             log_print(f"⚠️ [主播記憶腦袋協程異常]: {e}")
@@ -7531,7 +7520,7 @@ async def background_tool_executor(user_text: str, target: str = "dad", requeste
                 for _tool, _args in _mixed:
                     log_print(f"⚡ [CPU 硬體直連] 成功攔截混用指令: {_tool}({_args})")
                     if _tool in ("pe.play_virtual_piano", "play_virtual_piano"):
-                        asyncio.create_task(_mixed_piano_run(
+                        spawn(_mixed_piano_run(
                             _args.get("song_name", ""), _sing_title, target, requester_name))
                     else:
                         _dispatch_in_background(_tool, _args, caller_target=target, caller_user=requester_name)
@@ -7546,7 +7535,7 @@ async def background_tool_executor(user_text: str, target: str = "dad", requeste
                 _same = len({a.get("song_name", "") for _, a in _mixed}) == 1
                 _ack_song = f"{_mixed[0][1].get('song_name', '')}（邊彈邊唱）" if _same else f"{_titles}（混用）"
                 if not from_brain:
-                    asyncio.create_task(_song_ack(_ack_song, target))
+                    spawn(_song_ack(_ack_song, target))
                 return True, "mixed_play_sing", {"desc": _titles}
         if fn_name and _hard_cmd_seen_recently(fn_name, fn_args, time.time()):
             log_print(f"⏭️ [CPU 硬體直連] {fn_name}({fn_args}) 剛剛已在處理，不重複執行")
@@ -7578,9 +7567,9 @@ async def background_tool_executor(user_text: str, target: str = "dad", requeste
             # 點歌強制應答：主腦常靜默，補一句 TTS 保證出聲（target 透傳，播出规则照舊）
             if fn_name in ("auto_sing_song", "sing_song", "pe.play_virtual_piano", "play_virtual_piano") and not from_brain:
                 if _o_need_file:
-                    asyncio.create_task(_song_ack_missing_original((fn_args or {}).get("song_name", ""), target))
+                    spawn(_song_ack_missing_original((fn_args or {}).get("song_name", ""), target))
                 else:
-                    asyncio.create_task(_song_ack((fn_args or {}).get("song_name", ""), target,
+                    spawn(_song_ack((fn_args or {}).get("song_name", ""), target,
                                                   piano=fn_name in ("pe.play_virtual_piano", "play_virtual_piano")))
             # ⚠️ 紙條必須寫明「唱歌的是 7L 本人」，否則主腦會把點歌的人當成演唱者
             slip_text = build_slip_text(fn_name, fn_args, requester_name)
@@ -7699,7 +7688,7 @@ async def process_chat_message(vts, input_queue, user_input: str, user_audio_b64
             log_print("⚡ [極速直通主腦] Live 模式下，控制台訊息已轉交 Live 大腦處理。")
             # 老爸明確指令（唱歌/彈琴）走 CPU 硬拆解先斬後奏：零成本零幻覺，
             # 紙條照樣遞（主腦只負責口頭答應），Live 不調工具也不會漏執行
-            asyncio.create_task(background_tool_executor(user_input, target="dad", requester_name=owner))
+            spawn(background_tool_executor(user_input, target="dad", requester_name=owner))
             #  2026-10-11 桌機代答：CPU 沒命中＋沒工具味 → 免費桌面版回話，省 Live 生成。
             #  工具味/未知/CPU 命中一律走老路（寧可多燒，不靜默丟功能）；桌面掛了也走老路。
             #  開關：DESKTOP_FIRST=0 關（預設開）。mic/觀眾軌不動。
@@ -7709,7 +7698,7 @@ async def process_chat_message(vts, input_queue, user_input: str, user_audio_b64
                 _cpu_tool = None
             _desk_on = os.getenv("DESKTOP_FIRST", "1").strip() != "0" and time.time() >= _DESKTOP_DOWN_UNTIL
             if _desk_on and not _cpu_tool and not _likely_needs_tools(user_input):
-                asyncio.create_task(_desktop_dad_reply(vts, input_queue, user_input, owner))
+                spawn(_desktop_dad_reply(vts, input_queue, user_input, owner))
                 log_print("📱 [桌機代答] 純閒聊走免費桌面版（省 Live 生成）。")
                 return
             try:
@@ -7842,7 +7831,7 @@ async def process_chat_message(vts, input_queue, user_input: str, user_audio_b64
             
             if source == "tiktok_dad":
                 # 老爸直播間留言的硬指令同樣先過 CPU（零成本），再遞紙條給 Live 主腦接話
-                asyncio.create_task(background_tool_executor(user_input, target="dad", requester_name=current_custom_name))
+                spawn(background_tool_executor(user_input, target="dad", requester_name=current_custom_name))
                 if 'LIVE_API_SYSTEM_PROMPT_QUEUE' in globals():
                     LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait(f"[文字輸入] {current_custom_name} (在直播間留言)：{user_input}")
                     _note_brain_origin("dad")
@@ -7912,7 +7901,7 @@ async def process_chat_message(vts, input_queue, user_input: str, user_audio_b64
                 await fetch_ai_response(shadow_msgs, image_base64=current_screen_snapshot, is_proactive=True, request_start_time=req_start)
             except Exception:
                 log_swallowed()
-        asyncio.create_task(run_shadow_brain())
+        spawn(run_shadow_brain())
         
         # 嘴巴神經（極速串流，無Tool負擔）
         stream_iter = await fetch_ai_response(
@@ -7998,7 +7987,7 @@ async def process_chat_message(vts, input_queue, user_input: str, user_audio_b64
             #  防心想污染記憶庫鐵律：若未開口說話，儲存純淨動作標籤，避免將未清洗之 [THOUGHT] 存入歷史
             clean_asst_history = clean_spoken if clean_spoken else (TextCleanEngine.clean_for_tts(bot_reply, apply_phonetics=False) or "[演奏鋼琴/動作執行]")
             fresh_history.append({"role": "assistant", "content": clean_asst_history})
-            asyncio.create_task(save_to_long_term_memory(DEFAULT_CHANNEL_ID, fresh_history))
+            spawn(save_to_long_term_memory(DEFAULT_CHANNEL_ID, fresh_history))
             
     except asyncio.CancelledError:
         pass
@@ -8085,7 +8074,7 @@ async def execute_punish_action(reason: str = "", is_severe: bool = None):
 
         #  雙軌零延遲並行：
         # 1. 0 秒立即尖叫（即刻張嘴對嘴 + 臉紅微顫）
-        asyncio.create_task(play_instant_sound_clip(scream_sound, subtitle=scream_sub))
+        spawn(play_instant_sound_clip(scream_sound, subtitle=scream_sub))
         
         # 2. 同步啟動大腦思考，生成尖叫完畢後接續說的即時回應台詞
         await input_queue.put({
@@ -8336,13 +8325,13 @@ async def chat_processor_worker(vts, input_queue):
                     log_print(f"👑 [老爸幕後指令] 收到老爸在直播間留言: {aud_c}")
                     # 若為 Live 模式，完全交由 Live API 聽懂指令後自主呼叫 invoke_subagent，不在此處偷偷觸發背景工具人
                     if not is_live_brain_active():
-                        asyncio.create_task(background_tool_executor(aud_c, target="dad", requester_name=id_display))
+                        spawn(background_tool_executor(aud_c, target="dad", requester_name=id_display))
                     current_dad_task = asyncio.create_task(
                         process_chat_message(vts, input_queue, aud_c, None, request_start_time=req_time, source="tiktok_dad")
                     )
                 else:
                     # 進行 CPU 極速指令攔截 (觀眾專屬，不啟用 AI 備案避免消耗 API)
-                    asyncio.create_task(background_tool_executor(aud_c, target="audience", requester_name=id_display))
+                    spawn(background_tool_executor(aud_c, target="audience", requester_name=id_display))
                     # 寫入 7L 滾動記憶腦袋，由 streamer_mind_loop_worker 自主排程讀取與發話
                     add_to_streamer_mind_board(id_display, v_unique_id, aud_c, source)
 
@@ -8722,10 +8711,10 @@ async def main():
             print(f"⚠️ 聲紋綁定過程發生錯誤: {e}")
 
     # 🔥 GPT-SoVITS 曉伊模型預熱（提早至 main 最前端）：在背景 Thread 初始化，與 RAG / 記憶 / VTS 連線並行，避免第一句說話卡頓
-    asyncio.create_task(asyncio.to_thread(_prewarm_xiaoyi))
+    spawn(asyncio.to_thread(_prewarm_xiaoyi))
 
     # 知識庫向量模型背景預載：第一次 search_knowledge 不用在對話當下載入／下載（2026-10-24 實機卡 18 秒）
-    asyncio.create_task(asyncio.to_thread(_prewarm_embedder))
+    spawn(asyncio.to_thread(_prewarm_embedder))
 
     try:
         rag_service.init_rag(GEMINI_KEYS[0])
@@ -8733,10 +8722,10 @@ async def main():
         print(f"⚠️ [RAG] 初始化失敗: {e}")
 
     await asyncio.to_thread(_remove_temp_mp3)
-    asyncio.create_task(asyncio.to_thread(pe.init_piano_synthesizer))
+    spawn(asyncio.to_thread(pe.init_piano_synthesizer))
     # 嘗試將本地因配額限制未上傳的資料補傳上雲端
     import core.db as db_module
-    asyncio.create_task(db_module.flush_offline_queue())
+    spawn(db_module.flush_offline_queue())
     
     #  系統啟動防殘留：立即向雲端與本地同步乾淨待命狀態（徹底消除重開機殘留）
     await realtime_task_mgr.sync_to_cloud()
@@ -8761,14 +8750,14 @@ async def main():
         await set_vts_expression(vts, "_RESET_")
         print("✅ 成功連接到 VTube Studio！\n")
         
-        asyncio.create_task(print_model_parameters(vts))
+        spawn(print_model_parameters(vts))
         global GLOBAL_VTS_TRACKING_TASK
         if GLOBAL_VTS_TRACKING_TASK is None or GLOBAL_VTS_TRACKING_TASK.done():
             GLOBAL_VTS_TRACKING_TASK = asyncio.create_task(ai_face_tracking_loop(vts))
-        asyncio.create_task(vts_health_worker(vts))
+        spawn(vts_health_worker(vts))
     except Exception as e:
         print(f"⚠️ VTS 啟動連線未完成 ({e})，已啟動背景自動重連守護（程式正常運作中，開啟 VTS 後將自動連線）。\n")
-        asyncio.create_task(vts_health_worker(vts))
+        spawn(vts_health_worker(vts))
 
     recognizer = sr.Recognizer()
     #  語音結束停頓判定：由原 1.2 秒延長至 2.5 秒，避免稍微停頓思考就被切斷（可透過 .env 中的 MIC_PAUSE_THRESHOLD 自由調整）
@@ -8783,7 +8772,7 @@ async def main():
     
     # 啟動全部背景協程
     # （GPT-SoVITS 預熱已提早至 main() 開頭啟動）
-    asyncio.create_task(mic_volume_worker())
+    spawn(mic_volume_worker())
     # ── 提前載入雲端 MODE_TOGGLE，取代 .env ──
     try:
         from core.memory import get_cloud_knowledge
@@ -8809,10 +8798,10 @@ async def main():
     log_print(f"🎭 [運行模式] MODE={_RUN_MODE}（companion=1對1伴侶 / vtuber=只對觀眾7x24）")
     #  操作者輸入預設停用（OPERATOR_INPUT=1 才開；vtuber 模式強制關）：直播輸入只收聊天室觀眾留言
     if operator_input_enabled():
-        asyncio.create_task(continuous_live_worker(vts))
-        asyncio.create_task(instinct_live_worker())
-        asyncio.create_task(text_file_listener_worker(input_queue))
-        asyncio.create_task(console_keyboard_input_worker(input_queue))
+        spawn(continuous_live_worker(vts))
+        spawn(instinct_live_worker())
+        spawn(text_file_listener_worker(input_queue))
+        spawn(console_keyboard_input_worker(input_queue))
     else:
         log_print("🚫 操作者輸入通道已停用（OPERATOR_INPUT=0／vtuber 模式）：麥克風/鍵盤/文字檔/Web 打字一律忽略")
     if _IS_VTUBER:
@@ -8825,37 +8814,37 @@ async def main():
         log_print("📺 [VTuber 隔離] 休眠禁用／螢幕感知關／proactive 關／系統音監聽關／Discord 關／YT 伴看關")
     else:
         #  伴侶模式：看著主人、聽著主人、主動陪伴
-        asyncio.create_task(screen_capture_worker())
-        asyncio.create_task(peripheral_vision_worker())
-        asyncio.create_task(system_audio_worker())
-    asyncio.create_task(chat_processor_worker(vts, input_queue))
-    asyncio.create_task(streamer_mind_loop_worker(vts, input_queue))
-    asyncio.create_task(anti_watermark_worker(vts))
-    asyncio.create_task(cma_monitor_worker())
-    asyncio.create_task(speech_queue_worker(vts, input_queue))
-    asyncio.create_task(expression_keeper_worker(vts))
-    asyncio.create_task(busy_expression_worker())
+        spawn(screen_capture_worker())
+        spawn(peripheral_vision_worker())
+        spawn(system_audio_worker())
+    spawn(chat_processor_worker(vts, input_queue))
+    spawn(streamer_mind_loop_worker(vts, input_queue))
+    spawn(anti_watermark_worker(vts))
+    spawn(cma_monitor_worker())
+    spawn(speech_queue_worker(vts, input_queue))
+    spawn(expression_keeper_worker(vts))
+    spawn(busy_expression_worker())
     import services.auto_cover_pipeline as _acp_orig
-    asyncio.create_task(_acp_orig.originals_watch_worker())
-    asyncio.create_task(idle_chatter_worker(vts, input_queue))
-    asyncio.create_task(autonomous_wander_worker())
-    asyncio.create_task(pe.piano_focus_udp_worker())
-    asyncio.create_task(pe.piano_liveness_watchdog_worker())
-    asyncio.create_task(tk_listener.tiktok_live_worker(input_queue))
+    spawn(_acp_orig.originals_watch_worker())
+    spawn(idle_chatter_worker(vts, input_queue))
+    spawn(autonomous_wander_worker())
+    spawn(pe.piano_focus_udp_worker())
+    spawn(pe.piano_liveness_watchdog_worker())
+    spawn(tk_listener.tiktok_live_worker(input_queue))
     #  觀眾點播看全片（兩模式共用；空隊列時靜默待命）
-    asyncio.create_task(video_watch.video_watch_worker())
+    spawn(video_watch.video_watch_worker())
     #  直播聊天室觀眾輸入（TWITCH_CHANNELS / YOUTUBE_LIVE_ID 有設才真正連線，未設僅提示）
     #    註冊進 chat_source 註冊表：控制台 /api/chat_sources 可看狀態
     from services import chat_source as _cs
     _cs.bind_chat_workers(input_queue)
     _cs.register_chat_worker("twitch", twitch_live_worker)
     _cs.register_chat_worker("youtube", youtube_live_worker)
-    asyncio.create_task(twitch_live_worker(input_queue))
-    asyncio.create_task(youtube_live_worker(input_queue))
-    asyncio.create_task(pe.auto_restore_piano_state_on_startup())
-    asyncio.create_task(live_timer_sensor_worker(vts, input_queue))
+    spawn(twitch_live_worker(input_queue))
+    spawn(youtube_live_worker(input_queue))
+    spawn(pe.auto_restore_piano_state_on_startup())
+    spawn(live_timer_sensor_worker(vts, input_queue))
     if DISCORD_TOKEN and not _IS_VTUBER:
-        asyncio.create_task(safe_discord_runner())
+        spawn(safe_discord_runner())
 
     pe.bind_host(update_subtitle=update_subtitle, speech_queue=speech_queue, get_user_profile=get_user_profile,
                  get_speaking_target=lambda: CURRENT_SPEAKING_TARGET)
@@ -8866,7 +8855,7 @@ async def main():
     from services.dashboard_bridge import DashboardBridge
     bridge = DashboardBridge(core=sys.modules[__name__], vts=vts, input_queue=input_queue, run_mode=_RUN_MODE)
     await bridge.restore_switches_from_cloud()
-    asyncio.create_task(web_dash.start_web_dashboard(port=7860, **bridge.dashboard_callbacks()))
+    spawn(web_dash.start_web_dashboard(port=7860, **bridge.dashboard_callbacks()))
     
     #  啟動 YouTube 自動伴看與實時多模態視聽理解服務
     yt_comp.ON_VISION_RECORD_CB = record_vision_history_entry

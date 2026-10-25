@@ -20,7 +20,7 @@ import pygame
 from collections import deque
 
 import core.stage_state as stage
-from core.utils import log_swallowed
+from core.utils import log_swallowed, spawn
 
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
@@ -474,7 +474,7 @@ def _send_brain_slip(text: str) -> bool:
     try:
         from vts_7L_test import GLOBAL_LIVE_SESSION
         if GLOBAL_LIVE_SESSION:
-            asyncio.create_task(GLOBAL_LIVE_SESSION.send_realtime_input(text=text))
+            spawn(GLOBAL_LIVE_SESSION.send_realtime_input(text=text))
             return True
     except Exception as e:
         print(f"⚠️ [翻唱引擎] 紙條傳送失敗 ({e})")
@@ -974,7 +974,7 @@ async def play_cover_audio(vocal_path: str, song_name: str, inst_path: str = Non
                             "messageType": "ExpressionActivationRequest", "data": {"expressionFile": "话筒.exp3.json", "active": active}
                         }), timeout=0.5)
                     except Exception: pass
-                asyncio.create_task(_toggle_mic(True))
+                spawn(_toggle_mic(True))
 
         inst_info = " + 獨立伴奏雙軌同步" if snd_inst else " (純人聲清唱)"
         print(f"🎤 [7L 舞台開唱] 正在演唱《{song_name}》（7L 甜妹主唱{inst_info}）！")
@@ -1008,7 +1008,7 @@ async def play_cover_audio(vocal_path: str, song_name: str, inst_path: str = Non
                             "messageType": "ExpressionActivationRequest", "data": {"expressionFile": "话筒.exp3.json", "active": False}
                         }), timeout=0.5)
                     except Exception: pass
-                asyncio.create_task(_toggle_mic_off())
+                spawn(_toggle_mic_off())
         stage.stop_playback()
         core_vts = get_core_vts()
         if core_vts:

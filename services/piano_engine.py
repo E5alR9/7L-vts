@@ -28,7 +28,7 @@ from services.vts_client import move_vts_spatial, set_vts_expression
 from core.hard_command import display_requester
 
 
-from core.utils import log_print, to_tw, log_swallowed
+from core.utils import log_print, to_tw, log_swallowed, spawn
 from core.identity import get_owner_name
 from core.llm_engine import (GEMINI_KEYS, HIGH_IQ_GEMINI_MODELS, DEAD_GEMINI_MODELS, is_model_locked,
                              get_pingpong_alternating_index, get_pingpong_ring_indices)
@@ -2530,7 +2530,7 @@ async def play_virtual_piano(song_name: str = "", custom_sheet: str = "", auto_r
                             log_print(f"🎵 [鋼琴點歌排隊] 成功預約《{t_name}》（來自 {req_n}）排入下一首！（目前待播隊列中共 {len(PIANO_REQUEST_QUEUE)} 首）")
                     finally:
                         PENDING_PIANO_PRELOADS.discard(c_song.lower())
-                asyncio.create_task(preload_and_queue_worker(search_q, requester_name, target, clean_target_song))
+                spawn(preload_and_queue_worker(search_q, requester_name, target, clean_target_song))
                 return f"（系統提示：已成功為{requester_name}將《{clean_target_song}》排入下一首待播！請用自然口語告知對方：『我現在正在彈《{clean_song_title_for_speech(current_piano_song_title)}》喔～等我這首彈完，下一首就幫你彈《{clean_target_song}》！』）"
         elif is_same_title and not is_replay_command:
             display_name = current_piano_song_title
@@ -2802,7 +2802,7 @@ async def mashup_virtual_piano(*songs, song_name1: str = "", song_name2: str = "
     if current_ai_state != "PIANO":
         current_ai_state = "PIANO"
         if vc.GLOBAL_VTS:
-            asyncio.create_task(set_vts_expression(vc.GLOBAL_VTS, "星星眼"))
+            spawn(set_vts_expression(vc.GLOBAL_VTS, "星星眼"))
             
     await _show_subtitle(f"🎹 [7L 神仙打架合奏] {titles_display}")
     

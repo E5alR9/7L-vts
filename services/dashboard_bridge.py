@@ -14,7 +14,7 @@ import asyncio
 import os
 import time
 
-from core.utils import log_print, get_silence_ticks, get_uptime_ticks, format_ticks_to_human
+from core.utils import log_print, get_silence_ticks, get_uptime_ticks, format_ticks_to_human, spawn
 
 # 本檔經 core 讀寫的主程式名稱（新增 c.<名稱> 用法時一併登記）
 CORE_ATTRS = (
@@ -317,7 +317,7 @@ class DashboardBridge:
         elif tool_name == "set_timer":
             sec = int(args.get("seconds", 60))
             msg = args.get("message", "提醒時間到！")
-            asyncio.create_task(c.set_timer(sec, msg, self.input_queue, caller_user="老爸"))
+            spawn(c.set_timer(sec, msg, self.input_queue, caller_user="老爸"))
             return f"已設定 {sec} 秒後鬧鐘提醒：「{msg}」"
         elif tool_name == "open_browser":
             url = args.get("url", "https://www.google.com")

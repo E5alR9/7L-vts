@@ -46,3 +46,61 @@ def test_live_paper_drops_are_logged():
         body = ast.get_source_segment(src, n.body[0]) or ""
         if "LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait" in body:
             assert not any(_silent_broad(h) for h in n.handlers), n.lineno
+
+
+# —— 背景任務（2026-10-25）：沒存起來的 create_task 可能跑到一半被回收，例外也沒人接 ——
+
+def test_spawn_keeps_tasks_alive_and_logs_failures(monkeypatch):
+    import asyncio
+    import gc
+    import core.utils as u
+    logged = []
+    monkeypatch.setattr(u, "log_print", lambda m, *a, **k: logged.append(m))
+    u._BG_FAIL_LOG.clear()
+
+    async def boom():
+        await asyncio.sleep(0)
+        raise RuntimeError("壞掉了")
+
+    async def slow(out):
+        await asyncio.sleep(0.05)
+        out.append("跑完")
+
+    async def go():
+        out = []
+        u.spawn(slow(out))
+        gc.collect()                       # 沒人存的任務也不能被回收
+        u.spawn(boom(), label="pe.play_virtual_piano({'song_name': '小星星'})")
+        await asyncio.sleep(0.1)
+        return out
+    assert asyncio.run(go()) == ["跑完"]
+    assert len(logged) == 1 and "小星星" in logged[0] and "壞掉了" in logged[0] and "Traceback" in logged[0]
+    assert not u._BG_TASKS                 # 跑完就放掉
+
+
+def test_repeated_background_failures_are_throttled(monkeypatch):
+    import asyncio
+    import core.utils as u
+    logged = []
+    monkeypatch.setattr(u, "log_print", lambda m, *a, **k: logged.append(m))
+    u._BG_FAIL_LOG.clear()
+
+    async def boom():
+        raise ValueError("x")
+
+    async def go():
+        for _ in range(5):
+            u.spawn(boom())
+        await asyncio.sleep(0.05)
+    asyncio.run(go())
+    assert len(logged) == 1                # 同一個協程一分鐘只記一次
+
+
+@pytest.mark.parametrize("rel", ["vts_7L_test.py", "services/web_dashboard.py", "services/piano_engine.py",
+                                 "services/auto_cover_pipeline.py", "services/dashboard_bridge.py",
+                                 "services/yt_companion_service.py"])
+def test_no_fire_and_forget_create_task(rel):
+    tree = ast.parse(open(os.path.join(ROOT, rel), encoding="utf-8").read())
+    bare = [n.lineno for n in ast.walk(tree) if isinstance(n, ast.Expr) and isinstance(n.value, ast.Call)
+            and isinstance(n.value.func, ast.Attribute) and n.value.func.attr in ("create_task", "ensure_future")]
+    assert not bare, f"{rel} 這幾行的背景任務沒存起來，改用 spawn()：{bare}"

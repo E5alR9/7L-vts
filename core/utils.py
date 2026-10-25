@@ -103,6 +103,47 @@ def log_swallowed(where: str = "", interval: float = SWALLOW_LOG_INTERVAL):
     except Exception:
         pass
 
+
+# 背景任務：asyncio 只對任務留弱參考，沒人存的任務可能跑到一半被回收；
+# 例外也沒人 await，只會在回收時印一句 never retrieved（2026-10-25 實機：點曲任務無聲消失）
+_BG_TASKS = set()
+_BG_FAIL_LOG = {}   # 協程名 -> [上次記錄時間, 期間壓下次數]
+
+
+def spawn(coro, label: str = ""):
+    """丟背景跑的唯一出口（取代 asyncio.create_task(...) 不存結果）：留強參考到跑完，出錯記一筆日誌。"""
+    import asyncio
+    task = asyncio.create_task(coro)
+    task._7l_label = label or getattr(coro, "__qualname__", "") or repr(coro)[:60]
+    _BG_TASKS.add(task)
+    task.add_done_callback(_bg_done)
+    return task
+
+
+def _bg_done(task):
+    _BG_TASKS.discard(task)
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is None:
+        return
+    try:
+        import traceback
+        label = getattr(task, "_7l_label", "") or task.get_name()
+        key = getattr(task.get_coro(), "__qualname__", label)
+        now = time.monotonic()
+        rec = _BG_FAIL_LOG.get(key)
+        if rec is not None and now - rec[0] < SWALLOW_LOG_INTERVAL:
+            rec[1] += 1
+            return
+        suppressed = rec[1] if rec else 0
+        _BG_FAIL_LOG[key] = [now, 0]
+        extra = f"（前 {SWALLOW_LOG_INTERVAL:.0f}s 另壓下 {suppressed} 次）" if suppressed else ""
+        log_print(f"⚠️ [背景任務失敗] {label}: {type(exc).__name__}: {str(exc)[:200]}{extra}\n"
+                  + "".join(traceback.format_exception(exc))[-1500:])
+    except Exception:
+        pass
+
 def sys_notify(msg, duration=4.0):
     global current_system_notification, notification_expire_time
     clean_msg = str(msg).replace('\n', ' ').replace('\r', ' ')
