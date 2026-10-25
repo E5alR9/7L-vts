@@ -186,6 +186,8 @@ from core.subagent_router import resolve_subagent_chain
 from core.db import *
 from core.live_timer_sensor import live_timer_hub
 import services.piano_engine as pe
+from services.stage_actions import (parse_action_timeline, execute_action_timeline,
+                                   execute_speech_visual_actions, expression_keeper_worker)
 import services.yt_companion_service as yt_comp
 from core.llm_engine import (
     GEMINI_KEYS,
@@ -2726,34 +2728,6 @@ async def generate_ai_image(prompt: str) -> str:
 
     return "（系統回報：生圖伺服器當前忙線，稍後可再重試）"
 
-async def move_spatial_position(
-    target_position: str = "自由漫遊", 
-    delta_x: float = None,
-    delta_y: float = None,
-    delta_size: float = None,
-    scale_factor: float = None,
-    duration: float = 2.0
-) -> str:
-    """控制 7L 的 Live2D 模型在 VTube Studio 畫布內平滑移動位置、相對微調或縮放。
-    
-    Args:
-        target_position: 目標語意位置或微調指令（如：'右側', '右下角', '左側', '左上角', '正中間', '靠近', '躲角落', '鋼琴旁', '往右+10', '往左-15', '往上+5', '往下-10', '放大+10', '縮小-5', '自由漫遊', '原位'）。
-        delta_x: (可選) X 軸相對平移量（例如: +10 向右微調, -10 向左微調）。
-        delta_y: (可選) Y 軸相對平移量（例如: +10 向上微調, -10 向下微調）。
-        delta_size: (可選) 尺寸相對大小微調（例如: +5 放大, -5 縮小）。
-        scale_factor: (可選) 模型整體等比例縮放倍率（例如: 1.2 代表放大 20%, 0.8 代表縮小 20%）。
-        duration: (可選) 移動平滑過渡秒數 (預設 2.0 秒)。
-    """
-    print(f"\n🚀 [Tool 調用] 7L 正在自主調整模型位置: 「{target_position}」 (dx={delta_x}, dy={delta_y}, d_sz={delta_size}, 縮放={scale_factor})")
-    res = await apply_spatial_position(
-        position_name=target_position, 
-        delta_x=delta_x,
-        delta_y=delta_y,
-        delta_size=delta_size,
-        scale_factor=scale_factor,
-        duration=duration
-    )
-    return f"模型位置調整完成：{res}"
 
 
 # [Virtual Piano Module has been extracted to services/piano_engine.py]
@@ -3071,59 +3045,6 @@ async def interrupt_current_speech(clear_queue: bool = True, reason: str = "7L �
 # ────────────────────────────────────────────────────────
 #  12.5 Live API 即時神態導演與句中動態表情時間軸排程引擎
 # ────────────────────────────────────────────────────────
-def parse_action_timeline(raw_text: str, total_duration: float) -> list:
-    """從原始模型回覆字串中，按字元進度精確計算每個表情/動作標籤在語音播放期間的觸發時間點。
-    支援句中隨時切換表情（例如上半句 [EXPRESSION: 生氣]，下半句 [EXPRESSION: 臉紅]）。
-    回傳: [(fire_time_sec, action_type, action_val), ...]
-    """
-    if not raw_text:
-        return []
-
-    clean_raw = re.sub(r'\[THOUGHT:[^\]]*\]', '', raw_text, flags=re.IGNORECASE).strip()
-    tag_pattern = re.compile(
-        r'\[(EXPRESSION|MOVE|LOOK|SPATIAL|POSITION|WINDOW|WINK|FROWN|SHOCK|眨眼|皺眉|震驚)(?:[：:]\s*([^\]\[]*))?\]',
-        re.IGNORECASE
-    )
-
-    tags_with_pos = []
-    for m in tag_pattern.finditer(clean_raw):
-        raw_type = m.group(1).upper()
-        tag_val = m.group(2).strip() if m.group(2) else ''
-
-        if raw_type in ['SPATIAL', 'POSITION', 'WINDOW']:
-            tag_type = 'MOVE'
-        elif raw_type in ['WINK', '眨眼']:
-            tag_type = 'WINK'
-            tag_val = ''
-        elif raw_type in ['FROWN', '皺眉']:
-            tag_type = 'EXPRESSION'
-            tag_val = '皺眉'
-        elif raw_type in ['SHOCK', '震驚']:
-            tag_type = 'EXPRESSION'
-            tag_val = '震驚'
-        else:
-            tag_type = raw_type
-
-        tags_with_pos.append((m.start(), tag_type, tag_val))
-
-    clean_spoken = tag_pattern.sub('', clean_raw).strip()
-    clean_spoken = re.sub(r'\[[A-Z_]+[：:][^\]]*\]', '', clean_spoken).strip()
-    clean_spoken = re.sub(r'\[[A-Z_]+[：:]?[^\]]*$', '', clean_spoken).strip()
-    total_chars = max(1, len(clean_spoken))
-
-    timeline = []
-    for start_idx, tag_type, tag_val in tags_with_pos:
-        prefix = clean_raw[:start_idx]
-        prefix_clean = tag_pattern.sub('', prefix)
-        prefix_clean = re.sub(r'\[[A-Z_]+[：:][^\]]*\]', '', prefix_clean).strip()
-        prefix_clean = re.sub(r'\[[A-Z_]+[：:]?[^\]]*$', '', prefix_clean).strip()
-        char_offset = len(prefix_clean)
-        ratio = min(1.0, max(0.0, char_offset / total_chars))
-        fire_time = round(ratio * total_duration, 2)
-        timeline.append((fire_time, tag_type, tag_val))
-
-    timeline.sort(key=lambda x: x[0])
-    return timeline
 
 
 async def _director_ensure_session():
@@ -3286,62 +3207,6 @@ async def live_api_direct_sentence_emotions(clean_text: str, total_duration: flo
     if parsed_timeline:
         log_print(f"⚡ [Live API 神態導演] 成功策劃句中動態表情流: {parsed_timeline}")
     return parsed_timeline
-
-
-async def execute_action_timeline(vts, timeline: list, cancel_event: asyncio.Event = None):
-    """ 語音時間軸動態表情與動作執行器：
-    隨語音發音進度精確在毫秒級時間點觸發表情轉換，實現上半句到下半句想換就換的生動神態！
-    """
-    
-    if not timeline or not vts:
-        return
-    start_t = time.time()
-    for fire_time, action_type, action_val in sorted(timeline, key=lambda x: x[0]):
-        if cancel_event and cancel_event.is_set():
-            break
-        now_offset = time.time() - start_t
-        delay = fire_time - now_offset
-        if delay > 0:
-            try:
-                if cancel_event:
-                    await asyncio.wait_for(cancel_event.wait(), timeout=delay)
-                    break
-                else:
-                    await asyncio.sleep(delay)
-            except asyncio.TimeoutError:
-                pass
-
-        if cancel_event and cancel_event.is_set():
-            break
-
-        try:
-            if action_type == "EXPRESSION":
-                log_print(f"🎭 [句中即時換表情 ({fire_time:.1f}s)]: 切換至「{action_val}」")
-                await set_vts_expression(vts, action_val)
-            elif action_type == "WINK":
-                log_print(f"😉 [句中即時動作 ({fire_time:.1f}s)]: 眨眼 WINK")
-                await vc.trigger_wink()
-            elif action_type == "MOVE":
-                log_print(f"🚶 [句中即時走位 ({fire_time:.1f}s)]: 移動至「{action_val}」")
-                await apply_spatial_position(action_val)
-            elif action_type == "LOOK":
-                u_act = action_val.upper()
-                if "ROLL" in u_act:
-                    await vc.trigger_eye_roll()
-                elif "MOUSE" in u_act:
-                    await vc.set_tracking_mouse(True)
-                elif "LEFT" in u_act:
-                    await vc.set_target_look(-25.0, 0.0)
-                elif "RIGHT" in u_act:
-                    await vc.set_target_look(25.0, 0.0)
-                elif "UP" in u_act:
-                    await vc.set_target_look(0.0, 20.0)
-                elif "DOWN" in u_act:
-                    await vc.set_target_look(0.0, -20.0)
-                elif "CENTER" in u_act:
-                    await vc.set_target_look(0.0, 0.0)
-        except Exception as e:
-            log_print(f"⚠️ [即時時間軸執行異常]: {e}")
 
 
 async def play_voice_complete(text, target: str = "dad", raw_actions_text: str = "", vts=None):
@@ -4044,76 +3909,6 @@ async def live_timer_sensor_worker(vts, input_queue):
             log_print(f"⚠️ [API Live 時間感測協程異常]: {e}")
             await asyncio.sleep(1.0)
 
-async def execute_speech_visual_actions(vts, text: str):
-    """ 語音同步專用 Live2D 演出控制器：
-    精準在語音【真正開口發話播放】的瞬間觸發本句專屬的表情、走位、眨眼、視線與身體動作，
-    杜絕連續說話時下一句還在排隊、動作卻提前偷跑的脫節問題！
-    """
-    
-    if not text:
-        return
-        
-    exp_match = re.search(r'\[EXPRESSION[：:]\s*([^\]\[]+)\]', text, re.IGNORECASE)
-    if exp_match:
-        exp_tag = exp_match.group(1).strip()
-        if any(k in exp_tag.upper() for k in ["WINK", "眨眼", "單眼", "眨單眼"]):
-            asyncio.create_task(vc.trigger_wink())
-            log_print("😉 [Live2D 動作] 標籤觸發 Wink 單眼眨一下眼")
-        elif any(k in exp_tag for k in ["驚訝", "惊讶", "驚", "惊", "震驚", "震惊", "瞳孔", "嚇到", "SHOCK", "SURPRISE"]):
-            asyncio.create_task(vc.trigger_shock())
-            log_print("😱 [Live2D 動作] 標籤觸發驚訝縮瞳與瞪大雙眼微顫")
-        elif any(k in exp_tag for k in ["皺眉", "皱眉", "八字眉", "困擾", "困扰", "委屈", "傲嬌皺眉", "難過眉", "生氣皺眉", "FROWN"]):
-            asyncio.create_task(vc.trigger_frown())
-            log_print("🥺 [Live2D 動作] 標籤觸發八字皺眉/委屈表情")
-        else:
-            log_print(f"🎭 [Live2D 表情] 標籤觸發表情: 「{exp_tag}」")
-            asyncio.create_task(set_vts_expression(vts, exp_tag))
-
-    move_match = re.search(r'\[(?:MOVE|SPATIAL|WINDOW|POSITION)[：:]\s*([^\]\[]+)\]', text, re.IGNORECASE)
-    if move_match:
-        pos_tag = move_match.group(1).strip()
-        if not pe.is_piano_active or any(k in pos_tag for k in ["鋼琴", "原本", "大小", "視窗"]):
-            log_print(f"🚶 [Live2D 走位] 標籤觸發模型移動至: 「{pos_tag}」")
-            asyncio.create_task(apply_spatial_position(pos_tag))
-
-    try:
-        upper_text = text.upper()
-        if "WINK" in upper_text and not exp_match:
-            asyncio.create_task(vc.trigger_wink())
-            log_print("😉 [Live2D 動作] 動作觸發 Wink 單眼眨一下眼")
-        elif any(k in upper_text for k in ["SHOCK", "SHOCKED", "SURPRISE", "PUPIL", "驚訝", "惊讶", "震驚", "震惊", "瞳孔", "嚇到"]) and not exp_match:
-            asyncio.create_task(vc.trigger_shock())
-            log_print("😱 [Live2D 動作] 動作觸發驚訝縮瞳與瞪大雙眼微顫")
-        elif any(k in upper_text for k in ["FROWN", "FROWNING", "皺眉", "皱眉", "八字眉", "困擾", "委屈"]) and not exp_match:
-            asyncio.create_task(vc.trigger_frown())
-            log_print("🥺 [Live2D 動作] 動作觸發八字皺眉/委屈神態")
-        elif any(k in upper_text for k in ["ROLL", "AROUND", "WANDER", "轉眼", "環視"]):
-            asyncio.create_task(vc.trigger_eye_roll())
-            log_print("🌀 [Live2D 動作] 動作觸發招牌靈動轉眼珠環視四周")
-        elif "MOUSE" in upper_text and "LOOK" in upper_text:
-            asyncio.create_task(vc.set_tracking_mouse(True))
-            log_print("👀 [Live2D 視線] 視線切換為鎖定追蹤滑鼠游標")
-        elif "LEFT" in upper_text and "LOOK" in upper_text:
-            asyncio.create_task(vc.set_target_look(-25.0, 0.0))
-            log_print("👀 [Live2D 視線] 視線轉向【左邊】")
-        elif "RIGHT" in upper_text and "LOOK" in upper_text:
-            asyncio.create_task(vc.set_target_look(25.0, 0.0))
-            log_print("👀 [Live2D 視線] 視線轉向【右邊】")
-        elif "UP" in upper_text and "LOOK" in upper_text:
-            asyncio.create_task(vc.set_target_look(0.0, 25.0))
-            log_print("👀 [Live2D 視線] 視線轉向【上方】")
-        elif "DOWN" in upper_text and "LOOK" in upper_text:
-            asyncio.create_task(vc.set_target_look(0.0, -25.0))
-            log_print("👀 [Live2D 視線] 視線轉向【下方】")
-        elif "CENTER" in upper_text and "LOOK" in upper_text:
-            asyncio.create_task(vc.set_target_look(0.0, 0.0))
-            log_print("👀 [Live2D 視線] 視線回正【正前方】")
-
-        if "EARS" in upper_text:
-            vc.force_blink_trigger = 1
-            log_print("🐰 [Live2D 動作] 動作觸發耳朵抖動/眨眼")
-    except Exception:
-        pass
 
 async def execute_actions(vts, text, input_queue, user_input_ctx: str = "", has_dispatched_tool: bool = False, execute_visuals: bool = False, caller_target: str = "", caller_user: str = ""):
     """集中式系統動作與指令過濾器 (即刻執行底層系統動作/工具，並產出口語純淨文字)"""
@@ -6269,38 +6064,6 @@ async def _ai_face_tracking_loop_impl(vts):
 
         await asyncio.sleep(0.04)
 
-async def expression_keeper_worker(vts):
-    
-    while True:
-        await asyncio.sleep(12.0)
-        try:
-            active_exps = getattr(vc, "CURRENT_ACTIVE_EXPS", None)
-            if active_exps:
-                msg_state = {
-                    "apiName": "VTubeStudioPublicAPI", 
-                    "apiVersion": "1.0", 
-                    "requestID": "GetState", 
-                    "messageType": "ExpressionStateRequest", 
-                    "data": {"details": True}
-                }
-                async with vc.vts_lock:
-                    resp_state = await asyncio.wait_for(vts.request(msg_state), timeout=1.0)
-                
-                expressions = resp_state.get("data", {}).get("expressions", [])
-                vts_active_files = [exp.get("file") for exp in expressions if exp.get("active")]
-                
-                for exp_file in list(active_exps):
-                    if exp_file not in vts_active_files:
-                        async with vc.vts_lock:
-                            await asyncio.wait_for(vts.request({
-                                "apiName": "VTubeStudioPublicAPI",
-                                "apiVersion": "1.0",
-                                "requestID": "ForceActivate",
-                                "messageType": "ExpressionActivationRequest",
-                                "data": {"expressionFile": exp_file, "active": True}
-                            }), timeout=0.8)
-        except Exception:
-            log_swallowed()
 
 WATERMARK_REASSERT_SEC = 60.0  # 水印守護間隔：每分鐘重申一次常駐（冪等，開著再開一次無害）
 
