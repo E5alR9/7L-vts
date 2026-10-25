@@ -603,6 +603,7 @@ from core.llm_engine import (
     track_key, sort_keys_by_load, key_load,
     cool_key, key_cooling,
     parse_cooldown_seconds, get_seconds_until_pt_midnight, report_gemini_key_error,
+    live_one_shot,
     UNRESTRICTED_SAFETY_SETTINGS
 )
 from core.memory import init_unified_memory, flush_unified_memory, fetch_from_long_term_memory, save_to_long_term_memory, append_to_unified_memory, clear_all_memories, get_recent_100_memory_context, get_viewer_profile, save_viewer_profile, record_bot_message, get_cloud_knowledge, update_cloud_prompt_field, TIKTOK_CHATROOM_MEMORY, STREAMER_MIND_BOARD, DEFAULT_CHANNEL_ID, save_cloud_knowledge, get_unified_memory_context, RECENT_BOT_MESSAGES, evaluate_memory_demand, USER_PROFILE_FILE
@@ -4425,48 +4426,18 @@ async def check_screen_change_via_live_api(img_bytes: bytes, current_context: st
     """
     if not img_bytes or len(img_bytes) < 1000:
         return False
-        
-    candidate_keys = get_dynamic_live_key_candidates(KEYS_VISION if KEYS_VISION else GEMINI_KEYS)
-    for idx, g_key in enumerate(candidate_keys[:4]):
-        if key_cooling(g_key, "gemini-3.8-live"):
-            continue
-        client = genai.Client(api_key=g_key)
-        try:
-            live_cfg = types.LiveConnectConfig(
-                response_modalities=[types.Modality.AUDIO],
-                output_audio_transcription=types.AudioTranscriptionConfig(),
-                system_instruction=types.Content(parts=[types.Part(text="""妳是 7L 的背景餘光視覺神經哨兵。
+    decision = await live_one_shot(
+        """妳是 7L 的背景餘光視覺神經哨兵。
 妳正透過雙眼看著老爸的電腦螢幕畫面。
 妳的任務是保持眼睛在看，但【請保持安靜，僅使用表情代碼回應】！
 妳只負責做極速二元決策：
 - [NO_CHANGE]：若畫面維持在先前的操作中（如持續寫程式碼、同一個視窗/軟體中微調打字、滑鼠移動、無重大新動態），請【只輸出】: [NO_CHANGE]
 - [LOOK_SERIOUS]：只有當發生重大改變（如切換到完全不同的應用程式、跳出報錯或提示視窗、開啟新遊戲/影片、完成重大部署/編譯、畫面焦點徹底改變）時，才輸出: [LOOK_SERIOUS]
-請直接輸出 [NO_CHANGE] 或 [LOOK_SERIOUS]！""")]),
-            )
-            async with asyncio.timeout(3.8):
-                async with client.aio.live.connect(model="gemini-3.8-live", config=live_cfg) as session:
-                    await session.send_realtime_input(video={"data": img_bytes, "mime_type": "image/jpeg"})
-                    eval_prompt = f"前次已知畫面狀態：『{current_context}』。請看當前畫面，是否有出現重大新事件需要認真看？只輸出 [NO_CHANGE] 或 [LOOK_SERIOUS]："
-                    await session.send_realtime_input(text=eval_prompt)
-                    
-                    decision_text = ""
-                    async for resp in session.receive():
-                        c = resp.server_content
-                        if c:
-                            if c.output_transcription and c.output_transcription.text:
-                                decision_text += c.output_transcription.text
-                            if c.turn_complete or getattr(c, 'generation_complete', False):
-                                break
-                                
-                    decision_clean = decision_text.strip().upper()
-                    if "[LOOK_SERIOUS]" in decision_clean or "LOOK_SERIOUS" in decision_clean:
-                        return True
-                    if "[NO_CHANGE]" in decision_clean or "NO_CHANGE" in decision_clean or "[SILENCE]" in decision_clean:
-                        return False
-        except Exception as e:
-            report_gemini_key_error(g_key, e, "gemini-3.8-live")
-            continue
-    return False
+請直接輸出 [NO_CHANGE] 或 [LOOK_SERIOUS]！""",
+        f"前次已知畫面狀態：『{current_context}』。請看當前畫面，是否有出現重大新事件需要認真看？只輸出 [NO_CHANGE] 或 [LOOK_SERIOUS]：",
+        KEYS_VISION if KEYS_VISION else GEMINI_KEYS, image_jpeg=img_bytes, timeout=3.8,
+        accept=lambda t: any(m in t.upper() for m in ("LOOK_SERIOUS", "NO_CHANGE", "[SILENCE]")))
+    return "LOOK_SERIOUS" in decision.upper()
 
 
 
@@ -7506,67 +7477,36 @@ async def judge_subconscious_intent_via_live_api(memory_context: str, unread_bat
     極速判定當前是否該開口發話（二元決策），絕不浪費主力模型額度！
     回傳 dict: {"should_speak": bool, "target": str, "focus": str, "song": str, "raw": str}
     """
-    candidate_keys = get_dynamic_live_key_candidates(KEYS_AUDIENCE_LIVE if KEYS_AUDIENCE_LIVE else GEMINI_KEYS)
-    for idx, g_key in enumerate(candidate_keys[:4]):
-        if key_cooling(g_key, "gemini-3.8-live"):
-            continue
-        client = genai.Client(api_key=g_key)
-        try:
-            live_cfg = types.LiveConnectConfig(
-                response_modalities=[types.Modality.AUDIO],
-                output_audio_transcription=types.AudioTranscriptionConfig(),
-                system_instruction=types.Content(parts=[types.Part(text="""妳是 7L 的潛意識哨兵：只決定她現在該不該開口。
+    decision_clean = await live_one_shot(
+        """妳是 7L 的潛意識哨兵：只決定她現在該不該開口。
 - 老爸（麥克風/打字標註老爸）：對妳說話、下指令、問話、點歌→[SPEAK: target=老爸, focus=重點, song=歌名(若點歌)]；自言自語/雜音/咳嗽→[SILENCE]。
 - 觀眾彈幕：指名 7L、聊天、點歌、稱讚→[SPEAK: target=觀眾名, focus=重點, song=歌名(若點歌)]；聊遊戲戰況/嘴主播→[SPEAK: target=老爸(吐槽), focus=重點, user=觀眾名]；任何請求提問→[SPEAK: target=老爸(請示), focus=重點, user=觀眾名]；刷屏/符號/無需插話→[SILENCE]。
 - 彈鋼琴時照常判定，不因彈琴沉默。
-只輸出 [SILENCE] 或 [SPEAK: ...]！""")])
-            )
-            async with asyncio.timeout(3.5):
-                async with client.aio.live.connect(model="gemini-3.8-live", config=live_cfg) as session:
-                    prompt_eval = f"""【最新滾動記憶與近期全景上下文】：
+只輸出 [SILENCE] 或 [SPEAK: ...]！""",
+        f"""【最新滾動記憶與近期全景上下文】：
 {memory_context}
 
 【剛收到的最新未讀輸入】：
 {unread_batch_desc}
 
-請即刻給出潛意識發言決策（[SILENCE] 或 [SPEAK: ...]）："""
-                    await session.send_realtime_input(text=prompt_eval)
-                    
-                    decision_text = ""
-                    async for resp in session.receive():
-                        c = resp.server_content
-                        if c:
-                            if c.output_transcription and c.output_transcription.text:
-                                decision_text += c.output_transcription.text
-                            if c.turn_complete or getattr(c, 'generation_complete', False):
-                                break
-                                
-                    decision_clean = decision_text.strip()
-                    if decision_clean:
-                        if "[SILENCE]" in decision_clean or decision_clean.upper() == "SILENCE" or "[PASS]" in decision_clean:
-                            return {"should_speak": False, "raw": decision_clean}
-                        
-                        target_match = re.search(r'target\s*=\s*([^,\]]+)', decision_clean, re.IGNORECASE)
-                        focus_match = re.search(r'focus\s*=\s*([^,\]]+)', decision_clean, re.IGNORECASE)
-                        song_match = re.search(r'song\s*=\s*([^,\]]+)', decision_clean, re.IGNORECASE)
-                        
-                        t_user = target_match.group(1).strip() if target_match else ""
-                        t_focus = focus_match.group(1).strip() if focus_match else ""
-                        t_song = song_match.group(1).strip() if song_match else ""
-                        
-                        return {
-                            "should_speak": True,
-                            "target": t_user,
-                            "focus": t_focus,
-                            "song": t_song,
-                            "raw": decision_clean
-                        }
-        except Exception as e:
-            report_gemini_key_error(g_key, e, "gemini-3.8-live")
-            continue
-            
-    # 若 Live API 暫時連線繁忙，預設放行由主力大腦判定
-    return {"should_speak": True, "target": "", "focus": "", "song": "", "raw": "FALLBACK_ALLOW"}
+請即刻給出潛意識發言決策（[SILENCE] 或 [SPEAK: ...]）：""",
+        KEYS_AUDIENCE_LIVE if KEYS_AUDIENCE_LIVE else GEMINI_KEYS, timeout=3.5)
+    if not decision_clean:
+        # 若 Live API 暫時連線繁忙，預設放行由主力大腦判定
+        return {"should_speak": True, "target": "", "focus": "", "song": "", "raw": "FALLBACK_ALLOW"}
+    if "[SILENCE]" in decision_clean or decision_clean.upper() == "SILENCE" or "[PASS]" in decision_clean:
+        return {"should_speak": False, "raw": decision_clean}
+
+    target_match = re.search(r'target\s*=\s*([^,\]]+)', decision_clean, re.IGNORECASE)
+    focus_match = re.search(r'focus\s*=\s*([^,\]]+)', decision_clean, re.IGNORECASE)
+    song_match = re.search(r'song\s*=\s*([^,\]]+)', decision_clean, re.IGNORECASE)
+    return {
+        "should_speak": True,
+        "target": target_match.group(1).strip() if target_match else "",
+        "focus": focus_match.group(1).strip() if focus_match else "",
+        "song": song_match.group(1).strip() if song_match else "",
+        "raw": decision_clean
+    }
 
 _BARE_PING_NAMES = {"7l", "小7", "7寶", "小七"}
 _PING_COOLDOWN_SEC = 120.0  # 同一人光桿點名 2 分鐘只應一次（防 ping 刷屏燒 TTS）
