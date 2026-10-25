@@ -383,3 +383,19 @@ def test_tuning_knobs_are_constants_not_env():
         src = open(os.path.join(ROOT, f), encoding="utf-8").read()
         for n in names:
             assert f'getenv("{n}"' not in src and f'"key": "{n}"' not in src, (f, n)
+
+
+def test_playback_state_lives_in_stage_module():
+    """播放／嘴型狀態在 core.stage_state；翻唱流程不再用 setattr 改主程式的全域變數。"""
+    import core.stage_state as stage
+    stage.start_playback(envelope=[0.1, 0.5], start_time=12.0)
+    assert stage.IS_MP3_PLAYING and stage.CURRENT_MOUTH_ENVELOPE == [0.1, 0.5] and stage.CURRENT_SPEECH_START_TIME == 12.0
+    stage.clear_mouth()
+    assert stage.IS_MP3_PLAYING and stage.CURRENT_MOUTH_ENVELOPE == [] and stage.CURRENT_SMOOTH_MOUTH == 0.0
+    stage.stop_playback()
+    assert not stage.IS_MP3_PLAYING and stage.CURRENT_SPEECH_START_TIME == 0.0
+    names = ("IS_MP3_PLAYING", "CURRENT_MOUTH_ENVELOPE", "CURRENT_SMOOTH_MOUTH", "CURRENT_SPEECH_START_TIME")
+    pipe = open(os.path.join(ROOT, "services", "auto_cover_pipeline.py"), encoding="utf-8").read()
+    assert not [n for n in names if f'"{n}"' in pipe]
+    main_defs = [n.targets[0].id for n in TREE.body if isinstance(n, ast.Assign) and isinstance(n.targets[0], ast.Name)]
+    assert not [n for n in names if n in main_defs]

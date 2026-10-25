@@ -19,6 +19,8 @@ import time
 import pygame
 from collections import deque
 
+import core.stage_state as stage
+
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 if hasattr(sys.stderr, 'reconfigure'):
@@ -270,13 +272,10 @@ def stop_singing():
             pygame.mixer.music.stop()
     except Exception:
         pass
+    stage.stop_playback()
     core_vts = get_core_vts()
     if core_vts:
-        setattr(core_vts, "IS_MP3_PLAYING", False)
         _core_set_ai_state(core_vts, "IDLE", "翻唱手動停止", only_from="SINGING")
-        setattr(core_vts, "CURRENT_MOUTH_ENVELOPE", [])
-        setattr(core_vts, "CURRENT_SMOOTH_MOUTH", 0.0)
-        setattr(core_vts, "CURRENT_SPEECH_START_TIME", 0.0)
     print("🛑 [7L 翻唱] 已成功手動停止歌聲與伴奏播放。")
 
 
@@ -306,13 +305,10 @@ def stop_current_song() -> bool:
             pygame.mixer.Channel(7).stop()
     except Exception:
         pass
+    stage.stop_playback()
     core_vts = get_core_vts()
     if core_vts:
-        setattr(core_vts, "IS_MP3_PLAYING", False)
         _core_set_ai_state(core_vts, "IDLE", "電擊打斷當首", only_from="SINGING")
-        setattr(core_vts, "CURRENT_MOUTH_ENVELOPE", [])
-        setattr(core_vts, "CURRENT_SMOOTH_MOUTH", 0.0)
-        setattr(core_vts, "CURRENT_SPEECH_START_TIME", 0.0)
     print("🛑 [7L 翻唱] 電擊打斷：當首停止（排隊保留）。")
     return True
 
@@ -867,9 +863,9 @@ async def play_cover_audio(vocal_path: str, song_name: str, inst_path: str = Non
     global IS_SINGING_ACTIVE
     try:
         IS_SINGING_ACTIVE = True
+        stage.IS_MP3_PLAYING = True
         core_vts = get_core_vts()
         if core_vts:
-            setattr(core_vts, "IS_MP3_PLAYING", True)
             _core_set_ai_state(core_vts, "SINGING", f"準備開唱《{song_name}》")
 
         if not pygame.mixer.get_init():
@@ -899,8 +895,8 @@ async def play_cover_audio(vocal_path: str, song_name: str, inst_path: str = Non
                 extract_fn = getattr(core_vts, "extract_audio_mouth_envelope", None)
                 if extract_fn:
                     envelope = await asyncio.to_thread(extract_fn, snd_vocal, 25)
-                    setattr(core_vts, "CURRENT_MOUTH_ENVELOPE", envelope)
-                    setattr(core_vts, "CURRENT_SMOOTH_MOUTH", 0.0)
+                    stage.CURRENT_MOUTH_ENVELOPE = envelope
+                    stage.CURRENT_SMOOTH_MOUTH = 0.0
                     print("👄 [口型同步] 成功將【純人聲音軌】波形包絡同步至 Live2D 對嘴中樞（100% 精準對嘴，零伴奏雜音干擾）！")
             except Exception as env_err:
                 print(f"⚠️ [口型波形提取警告]: {env_err}")
@@ -914,9 +910,8 @@ async def play_cover_audio(vocal_path: str, song_name: str, inst_path: str = Non
         if snd_inst:
             ch_inst.play(snd_inst)
         ch_vocal.play(snd_vocal)
+        stage.start_playback()   # 播放旗標＋對嘴起點（嘴型包絡上面已經設好）
         if core_vts:
-            setattr(core_vts, "CURRENT_SPEECH_START_TIME", time.time())
-            setattr(core_vts, "IS_MP3_PLAYING", True)
             _core_set_ai_state(core_vts, "SINGING", f"雙軌齊發《{song_name}》")
             
             # 🎤 唱歌自動拿出麥克風 (不重置其他表情，單獨開關麥克風)
@@ -937,9 +932,8 @@ async def play_cover_audio(vocal_path: str, song_name: str, inst_path: str = Non
         # 完整播放整首歌曲，雙軌皆播畢或被手動指令中斷
         while (ch_vocal.get_busy() or (snd_inst and ch_inst.get_busy())) and IS_SINGING_ACTIVE:
             # 若歌聲部分已結束但伴奏在收尾，及時關閉口型波形避免嘴巴微動
-            if not ch_vocal.get_busy() and core_vts and getattr(core_vts, "CURRENT_MOUTH_ENVELOPE", None):
-                setattr(core_vts, "CURRENT_MOUTH_ENVELOPE", [])
-                setattr(core_vts, "CURRENT_SMOOTH_MOUTH", 0.0)
+            if not ch_vocal.get_busy() and stage.CURRENT_MOUTH_ENVELOPE:
+                stage.clear_mouth()
             await asyncio.sleep(0.3)
             
         print(f"✨ [7L 舞台開唱] 《{song_name}》演唱完畢！")
@@ -965,13 +959,10 @@ async def play_cover_audio(vocal_path: str, song_name: str, inst_path: str = Non
                         }), timeout=0.5)
                     except Exception: pass
                 asyncio.create_task(_toggle_mic_off())
+        stage.stop_playback()
         core_vts = get_core_vts()
         if core_vts:
-            setattr(core_vts, "IS_MP3_PLAYING", False)
             _core_set_ai_state(core_vts, "IDLE", f"演唱結束《{song_name}》", only_from="SINGING")
-            setattr(core_vts, "CURRENT_MOUTH_ENVELOPE", [])
-            setattr(core_vts, "CURRENT_SMOOTH_MOUTH", 0.0)
-            setattr(core_vts, "CURRENT_SPEECH_START_TIME", 0.0)
 
 if __name__ == "__main__":
     async def test():

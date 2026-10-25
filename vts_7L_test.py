@@ -582,6 +582,7 @@ from core.utils import (
     speech_allowed, operator_input_enabled, to_tw
 )
 from core.identity import is_owner_account, claims_owner_identity
+import core.stage_state as stage
 from core.hard_command import parse_hard_command, build_slip_text, display_requester, parse_slip_for_song, strip_blob_noise, sanitize_search_query, rescue_claim, split_original_request, PIANO_CONTROL_TOOLS
 from core.subagent_router import resolve_subagent_chain
 from core.db import *
@@ -2906,10 +2907,7 @@ _LIVE_SLIP_RETRY = deque()
 _RUNNING_SUBAGENT_TASKS = set()
 pygame.mixer.init()
 
-#  真實音訊波形對嘴中樞 (RMS 包絡提取與物理開閉濾波)
-CURRENT_MOUTH_ENVELOPE = []
-CURRENT_SPEECH_START_TIME = 0.0
-CURRENT_SMOOTH_MOUTH = 0.0
+#  真實音訊波形對嘴中樞 (RMS 包絡提取與物理開閉濾波)；播放／嘴型狀態在 core.stage_state
 IS_SHOCK_SCREAMING = False
 
 def extract_audio_mouth_envelope(sound_obj, fps=25) -> list:
@@ -3377,7 +3375,6 @@ def control_microphone(is_enabled: bool) -> str:
 
 
 LAST_TTS_END_TIME = 0.0
-IS_MP3_PLAYING = False
 MP3_ECHO_TRAILING_CHUNKS = 0
 CURRENT_TTS_ID = 0
 LAST_ECHO_FILTERED_TTS_ID = -1
@@ -3490,7 +3487,7 @@ def is_7l_voice_echo(stt_text: str, is_dad_verified: bool = False) -> bool:
 
     #  3. 物理聲學時效防護：喇叭聲音與房間殘響若已結束 > 3.5 秒，絕不可能存在自身喇叭回音
     now = time.time()
-    is_recent_speech = IS_MP3_PLAYING or (now - LAST_TTS_END_TIME < 3.5)
+    is_recent_speech = stage.IS_MP3_PLAYING or (now - LAST_TTS_END_TIME < 3.5)
     if not is_recent_speech:
         return False
 
@@ -3525,8 +3522,8 @@ def is_7l_voice_echo(stt_text: str, is_dad_verified: bool = False) -> bool:
         longest_threshold = 0.70
         min_longest_size = 5
     else:
-        cov_threshold = 0.65 if IS_MP3_PLAYING else 0.75
-        longest_threshold = 0.55 if IS_MP3_PLAYING else 0.65
+        cov_threshold = 0.65 if stage.IS_MP3_PLAYING else 0.75
+        longest_threshold = 0.55 if stage.IS_MP3_PLAYING else 0.65
         min_longest_size = 6
 
     if is_dad_verified:
@@ -3629,7 +3626,7 @@ SPEECH_PLAYBACK_LOCK = asyncio.Lock()
 
 async def interrupt_current_speech(clear_queue: bool = True, reason: str = "7L 自主插話/中斷"):
     """ 即時中斷 7L 當前正在播出的語音（支援自己插話自己、老爸秒級打斷與即時清空排隊）"""
-    global IS_MP3_PLAYING, MP3_ECHO_TRAILING_CHUNKS
+    global MP3_ECHO_TRAILING_CHUNKS
     try:
         # 1. 清空舊的排隊語音
         if clear_queue:
@@ -3660,7 +3657,7 @@ async def interrupt_current_speech(clear_queue: bool = True, reason: str = "7L �
         except Exception:
             pass
 
-        IS_MP3_PLAYING = False
+        stage.IS_MP3_PLAYING = False
         MP3_ECHO_TRAILING_CHUNKS = 1
         await asyncio.to_thread(update_subtitle, "")
         log_print(f"⚡ [{reason}] 已秒級中斷前一句語音，無縫切換開口說新句子！")
@@ -3944,12 +3941,11 @@ async def execute_action_timeline(vts, timeline: list, cancel_event: asyncio.Eve
 
 
 async def play_voice_complete(text, target: str = "dad", raw_actions_text: str = "", vts=None):
-    global LAST_TTS_END_TIME, IS_MP3_PLAYING, MP3_ECHO_TRAILING_CHUNKS, CURRENT_SPEAKING_TARGET
-    global CURRENT_MOUTH_ENVELOPE, CURRENT_SPEECH_START_TIME, CURRENT_SMOOTH_MOUTH
+    global LAST_TTS_END_TIME, MP3_ECHO_TRAILING_CHUNKS, CURRENT_SPEAKING_TARGET
 
     is_singing_now = is_singing_active()
-    backup_envelope = CURRENT_MOUTH_ENVELOPE if is_singing_now else None
-    backup_start_time = CURRENT_SPEECH_START_TIME if is_singing_now else 0.0
+    backup_envelope = stage.CURRENT_MOUTH_ENVELOPE if is_singing_now else None
+    backup_start_time = stage.CURRENT_SPEECH_START_TIME if is_singing_now else 0.0
 
     if not text: return
     
@@ -4072,11 +4068,11 @@ async def play_voice_complete(text, target: str = "dad", raw_actions_text: str =
                     part_file = item["file"]
                     snd_obj, part_dur, part_env = _load_sound_with_envelope(part_file, item["text"])
 
-                    CURRENT_MOUTH_ENVELOPE = part_env
-                    CURRENT_SMOOTH_MOUTH = 0.0
-                    CURRENT_SPEECH_START_TIME = time.time()
+                    stage.CURRENT_MOUTH_ENVELOPE = part_env
+                    stage.CURRENT_SMOOTH_MOUTH = 0.0
+                    stage.CURRENT_SPEECH_START_TIME = time.time()
                     set_ai_state("TALKING", "語音開播")
-                    IS_MP3_PLAYING = True
+                    stage.IS_MP3_PLAYING = True
 
                     # 若第一句剛開始播，掛載神態時間軸
                     if first_chunk:
@@ -4141,12 +4137,11 @@ async def play_voice_complete(text, target: str = "dad", raw_actions_text: str =
 
                     total_actual_spoken_time += part_dur
                     if is_singing_now and backup_envelope is not None:
-                        CURRENT_MOUTH_ENVELOPE = backup_envelope
-                        CURRENT_SPEECH_START_TIME = backup_start_time
-                        CURRENT_SMOOTH_MOUTH = 0.0
+                        stage.CURRENT_MOUTH_ENVELOPE = backup_envelope
+                        stage.CURRENT_SPEECH_START_TIME = backup_start_time
+                        stage.CURRENT_SMOOTH_MOUTH = 0.0
                     else:
-                        CURRENT_MOUTH_ENVELOPE = []
-                        CURRENT_SMOOTH_MOUTH = 0.0
+                        stage.clear_mouth()
 
             finally:
                 if timeline_cancel_event:
@@ -4170,14 +4165,11 @@ async def play_voice_complete(text, target: str = "dad", raw_actions_text: str =
 
                 # 清除或還原口型波形狀態
                 if is_singing_now and backup_envelope is not None:
-                    CURRENT_MOUTH_ENVELOPE = backup_envelope
-                    CURRENT_SPEECH_START_TIME = backup_start_time
-                    CURRENT_SMOOTH_MOUTH = 0.0
+                    stage.CURRENT_MOUTH_ENVELOPE = backup_envelope
+                    stage.CURRENT_SPEECH_START_TIME = backup_start_time
+                    stage.CURRENT_SMOOTH_MOUTH = 0.0
                 else:
-                    CURRENT_MOUTH_ENVELOPE = []
-                    CURRENT_SMOOTH_MOUTH = 0.0
-                    CURRENT_SPEECH_START_TIME = 0.0
-                    IS_MP3_PLAYING = False
+                    stage.stop_playback()
 
                     set_ai_state("IDLE", "語音播完", only_from="TALKING")
 
@@ -4207,7 +4199,7 @@ async def play_voice_complete(text, target: str = "dad", raw_actions_text: str =
                 producer_task.cancel()
             if 'director_task' in locals() and director_task and not director_task.done():
                 director_task.cancel()
-            IS_MP3_PLAYING = False
+            stage.IS_MP3_PLAYING = False
             MP3_ECHO_TRAILING_CHUNKS = 1
             LAST_TTS_END_TIME = time.time()
             set_ai_state("IDLE", "語音被取消", only_from="TALKING")
@@ -4226,15 +4218,14 @@ async def play_voice_complete(text, target: str = "dad", raw_actions_text: str =
                 timeline_cancel_event.set()
             if 'timeline_task' in locals() and timeline_task and not timeline_task.done():
                 timeline_task.cancel()
-            IS_MP3_PLAYING = False
+            stage.IS_MP3_PLAYING = False
             MP3_ECHO_TRAILING_CHUNKS = 1
             LAST_TTS_END_TIME = time.time()
             set_ai_state("IDLE", "語音合成錯誤", only_from="TALKING")
 
 async def play_instant_sound_clip(audio_path: str, subtitle: str = ""):
     """ 0 秒極速播放 7L 專屬觸電尖叫聲（即時對嘴 + 臉紅），後續對話無縫接軌"""
-    global CURRENT_MOUTH_ENVELOPE, CURRENT_SPEECH_START_TIME, CURRENT_SMOOTH_MOUTH
-    global IS_MP3_PLAYING, IS_SHOCK_SCREAMING
+    global IS_SHOCK_SCREAMING
     
     if not audio_path or not os.path.exists(audio_path):
         log_print(f"⚠️ [即時音訊警告]: 找不到音訊檔案: {audio_path}")
@@ -4253,16 +4244,15 @@ async def play_instant_sound_clip(audio_path: str, subtitle: str = ""):
         snd = None
         try:
             snd = pygame.mixer.Sound(audio_path)
-            CURRENT_MOUTH_ENVELOPE = extract_audio_mouth_envelope(snd, fps=25)
-            CURRENT_SMOOTH_MOUTH = 0.0
+            stage.CURRENT_MOUTH_ENVELOPE = extract_audio_mouth_envelope(snd, fps=25)
+            stage.CURRENT_SMOOTH_MOUTH = 0.0
         except Exception as e:
             log_print(f"⚠️ [即時尖叫包絡異常]: {e}")
-            CURRENT_MOUTH_ENVELOPE = []
-            CURRENT_SMOOTH_MOUTH = 0.0
+            stage.clear_mouth()
 
         set_ai_state("TALKING", "觸電尖叫")
-        IS_MP3_PLAYING = True
-        CURRENT_SPEECH_START_TIME = time.time()
+        stage.IS_MP3_PLAYING = True
+        stage.CURRENT_SPEECH_START_TIME = time.time()
         
         #  採用專屬 SFX 獨立通道 (Channel 5)，音量拉滿，絕不與 TTS 語音串流 (pygame.mixer.music) 衝突打架！
         channel = pygame.mixer.Channel(5)
@@ -4285,11 +4275,10 @@ async def play_instant_sound_clip(audio_path: str, subtitle: str = ""):
     except Exception as e:
         log_print(f"⚠️ [即時尖叫音效異常]: {e}")
     finally:
-        CURRENT_MOUTH_ENVELOPE = []
-        CURRENT_SMOOTH_MOUTH = 0.0
-        CURRENT_SPEECH_START_TIME = 0.0
+        stage.clear_mouth()
+        stage.CURRENT_SPEECH_START_TIME = 0.0
         IS_SHOCK_SCREAMING = False
-        IS_MP3_PLAYING = False
+        stage.IS_MP3_PLAYING = False
         set_ai_state("IDLE", "尖叫播完", only_from="TALKING")
         log_print("⚡ [即時尖叫完畢] 觸電叫聲播放結束，無縫移交大腦後續即時回應！")
 
@@ -6092,7 +6081,7 @@ async def mic_worker(recognizer, input_queue):
                     continue
 
                 #  3. 全雙工傾聽不打斷：保留 7L 完整發音說話或唱歌，絕不中斷，背景接收老爸輸入！
-                is_currently_speaking = (current_ai_state in ["TALKING", "SINGING"]) or is_singing_active() or IS_MP3_PLAYING or (pygame.mixer.get_init() and pygame.mixer.music.get_busy())
+                is_currently_speaking = (current_ai_state in ["TALKING", "SINGING"]) or is_singing_active() or stage.IS_MP3_PLAYING or (pygame.mixer.get_init() and pygame.mixer.music.get_busy())
                 if is_currently_speaking:
                     log_print(f"🎙️ [老爸語音接收] 聲紋確認 ({vp_score:.2f}) ➔ 7L 說話不中斷，背景接收老爸輸入！")
 
@@ -6337,7 +6326,7 @@ async def identify_system_music_and_sound(wav_bytes: bytes) -> str:
         realtime_task_mgr.update_audio_context(current_system_audio_context)
         return LATEST_SYSTEM_MUSIC_INFO
 
-    if IS_MP3_PLAYING:
+    if stage.IS_MP3_PLAYING:
         return LATEST_SYSTEM_MUSIC_INFO
 
     if now - LAST_MUSIC_IDENTIFY_TIME < 15.0:
@@ -6619,7 +6608,7 @@ async def _ai_face_tracking_loop_impl(vts):
                     except Exception:
                         log_swallowed()
                 is_playing = (
-                    IS_MP3_PLAYING 
+                    stage.IS_MP3_PLAYING 
                     or is_singing_active() 
                     or ch6_busy 
                     or (current_ai_state == "SINGING") 
@@ -6740,27 +6729,26 @@ async def _ai_face_tracking_loop_impl(vts):
 
             #  真實音訊波形精準對嘴：完全根據音訊逐幀 RMS 振幅與快開慢合物理平滑決定！
             if is_playing:
-                global CURRENT_SMOOTH_MOUTH
-                if CURRENT_MOUTH_ENVELOPE and CURRENT_SPEECH_START_TIME > 0:
-                    elapsed = now - CURRENT_SPEECH_START_TIME
+                if stage.CURRENT_MOUTH_ENVELOPE and stage.CURRENT_SPEECH_START_TIME > 0:
+                    elapsed = now - stage.CURRENT_SPEECH_START_TIME
                     frame_idx = int(elapsed * 25.0)
-                    if 0 <= frame_idx < len(CURRENT_MOUTH_ENVELOPE):
-                        raw_target = CURRENT_MOUTH_ENVELOPE[frame_idx]
+                    if 0 <= frame_idx < len(stage.CURRENT_MOUTH_ENVELOPE):
+                        raw_target = stage.CURRENT_MOUTH_ENVELOPE[frame_idx]
                     else:
                         raw_target = 0.0
                     
                     #  快開慢合 (Fast Attack 0.65, Gentle Release 0.35) 物理濾波，徹底告別卡頓與僵硬
-                    if raw_target > CURRENT_SMOOTH_MOUTH:
-                        CURRENT_SMOOTH_MOUTH += (raw_target - CURRENT_SMOOTH_MOUTH) * 0.65
+                    if raw_target > stage.CURRENT_SMOOTH_MOUTH:
+                        stage.CURRENT_SMOOTH_MOUTH += (raw_target - stage.CURRENT_SMOOTH_MOUTH) * 0.65
                     else:
-                        CURRENT_SMOOTH_MOUTH += (raw_target - CURRENT_SMOOTH_MOUTH) * 0.35
-                    target_mouth = round(CURRENT_SMOOTH_MOUTH, 3)
+                        stage.CURRENT_SMOOTH_MOUTH += (raw_target - stage.CURRENT_SMOOTH_MOUTH) * 0.35
+                    target_mouth = round(stage.CURRENT_SMOOTH_MOUTH, 3)
                 else:
                     #  若無真實音訊波形包絡 (如生成等待、句間分段間隙)，自然平滑閉合嘴巴，避免無聲時空動嘴！
-                    CURRENT_SMOOTH_MOUTH *= 0.35
-                    target_mouth = round(CURRENT_SMOOTH_MOUTH, 3)
+                    stage.CURRENT_SMOOTH_MOUTH *= 0.35
+                    target_mouth = round(stage.CURRENT_SMOOTH_MOUTH, 3)
             else:
-                CURRENT_SMOOTH_MOUTH = 0.0
+                stage.CURRENT_SMOOTH_MOUTH = 0.0
                 target_mouth = 0.0
 
             # 姿態與頭部運動計算
@@ -7236,8 +7224,8 @@ async def speech_queue_worker(vts, input_queue):
             
             def is_vocal_upcoming(window_sec=3.0):
                 if not is_singing(): return False
-                env = globals().get("CURRENT_MOUTH_ENVELOPE", [])
-                start_t = globals().get("CURRENT_SPEECH_START_TIME", 0)
+                env = stage.CURRENT_MOUTH_ENVELOPE
+                start_t = stage.CURRENT_SPEECH_START_TIME
                 if not env or not start_t: return True
                 current_t = time.time() - start_t
                 start_idx, end_idx = int(current_t * 25), int((current_t + window_sec) * 25)
