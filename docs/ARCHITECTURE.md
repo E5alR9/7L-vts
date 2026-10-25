@@ -89,7 +89,7 @@ flowchart TD
 
 ## 4. 背景工作（`main()` 啟動）
 
-- **輸入**：`mic_worker`、`text_file_listener_worker`、`console_keyboard_input_worker`、TikTok／Twitch／YouTube 監聽
+- **輸入**：`text_file_listener_worker`、`console_keyboard_input_worker`、TikTok／Twitch／YouTube 監聽；麥克風走 Live 主腦的原生音訊串流（`mic_worker` 這條舊 STT 路程式碼還在，但 main() 目前沒啟動，見 [REDESIGN.md](REDESIGN.md) H-1）
 - **大腦**：`continuous_live_worker`（Live 主腦）、`instinct_live_worker`（身體本能反射）、`chat_processor_worker`、`streamer_mind_loop_worker`、`idle_chatter_worker`
 - **說話與舞台**：`speech_queue_worker`、`expression_keeper_worker`、`busy_expression_worker`、`autonomous_wander_worker`、`ai_face_tracking_loop`、`anti_watermark_worker`、`vts_health_worker`
 - **感知**：`screen_capture_worker`、`peripheral_vision_worker`、`system_audio_worker`、`mic_volume_worker`
