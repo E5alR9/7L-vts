@@ -117,52 +117,19 @@ async def main():
         except Exception:
             pass
 
-    # 螢幕畫面感知 (採用 Windows GDI 硬件級 StretchBlt 極速截圖，100% 成功抓取真實桌面)
+    # 螢幕畫面感知（截圖用共用的 services.screen_capture，縮成 960 寬）
     def get_preview_screen_image():
         try:
-            import ctypes
-            from PIL import Image
             import io
-            user32 = ctypes.windll.user32
-            gdi32 = ctypes.windll.gdi32
-            w = user32.GetSystemMetrics(0)
-            h = user32.GetSystemMetrics(1)
+            from PIL import Image
+            from services.screen_capture import gdi_capture_screen
+            screenshot = gdi_capture_screen()
             target_w = 960
-            target_h = int(h * (target_w / max(1, w)))
-
-            hdesk = user32.GetDesktopWindow()
-            desk_dc = user32.GetWindowDC(hdesk)
-            img_dc = gdi32.CreateCompatibleDC(desk_dc)
-            mem_bmp = gdi32.CreateCompatibleBitmap(desk_dc, target_w, target_h)
-            gdi32.SelectObject(img_dc, mem_bmp)
-            gdi32.SetStretchBltMode(img_dc, 4) # HALFTONE
-            gdi32.StretchBlt(img_dc, 0, 0, target_w, target_h, desk_dc, 0, 0, w, h, 0x00CC0020)
-
-            class BITMAPINFOHEADER(ctypes.Structure):
-                _fields_ = [
-                    ('biSize', ctypes.c_uint32), ('biWidth', ctypes.c_int32), ('biHeight', ctypes.c_int32),
-                    ('biPlanes', ctypes.c_uint16), ('biBitCount', ctypes.c_uint16), ('biCompression', ctypes.c_uint32),
-                    ('biSizeImage', ctypes.c_uint32), ('biXPelsPerMeter', ctypes.c_int32), ('biYPelsPerMeter', ctypes.c_int32),
-                    ('biClrUsed', ctypes.c_uint32), ('biClrImportant', ctypes.c_uint32)
-                ]
-            bmi = BITMAPINFOHEADER()
-            bmi.biSize = ctypes.sizeof(BITMAPINFOHEADER)
-            bmi.biWidth = target_w
-            bmi.biHeight = -target_h
-            bmi.biPlanes = 1
-            bmi.biBitCount = 32
-            bmi.biCompression = 0
-            buf = ctypes.create_string_buffer(target_w * target_h * 4)
-            gdi32.GetDIBits(img_dc, mem_bmp, 0, target_h, buf, ctypes.byref(bmi), 0)
-            screenshot = Image.frombuffer('RGBA', (target_w, target_h), buf, 'raw', 'BGRA', 0, 1).convert('RGB')
-            gdi32.DeleteObject(mem_bmp)
-            gdi32.DeleteDC(img_dc)
-            user32.ReleaseDC(hdesk, desk_dc)
-
+            screenshot = screenshot.resize((target_w, int(screenshot.height * target_w / max(1, screenshot.width))), Image.LANCZOS)
             out_buf = io.BytesIO()
             screenshot.save(out_buf, format="JPEG", quality=75)
             return out_buf.getvalue()
-        except Exception as e:
+        except Exception:
             return None
 
     # 初始化示範工具調用紀錄

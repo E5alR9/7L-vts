@@ -177,12 +177,23 @@ def test_desktop_helper_absence_is_remembered():
 # ── 截圖 ──────────────────────────────────────────────────────────────
 
 def test_gdi_capture_declares_handle_types_on_private_dlls():
-    src = _src("_gdi_capture_screen")
-    assert 'ctypes.WinDLL("user32")' in src and 'ctypes.WinDLL("gdi32")' in src
-    assert "restype = H" in src or ".restype = [H]" in src or "], H" in src
-    calls = [ast.unparse(n.func) for n in ast.walk(_fn("_gdi_capture_screen")) if isinstance(n, ast.Call)]
+    path = os.path.join(ROOT, "services", "screen_capture.py")
+    src = open(path, encoding="utf-8").read()
+    tree = ast.parse(src)
+    fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "gdi_capture_screen")
+    body = ast.get_source_segment(src, fn)
+    assert 'ctypes.WinDLL("user32")' in body and 'ctypes.WinDLL("gdi32")' in body
+    calls = [ast.unparse(n.func) for n in ast.walk(fn) if isinstance(n, ast.Call)]
     assert not [c for c in calls if c.startswith("ctypes.windll")]   # 不動其他套件共用的 windll
-    assert "_DXCAM_LAST_FRAME" in _src("capture_screen_multi_view")
+    assert "_DXCAM_LAST_FRAME" in src                                 # dxcam 沒新畫面沿用上一張
+    assert "grab_screen()" in _src("capture_screen_multi_view")
+
+
+def test_screen_capture_is_not_duplicated():
+    """截圖只剩共用模組一份（以前三份，修好一份另外兩份還壞著）。"""
+    for f in ("vts_7L_test.py", "services/web_dashboard.py", "run_dashboard.py"):
+        src = open(os.path.join(ROOT, f), encoding="utf-8").read()
+        assert "BitBlt" not in src and "StretchBlt" not in src, f
 
 
 # ── 顯示與記憶 ────────────────────────────────────────────────────────

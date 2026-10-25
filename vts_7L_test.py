@@ -4333,118 +4333,24 @@ def get_realistic_cursor_icon():
     except Exception:
         return None
 
-_DXCAM_CAM = None
-_DXCAM_FAILED = False
 PREV_SCREEN_THUMB = None
-
-def get_dxcam_cam():
-    global _DXCAM_CAM, _DXCAM_FAILED
-    if _DXCAM_FAILED:
-        return None
-    if _DXCAM_CAM is not None:
-        return _DXCAM_CAM
-    try:
-        import dxcam
-        _DXCAM_CAM = dxcam.create(output_color="RGB")
-        return _DXCAM_CAM
-    except Exception:
-        _DXCAM_FAILED = True
-        return None
-
-_DXCAM_LAST_FRAME = None
-
-
-def _gdi_capture_screen():
-    """GDI BitBlt 全螢幕截圖（dxcam 不能用時的備援）。回 PIL RGB 圖。
-
-    用自己的 WinDLL 物件並宣告參數／回傳型別：預設 c_int 會把 64 位元的 handle 截斷或溢位，
-    舊碼在畫面靜止（dxcam 回 None）時一走這裡就 OverflowError（2026-10-25 實機一小時 6 次）。
-    另開 WinDLL 不會動到 ctypes.windll，其他套件照舊。"""
-    from PIL import Image
-    import ctypes
-    from ctypes import wintypes as wt
-    user32 = ctypes.WinDLL("user32")
-    gdi32 = ctypes.WinDLL("gdi32")
-    H = ctypes.c_void_p
-    user32.GetSystemMetrics.argtypes = [ctypes.c_int]
-    user32.GetDesktopWindow.restype = H
-    user32.GetWindowDC.argtypes, user32.GetWindowDC.restype = [H], H
-    user32.ReleaseDC.argtypes = [H, H]
-    gdi32.CreateCompatibleDC.argtypes, gdi32.CreateCompatibleDC.restype = [H], H
-    gdi32.CreateCompatibleBitmap.argtypes, gdi32.CreateCompatibleBitmap.restype = [H, ctypes.c_int, ctypes.c_int], H
-    gdi32.SelectObject.argtypes, gdi32.SelectObject.restype = [H, H], H
-    gdi32.BitBlt.argtypes = [H, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, H, ctypes.c_int, ctypes.c_int, wt.DWORD]
-    gdi32.GetDIBits.argtypes = [H, H, wt.UINT, wt.UINT, ctypes.c_void_p, ctypes.c_void_p, wt.UINT]
-    gdi32.DeleteObject.argtypes = [H]
-    gdi32.DeleteDC.argtypes = [H]
-
-    class BITMAPINFOHEADER(ctypes.Structure):
-        _fields_ = [
-            ('biSize', ctypes.c_uint32), ('biWidth', ctypes.c_int32), ('biHeight', ctypes.c_int32),
-            ('biPlanes', ctypes.c_uint16), ('biBitCount', ctypes.c_uint16), ('biCompression', ctypes.c_uint32),
-            ('biSizeImage', ctypes.c_uint32), ('biXPelsPerMeter', ctypes.c_int32), ('biYPelsPerMeter', ctypes.c_int32),
-            ('biClrUsed', ctypes.c_uint32), ('biClrImportant', ctypes.c_uint32)
-        ]
-
-    w = user32.GetSystemMetrics(0)
-    h = user32.GetSystemMetrics(1)
-    hdesk = user32.GetDesktopWindow()
-    desk_dc = user32.GetWindowDC(hdesk)
-    img_dc = gdi32.CreateCompatibleDC(desk_dc)
-    mem_bmp = gdi32.CreateCompatibleBitmap(desk_dc, w, h)
-    try:
-        gdi32.SelectObject(img_dc, mem_bmp)
-        gdi32.BitBlt(img_dc, 0, 0, w, h, desk_dc, 0, 0, 0x00CC0020)
-        bmi = BITMAPINFOHEADER()
-        bmi.biSize = ctypes.sizeof(BITMAPINFOHEADER)
-        bmi.biWidth = w
-        bmi.biHeight = -h
-        bmi.biPlanes = 1
-        bmi.biBitCount = 32
-        bmi.biCompression = 0
-        buf = ctypes.create_string_buffer(w * h * 4)
-        gdi32.GetDIBits(img_dc, mem_bmp, 0, h, buf, ctypes.byref(bmi), 0)
-        return Image.frombuffer('RGBA', (w, h), buf, 'raw', 'BGRA', 0, 1).convert('RGB')
-    finally:
-        gdi32.DeleteObject(mem_bmp)
-        gdi32.DeleteDC(img_dc)
-        user32.ReleaseDC(hdesk, desk_dc)
-
 
 def capture_screen_multi_view():
     """
-    五方多視角超高清螢幕感知系統 (DXGI GPU 加速 + 硬件級 StretchBlt 極速引擎)：
+    五方多視角超高清螢幕感知系統（截圖本身見 services.screen_capture）：
     1.  全螢幕全景總覽圖 (含原生真實滑鼠游標貼圖)
     2.  左上象限原生細節放大圖 (Top-Left)
     3.  右上象限原生細節放大圖 (Top-Right)
     4.  左下象限原生細節放大圖 (Bottom-Left)
     5.  右下象限原生細節放大圖 (Bottom-Right)
     """
-    global has_printed_vision_error, _DXCAM_LAST_FRAME
+    global has_printed_vision_error
     try:
         from PIL import Image
         import io
-        
-        screenshot = None
-        
-        # 1. 優先嘗試 DXGI 顯存直出 (若遊戲反作弊未阻擋，僅耗 1~3ms)
-        cam = get_dxcam_cam()
-        if cam is not None:
-            try:
-                frame = cam.grab()
-                if frame is not None:
-                    _DXCAM_LAST_FRAME = frame
-                # dxcam 在畫面沒變時回 None：沒變就代表上一張還是現在的畫面
-                frame = frame if frame is not None else _DXCAM_LAST_FRAME
-                if frame is not None:
-                    screenshot = Image.fromarray(frame)
-            except Exception:
-                pass
-                
-        # 2. 高效 GDI 硬件級 BitBlt 引擎 (耗時僅 ~15ms，零縮放失真，真實 1:1 4K 像素)
-        if screenshot is None:
-            screenshot = _gdi_capture_screen()
+        from services.screen_capture import grab_screen
 
+        screenshot = grab_screen()   # dxcam 優先、沒新畫面沿用上一張、最後 GDI（共用模組）
         if screenshot is None:
             return None
 

@@ -1245,44 +1245,11 @@ def get_optimized_thumbnail_bytes(raw_bytes: bytes, target_w: int = 720) -> byte
         return raw_bytes
 
 def grab_direct_screen_thumbnail(hd: bool = False) -> Optional[bytes]:
-    """採用 Windows GDI BitBlt 直接抓取當前桌面真實原生畫面 (保底極速引擎)"""
+    """直接抓目前桌面（GDI，跟主程式共用 services.screen_capture），回 JPEG bytes。"""
     try:
-        import ctypes
-        from PIL import Image
         import io
-        user32 = ctypes.windll.user32
-        gdi32 = ctypes.windll.gdi32
-        w = user32.GetSystemMetrics(0)
-        h = user32.GetSystemMetrics(1)
-
-        hdesk = user32.GetDesktopWindow()
-        desk_dc = user32.GetWindowDC(hdesk)
-        img_dc = gdi32.CreateCompatibleDC(desk_dc)
-        mem_bmp = gdi32.CreateCompatibleBitmap(desk_dc, w, h)
-        gdi32.SelectObject(img_dc, mem_bmp)
-        gdi32.BitBlt(img_dc, 0, 0, w, h, desk_dc, 0, 0, 0x00CC0020)
-
-        class BITMAPINFOHEADER(ctypes.Structure):
-            _fields_ = [
-                ('biSize', ctypes.c_uint32), ('biWidth', ctypes.c_int32), ('biHeight', ctypes.c_int32),
-                ('biPlanes', ctypes.c_uint16), ('biBitCount', ctypes.c_uint16), ('biCompression', ctypes.c_uint32),
-                ('biSizeImage', ctypes.c_uint32), ('biXPelsPerMeter', ctypes.c_int32), ('biYPelsPerMeter', ctypes.c_int32),
-                ('biClrUsed', ctypes.c_uint32), ('biClrImportant', ctypes.c_uint32)
-            ]
-        bmi = BITMAPINFOHEADER()
-        bmi.biSize = ctypes.sizeof(BITMAPINFOHEADER)
-        bmi.biWidth = w
-        bmi.biHeight = -h
-        bmi.biPlanes = 1
-        bmi.biBitCount = 32
-        bmi.biCompression = 0
-        buf = ctypes.create_string_buffer(w * h * 4)
-        gdi32.GetDIBits(img_dc, mem_bmp, 0, h, buf, ctypes.byref(bmi), 0)
-        screenshot = Image.frombuffer('RGBA', (w, h), buf, 'raw', 'BGRA', 0, 1).convert('RGB')
-        gdi32.DeleteObject(mem_bmp)
-        gdi32.DeleteDC(img_dc)
-        user32.ReleaseDC(hdesk, desk_dc)
-
+        from services.screen_capture import gdi_capture_screen
+        screenshot = gdi_capture_screen()
         out_buf = io.BytesIO()
         screenshot.save(out_buf, format="JPEG", quality=90)
         return out_buf.getvalue()
