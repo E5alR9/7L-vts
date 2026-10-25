@@ -8626,9 +8626,16 @@ def _on_piano_liveness_change(is_active: bool):
 
 
 async def _status_bar_loop():
-    """終端機即時狀態列（每 0.1 秒重畫一行；main() 啟動完畢後一直跑到被取消）"""
+    """終端機即時狀態列（每 0.1 秒重畫一行；main() 啟動完畢後一直跑到被取消，main 也靠它撐住不結束）"""
     spinner_chars = ['/', '-', '\\', '|']
     idx = 0
+    try:
+        on_terminal = bool(sys.__stdout__ and sys.__stdout__.isatty())
+    except Exception:
+        on_terminal = False
+    while not on_terminal:
+        # 輸出導到檔案或管線時不畫：每秒 10 行狀態列會把日誌灌爆（實測一輪測試 37 萬字、3000 行是狀態列）
+        await asyncio.sleep(3600)
     while True:
         try:
             _draw_status_bar(spinner_chars[idx % len(spinner_chars)])

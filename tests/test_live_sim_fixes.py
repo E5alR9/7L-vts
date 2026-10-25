@@ -441,7 +441,9 @@ def test_status_bar_error_does_not_kill_7l():
     def boom(ch):
         calls.append(ch)
         raise AttributeError("'_WebLogStream' object has no attribute 'buffer'")
-    ns = {"asyncio": asyncio, "_draw_status_bar": boom, "log_swallowed": lambda: swallowed.append(1)}
+    import types as _t
+    ns = {"asyncio": asyncio, "_draw_status_bar": boom, "log_swallowed": lambda: swallowed.append(1),
+          "sys": _t.SimpleNamespace(__stdout__=_t.SimpleNamespace(isatty=lambda: True))}
     exec(compile(ast.Module(body=[fn], type_ignores=[]), "x", "exec"), ns)
 
     async def run():
@@ -450,6 +452,11 @@ def test_status_bar_error_does_not_kill_7l():
         except asyncio.TimeoutError:
             return "still running"
     assert asyncio.run(run()) == "still running" and len(calls) >= 3 and len(swallowed) == len(calls)
+
+    # 輸出不是終端機（導到檔案、管線）：一格都不畫，但照樣撐住 main 不結束（2026-10-25 健檢：日誌被狀態列灌爆）
+    calls.clear()
+    ns["sys"] = _t.SimpleNamespace(__stdout__=_t.SimpleNamespace(isatty=lambda: False))
+    assert asyncio.run(run()) == "still running" and calls == []
 
 
 def test_main_crash_exits_instead_of_lingering():
