@@ -1,32 +1,27 @@
 # ==============================================================================
-#  7L AI-VTuber 智慧一體化核心系統 (vts_7L_test.py)
+#  7L AI-VTuber 主程式 (vts_7L_test.py)：協調者
 #  作者: E5alR9 & 7L 開發團隊
-#  核心特色:
-#    -  Google GenAI Live API (全雙工雙向音訊、背景潛意識發言哨兵、雙軌熱備)
-#    -  8 大 Gemini 模型智能階梯調度 
-#    -  100 句全景記憶滾動中樞 (Live2D 表情、視線走位、觀眾個人檔案 Firestore 雲端同步)
-#    -  88 鍵全音域平台鋼琴即時發聲與 MIDI 智能搜譜演奏
-#    -  即時多螢幕視覺感知、眼角餘光與 WASAPI 電腦內部聲音監聽
-#    -  Python 本機沙盒遊樂場、Tavily 網路搜尋、Nano 生圖與 Discord CMA 狀態監控
-#  腳本模組導覽目錄 (Table of Contents):
-#  1.  環境變數載入與金鑰矩陣分流 (API Keys, DualHotStandby Live Manager)
-#  2.  模型梯隊清單與排程定義 (GEMINI_MODELS 7-Tier Matrix)
-#  3.  API 頻率限制、冷卻與熔斷管理 (Circuit Breaker & Lock Cache)
-#  4.  全域狀態變數與硬體環境偵測 (Global State & Resolution)
-#  5.  Firebase 雲端永久記憶與觀眾檔案 (Long-Term Memory & Viewer Profile)
-#  6.  VTube Studio WebSocket 引擎與 Live2D 控制 (VTSManager & Expression Dispatcher)
-#  7.  7L 本機遊樂場沙盒 (7L_Playground Python Sandbox)
-#  8.  Google GenAI 官方 Function Calling 工具清單 (宣告在 core/tool_schema.py；這裡是 Dispatcher)
-#     8.1  88 鍵平台鋼琴發聲與樂譜演奏引擎 (Virtual Piano 88K & MIDI Player)
-#  9.  防跳針與記憶去重系統 (Code-Level Anti-Repetition)
-# 10.  語音合成、音訊分析與字幕工具
-# 11.  視覺感知、畫面截圖與輕量眼角餘光 (Screen Vision & get_lightweight_gemini_vision)
-# 12.  旗艦多模態大腦推理核心 (fetch_ai_response: Gemini Multimodal Dispatcher)
-# 13.  使用者指令、電腦控制與計時器動作 (execute_actions & System Controls)
-# 14.  專屬背景工作協程群 (Workers: Screen, Vision, WASAPI Loopback Audio, Proactive)
-# 15.  對話處理、Live 潛意識哨兵與 100 句記憶中樞 (Mind-Stream & Audience Live Channel)
-# 16.  CMA 狀態監控檔案輸出與 Discord 機器人 (CMA Monitor & Discord Bot Commands)
-# 17.  主程式進入點與終端機即時狀態列 (main Entry Point & ANSI Status Bar)
+#
+#  整體架構、資料流、各模組分工見 docs/ARCHITECTURE.md（AI 供應商與配額見 docs/AI_SOURCES.md）。
+#  功能本體在 services/、共用底層在 core/；這支檔案只做串接：
+#
+#  找東西請用函式名稱搜（檔案內的「# 1.」「# 12.」段落編號是舊的，已跟內容對不上）：
+#    工具派發            execute_tool_dispatch（工具宣告在 core/tool_schema.py）
+#    REST 備援大腦       fetch_ai_response、get_prioritized_gemini_models、get_available_gemini_channels
+#    觀眾 Live 回覆      call_gemini_live_audience_reply
+#    彈唱會合（鋼琴側）  _mixed_piano_run
+#    說話播放            play_voice_complete、interrupt_current_speech、update_subtitle、神態導演 _director_*
+#    視覺                capture_screen_multi_view、get_lightweight_gemini_vision、check_screen_change_via_live_api
+#    回覆裡的動作標籤    execute_actions
+#    Live 主腦           continuous_live_worker（工具 invoke_subagent）、instinct_live_worker（身體本能）
+#    背景工作            mic_worker、peripheral_vision_worker、system_audio_worker、speech_queue_worker、
+#                        autonomous_wander_worker、busy_expression_worker、vts_health_worker …
+#    看板與哨兵          add_to_streamer_mind_board、judge_subconscious_intent_via_live_api、streamer_mind_loop_worker
+#    子智能體            nv_interpret_task、_gemini_tool_pass、_nv_tool_pass、background_tool_executor（CPU 硬指令）
+#    老爸對話            process_chat_message
+#    對話分派器          chat_processor_worker（來源分類在 core/input_sources.py）
+#    狀態面板、Discord   cma_monitor_worker、show_cma_panel、safe_discord_runner
+#    進入點              main、_status_bar_loop、shutdown_7l（唯一關機出口）
 # ==============================================================================
 
 
