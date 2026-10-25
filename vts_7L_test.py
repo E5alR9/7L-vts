@@ -306,8 +306,8 @@ _AUDIENCE_DENIED_TOOLS = frozenset({
 #  主腦只有一個，觀眾說「收起鋼琴」被 CPU 擋下後，哨兵照樣把留言轉給主腦，主腦呼叫子智能體時
 #  舊碼一律當老爸下令，鋼琴就被收掉了（2026-10-25 實機）。子智能體照這裡決定用誰的權限。
 #  said：那則的人話（不含紙條包裝），主腦自己要彈／唱時拿來對照有沒有人點歌；
-#  human：最近送進主腦的是人話還是系統通知（系統通知觸發的就不對照）。
-_BRAIN_INPUT_ORIGIN = {"who": "dad", "ts": 0.0, "said": "", "human": False}
+#  human：最近送進主腦的是人話還是系統通知（系統通知觸發的就不對照）；name：觀眾留言是誰講的。
+_BRAIN_INPUT_ORIGIN = {"who": "dad", "ts": 0.0, "said": "", "human": False, "name": ""}
 
 
 UNASKED_STAGE_DECLINE = ("[系統底層：剛才那句話沒有人點歌，系統沒有去彈／唱《{song}》。那是之前的點歌，不要自己翻出來；"
@@ -316,11 +316,22 @@ AUDIENCE_STAGE_DECLINE = ("[系統底層：鋼琴的停止／暫停／繼續和�
                           "請妳用一句話俏皮帶過；剛才如果說了「好」，就改口說這要老爸點頭。]")
 
 
-def _note_brain_origin(who: str, said: str = "") -> None:
+def _note_brain_origin(who: str, said: str = "", name: str = "") -> None:
     if not who:   # 系統通知：權限照舊，只記「最近一則不是人話」
         _BRAIN_INPUT_ORIGIN["human"] = False
         return
-    _BRAIN_INPUT_ORIGIN.update(who=who, ts=time.time(), said=said or "", human=True)
+    _BRAIN_INPUT_ORIGIN.update(who=who, ts=time.time(), said=said or "", human=True, name=name or "")
+
+
+def _brain_requester() -> str:
+    """主腦這輪替誰做事：老爸講的就是老爸，觀眾留言有名字就寫名字；系統通知觸發或不知道是誰就留空（中性稱呼）。
+    以前一律留空，老爸用麥克風點歌，鋼琴隊列和她的應答都寫「點播的人」。"""
+    o = _BRAIN_INPUT_ORIGIN
+    if not o.get("human"):
+        return ""
+    if o.get("who") == "dad":
+        return _owner_name()
+    return o.get("name", "")
 
 
 def _her_words_before(ts: float) -> str:
@@ -349,14 +360,14 @@ def _brain_replaying_old_request(songs) -> bool:
     return stage_request_unasked(o.get("said", ""), songs, _her_words_before(o.get("ts", 0.0)))
 
 
-def send_brain_slip(text: str, origin: str = "", said: str = "") -> bool:
+def send_brain_slip(text: str, origin: str = "", said: str = "", name: str = "") -> bool:
     """給 Live 主腦遞紙條的唯一出口（以前 14 處各自 put_nowait，「這張是誰觸發的」又在別處另外記）。
     進紙條佇列，由 send_system_prompts_to_live 統一去重、加鎖、掛看門狗。
     origin："audience"（觀眾彈幕、哨兵轉述）／"dad"（老爸打字、主持插話）；系統通知留空，不改「這輪算誰的」。
     真的送出那一刻才記，排隊中的紙條不會搶先改掉身分。
-    said：觸發的那句人話（不含紙條包裝），主腦自己要彈唱時對照用。"""
+    said：觸發的那句人話（不含紙條包裝），主腦自己要彈唱時對照用；name：觀眾留言是誰講的。"""
     try:
-        LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait((text, origin, said) if origin else text)
+        LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait((text, origin, said, name) if origin else text)
         return True
     except Exception:
         log_swallowed()
@@ -1272,10 +1283,10 @@ async def call_gemini_live_audience_reply(vts, input_queue, audience_user: str, 
         try:
             if recorded_target == "7L":
                 send_brain_slip(f"[黑板同步] TikTok 觀眾 {id_display} 對妳說：{audience_content}", origin="audience",
-                                said=audience_content)
+                                said=audience_content, name=id_display)
             else:
                 send_brain_slip(f"[黑板同步] TikTok 觀眾 {id_display} 在聊天室說：{audience_content}", origin="audience",
-                                said=audience_content)
+                                said=audience_content, name=id_display)
         except Exception: log_swallowed()
 
         # 整理近期聊天室動態字串
@@ -4457,18 +4468,19 @@ async def _handle_invoke_subagent(session, ws_send_lock, _fn_name, _fn_call_id, 
                                "可以先說一句「我看看～」。]", _speak)
             return
         if _task_ins:
-            # ⚠️ requester 傳空字串：task_ins 是主腦自己寫的指令，
-            # 點歌人不一定是老爸（可能是轉述觀眾點的），紙條走中性文案
             _who = _BRAIN_INPUT_ORIGIN["who"]   # 這輪是觀眾觸發的，就照觀眾的權限
+            # 點播者照觸發這輪的人；系統通知觸發或不知道是誰就留空，紙條走中性文案
+            _req = _brain_requester()
             # 主腦填了結構化舞台動作就照欄位直接執行，不再用正則猜她轉述的說法（2026-10-25）
             _cmds = structured_stage_command(**(_intent or {}))
             try:
                 if _cmds:
                     log_print(f"🧩 [子智能體] 主腦填了結構化動作 {_intent}，直接執行")
-                    _hit, _tname, _targs = await run_stage_commands(_cmds, target=_who, requester_name="",
+                    _hit, _tname, _targs = await run_stage_commands(_cmds, target=_who, requester_name=_req,
                                                                     from_brain=True, said=_task_ins)
                 else:
-                    _hit, _tname, _targs = await background_tool_executor(_task_ins, target=_who, requester_name="", from_brain=True)
+                    _hit, _tname, _targs = await background_tool_executor(_task_ins, target=_who, requester_name=_req,
+                                                                          from_brain=True)
             except Exception as _be:
                 log_print(f"⚠️ [子智能體執行異常]: {_be}")
                 _hit, _tname, _targs = False, "", {}
@@ -4483,7 +4495,7 @@ async def _handle_invoke_subagent(session, ws_send_lock, _fn_name, _fn_call_id, 
                                 f"請妳口頭答應一聲。]" + _if_said)
                 _sched = _speak
             elif _hit:
-                _result_text, _sched = build_slip_text(_tname, _targs, "", via="") + _if_said, _speak
+                _result_text, _sched = build_slip_text(_tname, _targs, _req, via="") + _if_said, _speak
             else:
                 await _respond("[系統底層：子智能體開始處理了，要幾秒到半分鐘。請妳先用一句短話答應對方"
                                "（例如「好，我去查！」），不要猜結果；結果回來會再告訴妳。]" + _if_said,
@@ -4491,7 +4503,7 @@ async def _handle_invoke_subagent(session, ws_send_lock, _fn_name, _fn_call_id, 
                 # CPU 沒命中 → 副腦解讀（工具判定＋深度思考），整段限時，免得主腦答應後一直等不到結果
                 try:
                     _k2, _t2 = await asyncio.wait_for(
-                        nv_interpret_task(_task_ins, target=_who, requester_name=""),
+                        nv_interpret_task(_task_ins, target=_who, requester_name=_req),
                         timeout=_SUBAGENT_TOTAL_TIMEOUT)
                 except asyncio.TimeoutError:
                     log_print(f"⚠️ [子智能體] 超過 {_SUBAGENT_TOTAL_TIMEOUT:.0f} 秒沒結果，放棄：{_task_ins[:40]}")
@@ -4827,7 +4839,8 @@ async def continuous_live_worker(vts):
                                 prompt = _LIVE_SLIP_RETRY.popleft()
                             else:
                                 prompt = await LIVE_API_SYSTEM_PROMPT_QUEUE.get()
-                            prompt, origin, said = (tuple(prompt) + ("", ""))[:3] if isinstance(prompt, tuple) else (prompt, "", "")
+                            prompt, origin, said, name = ((tuple(prompt) + ("", "", ""))[:4] if isinstance(prompt, tuple)
+                                                          else (prompt, "", "", ""))
                             try:
                                 if _slip_is_dupe(prompt, time.time()):
                                     log_print("📄 [紙條去重] 10 秒內相同紙條已送過，跳過（一次點歌三張同字紙條會自斷風暴）。")
@@ -4839,7 +4852,7 @@ async def continuous_live_worker(vts):
                                 async with ws_send_lock:
                                     await session.send_realtime_input(text=prompt)
                                     sent_ts = time.time()
-                                    _note_brain_origin(origin, said)
+                                    _note_brain_origin(origin, said, name)
                                     LIVE_CONTEXT_MEMORY.append((sent_ts, prompt))
                                     if len(LIVE_CONTEXT_MEMORY) > 10:
                                         LIVE_CONTEXT_MEMORY.pop(0)
@@ -4855,7 +4868,7 @@ async def continuous_live_worker(vts):
                                 log_print(f"⚠️ [黑板同步] 發送失敗 ({inner_e})，訊息已退回佇列等待重連...")
                                 # 沒送成功的紙條排到最前面，並撤銷去重記帳，重連後才不會被當重複丟掉
                                 _slip_forget(prompt)
-                                _LIVE_SLIP_RETRY.appendleft((prompt, origin, said) if origin else prompt)
+                                _LIVE_SLIP_RETRY.appendleft((prompt, origin, said, name) if origin else prompt)
                                 raise inner_e
                     except asyncio.CancelledError: pass
                     except Exception as e:
@@ -6876,7 +6889,9 @@ async def streamer_mind_loop_worker(vts, input_queue):
                     # 只有主持插話的那批照老爸的權限；夾了任何觀眾留言就當觀眾
                     send_brain_slip(slip_text, origin="dad" if all(m.get("source") == "owner_interject"
                                                                    for m in batch_to_process) else "audience",
-                                    said="\n".join(str(m.get("content", "")) for m in batch_to_process))
+                                    said="\n".join(str(m.get("content", "")) for m in batch_to_process
+                                                    if m.get("source") != "video_watch"),
+                                    name=users_involved[0] if len(users_involved) == 1 else "")
                     for m in batch_to_process:
                         m["status"] = "read"
                     continue # 成功交棒給主腦，直接進入下一輪監控

@@ -62,19 +62,24 @@ class _FakeSession:
 
 
 def _run_handler(cpu, nv, total_timeout=45.0, task="幫我查日圓匯率", origin="dad", targets=None, intent=None,
-                 staged=(True, "auto_sing_song", {"song_name": "晴天"})):
+                 staged=(True, "auto_sing_song", {"song_name": "晴天"}), requester="", requesters=None):
     targets = [] if targets is None else targets
+
+    requesters = [] if requesters is None else requesters
 
     async def run_stage_commands(cmds, **k):
         targets.append(("struct", k.get("target"), cmds))
+        requesters.append(k.get("requester_name"))
         return staged
 
     async def background_tool_executor(*a, **k):
         targets.append(("cpu", k.get("target")))
+        requesters.append(k.get("requester_name"))
         return cpu
 
     async def nv_interpret_task(*a, **k):
         targets.append(("nv", k.get("target")))
+        requesters.append(k.get("requester_name"))
         if nv == "hang":
             await asyncio.sleep(10)
         return nv
@@ -84,7 +89,7 @@ def _run_handler(cpu, nv, total_timeout=45.0, task="幫我查日圓匯率", orig
     ns = _load("_handle_invoke_subagent", types=types, asyncio=asyncio, session=sess, ws_send_lock=asyncio.Lock(),
                background_tool_executor=background_tool_executor, nv_interpret_task=nv_interpret_task,
                build_slip_text=build_slip_text, _SUBAGENT_TOTAL_TIMEOUT=total_timeout,
-               _BRAIN_INPUT_ORIGIN={"who": origin, "ts": 0.0},
+               _BRAIN_INPUT_ORIGIN={"who": origin, "ts": 0.0}, _brain_requester=lambda: requester,
                structured_stage_command=structured_stage_command, run_stage_commands=run_stage_commands,
                AUDIENCE_STAGE_DECLINE=_const("AUDIENCE_STAGE_DECLINE"),
                UNASKED_STAGE_DECLINE=_const("UNASKED_STAGE_DECLINE"),
@@ -309,11 +314,11 @@ def test_brain_slips_have_one_exit_and_origin_is_noted_on_send():
                _BRAIN_INPUT_ORIGIN={"who": "dad", "ts": 0.0})
     assert ns["send_brain_slip"]("觀眾說收起鋼琴", origin="audience") is True
     assert ns["send_brain_slip"]("[系統底層：計時到了]") is True
-    assert list(q) == [("觀眾說收起鋼琴", "audience", ""), "[系統底層：計時到了]"]
+    assert list(q) == [("觀眾說收起鋼琴", "audience", "", ""), "[系統底層：計時到了]"]
     assert ns["_BRAIN_INPUT_ORIGIN"]["who"] == "dad"          # 排隊中不改身分，送出那一刻才記
     assert MAIN.count("LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait(") == 1   # 只剩出口裡那一處
     sender = ast.get_source_segment(MAIN, _fn("send_system_prompts_to_live"))
-    assert sender.index("send_realtime_input(text=prompt)") < sender.index("_note_brain_origin(origin, said)")
+    assert sender.index("send_realtime_input(text=prompt)") < sender.index("_note_brain_origin(origin, said, name)")
 
 
 def test_structured_stage_action_skips_text_parsing():
@@ -388,3 +393,22 @@ def test_subagent_tells_her_not_to_replay_and_skips_the_reinterpreter():
                                staged=(False, "unasked", {"song_name": "小星星"}))
     assert [t[0] for t in targets] == ["struct"]
     assert "沒有人點歌" in text and "小星星" in text and sched == types.FunctionResponseScheduling.WHEN_IDLE
+
+
+def test_subagent_acts_for_whoever_prompted_the_brain_by_name():
+    """以前一律傳空字串：老爸用麥克風點歌，鋼琴隊列和她的應答都寫「點播的人」。"""
+    ns = _load("_note_brain_origin", "_brain_requester", time=time, _owner_name=lambda: "老爸",
+               _BRAIN_INPUT_ORIGIN={"who": "dad", "ts": 0.0, "said": "", "human": False, "name": ""})
+    note, req = ns["_note_brain_origin"], ns["_brain_requester"]
+    note("dad", "彈小星星")
+    assert req() == "老爸"
+    note("audience", "唱晴天", "歌迷阿華")
+    assert req() == "歌迷阿華"
+    note("audience", "大家好", "")                  # 好幾個觀眾一起：不知道是誰，走中性
+    assert req() == ""
+    note("", "")                                   # 系統通知觸發的
+    assert req() == ""
+    requesters = []
+    text, _ = _run_handler((True, "auto_sing_song", {"song_name": "晴天"}), None, task="唱晴天",
+                           requester="歌迷阿華", requesters=requesters)
+    assert requesters == ["歌迷阿華"] and "歌迷阿華" in text
