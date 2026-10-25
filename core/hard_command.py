@@ -182,6 +182,29 @@ _ASK_DESKTOP_RE = re.compile(
     r'^\s*(?:請|幫我|幫|來|給我|替我|\s)*問(?:一下)?\s*gemini(?![A-Za-z0-9_])\s*[:：]?\s*(.+)$',
     re.IGNORECASE | re.DOTALL)
 
+# —— 點播看片（2026-10-25）——
+# 貼 YouTube 連結叫她看，主腦常只嘴上說「我這就去看」卻沒呼叫工具（實機），CPU 直接接。
+# 要有連結＋「看／點播」才算：光貼連結不算，觀眾洗連結不會讓她一直下載影片。
+_YT_URL_RE = re.compile(
+    r'(?:https?://)?(?:www\.|m\.)?(?:youtube\.com/(?:watch\?\S*?v=|shorts/|live/|embed/)|youtu\.be/)'
+    r'([A-Za-z0-9_\-]{11})[^\s，。！？、]*', re.IGNORECASE)
+_WATCH_INTENT_RE = re.compile(r'看|點播')
+# 「我剛看完 <連結>」「看過了」是在聊天；「幫我看完這部」才是要她看
+_NEG_WATCH = re.compile(r'(?:不|別)(?:要|用)?(?:看|點播)|(?:剛|已經?|有)看(?:完|過)|看(?:過|完了|了)')
+
+
+def extract_watch_url(text: Optional[str]) -> Optional[str]:
+    """「幫我看這部 https://youtu.be/xxx」→ https://youtu.be/<ID>；沒有看片意圖或是否定句回 None。"""
+    s = text or ""
+    m = _YT_URL_RE.search(s)
+    if not m:
+        return None
+    rest = s[:m.start()] + " " + s[m.end():]
+    if _NEG_WATCH.search(rest) or not _WATCH_INTENT_RE.search(rest):
+        return None
+    # 統一成 youtu.be/<ID>：主腦常換個網址寫法再呼叫一次子智能體，寫法一樣去重才擋得住
+    return f"https://youtu.be/{m.group(1)}"
+
 
 def extract_ask_desktop(text: Optional[str]) -> Optional[str]:
     """桌機助手關鍵字（B 架構，2026-10-11）：問Gemini＋問題，回問題文本。
@@ -344,7 +367,7 @@ def extract_piano_control(text: Optional[str], controls=_PIANO_CONTROLS) -> Opti
 def parse_hard_command(text: Optional[str]) -> Tuple[Optional[str], Dict]:
     """B 架構入口：把純文字拆成 (工具名, 參數)。
 
-    只認點歌（唱歌/彈琴）、鋼琴的停止／暫停／繼續、停止唱歌。表情不歸 CPU（交還主腦/A 架構，避免誤觸搶戲）。
+    只認點歌（唱歌/彈琴）、鋼琴的停止／暫停／繼續、停止唱歌、貼 YouTube 連結點播看片。表情不歸 CPU（交還主腦/A 架構，避免誤觸搶戲）。
     混用句（彈X加唱Y）走 parse_mixed_command，不在這裡處理。
     桌機助手（問Gemini）最優先判定：顯式問句不跟唱歌搶。
     回 (None, {}) 代表無硬指令，交還 A 架構（Live 主腦 → invoke_subagent → NV 解讀）。
@@ -352,6 +375,9 @@ def parse_hard_command(text: Optional[str]) -> Tuple[Optional[str], Dict]:
     ask = extract_ask_desktop(text)
     if ask:
         return "ask_desktop", {"question": ask}
+    url = extract_watch_url(text)
+    if url:
+        return "video.request_watch", {"url": url}
     control = extract_piano_control(text) or extract_piano_control(text, _SING_CONTROLS)
     if control:
         return control, {}
@@ -494,6 +520,10 @@ def build_slip_text(fn_name: str, fn_args: Dict, requester_name: str,
         return (f"[系統底層：收到點曲請求，7L 正在背景彈奏《{song}》。"
                 f"【彈琴的是妳 7L 本人，不是點曲的人】"
                 f"請妳現在只需要負責口頭答應、順著話題接話即可，鋼琴已在背景執行。]")
+    if fn_name == "video.request_watch":
+        # 不寫連結：主腦會把網址一個字一個字念出來
+        return (f"[系統底層：{who or '有人'}點播的影片已排進看片隊列，7L 會在背景看完再說內容。"
+                f"請妳口頭答應一聲就好，還沒看完之前不要猜影片在講什麼。]")
     if fn_name == "trigger_vts_expression":
         exp = (args.get("expression_name", "") or "").strip()
         done = "表情已重置為自然狀態" if exp in _RESET_NAMES or exp == "_RESET_" else f"表情已切換為{exp}"

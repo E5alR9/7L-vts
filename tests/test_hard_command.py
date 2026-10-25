@@ -435,3 +435,32 @@ def test_stage_control_names_match_with_or_without_prefix():
         assert is_stage_control(name), name
     for name in ("pe.play_virtual_piano", "auto_sing_song", "set_piano_volume", "", None):
         assert not is_stage_control(name), name
+
+
+@pytest.mark.parametrize("text,url", [
+    # 2026-10-25 實機：主腦說「我這就去看」卻沒呼叫工具，影片沒排進去
+    ("7L 幫我看這部影片 https://www.youtube.com/watch?v=jNQXAC9IVRw 看完跟我說在講什麼", "jNQXAC9IVRw"),
+    ("看這個 youtu.be/jNQXAC9IVRw", "jNQXAC9IVRw"),
+    ("點播 https://youtube.com/shorts/jNQXAC9IVRw", "jNQXAC9IVRw"),
+    # 主腦換個寫法又呼叫一次子智能體：網址統一成同一個，去重才擋得住
+    ("觀看影片 youtube.com/watch?v=jNQXAC9IVRw&t=3s，並在看完後回報給我。", "jNQXAC9IVRw"),
+    ("幫我看完這部 YouTube 影片：https://www.youtube.com/watch?v=jNQXAC9IVRw，然後告訴我", "jNQXAC9IVRw"),
+])
+def test_watch_request_with_a_youtube_link(text, url):
+    assert parse_hard_command(text) == ("video.request_watch", {"url": "https://youtu.be/" + url})
+
+
+@pytest.mark.parametrize("text", [
+    "https://youtu.be/jNQXAC9IVRw",                         # 光貼連結：觀眾洗連結不會讓她一直下載
+    "不要看 https://youtu.be/jNQXAC9IVRw", "別點播 https://youtu.be/jNQXAC9IVRw",
+    "我剛看完 https://www.youtube.com/watch?v=jNQXAC9IVRw，超好笑",
+    "這部我看過了 https://youtu.be/jNQXAC9IVRw",
+    "https://www.youtube.com/@LofiGirl 看這個頻道",           # 頻道不是影片
+])
+def test_watch_request_needs_a_video_link_and_intent(text):
+    assert parse_hard_command(text)[0] != "video.request_watch"
+
+
+def test_watch_slip_does_not_read_out_the_link():
+    s = build_slip_text("video.request_watch", {"url": "https://youtu.be/jNQXAC9IVRw"}, "E5")
+    assert "youtu" not in s and "E5" in s and "不要猜" in s
