@@ -1181,7 +1181,7 @@ async def fetch_ai_response(messages, image_base64=None, audio_base64=None, is_p
                 
         if local_desc:
             if messages and messages[-1]["role"] == "user": 
-                inject_text = f"\n\n【備用視覺情報】：畫面描述: {local_desc}\n【鐵律】：畫面上的白色箭頭代表老爸當前的滑鼠游標。請注意：【除非滑鼠正指著某個你覺得很有趣、或特別值得注意的東西，否則請自然看待，不需要刻意強調滑鼠位置】。自然流暢表達，不限制說話長度！"
+                inject_text = f"\n\n【備用視覺情報】：畫面描述: {local_desc}\n【鐵律】：畫面上的白色箭頭代表老爸當前的滑鼠游標。請注意：【除非滑鼠正指著某個你覺得很有趣、或特別值得注意的東西，否則請自然看待，不需要刻意強調滑鼠位置】。挑一兩個重點、一兩句話講完（40 字內），不要把畫面上的東西全念一遍。"
                 
                 if isinstance(messages[-1]["content"], list):
                     messages[-1]["content"].append({"type": "text", "text": inject_text})
@@ -4061,12 +4061,12 @@ async def live_vision_tool_task(session, vts):
         reply_text = resp if isinstance(resp, str) else resp[0]
         log_print(f"👁️ [視覺大腦回報] 分析完成: {reply_text[:50]}...")
         _VISION_STATE["report_ts"] = time.time()
-        await session.send_realtime_input(text=f"[系統提示：視覺大腦回報畫面內容（已經看完了，直接用這段回答，不要再輸出 [TOOL:VISION]）] {_clean_result_for_brain(reply_text)}")
+        send_brain_slip(f"[系統提示：視覺大腦回報畫面內容（已經看完了，直接用這段回答，不要再輸出 [TOOL:VISION]）。挑一兩個最有意思的點，一兩句話講完（40 字內），不要把畫面上的東西全念一遍] {_clean_result_for_brain(reply_text)}")
     except Exception as e:
         log_print(f"❌ [視覺大腦錯誤] {'超過 %.0f 秒沒看完' % VISION_TOOL_TIMEOUT_SEC if isinstance(e, asyncio.TimeoutError) else e}")
         fallback_prompt = "[系統提示：這次沒看清楚畫面（看太久或遇到 API 限流）。請發揮傲嬌本性抱怨暫時看不到畫面，並叫老爸直接把畫面內容唸給妳聽！請發揮創意，用不同的說法。]"
         try:
-            await session.send_realtime_input(text=fallback_prompt)
+            send_brain_slip(fallback_prompt)
         except Exception as inner_e:
             log_print(f"⚠️ [視覺大腦] 無法傳送 fallback: {inner_e}")
 
@@ -4078,7 +4078,7 @@ async def live_mirror_tool_task(session, vts):
         img_path = os.path.join(DATA_DIR, "7L_appearance.png")
         if not os.path.exists(img_path):
             try:
-                await session.send_realtime_input(text="[系統提示：找不到圖片，請發揮傲嬌本性找個有趣的藉口告訴老爸妳現在照不到鏡子（請發揮創意）]")
+                send_brain_slip("[系統提示：找不到圖片，請發揮傲嬌本性找個有趣的藉口告訴老爸妳現在照不到鏡子（請發揮創意）]")
             except Exception:
                 log_swallowed()
             return
@@ -4098,12 +4098,12 @@ async def live_mirror_tool_task(session, vts):
             raise Exception("視覺模型未回傳")
         reply_text = resp if isinstance(resp, str) else resp[0]  # 同上：舊碼只拿到第一個字
         log_print(f"🪞 [鏡子回報] {reply_text[:50]}...")
-        await session.send_realtime_input(text=f"[系統提示：鏡子裡映出的妳長這樣，請自然地把這段觀察說出來：] {_clean_result_for_brain(reply_text)}")
+        send_brain_slip(f"[系統提示：鏡子裡映出的妳長這樣，請自然地把這段觀察說出來：] {_clean_result_for_brain(reply_text)}")
     except Exception as e:
         log_print(f"❌ [鏡子錯誤] {e}")
         fallback_prompt = "[系統提示：鏡子功能暫時失敗。請依憑身為高智商 AI 的設定，自信地用言語描述自己的外貌，並找個藉口說鏡子碎了或起霧了！請每次換個說法。]"
         try:
-            await session.send_realtime_input(text=fallback_prompt)
+            send_brain_slip(fallback_prompt)
         except Exception as inner_e:
             log_print(f"⚠️ [鏡子] 無法傳送 fallback: {inner_e}")
 
@@ -4117,14 +4117,14 @@ async def live_search_tool_task(session, query):
             if res and isinstance(res, dict):
                 results_text = "\\n".join([f"- {r.get('title', '')}: {r.get('content', '')}" for r in res.get('results', [])[:3]])
                 log_print(f"🌐 [搜網專家回報] 找到 {len(res.get('results', []))} 筆結果。")
-                await session.send_realtime_input(text=f"[系統提示：搜網專家回報搜尋結果，請自然地把這段資料告訴老爸（不要全唸，要口語化提煉）：]\\n{_clean_result_for_brain(results_text)}")
+                send_brain_slip(f"[系統提示：搜網專家回報搜尋結果，請自然地把這段資料告訴老爸（不要全唸，要口語化提煉）：]\\n{_clean_result_for_brain(results_text)}")
                 return
         raise Exception("Tavily 搜尋客戶端未初始化或搜尋無結果")
     except Exception as e:
         log_print(f"❌ [搜網錯誤] {e}")
         fallback_prompt = "[系統提示：搜尋功能暫時失敗。請自然地告訴老爸妳現在連不上外網，然後直接憑妳豐富的內建記憶回答他的問題！請發揮創意。]"
         try:
-            await session.send_realtime_input(text=fallback_prompt)
+            send_brain_slip(fallback_prompt)
         except Exception as inner_e:
             log_print(f"⚠️ [搜網] 無法傳送 fallback: {inner_e}")
 

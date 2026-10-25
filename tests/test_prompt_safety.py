@@ -193,3 +193,16 @@ def test_gemini_contents_builder():
     assert out[0].parts[0].text.startswith("妳是 7L。") and out[0].parts[0].text.endswith("早安")
     assert len(out[-1].parts) == 2 and out[-1].parts[1].inline_data.mime_type == "image/jpeg"
     assert "interaction_input = []" not in MAIN_SRC
+
+
+def test_tool_results_go_through_slip_exit_and_vision_is_kept_short():
+    """看畫面、照鏡子、搜網的結果以前直接 session.send_realtime_input（沒去重、沒加鎖）；
+    視覺結果紙條沒長度提示，她常把畫面上的東西全念一遍，60 字以上的回覆要念 6～17 秒（2026-10-25 健檢）。"""
+    tree = ast.parse(MAIN_SRC)
+    for name in ("live_vision_tool_task", "live_mirror_tool_task", "live_search_tool_task"):
+        fn = next(x for x in tree.body if isinstance(x, ast.AsyncFunctionDef) and x.name == name)
+        src = ast.get_source_segment(MAIN_SRC, fn)
+        assert "session.send_realtime_input(" not in src and "send_brain_slip(" in src, name
+    vision = ast.get_source_segment(MAIN_SRC, next(x for x in tree.body if isinstance(x, ast.AsyncFunctionDef)
+                                                   and x.name == "live_vision_tool_task"))
+    assert "40 字內" in vision and "不限制說話長度" not in MAIN_SRC
