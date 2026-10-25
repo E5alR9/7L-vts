@@ -968,12 +968,8 @@ class VirtualPianoGUI:
         if vol > 0:
             self.prev_volume = vol
             
-        try:
-            piano_set_path = os.path.join("data", "piano_settings.json") if os.path.exists("data") else "piano_settings.json"
-            with open(piano_set_path, "w", encoding="utf-8") as f:
-                json.dump({"volume": int(vol), "speed": float(self.current_speed)}, f, ensure_ascii=False, indent=2)
-        except Exception:
-            pass
+        # 併進設定檔，別整檔覆寫（以前讀不存在的 current_speed，開檔清空後才炸，視窗位置記憶每次開彈都被清掉）
+        save_piano_settings({"volume": int(vol)})
             
         if SOUND_ENGINE:
             SOUND_ENGINE.set_volume(vol)

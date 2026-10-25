@@ -76,6 +76,26 @@ def test_piano_window_handles_pause_resume_ipc():
     assert 'elif cmd == "pause":' in src and 'elif cmd == "resume":' in src
 
 
+def test_piano_volume_keeps_saved_window_geometry(tmp_path, monkeypatch):
+    """調音量要併進設定檔，不能整檔清空（2026-10-25：讀不存在的 current_speed，開檔清空後才炸，
+    視窗位置記憶每次開彈都被清掉）。"""
+    import json
+    import types
+    src = open(os.path.join(ROOT, "test_virtual_piano.py"), encoding="utf-8").read()
+    ns = {"os": os, "json": json, "SOUND_ENGINE": None}
+    for node in ast.walk(ast.parse(src)):
+        if isinstance(node, ast.FunctionDef) and node.name in (
+                "get_piano_settings_path", "load_piano_settings", "save_piano_settings", "set_piano_volume"):
+            exec(compile(ast.Module(body=[node], type_ignores=[]), "x", "exec"), ns)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "data").mkdir()
+    ns["save_piano_settings"]({"geometry": "800x600+10+10"})
+    win = types.SimpleNamespace(current_volume=100, prev_volume=100, broadcast_piano_status=lambda *a: None,
+                                set_status_text=lambda *a: None)
+    ns["set_piano_volume"](win, 94)
+    assert ns["load_piano_settings"]() == {"geometry": "800x600+10+10", "volume": 94}
+
+
 def test_precise_sleep_exists_for_text_sheet_playback():
     """文字樂譜演奏路徑要用 precise_sleep；ef252eb2c 誤刪後走到就 NameError。"""
     import services.piano_engine as pe
