@@ -37,7 +37,7 @@ except Exception:
 
 # WebSocket 握手補丁
 import core.websocket_patch
-from core.llm_engine import GEMINI_KEYS
+from core.llm_engine import GEMINI_KEYS, LIVE_MODEL, key_cooling, report_gemini_key_error
 from core.utils import log_print, sys_notify, log_swallowed, spawn
 from google import genai
 from google.genai import types
@@ -240,9 +240,11 @@ async def _yt_companion_session_loop(target_hwnd, initial_rect, initial_title):
         log_print("❌ [YT 眼耳] 無可用 GEMINI_KEYS，無法啟動感官串流")
         return
 
-    api_key = GEMINI_KEYS[0]
+    # 舊碼永遠用第一把金鑰：那把被限流就整個伴看連不上。挑一把沒在冷卻的
+    import random
+    model = LIVE_MODEL
+    api_key = random.choice([k for k in GEMINI_KEYS if not key_cooling(k, model)] or GEMINI_KEYS)
     client = genai.Client(api_key=api_key)
-    model = "gemini-3.8-live"
 
     CURRENT_YT_TITLE = initial_title
     IS_YT_COMPANION_ACTIVE = True
@@ -388,6 +390,7 @@ async def _yt_companion_session_loop(target_hwnd, initial_rect, initial_title):
             r_task.cancel()
 
     except Exception as e:
+        report_gemini_key_error(api_key, e, model)
         log_print(f"⚠️ [YT 眼耳] 感官連線中斷: {e}")
     finally:
         _live_session = None

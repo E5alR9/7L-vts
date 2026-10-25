@@ -185,6 +185,8 @@ from services.stage_actions import (parse_action_timeline, execute_action_timeli
 import services.yt_companion_service as yt_comp
 from core.llm_engine import (
     GEMINI_KEYS,
+    GEMINI_MODELS, IMAGE_GEN_MODELS, LIVE_MODEL, LIVE_MAIN_MODELS,
+    FAST_TEXT_MODEL, FAST_MULTIMODAL_MODEL, AUDIO_MODEL,
     KEYS_AUDIENCE_LIVE,
     KEYS_VISION,
     DEAD_GEMINI_MODELS,
@@ -1018,7 +1020,7 @@ async def fetch_ai_response(messages, image_base64=None, audio_base64=None, is_p
             log_print(f"⚠️ [Groq 前鋒暫時失敗，交回 Gemini]: {str(_g_err)[:100]}")
 
     if is_mouth_stream:
-        g_model = "gemini-3.5-flash-lite" if not image_base64 and not audio_base64 else "gemini-3.6-flash"
+        g_model = FAST_TEXT_MODEL if not image_base64 and not audio_base64 else FAST_MULTIMODAL_MODEL
         gen_config = types.GenerateContentConfig(temperature=0.85, safety_settings=UNRESTRICTED_SAFETY_SETTINGS)
         
         async def _stream_wrapper():
@@ -1613,15 +1615,7 @@ except ImportError:
 # ────────────────────────────────────────────────────────
 
 
-GEMINI_MODELS = [
-    # 第一防線：極速秒回前鋒
-    "gemini-3.5-flash-lite",
-    "gemini-3.1-flash-lite",
-
-    # 主力前沿模型 (聰明、高配額；3.5/3.7 已棄用自動導向 3.6/3.8，直接打目標省一跳)
-    "gemini-3.6-flash",
-    "gemini-3.8-flash"
-]
+# GEMINI_MODELS、生圖、Live 模型名稱都在 core/llm_engine.py 的「模型名稱唯一出處」
 
 #  高智商任務專屬倒序模型梯隊 (由 3.8 旗艦深度思考領銜，專攻找歌判斷、找譜語意、代碼、哲學與高難度推理)
 
@@ -2414,20 +2408,6 @@ async def execute_local_python_code(code_string: str) -> str:
 DRAWING_DIR = os.path.join(PLAYGROUND_DIR, "drawings")
 os.makedirs(DRAWING_DIR, exist_ok=True)
 
-IMAGE_GEN_MODELS = [
-    #  Nano Banana 系列 (Gemini 原生生圖創作)
-    "gemini-3.1-flash-image",           # Nano Banana 2
-    "gemini-3.1-flash-image-preview",   # Nano Banana 2 Preview
-    "gemini-3-pro-image",               # Nano Banana Pro
-    "gemini-3-pro-image-preview",       # Nano Banana Pro Preview
-    "nano-banana-pro-preview",          # Nano Banana Pro Preview Alias
-    "gemini-3.1-flash-lite-image",      # Nano Banana 2 Lite
-    
-    #  Imagen 4 頂尖寫實與二次元生圖
-    "imagen-4.0-ultra-generate-001",    # Imagen 4 Ultra (極限畫質)
-    "imagen-4.0-generate-001",          # Imagen 4 標準版
-    "imagen-4.0-fast-generate-001"      # Imagen 4 Fast (極速版)
-]
 
 async def generate_ai_image(prompt: str) -> str:
     """PROVIDER: GEMINI-IMAGE（Nano Banana 系； 配額表全系 0/0/0，現降級中；見 docs/AI_SOURCES.md）使用 Google 頂尖 AI 生圖模型 (Nano Banana / Gemini Image / Imagen / FLUX) 繪製高品質圖片、二次元插圖或藝術創作，並自動在老爸的螢幕上彈出展示。
@@ -2448,7 +2428,7 @@ async def generate_ai_image(prompt: str) -> str:
             g_key = GEMINI_KEYS[offset]
             temp_client = genai.Client(api_key=g_key)
             
-            for img_model in ["gemini-3.1-flash-lite-image", "gemini-3.1-flash-image", "gemini-3-pro-image"]:
+            for img_model in IMAGE_GEN_MODELS:
                 if key_cooling(g_key, img_model):
                     continue
                 try:
@@ -2798,7 +2778,7 @@ async def _director_ensure_session():
 [秒數: 表情名]
 請直接輸出時間戳標籤！""")])
             )
-            cm = client.aio.live.connect(model="gemini-3.8-live", config=live_cfg)
+            cm = client.aio.live.connect(model=LIVE_MODEL, config=live_cfg)
             session = await cm.__aenter__()
             st["session"] = session
             st["cm"] = cm
@@ -2806,7 +2786,7 @@ async def _director_ensure_session():
             log_print(f"🎭 [神態導演連線] 常駐 session 就緒（key 輪轉至第 {st['key_idx']} 把）。")
             return session
         except Exception as e:
-            report_gemini_key_error(g_key, e, "gemini-3.8-live")
+            report_gemini_key_error(g_key, e, LIVE_MODEL)
             continue
     return None
 
@@ -4203,7 +4183,7 @@ async def instinct_live_worker():
                 log_print("⚠️ [本能大腦] 沒有可用的 Gemini 金鑰，1 分鐘後再試")
                 await asyncio.sleep(60)
                 continue
-            live_key = random.choice([k for k in _pool if not key_cooling(k, "gemini-3.8-live")] or _pool)
+            live_key = random.choice([k for k in _pool if not key_cooling(k, LIVE_MODEL)] or _pool)
             client = genai.Client(api_key=live_key)
             
             import services.vts_client as _vc_menu
@@ -4226,7 +4206,7 @@ async def instinct_live_worker():
                 output_audio_transcription=types.AudioTranscriptionConfig()
             )
             
-            async with client.aio.live.connect(model="gemini-3.8-live", config=live_cfg) as session:
+            async with client.aio.live.connect(model=LIVE_MODEL, config=live_cfg) as session:
                 INSTINCT_LIVE_SESSION = session
                 log_print("🦊 [本能大腦] 連線成功，開始平行監聽環境...")
                 
@@ -4259,7 +4239,7 @@ async def instinct_live_worker():
             break
         except Exception as e:
             INSTINCT_LIVE_SESSION = None
-            report_gemini_key_error(live_key, e, "gemini-3.8-live")
+            report_gemini_key_error(live_key, e, LIVE_MODEL)
             log_print(f"⚠️ [本能大腦] 連線中斷或重啟中: {e}")
             await asyncio.sleep(3)
 
@@ -4410,7 +4390,7 @@ async def continuous_live_worker(vts):
     CHUNK = 8000  
 
     # -- Live API 輪替矩陣 --
-    live_models = ["gemini-3.1-flash-live-preview", "gemini-3.8-live"]
+    live_models = list(LIVE_MAIN_MODELS)
     current_m_idx = 0
     current_k_idx = 0
     clean_fail_count = 0  # 同鑰乾淨斷開連擊計數（>3 才輪轉，不燒鑰匙矩陣）
@@ -5272,7 +5252,7 @@ async def identify_system_music_and_sound(wav_bytes: bytes) -> str:
         # 同步 SDK 丟執行緒跑；加逾時，API 卡住時系統音監聽才不會永遠等下去
         resp = await asyncio.wait_for(asyncio.to_thread(
             client.models.generate_content,
-            model="gemini-3.1-flash-lite",
+            model=AUDIO_MODEL,
             contents=[audio_part, prompt_text]
         ), timeout=12.0)
 
@@ -5320,7 +5300,7 @@ async def identify_system_music_and_sound(wav_bytes: bytes) -> str:
                 log_print(f"🎵 [電腦音樂感知] 7L 聽出電腦正在播放: 「{res_text}」")
             return res_text
     except Exception as e:
-        report_gemini_key_error(target_key, e, "gemini-3.1-flash-lite")
+        report_gemini_key_error(target_key, e, AUDIO_MODEL)
         # 若 API 短暫異常，由 GSMTC 底層精確線索保底
         try:
             from mic_live_plugin.os_desktop_sensor import os_desktop_sensor

@@ -21,7 +21,9 @@ import threading
 from typing import List, Optional
 
 DEFAULT_LOCAL_MODEL = "BAAI/bge-small-zh-v1.5"   # 中英混合、檔案小、夠用
-GEMINI_EMBED_MODEL = os.getenv("RAG_GEMINI_EMBED_MODEL") or "gemini-embedding-001"
+from core.llm_engine import EMBED_MODEL as _DEFAULT_GEMINI_EMBED
+
+GEMINI_EMBED_MODEL = os.getenv("RAG_GEMINI_EMBED_MODEL") or _DEFAULT_GEMINI_EMBED
 
 _lock = threading.Lock()
 _local_model = None

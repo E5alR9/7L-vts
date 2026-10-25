@@ -16,6 +16,7 @@ from typing import Dict, Any, Optional, List
 import core.websocket_patch  # 🔧 自動修復 Live API additional_headers 相容性
 from google import genai
 from google.genai import types
+from core.llm_engine import LIVE_MODEL, AUDIO_MODEL, STREAMER_MIND_MODELS
 
 class MicLiveAudioAnalyzer:
     def __init__(self, api_keys: Optional[List[str]] = None):
@@ -124,7 +125,7 @@ class MicLiveAudioAnalyzer:
                         system_instruction=types.Content(parts=[types.Part.from_text(text=system_instruction)])
                     )
                     async with asyncio.timeout(8.0):
-                        async with live_client.aio.live.connect(model="gemini-3.8-live", config=live_cfg) as session:
+                        async with live_client.aio.live.connect(model=LIVE_MODEL, config=live_cfg) as session:
                             pcm_bytes = raw_bytes[44:] if raw_bytes.startswith(b'RIFF') else raw_bytes
                             chunk_sz = 8000
                             for offset in range(0, len(pcm_bytes), chunk_sz):
@@ -159,7 +160,7 @@ class MicLiveAudioAnalyzer:
                                     try:
                                         data = json.loads(json_m.group(0))
                                         data["success"] = True
-                                        data["model"] = "gemini-3.8-live"
+                                        data["model"] = LIVE_MODEL
                                         if tool_call_dict and not data.get("tool_call"):
                                             data["tool_call"] = tool_call_dict
                                         return data
@@ -179,14 +180,14 @@ class MicLiveAudioAnalyzer:
                                     "acoustic_vibe": "Live 串流",
                                     "suggested_reaction": "延續即時互動",
                                     "success": True,
-                                    "model": "gemini-3.8-live"
+                                    "model": LIVE_MODEL
                                 }
                 except Exception:
                     continue
 
             # 🛡️ 階段 2：若 Live WebSocket 網路波動，自動平滑切換至極速 Flash Lite 模型保底
             prompt_text = f"本機 STT 快速草稿文字為: 「{stt_draft}」（僅供參考，請 100% 以音訊真實發音、語氣與情緒為準）。請自主思考、感知並輸出 JSON："
-            for model_name in ["gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-3-flash-preview", "gemini-3.6-flash", "gemini-3.8-flash"]:
+            for model_name in [AUDIO_MODEL] + [m for m in STREAMER_MIND_MODELS if m != AUDIO_MODEL]:
                 try:
                     cfg_kwargs = {
                         "system_instruction": system_instruction,

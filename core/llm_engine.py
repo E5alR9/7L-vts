@@ -18,6 +18,22 @@ from core.utils import log_print, sys_notify
 # --- LLM Engine Configuration & Standby Manager ---
 # PROVIDER: GEMINI（google-genai；視覺＋Live 全雙工；見 docs/AI_SOURCES.md）
 
+# ── 模型名稱唯一出處（2026-10-25）：Google 下架或改名時只改這一段 ──
+# 以前散在主程式、鋼琴、伴看、麥克風分析各自寫死；作曲一直打已下架的 gemini-2.5-flash，每次 404 都沒人發現
+LIVE_MODEL = "gemini-3.8-live"                    # Live 常駐：哨兵、本能、神態導演、YT 伴看、麥克風情緒
+LIVE_MAIN_MODELS = ["gemini-3.1-flash-live-preview", LIVE_MODEL]   # Live 主腦輪替順序
+FAST_TEXT_MODEL = "gemini-3.5-flash-lite"         # 純文字快速回覆
+FAST_MULTIMODAL_MODEL = "gemini-3.6-flash"        # 帶圖／音的快速回覆
+AUDIO_MODEL = "gemini-3.1-flash-lite"             # 系統音、聲音片段辨識
+GEMINI_MODELS = [                                 # REST 主梯隊：前鋒輕量 → 主力
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
+    "gemini-3.6-flash",                           # 3.5/3.7 已棄用自動導向 3.6/3.8，直接打目標省一跳
+    "gemini-3.8-flash",
+]
+IMAGE_GEN_MODELS = ["gemini-3.1-flash-lite-image", "gemini-3.1-flash-image", "gemini-3-pro-image"]   # 生圖（Nano Banana）
+EMBED_MODEL = "gemini-embedding-001"              # RAG 向量的 Gemini 備援（.env 的 RAG_GEMINI_EMBED_MODEL 可蓋過）
+
 # 🛡️ 解除全域安全審查限制：將所有危害類別門檻設為 BLOCK_NONE，確保不被惡意熔斷或過度審查
 UNRESTRICTED_SAFETY_SETTINGS = [
     types.SafetySetting(category="HARM_CATEGORY_HARASSMENT", threshold="BLOCK_NONE"),
@@ -185,7 +201,7 @@ def report_gemini_key_error(key: str, err, model: str = "") -> bool:
 # ── Live API 問一句拿一句（2026-10-25）──
 # 哨兵類二元判斷（畫面有沒有大變化、該不該開口）走 Live：不吃 REST 額度。
 # 以前畫面哨兵、發言哨兵各抄一份「挑 key → 連線 → 送 → 收轉寫 → 限流記冷卻」。
-LIVE_ONE_SHOT_MODEL = "gemini-3.8-live"
+LIVE_ONE_SHOT_MODEL = LIVE_MODEL
 
 
 async def live_one_shot(system_text: str, prompt: str, pool: List[str], image_jpeg: bytes = b"",

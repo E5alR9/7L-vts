@@ -86,6 +86,7 @@ def _load(fx):
         "report_gemini_key_error": lambda *a, **k: False,
         "KEYS_AUDIENCE_LIVE": [],
         "GEMINI_KEYS": ["K1", "K2", "K3"],
+        "LIVE_MODEL": __import__("core.llm_engine", fromlist=["LIVE_MODEL"]).LIVE_MODEL,
         "_DIRECTOR_STATE": {"session": None, "cm": None, "key_idx": 0},
         "_DIRECTOR_LOCK": asyncio.Lock(),
         "_DIRECTOR_TIMELINE_CACHE": {},
