@@ -237,6 +237,22 @@ def test_mixed_play_sing():
     assert parse_mixed_command("他彈晴天加唱月光") == []  # 第三人稱不碰
     assert parse_mixed_command("別彈晴天加唱月光") == []  # 否定不碰
     assert parse_mixed_command("彈歌加唱舞") == []  # 兩邊有一邊不是歌名就整單退回
+
+
+@pytest.mark.parametrize("text", [
+    "彈鋼琴 Faded 並唱歌 Faded",   # 2026-10-25 實機：主腦的轉述，整串被當曲名上網搜譜
+    "彈鋼琴 Faded 並且唱 Faded", "彈 Faded 然後唱 Faded", "彈奏 Faded 同時唱 Faded",
+    "自彈自唱 Faded", "邊彈邊唱 Faded", "一邊彈琴一邊唱 Faded", "7L 彈唱 Faded",
+])
+def test_mixed_play_sing_in_the_brains_words(text):
+    assert parse_mixed_command(text) == [("pe.play_virtual_piano", {"song_name": "Faded"}),
+                                         ("auto_sing_song", {"song_name": "Faded"})]
+
+
+def test_mixed_play_sing_leaves_other_sentences_alone():
+    assert parse_mixed_command("唱歌劇魅影加彈月光")[0] == ("auto_sing_song", {"song_name": "歌劇魅影"})
+    for text in ("彈唱歌手很厲害", "他說彈晴天並唱月光", "別彈晴天並唱月光", "彈唱", "彈鋼琴 Faded"):
+        assert parse_mixed_command(text) == [], text
     # 救援只救唱歌那路
     assert parse_slip_for_song("[文字輸入] 老爸：彈晴天加唱晴天") == (
         "auto_sing_song", {"song_name": "晴天"})

@@ -202,14 +202,21 @@ def extract_piano_song(text: Optional[str]) -> Optional[str]:
     return _scan(text or "", _PIANO_KW, _NEG_PIANO)
 
 
-# 混用連接詞（彈X加唱Y / 唱X再彈Y）：兩邊都必須是乾淨歌名，否則退回單句拆解
-_MIXED_SEP = r'(?:加|和|跟|與|再|還有|、|＋|\+|;|；)'
+# 混用連接詞（彈X加唱Y / 唱X再彈Y）：兩邊都必須是乾淨歌名，否則退回單句拆解。
+# 主腦轉述時會寫「彈鋼琴 X 並唱歌 Y」：舊規則不認「並」，單句拆解把「X 並唱歌 Y」整串當曲名
+# 上網搜譜，蓋掉彈唱同步用的譜（2026-10-25 實機）。所以動詞後的「鋼琴／琴／奏」「歌」也要吃掉。
+_MIXED_SEP = r'\s*(?:並且|並|然後|同時|順便|接著|加|和|跟|與|再|還有|、|＋|\+|;|；)\s*'
+_MIXED_PIANO = r'彈(?:鋼琴|琴|奏)?\s*'
+_MIXED_SING = r'唱(?:歌(?=[\s「『《"“]))?\s*'
 _MIXED_PATTERNS = [
-    (re.compile(r'彈(.+?)' + _MIXED_SEP + r'唱(.+)', re.DOTALL),
+    (re.compile(_MIXED_PIANO + r'(.+?)' + _MIXED_SEP + _MIXED_SING + r'(.+)', re.DOTALL),
      ("pe.play_virtual_piano", "auto_sing_song")),
-    (re.compile(r'唱(.+?)' + _MIXED_SEP + r'彈(.+)', re.DOTALL),
+    (re.compile(_MIXED_SING + r'(.+?)' + _MIXED_SEP + _MIXED_PIANO + r'(.+)', re.DOTALL),
      ("auto_sing_song", "pe.play_virtual_piano")),
 ]
+# 同一首邊彈邊唱：「自彈自唱 X」「邊彈邊唱 X」「一邊彈琴一邊唱 X」「彈唱 X」
+# 「彈唱」後面要隔開才算（「彈唱歌手很厲害」是在聊天）
+_MIXED_SAME = re.compile(r'(?:自彈自唱|邊彈邊唱|一邊彈(?:鋼琴|琴)?一邊唱(?:歌)?|彈唱(?=[\s:：「『《"“]))\s*(.+)', re.DOTALL)
 
 
 def parse_mixed_command(text: Optional[str]) -> list:
@@ -234,6 +241,11 @@ def parse_mixed_command(text: Optional[str]) -> list:
             continue
         key1 = "song_name"
         return [(tool1, {key1: t1}), (tool2, {key1: t2})]
+    m = _MIXED_SAME.search(s)
+    if m and _LEAD_OK.match(s[:m.start()]):
+        t = _clean_title(_take_candidate(m.group(1)))
+        if t:
+            return [("pe.play_virtual_piano", {"song_name": t}), ("auto_sing_song", {"song_name": t})]
     return []
 
 
