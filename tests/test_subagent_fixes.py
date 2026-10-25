@@ -61,8 +61,13 @@ class _FakeSession:
         self.sent += function_responses
 
 
-def _run_handler(cpu, nv, total_timeout=45.0, task="幫我查日圓匯率", origin="dad", targets=None):
+def _run_handler(cpu, nv, total_timeout=45.0, task="幫我查日圓匯率", origin="dad", targets=None, intent=None,
+                 staged=(True, "auto_sing_song", {"song_name": "晴天"})):
     targets = [] if targets is None else targets
+
+    async def run_stage_commands(cmds, **k):
+        targets.append(("struct", k.get("target"), cmds))
+        return staged
 
     async def background_tool_executor(*a, **k):
         targets.append(("cpu", k.get("target")))
@@ -74,14 +79,16 @@ def _run_handler(cpu, nv, total_timeout=45.0, task="幫我查日圓匯率", orig
             await asyncio.sleep(10)
         return nv
 
-    from core.hard_command import build_slip_text
+    from core.hard_command import build_slip_text, structured_stage_command
     sess = _FakeSession()
     ns = _load("_handle_invoke_subagent", types=types, asyncio=asyncio, session=sess, ws_send_lock=asyncio.Lock(),
                background_tool_executor=background_tool_executor, nv_interpret_task=nv_interpret_task,
                build_slip_text=build_slip_text, _SUBAGENT_TOTAL_TIMEOUT=total_timeout,
                _BRAIN_INPUT_ORIGIN={"who": origin, "ts": 0.0},
+               structured_stage_command=structured_stage_command, run_stage_commands=run_stage_commands,
+               AUDIENCE_STAGE_DECLINE=_const("AUDIENCE_STAGE_DECLINE"),
                _SUBAGENT_VISION_TASK_RE=__import__('re').compile(_const_pattern('_SUBAGENT_VISION_TASK_RE')))
-    asyncio.run(ns["_handle_invoke_subagent"](sess, asyncio.Lock(), "invoke_subagent", "call-1", task))
+    asyncio.run(ns["_handle_invoke_subagent"](sess, asyncio.Lock(), "invoke_subagent", "call-1", task, intent))
     assert all(r.id == "call-1" for r in sess.sent)
     if cpu[0]:
         assert len(sess.sent) == 1                       # 硬指令不到 1 秒：一則就好
@@ -142,7 +149,8 @@ def test_audience_turn_cannot_stop_the_stage_through_the_subagent():
     from core.utils import spawn
     ns = _load("nv_interpret_task", "_dispatch_in_background", spawn=spawn, asyncio=asyncio, resolve_subagent_chain=lambda: ["gemini"],
                load_prompt=lambda n: "", execute_tool_dispatch=dispatch, is_stage_control=is_stage_control,
-               build_slip_text=build_slip_text, _gemini_tool_pass=tool_pass)
+               build_slip_text=build_slip_text, _gemini_tool_pass=tool_pass,
+               AUDIENCE_STAGE_DECLINE=_const("AUDIENCE_STAGE_DECLINE"))
 
     async def go(target):
         r = await ns["nv_interpret_task"]("停止播放鋼琴", target=target)
@@ -305,3 +313,27 @@ def test_brain_slips_have_one_exit_and_origin_is_noted_on_send():
     assert MAIN.count("LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait(") == 1   # 只剩出口裡那一處
     sender = ast.get_source_segment(MAIN, _fn("send_system_prompts_to_live"))
     assert sender.index("send_realtime_input(text=prompt)") < sender.index("_note_brain_origin(origin)")
+
+
+def test_structured_stage_action_skips_text_parsing():
+    """主腦填了結構化動作：照欄位直接執行，不再用正則猜她轉述的說法，也不交 AI 重新解讀（2026-10-25）。"""
+    targets = []
+    text, sched = _run_handler((True, "", {}), "hang", task="背景彈唱 Faded", targets=targets,   # 結構化路徑只回一則
+                               intent={"action": "play_and_sing", "song": "Faded", "song2": "", "url": ""},
+                               staged=(True, "mixed_play_sing", {"desc": "Faded＋Faded"}))
+    assert targets == [("struct", "dad", [("pe.play_virtual_piano", {"song_name": "Faded"}),
+                                          ("auto_sing_song", {"song_name": "Faded"})])]
+    assert "Faded＋Faded" in text and sched == types.FunctionResponseScheduling.WHEN_IDLE
+    # 沒填或填 other：照舊走文字流程
+    targets = []
+    _run_handler((True, "auto_sing_song", {"song_name": "晴天"}), None, task="唱晴天", targets=targets,
+                 intent={"action": "other", "song": "", "song2": "", "url": ""})
+    assert targets == [("cpu", "dad")]
+
+
+def test_structured_stage_control_from_an_audience_turn_is_declined():
+    targets = []
+    text, sched = _run_handler((True, "", {}), None, task="收起鋼琴", origin="audience", targets=targets,
+                               intent={"action": "stop_piano", "song": "", "song2": "", "url": ""},
+                               staged=(False, "", {}))
+    assert targets[0][:2] == ("struct", "audience") and "只聽老爸" in text

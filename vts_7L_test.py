@@ -172,7 +172,7 @@ from core.utils import (
 )
 from core.identity import is_owner_account, claims_owner_identity
 import core.stage_state as stage
-from core.hard_command import parse_hard_command, build_slip_text, display_requester, parse_slip_for_song, strip_blob_noise, sanitize_search_query, rescue_claim, split_original_request, PIANO_CONTROL_TOOLS, STAGE_CONTROL_TOOLS, is_stage_control
+from core.hard_command import parse_hard_command, build_slip_text, display_requester, parse_slip_for_song, strip_blob_noise, sanitize_search_query, rescue_claim, split_original_request, PIANO_CONTROL_TOOLS, STAGE_CONTROL_TOOLS, is_stage_control, structured_stage_command
 from core.subagent_router import resolve_subagent_chain
 from core.db import *
 from core.live_timer_sensor import live_timer_hub
@@ -306,6 +306,10 @@ _AUDIENCE_DENIED_TOOLS = frozenset({
 #  主腦只有一個，觀眾說「收起鋼琴」被 CPU 擋下後，哨兵照樣把留言轉給主腦，主腦呼叫子智能體時
 #  舊碼一律當老爸下令，鋼琴就被收掉了（2026-10-25 實機）。子智能體照這裡決定用誰的權限。
 _BRAIN_INPUT_ORIGIN = {"who": "dad", "ts": 0.0}
+
+
+AUDIENCE_STAGE_DECLINE = ("[系統底層：鋼琴的停止／暫停／繼續和停止唱歌只聽老爸的，觀眾說的不算，系統沒有執行。"
+                          "請妳用一句話俏皮帶過；剛才如果說了「好」，就改口說這要老爸點頭。]")
 
 
 def _note_brain_origin(who: str) -> None:
@@ -4371,7 +4375,7 @@ def _take_live_resume_handle(model: str, key_idx: int, now: Optional[float] = No
     return handle if ok else None
 
 
-async def _handle_invoke_subagent(session, ws_send_lock, _fn_name, _fn_call_id, _task_ins):
+async def _handle_invoke_subagent(session, ws_send_lock, _fn_name, _fn_call_id, _task_ins, _intent=None):
     """單個子智能體任務全流程（CPU→副腦→回報），獨立背景執行、互不堵塞。
     invoke_subagent 是非阻塞工具。實測主腦呼叫時幾乎都不開口（2026-10-24），所以：
     CPU 硬指令命中（不到 1 秒）→ 一則回應請她答應；
@@ -4413,8 +4417,18 @@ async def _handle_invoke_subagent(session, ws_send_lock, _fn_name, _fn_call_id, 
             # ⚠️ requester 傳空字串：task_ins 是主腦自己寫的指令，
             # 點歌人不一定是老爸（可能是轉述觀眾點的），紙條走中性文案
             _who = _BRAIN_INPUT_ORIGIN["who"]   # 這輪是觀眾觸發的，就照觀眾的權限
+            # 主腦填了結構化舞台動作就照欄位直接執行，不再用正則猜她轉述的說法（2026-10-25）
+            _cmds = structured_stage_command(**(_intent or {}))
             try:
-                _hit, _tname, _targs = await background_tool_executor(_task_ins, target=_who, requester_name="", from_brain=True)
+                if _cmds:
+                    log_print(f"🧩 [子智能體] 主腦填了結構化動作 {_intent}，直接執行")
+                    _hit, _tname, _targs = await run_stage_commands(_cmds, target=_who, requester_name="",
+                                                                    from_brain=True, said=_task_ins)
+                    if not _hit:   # 觀眾那輪的停鋼琴／停歌：擋下來，請她婉拒
+                        await _respond(AUDIENCE_STAGE_DECLINE, _speak)
+                        return
+                else:
+                    _hit, _tname, _targs = await background_tool_executor(_task_ins, target=_who, requester_name="", from_brain=True)
             except Exception as _be:
                 log_print(f"⚠️ [子智能體執行異常]: {_be}")
                 _hit, _tname, _targs = False, "", {}
@@ -4645,7 +4659,8 @@ async def continuous_live_worker(vts):
                                         _sub_t = asyncio.create_task(
                                             _handle_invoke_subagent(
                                                 session, ws_send_lock, fn_name, fn_call_id,
-                                                fn_args.get("task_instruction", "")))
+                                                fn_args.get("task_instruction", ""),
+                                                {k: fn_args.get(k, "") for k in ("action", "song", "song2", "url")}))
                                         _RUNNING_SUBAGENT_TASKS.add(_sub_t)
                                         _sub_t.add_done_callback(_RUNNING_SUBAGENT_TASKS.discard)
                                     else:
@@ -7329,8 +7344,7 @@ async def nv_interpret_task(task_ins: str, target: str = "dad", requester_name: 
             break  # 乾淨無調用：信任它，不問下一棒（省一顆腦的額度與延遲）
         if fn_name and target == "audience" and is_stage_control(fn_name):
             log_print(f"🛑 [子智能體] 這輪是觀眾觸發的，{fn_name} 只聽老爸的，不執行")
-            return "advice", ("[系統底層：鋼琴的停止／暫停／繼續和停止唱歌只聽老爸的，觀眾說的不算，系統沒有執行。"
-                              "請妳用一句話俏皮帶過；剛才如果說了「好」，就改口說這要老爸點頭。]")
+            return "advice", AUDIENCE_STAGE_DECLINE
         if fn_name:
             if fn_name == "search_google":
                 # 資訊型工具：等結果、摘要後再回報（fire-and-forget 會把答案弄丟）
@@ -7490,111 +7504,28 @@ async def background_tool_executor(user_text: str, target: str = "dad", requeste
     回傳 (是否命中, 工具名, 參數)，供調用方誠實回報。
     from_brain：主腦自己呼叫 invoke_subagent 進來的。工具回應已經告訴主腦結果，這裡就不再送紙條、
     不補念應答——舊碼會送紙條給主腦，主腦看到又呼叫一次，形成迴圈（2026-10-24 實機）。
+    解析完交給 run_stage_commands 執行（主腦填結構化動作時也走同一個，2026-10-25）。
     """
     try:
         log_print(f"🤖 [CPU 拆解] 掃描指令: {user_text}")
-
         # 1. CPU 代碼硬體判斷 (極速、零成本、零幻覺)——三道閘門見 core/hard_command.py
         #    2026-10-09：舊版只認關鍵字「唱」，把「你可以唱歌了？」抽成歌名「歌了？」、
         #    「? 又我唱了????」抽成「了????」，兩次都真的開跑 YT-DLP。改走 parse_hard_command。
-        fn_name, fn_args = parse_hard_command(user_text)
-        if fn_name in STAGE_CONTROL_TOOLS and target == "audience":
-            # 觀眾留言也會進 CPU：鋼琴的停止／暫停／繼續、停止唱歌只聽老爸的，不然一句「別彈了」就能把鋼琴收掉
-            log_print(f"🛑 [CPU 硬體直連] 觀眾不能控制鋼琴／唱歌，不執行：{user_text[:30]}")
-            return False, "", {}
-
-        # 搜尋指令：CPU 層不處理（搜尋是資訊型工具、結果無處可去，只能燒 API；
-        # 統一交給 AI 子智能體/主腦走 function calling＋摘要後再說話）
-
-        # 執行配對到的指令（沒命中就直接返回；AI 解讀交給 A 架構）
-        # 回傳 (是否命中, 工具名, 參數)，供 invoke_subagent handler 誠實回報
-        slip_text = ""
-        # 混用優先（彈X加唱Y）：兩路都跑、兩張紙條；失敗退回單句
+        #    混用優先（彈X加唱Y）：兩路都跑、兩張紙條；不是混用才看單句
         try:
             from core.hard_command import parse_mixed_command as _parse_mixed
+            cmds = _parse_mixed(user_text)
         except Exception:
-            _parse_mixed = None
-        if _parse_mixed:
-            try:
-                _mixed = _parse_mixed(user_text)
-            except Exception:
-                _mixed = []
-            if _mixed and _hard_cmd_seen_recently("mixed", [list(x) for x in _mixed], time.time()):
-                log_print("⏭️ [CPU 硬體直連] 同一組混用指令剛剛已在處理，不重複執行")
-                return True, "mixed_play_sing", {"desc": "＋".join(a.get("song_name", "") for _, a in _mixed)}
-            if _mixed:
-                # 鋼琴走會合（先開等翻唱），唱歌走正常管線；兩張紙條照發
-                _sing_title = next((a.get("song_name", "") for t, a in _mixed if t in ("auto_sing_song", "sing_song")), "")
-                for _tool, _args in _mixed:
-                    log_print(f"⚡ [CPU 硬體直連] 成功攔截混用指令: {_tool}({_args})")
-                    if _tool in ("pe.play_virtual_piano", "play_virtual_piano"):
-                        spawn(_mixed_piano_run(
-                            _args.get("song_name", ""), _sing_title, target, requester_name))
-                    else:
-                        _dispatch_in_background(_tool, _args, caller_target=target, caller_user=requester_name)
-                    _slip = build_slip_text(_tool, _args, requester_name)
-                    if _slip and is_live_brain_active() and not from_brain:
-                        try:
-                            send_brain_slip(_slip)
-                            log_print(f"📥 [黑板同步] 透過紙條傳送給 Live 大腦: {_slip[:60]}...")
-                        except Exception as _e:
-                            log_print(f"⚠️ [平行副腦紙條傳遞失敗]: {_e}")
-                _titles = "＋".join([a.get("song_name", "") for _, a in _mixed])
-                _same = len({a.get("song_name", "") for _, a in _mixed}) == 1
-                _ack_song = f"{_mixed[0][1].get('song_name', '')}（邊彈邊唱）" if _same else f"{_titles}（混用）"
-                if not from_brain:
-                    spawn(_song_ack(_ack_song, target))
-                return True, "mixed_play_sing", {"desc": _titles}
-        if fn_name and _hard_cmd_seen_recently(fn_name, fn_args, time.time()):
-            log_print(f"⏭️ [CPU 硬體直連] {fn_name}({fn_args}) 剛剛已在處理，不重複執行")
-            return True, fn_name, fn_args
-        if fn_name in PIANO_CONTROL_TOOLS:
-            # 去重只擋同一則訊息被執行兩次；「暫停→繼續→暫停」20 秒內換了指令，就把另外兩個的紀錄清掉
-            for _other in PIANO_CONTROL_TOOLS - {fn_name}:
-                _HARD_CMD_RECENT.pop(f"{_other}|{{}}", None)
-        if fn_name:
-            log_print(f"⚡ [CPU 硬體直連] 成功攔截指令: {fn_name}({fn_args})")
-            # 自創曲歸隊（2026-10-11）：剝前綴＋找檔，後面執行/紙條/應答全用乾淨參數
-            _o_need_file = False
-            if fn_name in ("auto_sing_song", "sing_song"):
-                try:
-                    _o_clean, _o_src, _o_hit = split_original_request((fn_args or {}).get("song_name", ""))
-                    if _o_hit:
-                        fn_args = dict(fn_args or {})
-                        fn_args["song_name"] = _o_clean
-                        fn_args["origin"] = "original"
-                        fn_args["source_mp3"] = _o_src
-                        _o_need_file = not _o_src
-                except Exception:
-                    log_swallowed()
-            # CPU 只認點歌和鋼琴控制：一律走背景執行＋紙條（表情不歸 CPU，交主腦/A 架構）
-            _d_args = fn_args
-            if fn_name == "pe.stop_virtual_piano" and not from_brain:
-                _d_args = dict(fn_args or {}, force=True)   # 老爸親口說的：不受「剛拿出 3.5 秒」防護擋
-            _dispatch_in_background(fn_name, _d_args, caller_target=target, caller_user=requester_name)
-            # 點歌強制應答：主腦常靜默，補一句 TTS 保證出聲（target 透傳，播出规则照舊）
-            if fn_name in ("auto_sing_song", "sing_song", "pe.play_virtual_piano", "play_virtual_piano") and not from_brain:
-                if _o_need_file:
-                    spawn(_song_ack_missing_original((fn_args or {}).get("song_name", ""), target))
-                else:
-                    spawn(_song_ack((fn_args or {}).get("song_name", ""), target,
-                                                  piano=fn_name in ("pe.play_virtual_piano", "play_virtual_piano")))
-            # ⚠️ 紙條必須寫明「唱歌的是 7L 本人」，否則主腦會把點歌的人當成演唱者
-            slip_text = build_slip_text(fn_name, fn_args, requester_name)
-        else:
+            cmds = []
+        if not cmds:
+            fn_name, fn_args = parse_hard_command(user_text)
+            cmds = [(fn_name, fn_args)] if fn_name else []
+        if not cmds:
             # CPU 沒命中就交還；AI 解讀一律走 A 架構（invoke_subagent → nv_interpret_task），這裡不燒 API
             log_print("🤖 [CPU 拆解] 無硬指令，交還主腦處理。")
             return False, "", {}
-                
-        # 如果是 Live Session 啟動狀態，發送背景通知紙條給主腦
-        # （經加鎖紙條佇列投遞，避免跟麥克風音訊流搶通道）
-        if slip_text and is_live_brain_active() and not from_brain:
-            try:
-                send_brain_slip(slip_text)
-                log_print(f"📥 [黑板同步] 透過紙條傳送給 Live 大腦: {slip_text[:60]}...")
-            except Exception as e:
-                log_print(f"⚠️ [平行副腦紙條傳遞失敗]: {e}")
-        return True, fn_name, fn_args
+        return await run_stage_commands(cmds, target=target, requester_name=requester_name,
+                                        from_brain=from_brain, said=user_text)
     except Exception as e:
         if isinstance(e, asyncio.TimeoutError) or isinstance(e, TimeoutError):
             pass # CPU 正則不應超時，保險起見靜默略過
@@ -7603,6 +7534,83 @@ async def background_tool_executor(user_text: str, target: str = "dad", requeste
             err_msg = traceback.format_exc()
             log_print(f"⚠️ [CPU 拆解異常]: {err_msg}")
         return False, "", {}
+
+
+async def run_stage_commands(cmds: list, target: str = "dad", requester_name: str = "", from_brain: bool = False,
+                             said: str = ""):
+    """執行解析好的舞台指令 [(工具, 參數)]：兩個＝彈加唱（混用），一個＝單句。
+    權限（觀眾不能停鋼琴／停歌）、去重、紙條、應答都在這裡，文字解析和主腦的結構化動作共用。
+    回傳 (是否執行, 工具名, 參數)。"""
+    if len(cmds) > 1:
+        _mixed = cmds
+        if _hard_cmd_seen_recently("mixed", [list(x) for x in _mixed], time.time()):
+            log_print("⏭️ [CPU 硬體直連] 同一組混用指令剛剛已在處理，不重複執行")
+            return True, "mixed_play_sing", {"desc": "＋".join(a.get("song_name", "") for _, a in _mixed)}
+        # 鋼琴走會合（先開等翻唱），唱歌走正常管線；兩張紙條照發
+        _sing_title = next((a.get("song_name", "") for t, a in _mixed if t in ("auto_sing_song", "sing_song")), "")
+        for _tool, _args in _mixed:
+            log_print(f"⚡ [CPU 硬體直連] 成功攔截混用指令: {_tool}({_args})")
+            if _tool in ("pe.play_virtual_piano", "play_virtual_piano"):
+                spawn(_mixed_piano_run(
+                    _args.get("song_name", ""), _sing_title, target, requester_name))
+            else:
+                _dispatch_in_background(_tool, _args, caller_target=target, caller_user=requester_name)
+            _slip = build_slip_text(_tool, _args, requester_name)
+            if _slip and is_live_brain_active() and not from_brain:
+                send_brain_slip(_slip)
+                log_print(f"📥 [黑板同步] 透過紙條傳送給 Live 大腦: {_slip[:60]}...")
+        _titles = "＋".join([a.get("song_name", "") for _, a in _mixed])
+        _same = len({a.get("song_name", "") for _, a in _mixed}) == 1
+        _ack_song = f"{_mixed[0][1].get('song_name', '')}（邊彈邊唱）" if _same else f"{_titles}（混用）"
+        if not from_brain:
+            spawn(_song_ack(_ack_song, target))
+        return True, "mixed_play_sing", {"desc": _titles}
+
+    fn_name, fn_args = cmds[0]
+    if is_stage_control(fn_name) and target == "audience":
+        # 觀眾留言也會進 CPU：鋼琴的停止／暫停／繼續、停止唱歌只聽老爸的，不然一句「別彈了」就能把鋼琴收掉
+        log_print(f"🛑 [CPU 硬體直連] 觀眾不能控制鋼琴／唱歌，不執行：{(said or fn_name)[:30]}")
+        return False, "", {}
+    if _hard_cmd_seen_recently(fn_name, fn_args, time.time()):
+        log_print(f"⏭️ [CPU 硬體直連] {fn_name}({fn_args}) 剛剛已在處理，不重複執行")
+        return True, fn_name, fn_args
+    if fn_name in PIANO_CONTROL_TOOLS:
+        # 去重只擋同一則訊息被執行兩次；「暫停→繼續→暫停」20 秒內換了指令，就把另外兩個的紀錄清掉
+        for _other in PIANO_CONTROL_TOOLS - {fn_name}:
+            _HARD_CMD_RECENT.pop(f"{_other}|{{}}", None)
+    log_print(f"⚡ [CPU 硬體直連] 成功攔截指令: {fn_name}({fn_args})")
+    # 自創曲歸隊（2026-10-11）：剝前綴＋找檔，後面執行/紙條/應答全用乾淨參數
+    _o_need_file = False
+    if fn_name in ("auto_sing_song", "sing_song"):
+        try:
+            _o_clean, _o_src, _o_hit = split_original_request((fn_args or {}).get("song_name", ""))
+            if _o_hit:
+                fn_args = dict(fn_args or {})
+                fn_args["song_name"] = _o_clean
+                fn_args["origin"] = "original"
+                fn_args["source_mp3"] = _o_src
+                _o_need_file = not _o_src
+        except Exception:
+            log_swallowed()
+    # CPU 只認點歌和鋼琴控制：一律走背景執行＋紙條（表情不歸 CPU，交主腦/A 架構）
+    _d_args = fn_args
+    if fn_name == "pe.stop_virtual_piano" and not from_brain:
+        _d_args = dict(fn_args or {}, force=True)   # 老爸親口說的：不受「剛拿出 3.5 秒」防護擋
+    _dispatch_in_background(fn_name, _d_args, caller_target=target, caller_user=requester_name)
+    # 點歌強制應答：主腦常靜默，補一句 TTS 保證出聲（target 透傳，播出规则照舊）
+    if fn_name in ("auto_sing_song", "sing_song", "pe.play_virtual_piano", "play_virtual_piano") and not from_brain:
+        if _o_need_file:
+            spawn(_song_ack_missing_original((fn_args or {}).get("song_name", ""), target))
+        else:
+            spawn(_song_ack((fn_args or {}).get("song_name", ""), target,
+                            piano=fn_name in ("pe.play_virtual_piano", "play_virtual_piano")))
+    # ⚠️ 紙條必須寫明「唱歌的是 7L 本人」，否則主腦會把點歌的人當成演唱者
+    # （經加鎖紙條佇列投遞，避免跟麥克風音訊流搶通道）
+    slip_text = build_slip_text(fn_name, fn_args, requester_name)
+    if slip_text and is_live_brain_active() and not from_brain:
+        send_brain_slip(slip_text)
+        log_print(f"📥 [黑板同步] 透過紙條傳送給 Live 大腦: {slip_text[:60]}...")
+    return True, fn_name, fn_args
 
 # 桌機代答工具味關鍵字（2026-10-11）：命中→走 API 老路；沒命中→免費桌面版。
 # 只收複合詞（「開心」這種不能進來，否則省個寂寞）；寧可誤判去 API（現狀），

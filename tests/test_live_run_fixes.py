@@ -108,7 +108,7 @@ def _run_executor(text, target, recent=None):
     import asyncio
     import collections
     from core.hard_command import (parse_hard_command, build_slip_text, PIANO_CONTROL_TOOLS, STAGE_CONTROL_TOOLS,
-                                   split_original_request)
+                                   split_original_request, is_stage_control)
     dispatched = []
 
     async def execute_tool_dispatch(fn, args, **k):
@@ -120,11 +120,11 @@ def _run_executor(text, target, recent=None):
     ns = {"asyncio": asyncio, "time": time, "log_print": lambda *a, **k: None, "log_swallowed": lambda: None,
           "parse_hard_command": parse_hard_command, "build_slip_text": build_slip_text,
           "PIANO_CONTROL_TOOLS": PIANO_CONTROL_TOOLS, "STAGE_CONTROL_TOOLS": STAGE_CONTROL_TOOLS,
-          "split_original_request": split_original_request,
+          "split_original_request": split_original_request, "is_stage_control": is_stage_control,
           "execute_tool_dispatch": execute_tool_dispatch, "_song_ack": _song_ack, "spawn": __import__("core.utils", fromlist=["spawn"]).spawn,
           "is_live_brain_active": lambda: False, "LIVE_API_SYSTEM_PROMPT_QUEUE": collections.deque(),
           "_HARD_CMD_RECENT": {} if recent is None else recent, "_HARD_CMD_DEDUPE_SEC": 20.0}
-    for name in ("_hard_cmd_seen_recently", "_dispatch_in_background", "background_tool_executor"):
+    for name in ("_hard_cmd_seen_recently", "_dispatch_in_background", "run_stage_commands", "background_tool_executor"):
         exec(compile(ast.Module(body=[_fn(name)], type_ignores=[]), name, "exec"), ns)
 
     async def go():
@@ -159,7 +159,7 @@ def test_piano_ack_does_not_say_sing():
     lines = next(ast.literal_eval(n.value) for n in TREE.body
                  if isinstance(n, ast.Assign) and getattr(n.targets[0], "id", "") == "_PIANO_ACK_LINES")
     assert lines and not any("唱" in l for l in lines)
-    src = ast.get_source_segment(MAIN, _fn("background_tool_executor"))
+    src = ast.get_source_segment(MAIN, _fn("run_stage_commands"))   # 2026-10-25 執行段拆出來共用
     assert "piano=fn_name in (" in src
 
 

@@ -434,14 +434,26 @@ LIVE_API_TOOLS = [
             types.FunctionDeclaration(
                 name="invoke_subagent",
                 behavior=types.Behavior.NON_BLOCKING,
-                description="當老爸明確要求進行操作（例如點歌、唱歌、彈琴、停止或暫停鋼琴、計時、查資料）時，呼叫此工具。將任務交給背景的子智能體處理。只有呼叫才會真的執行，光說「好了」不算；結果回來系統會告訴妳。注意：若只是純聊天，請不要呼叫此工具！看螢幕畫面不要用這個工具（子智能體看不到畫面），請照規則說 [TOOL:VISION]。",
+                description="當老爸明確要求進行操作（例如點歌、唱歌、彈琴、停止或暫停鋼琴、計時、查資料）時，呼叫此工具。將任務交給背景的子智能體處理。只有呼叫才會真的執行，光說「好了」不算；結果回來系統會告訴妳。注意：若只是純聊天，請不要呼叫此工具！看螢幕畫面不要用這個工具（子智能體看不到畫面），請照規則說 [TOOL:VISION]。舞台動作（彈琴、唱歌、邊彈邊唱、停止唱歌、收起／暫停／繼續鋼琴、看 YouTube 影片）請同時填 action 和歌名或網址，系統會直接照做；其他事 action 填 other。",
                 parameters=types.Schema(
                     type="OBJECT",
                     properties={
                         "task_instruction": types.Schema(
                             type="STRING",
                             description="要交給子智能體執行的任務，例如「幫我點歌 晴天」、「查現在台北天氣」"
-                        )
+                        ),
+                        # 2026-10-25：舞台動作直接給結構化欄位，CPU 照欄位執行，不再用正則猜她轉述的說法
+                        "action": types.Schema(
+                            type="STRING",
+                            enum=["play_piano", "sing", "play_and_sing", "stop_singing",
+                                  "stop_piano", "pause_piano", "resume_piano", "watch_video", "other"],
+                            description="play_piano 彈琴／sing 唱歌／play_and_sing 邊彈邊唱／stop_singing 停止唱歌／"
+                                        "stop_piano 收起鋼琴／pause_piano 暫停鋼琴／resume_piano 繼續彈／"
+                                        "watch_video 看 YouTube 影片／other 其他（查資料、計時、作曲…）"
+                        ),
+                        "song": types.Schema(type="STRING", description="歌名或曲名（彈琴、唱歌、邊彈邊唱時填，只填歌名）"),
+                        "song2": types.Schema(type="STRING", description="邊彈邊唱但彈和唱不同首時，要唱的那首"),
+                        "url": types.Schema(type="STRING", description="看影片時的 YouTube 網址"),
                     },
                     required=["task_instruction"]
                 )

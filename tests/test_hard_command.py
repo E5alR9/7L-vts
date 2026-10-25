@@ -464,3 +464,29 @@ def test_watch_request_needs_a_video_link_and_intent(text):
 def test_watch_slip_does_not_read_out_the_link():
     s = build_slip_text("video.request_watch", {"url": "https://youtu.be/jNQXAC9IVRw"}, "E5")
     assert "youtu" not in s and "E5" in s and "不要猜" in s
+
+
+def test_structured_stage_command_maps_brain_fields():
+    """主腦填的結構化動作直接轉工具（2026-10-25）：不再用正則猜她轉述的說法。"""
+    from core.hard_command import structured_stage_command as f
+    assert f("play_and_sing", "Faded") == [("pe.play_virtual_piano", {"song_name": "Faded"}),
+                                          ("auto_sing_song", {"song_name": "Faded"})]
+    assert f("play_and_sing", "晴天", "稻香")[1] == ("auto_sing_song", {"song_name": "稻香"})
+    assert f("sing", "《晴天》") == [("auto_sing_song", {"song_name": "晴天"})]
+    assert f("play_piano", "安靜") == [("pe.play_virtual_piano", {"song_name": "安靜"})]   # 不會被判成收琴
+    assert f("stop_piano") == [("pe.stop_virtual_piano", {})] and f("pause_piano") == [("pe.pause_virtual_piano", {})]
+    assert f("resume_piano") == [("pe.resume_virtual_piano", {})] and f("stop_singing") == [("stop_singing", {})]
+    assert f("watch_video", url="youtube.com/watch?v=jNQXAC9IVRw&t=3") == [
+        ("video.request_watch", {"url": "https://youtu.be/jNQXAC9IVRw"})]
+    for bad in (("other", "晴天"), ("sing", ""), ("play_piano", "？！"), ("watch_video", "", "", "不是網址"), ("", "")):
+        assert f(*bad) == [], bad
+
+
+def test_live_brain_tool_declares_structured_fields():
+    from core.tool_schema import LIVE_API_TOOLS
+    decl = LIVE_API_TOOLS[0].function_declarations[0]
+    props = decl.parameters.properties
+    assert set(props) >= {"task_instruction", "action", "song", "song2", "url"}
+    from core.hard_command import STAGE_ACTIONS
+    assert set(props["action"].enum) == set(STAGE_ACTIONS) | {"other"}
+    assert decl.parameters.required == ["task_instruction"]

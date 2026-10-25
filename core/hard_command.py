@@ -364,6 +364,41 @@ def extract_piano_control(text: Optional[str], controls=_PIANO_CONTROLS) -> Opti
     return None
 
 
+# —— 主腦填的結構化舞台動作（2026-10-25）——
+# 主腦以前只能丟一句自由文字給子智能體，CPU 再用正則猜她轉述的說法：
+# 「唱歌 Faded」「背景彈唱 Faded」「彈鋼琴 Faded 並唱歌 Faded」都得一條條補正則，猜不到就交 AI 重新解讀
+# （較慢，也曾把〈安靜〉判成收鋼琴）。現在她呼叫時直接填 action＋歌名／網址，這裡照欄位轉成工具，不再解析。
+STAGE_ACTIONS = ("play_piano", "sing", "play_and_sing", "stop_singing",
+                 "stop_piano", "pause_piano", "resume_piano", "watch_video")
+
+
+def _clean_brain_title(t) -> str:
+    t = str(t or "").strip().strip("《》「」『』\"'“”〈〉 ")
+    return t if t and len(t) <= 80 and _has_content_char(t) else ""
+
+
+def structured_stage_command(action: str = "", song: str = "", song2: str = "", url: str = "", **_) -> list:
+    """主腦填的結構化動作 → [(工具名, 參數), ...]；不是舞台動作或缺必要欄位回 []（照舊走文字流程）。"""
+    a = (action or "").strip().lower()
+    t1 = _clean_brain_title(song)
+    t2 = _clean_brain_title(song2) or t1
+    if a == "play_piano" and t1:
+        return [("pe.play_virtual_piano", {"song_name": t1})]
+    if a == "sing" and t1:
+        return [("auto_sing_song", {"song_name": t1})]
+    if a == "play_and_sing" and t1:
+        return [("pe.play_virtual_piano", {"song_name": t1}), ("auto_sing_song", {"song_name": t2})]
+    if a == "stop_singing":
+        return [("stop_singing", {})]
+    if a in ("stop_piano", "pause_piano", "resume_piano"):
+        return [(f"pe.{a.split('_')[0]}_virtual_piano", {})]
+    if a == "watch_video":
+        m = _YT_URL_RE.search(str(url or ""))
+        if m:
+            return [("video.request_watch", {"url": f"https://youtu.be/{m.group(1)}"})]
+    return []
+
+
 def parse_hard_command(text: Optional[str]) -> Tuple[Optional[str], Dict]:
     """B 架構入口：把純文字拆成 (工具名, 參數)。
 
