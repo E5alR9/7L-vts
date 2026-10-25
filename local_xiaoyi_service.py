@@ -226,9 +226,16 @@ _ZH_WORDS = ("老爸", "老媽", "大家", "各位", "觀眾", "朋友")
 _LANG_REPAIR_ON = True
 
 
-def _repair_lang_segments(segs: list) -> list:
-    """修正 split-lang 在中日交界的分段：[{'lang','text'}...] → 同格式。只動 zh/ja 交界，其他原樣。"""
+def _repair_lang_segments(segs: list, zh_main: bool = False) -> list:
+    """修正 split-lang 在中日交界的分段：[{'lang','text'}...] → 同格式。只動 zh/ja 交界，其他原樣。
+    zh_main：整句以中文為主。split-lang 只看漢字分不出中日，純中文段也常被判成日文
+    （2026-10-25 實測：「感覺很有節奏感喔」「沒問題。」都被切成 ja，用日文發音念）；
+    中文為主的句子裡，沒有假名的段一律算中文。"""
     segs = [dict(s) for s in segs]
+    if zh_main:
+        for s in segs:
+            if s.get("lang") == "ja" and not KANA_RE.search(s.get("text", "")):
+                s["lang"] = "zh"
     # 1. 中文段尾巴的漢字其實是後面日文詞的一部分（夜|に駆ける）：最多搬 2 個字，遇到中文才有的字就停
     for i in range(len(segs) - 1):
         a, b = segs[i], segs[i + 1]
@@ -271,7 +278,8 @@ def _install_lang_repair():
 
         def _get_texts(text, default_lang=""):
             segs = original(text, default_lang)
-            return segs if (default_lang or not _LANG_REPAIR_ON) else _repair_lang_segments(segs)
+            return segs if (default_lang or not _LANG_REPAIR_ON) else _repair_lang_segments(
+                segs, zh_main=not is_japanese_sentence(text))
 
         LangSegmenter.getTexts = staticmethod(_get_texts)
         LangSegmenter._7l_lang_repair = True
@@ -440,12 +448,13 @@ def synthesize_xiaoyi_bytes(text: str) -> bytes:
                 speed = 1.0
             else:
                 #  中文主體模式：
-                # 採用中文參考音訊，若為純中文則鎖定 'zh' 避免被誤判為日文，若有日文夾雜則交由 'auto'
+                # 採用中文參考音訊。沒有假名就用 'zh'（GPT-SoVITS 的「中英混合」：英文段念英文、其他照中文念）；
+                # 舊碼有英文字母（連還沒換成「小七」的 7L 也算）就改 'auto'，auto 只看漢字分不出中日，
+                # 純中文段常被判成日文、用日文發音念（2026-10-25 老爸回報）。有假名才需要 auto
                 ref_audio = _REF_ZH or REF_VOICE_ZH
                 ref_text = "哇！真的假的？太棒了吧！今天也要一起加油喔！嘿嘿～"
                 ref_lang = "all_zh"
-                has_english = bool(re.search(r'[a-zA-Z]', text))
-                text_lang = "zh" if (num_kana == 0 and not has_english) else "auto"
+                text_lang = "zh" if num_kana == 0 else "auto"
                 top_k = 15
                 top_p = _TOP_P
                 temp = 0.80

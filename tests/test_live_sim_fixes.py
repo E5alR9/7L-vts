@@ -371,7 +371,35 @@ def test_mixed_zh_ja_boundary_repair():
 def test_lang_repair_is_installed_on_pipeline_init():
     src = open(os.path.join(ROOT, "local_xiaoyi_service.py"), encoding="utf-8").read()
     assert "_tts_pipeline = TTS(config)\n            _install_lang_repair()" in src
-    assert "segs if (default_lang or not _LANG_REPAIR_ON) else _repair_lang_segments(segs)" in src
+    assert "segs if (default_lang or not _LANG_REPAIR_ON) else _repair_lang_segments(" in src
+    assert "zh_main=not is_japanese_sentence(text)" in src
+
+
+def test_chinese_segments_are_not_read_as_japanese():
+    """split-lang 只看漢字分不出中日：純中文段被判成日文、用日文發音念（2026-10-25 老爸回報；實測
+    「感覺很有節奏感喔」「沒問題。」都被切成 ja）。中文為主的句子裡，沒假名的段一律算中文。"""
+    import local_xiaoyi_service as lx
+
+    def run(zh_main, *pairs):
+        segs = [{"lang": l, "text": t} for l, t in pairs]
+        return [(s["lang"], s["text"]) for s in lx._repair_lang_segments(segs, zh_main=zh_main)]
+
+    assert run(True, ("ja", "沒問題。"), ("zh", "經典的小星星來囉～"), ("ja", "聽聽看我有沒有談得比上次更厲害。")) == [
+        ("zh", "沒問題。經典的小星星來囉～聽聽看我有沒有談得比上次更厲害。")]
+    assert run(True, ("zh", "我看看～老爸一邊聽"), ("en", "Lemon Tree"), ("ja", "感覺很有節奏感喔")) == [
+        ("zh", "我看看～老爸一邊聽"), ("en", "Lemon Tree"), ("zh", "感覺很有節奏感喔")]
+    # 真的有假名的日文段照舊；日文為主的句子也不動
+    assert run(True, ("zh", "這首歌叫做"), ("ja", "夜に駆ける")) == [("zh", "這首歌叫做"), ("ja", "夜に駆ける")]
+    assert run(False, ("ja", "今日も一日お疲れ様でした。")) == [("ja", "今日も一日お疲れ様でした。")]
+
+
+def test_chinese_with_english_uses_zh_mode_not_auto():
+    """有英文字母（連還沒換成「小七」的 7L 也算）舊碼就改 auto，auto 會把中文當日文念。"""
+    src = open(os.path.join(ROOT, "local_xiaoyi_service.py"), encoding="utf-8").read()
+    assert 'text_lang = "zh" if num_kana == 0 else "auto"' in src
+    assert "has_english" not in src
+    import services.tts_router as tr
+    assert tr.TTS_CACHE_VERSION not in ("v2", "v3", "v4")   # 舊快取裡有念錯的，要重抽
 
 
 def test_tuning_knobs_are_constants_not_env():
