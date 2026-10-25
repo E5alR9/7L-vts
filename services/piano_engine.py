@@ -1403,15 +1403,6 @@ async def play_midi_band(midi_path: str, band_map: dict = None, speed: float = 1
     return f"（系統回報：樂隊演奏《{title or os.path.basename(midi_path)}》完畢） [EXPRESSION: 星星眼]"
 
 
-def stop_midi_band():
-    """樂隊急停（全通道靜音）。"""
-    try:
-        if SOUND_ENGINE:
-            SOUND_ENGINE.all_notes_off()
-    except Exception:
-        pass
-
-
 # 暫停狀態：鋼琴視窗暫停時心跳回報 is_playing=False，等待迴圈會誤判成「播完」而接下一首（2026-10-24 實機）
 IS_PIANO_PAUSED = False
 _PIANO_RESUME_GRACE_UNTIL = 0.0   # 剛繼續的前幾秒，視窗心跳可能還是舊的 is_playing=False
@@ -2603,89 +2594,6 @@ async def play_virtual_piano(song_name: str = "", custom_sheet: str = "", auto_r
 
     current_piano_task = asyncio.create_task(async_fetch_and_play_worker(final_search_query, session_id, custom_sheet or ""))
     return "[EXPRESSION: 星星眼]"
-
-def merge_two_midi_files(path1: str, path2: str, title1: str, title2: str) -> Tuple[str, str]:
-    """將兩首鋼琴 MIDI 檔案深度融合，生成 88 鍵雙曲極限狂暴合奏 (Mashup) 樂譜"""
-    try:
-        import mido
-        mid1 = mido.MidiFile(path1, clip=True)
-        mid2 = mido.MidiFile(path2, clip=True)
-        
-        tpb = 480
-        target_tempo = 400000  # 150 BPM 高能狂暴速度
-        
-        def extract_timed_events(mid_file):
-            file_tpb = mid_file.ticks_per_beat
-            events = []
-            for track in mid_file.tracks:
-                cur_tempo = 500000
-                abs_sec = 0.0
-                for msg in track:
-                    if msg.time > 0:
-                        abs_sec += mido.tick2second(msg.time, file_tpb, cur_tempo)
-                    if msg.is_meta and msg.type == 'set_tempo':
-                        cur_tempo = msg.tempo
-                    if not msg.is_meta and msg.type in ['note_on', 'note_off', 'control_change', 'pitchwheel']:
-                        events.append((abs_sec, msg.copy()))
-            return events
-
-        events1 = extract_timed_events(mid1)
-        events2 = extract_timed_events(mid2)
-        all_events = events1 + events2
-        
-        def event_sort_key(ev):
-            t, m = ev
-            priority = 0 if m.type == 'note_off' or (m.type == 'note_on' and m.velocity == 0) else 1
-            return (t, priority)
-            
-        all_events.sort(key=event_sort_key)
-        
-        new_mid = mido.MidiFile(type=1, ticks_per_beat=tpb)
-        
-        # Track 0: Tempo
-        tempo_track = mido.MidiTrack()
-        new_mid.tracks.append(tempo_track)
-        tempo_track.append(mido.MetaMessage('track_name', name='Mashup Tempo', time=0))
-        tempo_track.append(mido.MetaMessage('set_tempo', tempo=target_tempo, time=0))
-        tempo_track.append(mido.MetaMessage('end_of_track', time=0))
-        
-        # Track 1: Merged Notes
-        merged_track = mido.MidiTrack()
-        new_mid.tracks.append(merged_track)
-        merged_track.append(mido.MetaMessage('track_name', name='Mashup Piano Track', time=0))
-        merged_track.append(mido.Message('program_change', channel=0, program=0, time=0))
-        
-        last_tick = 0
-        for t_sec, msg in all_events:
-            cur_tick = mido.second2tick(t_sec, tpb, target_tempo)
-            if cur_tick < last_tick:
-                cur_tick = last_tick
-            delta_tick = cur_tick - last_tick
-            msg.time = delta_tick
-            msg.channel = 0
-            merged_track.append(msg)
-            last_tick = cur_tick
-            
-        merged_track.append(mido.MetaMessage('end_of_track', time=0))
-        
-        safe_t1 = re.sub(r'[^\w]', '', title1)[:10] or "song1"
-        safe_t2 = re.sub(r'[^\w]', '', title2)[:10] or "song2"
-        mashup_filename = f"Mashup_{safe_t1}_x_{safe_t2}_{abs(hash(title1+title2))%10000}.mid"
-        out_path = os.path.abspath(os.path.join(MIDI_SHEETS_DIR, mashup_filename))
-        new_mid.save(out_path)
-        mashup_title = f"{title1} x {title2} (神仙打架 Mashup)"
-        save_midi_catalog_entry(mashup_title, out_path)
-        save_midi_catalog_entry(f"{title1} {title2}", out_path)
-        save_midi_catalog_entry(f"{title1} x {title2}", out_path)
-        save_midi_catalog_entry(f"{title1}+{title2}", out_path)
-        log_print(f"🔥 [雙曲合體] 成功生成雙曲融合 MIDI: 《{mashup_title}》 (時長: {new_mid.length:.1f}s | 檔案: {out_path})")
-        return out_path, mashup_title
-    except Exception as e:
-        log_print(f"❌ [雙曲融合失敗]: {e}")
-        return path1, title1
-
-
-
 
 def extract_multi_songs_from_text(text: str) -> List[str]:
     """從自然語言字串中解析出多首歌曲名稱 (支援 2首、3首、4首甚至更多曲目同時合奏)"""

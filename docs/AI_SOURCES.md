@@ -37,7 +37,7 @@
 | 上下文組裝（規劃） | LOCAL | 對標 groq-router：fold 摘要＋recent-2＋向量 top-k（0.15＋60％門檻、上限 4 段、時間序）＋ITPM 收斂器 | 解 Groq 7K ITPM |
 | 點播看全片 | LOCAL＋GEMINI-VISION＋GROQ | `services/video_watch.py`（captions→音軌轉錄→抽幀看圖→Groq 摘要→記憶＋看板，source=`video_watch`） | 單片上限 `VIDEO_WATCH_MAX_MIN`（預設 30 分） |
 | 聯網搜尋 | TAVILY／LOCAL-SCRAPE | `tavily`×10 key（⚠️ 額度已爆）／`search_google` 無 API 爬蟲 | Tavily 爆時自動退爬蟲 |
-| 每日日記濃縮 | GROQ | `update_daily_diary` 走 `groq_chat`；**Groq 全滅就跳過該輪**（不拿 Gemini 兜底） | 2026-10-09 |
+| 每日日記濃縮 | GROQ | 只剩舊 `7L.py` 機器人有（主程式那份從沒被呼叫，2026-10-25 刪除） | 2026-10-25 |
 | 點歌意圖 JSON 解析 | GROQ-primary | `pe.resolve_piano_intent_by_ai` 走 `groq_chat`（temp 0.1）；Gemini 高 IQ 梯隊僅 Groq 全滅時兜底 | 2026-10-09 |
 | 雲同步（刪除候選） | FIRESTORE | `core/db.py`，全呼叫點 `if db is not None`＋本地 JSON 備援 | 拔掉只失多機同步；且 db.py 吃 google-auth |
 
