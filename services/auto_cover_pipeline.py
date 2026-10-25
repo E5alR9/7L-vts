@@ -241,14 +241,26 @@ _ORCH_TASK = None
 _PREPARE_TASK = None
 _PLAY_TASK = None
 
-def get_core_vts():
-    """動態取得當前運行的主核心模組，杜絕重複 import 導致 .env 與全域狀態衝突"""
-    return sys.modules.get("vts_7L_test") or sys.modules.get("__main__")
+# 主程式交進來的東西（main() 開機時 bind_host）。以前從 sys.modules 撈主程式模組、或直接 import 主程式，
+# 主程式改名或換啟動方式就默默失效；紙條還繞過紙條佇列直接送給主腦，沒去重也沒加鎖（2026-10-25 健檢）
+_HOST = {}
 
 
-def _core_set_ai_state(core_vts, new: str, reason: str = "", only_from=None):
+def bind_host(set_ai_state=None, get_ai_state=None, speech_queue=None, get_last_tts_end=None, send_brain_slip=None):
+    """main() 開機時呼叫：AI 狀態的讀寫、說話佇列、上次講完話的時間、給主腦遞紙條。"""
+    _HOST.update({k: v for k, v in dict(set_ai_state=set_ai_state, get_ai_state=get_ai_state,
+                                        speech_queue=speech_queue, get_last_tts_end=get_last_tts_end,
+                                        send_brain_slip=send_brain_slip).items() if v is not None})
+
+
+def _ai_state() -> str:
+    fn = _HOST.get("get_ai_state")
+    return fn() if fn else ""
+
+
+def _core_set_ai_state(new: str, reason: str = "", only_from=None):
     """AI 狀態一律交給主核心 set_ai_state 轉（唯一轉換點：統一 log＋後台廣播），不再 setattr 硬改。"""
-    fn = getattr(core_vts, "set_ai_state", None) if core_vts else None
+    fn = _HOST.get("set_ai_state")
     if callable(fn):
         fn(new, reason, only_from=only_from)
 
@@ -274,9 +286,7 @@ def stop_singing():
     except Exception:
         pass
     stage.stop_playback()
-    core_vts = get_core_vts()
-    if core_vts:
-        _core_set_ai_state(core_vts, "IDLE", "翻唱手動停止", only_from="SINGING")
+    _core_set_ai_state("IDLE", "翻唱手動停止", only_from="SINGING")
     print("🛑 [7L 翻唱] 已成功手動停止歌聲與伴奏播放。")
 
 
@@ -307,9 +317,7 @@ def stop_current_song() -> bool:
     except Exception:
         pass
     stage.stop_playback()
-    core_vts = get_core_vts()
-    if core_vts:
-        _core_set_ai_state(core_vts, "IDLE", "電擊打斷當首", only_from="SINGING")
+    _core_set_ai_state("IDLE", "電擊打斷當首", only_from="SINGING")
     print("🛑 [7L 翻唱] 電擊打斷：當首停止（排隊保留）。")
     return True
 
@@ -317,12 +325,11 @@ async def wait_for_intro_speech_complete(timeout: float = 15.0):
     """等候 7L 大腦完成開場白發話，再銜接翻唱開唱。
     2026-10-11：步驟 3 原本無限等——直播間聊不停（Johnny 式連聊）歌就永遠開不了口。
     上限兜底：開場應答約 6 秒，15 秒還在聊就直接開唱（邊唱邊聊好過乾等）。」"""
-    core_vts = get_core_vts()
-    if not core_vts:
+    if not _HOST:
         return
     # 1. 若大腦還在深度思考中 (THINKING)，先等候大腦產出台詞 (最多等 8 秒)
     t0 = time.time()
-    while getattr(core_vts, "current_ai_state", "") == "THINKING" and time.time() - t0 < 8.0:
+    while _ai_state() == "THINKING" and time.time() - t0 < 8.0:
         await asyncio.sleep(0.2)
     # 2. 緩衝等候語音進入 speech_queue 或開始播話
     await asyncio.sleep(0.5)
@@ -330,12 +337,12 @@ async def wait_for_intro_speech_complete(timeout: float = 15.0):
     t1 = time.time()
     _last_log = 0.0
     while True:
-        sq = getattr(core_vts, "speech_queue", None)
+        sq = _HOST.get("speech_queue")
         has_queued = sq and not sq.empty()
-        is_talking = getattr(core_vts, "current_ai_state", "") == "TALKING"
+        is_talking = _ai_state() == "TALKING"
         is_music = pygame.mixer.get_init() and pygame.mixer.music.get_busy() and not IS_SINGING_ACTIVE
 
-        last_tts_end = getattr(core_vts, "LAST_TTS_END_TIME", 0.0)
+        last_tts_end = (_HOST.get("get_last_tts_end") or (lambda: 0.0))()
         recent_speech = (time.time() - last_tts_end) < 2.5
 
         if has_queued or is_talking or is_music or recent_speech:
@@ -443,8 +450,7 @@ def _stage_busy() -> bool:
     """舞台是否有人在唱（管線旗＋主核心 AI 狀態）"""
     if IS_SINGING_ACTIVE:
         return True
-    core_vts = get_core_vts()
-    if core_vts and getattr(core_vts, "current_ai_state", "") == "SINGING":
+    if _ai_state() == "SINGING":
         return True
     return False
 
@@ -470,15 +476,13 @@ def singing_audio_active() -> bool:
     return False
 
 def _send_brain_slip(text: str) -> bool:
-    """給 Live 主腦遞紙條（跟本檔謝幕紙條同通道）。"""
+    """給 Live 主腦遞紙條：走主程式的紙條出口（去重、加鎖、看門狗都在那邊）。"""
+    fn = _HOST.get("send_brain_slip")
     try:
-        from vts_7L_test import GLOBAL_LIVE_SESSION
-        if GLOBAL_LIVE_SESSION:
-            spawn(GLOBAL_LIVE_SESSION.send_realtime_input(text=text))
-            return True
+        return bool(fn and fn(text))
     except Exception as e:
         print(f"⚠️ [翻唱引擎] 紙條傳送失敗 ({e})")
-    return False
+        return False
 
 def _ensure_orchestrator():
     """確保調度協程活著（同步、可重複呼叫；無 event loop 時靜默跳過等下次請求）。"""
@@ -904,9 +908,7 @@ async def play_cover_audio(vocal_path: str, song_name: str, inst_path: str = Non
     try:
         IS_SINGING_ACTIVE = True
         stage.IS_MP3_PLAYING = True
-        core_vts = get_core_vts()
-        if core_vts:
-            _core_set_ai_state(core_vts, "SINGING", f"準備開唱《{song_name}》")
+        _core_set_ai_state("SINGING", f"準備開唱《{song_name}》")
 
         if not pygame.mixer.get_init():
             pygame.mixer.init(frequency=44100, size=-16, channels=2, buffer=2048)
@@ -961,8 +963,8 @@ async def play_cover_audio(vocal_path: str, song_name: str, inst_path: str = Non
                 on_start(stage.CURRENT_SPEECH_START_TIME)
             except Exception as sync_err:
                 print(f"⚠️ [彈唱同步] 鋼琴校時失敗: {sync_err}")
-        if core_vts:
-            _core_set_ai_state(core_vts, "SINGING", f"雙軌齊發《{song_name}》")
+        if _HOST:
+            _core_set_ai_state("SINGING", f"雙軌齊發《{song_name}》")
             
             # 🎤 唱歌自動拿出麥克風 (不重置其他表情，單獨開關麥克風)
             import services.vts_client as vc
@@ -998,7 +1000,7 @@ async def play_cover_audio(vocal_path: str, song_name: str, inst_path: str = Non
             pass
             
         # 唱歌結束自動收起麥克風 (不重置其他表情)
-        if core_vts:
+        if _HOST:
             import services.vts_client as vc
             if vc.GLOBAL_VTS:
                 async def _toggle_mic_off():
@@ -1010,9 +1012,7 @@ async def play_cover_audio(vocal_path: str, song_name: str, inst_path: str = Non
                     except Exception: pass
                 spawn(_toggle_mic_off())
         stage.stop_playback()
-        core_vts = get_core_vts()
-        if core_vts:
-            _core_set_ai_state(core_vts, "IDLE", f"演唱結束《{song_name}》", only_from="SINGING")
+        _core_set_ai_state("IDLE", f"演唱結束《{song_name}》", only_from="SINGING")
 
 if __name__ == "__main__":
     async def test():

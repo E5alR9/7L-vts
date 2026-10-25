@@ -275,7 +275,7 @@ def test_play_prepared_song_hands_start_time_to_playback(monkeypatch):
         got.update(start_at=start_at, on_start=on_start)
     monkeypatch.setattr(acp, "play_cover_audio", fake_play)
     monkeypatch.setattr(acp, "_send_brain_slip", lambda text: True)
-    monkeypatch.setattr(acp, "get_core_vts", lambda: None)
+    monkeypatch.setattr(acp, "_HOST", {})
     monkeypatch.setattr(ats, "instrumental_to_piano_midi", lambda p: "y_piano.mid")
     synced = []
     monkeypatch.setattr(pe, "sync_piano_clock", lambda t, midi: synced.append((t, midi)))

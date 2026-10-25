@@ -8836,6 +8836,9 @@ async def main():
     pe.bind_host(update_subtitle=update_subtitle, speech_queue=speech_queue, get_user_profile=get_user_profile,
                  get_speaking_target=lambda: CURRENT_SPEAKING_TARGET)
     pe.register_piano_state_callback(_on_piano_liveness_change)
+    auto_cover.bind_host(set_ai_state=set_ai_state, get_ai_state=lambda: current_ai_state, speech_queue=speech_queue,
+                         get_last_tts_end=lambda: LAST_TTS_END_TIME, send_brain_slip=send_brain_slip)
+    video_watch.bind_host(look=get_lightweight_gemini_vision, post_note=add_to_streamer_mind_board)
 
     #  啟動 7L Web 視覺化即時監控與控制後台 (Port 7860 -> http://localhost:7860)
     #  後台 callback 全在 services/dashboard_bridge.py；主程式狀態經本模組物件明確交給它

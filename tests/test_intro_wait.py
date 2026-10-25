@@ -29,9 +29,15 @@ def _make_core(state="IDLE", queued=False, last_tts_end=0.0, music_busy=False):
     ), music_busy
 
 
+def _host(core):
+    """main() 用 bind_host 交進來的那幾樣（2026-10-25 起不再撈主程式模組）。"""
+    return {"get_ai_state": lambda: core.current_ai_state, "speech_queue": core.speech_queue,
+            "get_last_tts_end": lambda: core.LAST_TTS_END_TIME}
+
+
 def test_intro_wait_returns_when_idle(monkeypatch):
     core, _ = _make_core(state="IDLE")
-    monkeypatch.setattr(acp, "get_core_vts", lambda: core)
+    monkeypatch.setattr(acp, "_HOST", _host(core))
     monkeypatch.setattr(acp.pygame.mixer, "get_init", lambda: None)
     t0 = time.time()
     asyncio.run(acp.wait_for_intro_speech_complete(timeout=5.0))
@@ -42,7 +48,7 @@ def test_intro_wait_breaks_through_chatter(monkeypatch):
     """一直 TALKING 也必須在 timeout 內硬開唱（2026-10-11：無限等修復）。"""
     core, _ = _make_core(state="TALKING", queued=True,
                          last_tts_end=time.time())  # 三個條件全滿
-    monkeypatch.setattr(acp, "get_core_vts", lambda: core)
+    monkeypatch.setattr(acp, "_HOST", _host(core))
     monkeypatch.setattr(acp.pygame.mixer, "get_init", lambda: None)
     t0 = time.time()
     asyncio.run(acp.wait_for_intro_speech_complete(timeout=1.5))
@@ -51,7 +57,7 @@ def test_intro_wait_breaks_through_chatter(monkeypatch):
 
 
 def test_intro_wait_no_core_returns(monkeypatch):
-    monkeypatch.setattr(acp, "get_core_vts", lambda: None)
+    monkeypatch.setattr(acp, "_HOST", {})
     asyncio.run(acp.wait_for_intro_speech_complete(timeout=1.0))
 
 

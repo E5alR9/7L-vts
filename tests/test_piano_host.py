@@ -56,3 +56,20 @@ def test_pingpong_helpers_live_in_llm_engine():
     assert sorted(le.get_pingpong_ring_indices(5, 1)) == [0, 1, 2, 3, 4]
     main = open(os.path.join(ROOT, "vts_7L_test.py"), encoding="utf-8").read()
     assert "def get_pingpong_alternating_index(" not in main and "def get_pingpong_ring_indices(" not in main
+
+
+def test_services_do_not_reach_back_into_main():
+    """翻唱、看片以前從 sys.modules 撈主程式、或 from vts_7L_test import（2026-10-25 健檢）：改成 main() 用 bind_host 交進來。"""
+    import glob
+    import re
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    bad = []
+    for f in glob.glob(os.path.join(root, "services", "*.py")) + glob.glob(os.path.join(root, "core", "*.py")):
+        src = open(f, encoding="utf-8").read()
+        if re.search(r"^\s*(from vts_7L_test import|import vts_7L_test|import __main__)|sys\.modules\.get\(\"(vts_7L_test|__main__)\"\)",
+                     src, re.M):
+            bad.append(os.path.basename(f))
+    assert not bad, bad
+    main = open(os.path.join(root, "vts_7L_test.py"), encoding="utf-8").read()
+    for call in ("pe.bind_host(", "auto_cover.bind_host(", "video_watch.bind_host("):
+        assert call in main

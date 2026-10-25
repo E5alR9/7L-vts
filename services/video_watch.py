@@ -26,6 +26,14 @@ WATCH_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file_
 os.makedirs(WATCH_DIR, exist_ok=True)
 
 WATCH_QUEUE: asyncio.Queue = None
+# 主程式交進來的東西（main() 開機時 bind_host）：看一張圖、把筆記寫上看板。以前直接 import 主程式，
+# 靠主程式把自己登記成模組才不出事（2026-10-25 健檢）
+_HOST = {}
+
+
+def bind_host(look=None, post_note=None):
+    """look(b64, prompt=...) -> 描述；post_note(user, uid, content, source) 寫看板。"""
+    _HOST.update({k: v for k, v in dict(look=look, post_note=post_note).items() if v is not None})
 WATCH_HISTORY = []
 REWATCH_GAP_SEC = 600.0   # 同一部片 10 分鐘內不重看
 # 抽出來的是影片畫面，不是老爸的螢幕：用看螢幕的提示詞，摘要會冒出「這不是老爸的電腦畫面」（2026-10-25 實機）
@@ -217,7 +225,9 @@ async def digest_video(video_id: str, requester: str) -> dict:
         if frames:
             try:
                 import base64
-                from vts_7L_test import get_lightweight_gemini_vision  # lazy：主程式才有
+                look = _HOST.get("look")
+                if look is None:
+                    raise RuntimeError("看圖功能沒交進來（main() 沒 bind_host）")
                 descs = []
                 for fp in frames[::max(1, len(frames) // 12)][:12]:
                     import base64 as _b64
@@ -226,7 +236,7 @@ async def digest_video(video_id: str, requester: str) -> dict:
                         with open(p, "rb") as fh:
                             return _b64.b64encode(fh.read()).decode()
                     b64 = await asyncio.to_thread(_read_b64)
-                    d = await get_lightweight_gemini_vision(b64, prompt=FRAME_PROMPT)
+                    d = await look(b64, prompt=FRAME_PROMPT)
                     if d:
                         descs.append(d)
                 frames_desc = "\n".join(f"【畫面{i+1}】{d}" for i, d in enumerate(descs))
@@ -241,8 +251,7 @@ async def digest_video(video_id: str, requester: str) -> dict:
         summary = material[:900]
     note = f"📺 看完《https://youtu.be/{video_id}》（{requester} 點播，來源：{src_note}）：{summary or material[:400]}"
     try:
-        from vts_7L_test import add_to_streamer_mind_board  # lazy
-        add_to_streamer_mind_board(f"{requester} 點播的片", f"video:{video_id}", note, "video_watch")
+        _HOST["post_note"](f"{requester} 點播的片", f"video:{video_id}", note, "video_watch")
     except Exception:
         pass
     log_print(f"📺 [看完] {video_id}：{(summary or '')[:80]}")

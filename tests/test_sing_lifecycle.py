@@ -51,7 +51,7 @@ def test_play_lifecycle_broadcasts(monkeypatch, tmp_path):
 
     monkeypatch.setattr(acp, "play_cover_audio", fake_play)
     monkeypatch.setattr(acp, "_send_brain_slip", lambda text: True)
-    monkeypatch.setattr(acp, "get_core_vts", lambda: None)  # intro 等待直通
+    monkeypatch.setattr(acp, "_HOST", {})  # intro 等待直通
 
     asyncio.run(acp.play_prepared_song("單元測試HUD開唱歌", "v.wav", "i.wav",
                                        acp._PIPELINE_GEN))

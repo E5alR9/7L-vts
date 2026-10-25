@@ -47,7 +47,7 @@ def test_frames_are_described_as_video_not_the_owners_screen():
     import ast, os
     assert "螢幕" not in vw.FRAME_PROMPT.replace("不要提電腦螢幕", "")
     src = open(os.path.join(ROOT, "services", "video_watch.py"), encoding="utf-8").read()
-    assert "get_lightweight_gemini_vision(b64, prompt=FRAME_PROMPT)" in src
+    assert "look(b64, prompt=FRAME_PROMPT)" in src
     main = open(os.path.join(ROOT, "vts_7L_test.py"), encoding="utf-8").read()
     fn = next(n for n in ast.walk(ast.parse(main)) if isinstance(n, ast.AsyncFunctionDef)
               and n.name == "get_lightweight_gemini_vision")

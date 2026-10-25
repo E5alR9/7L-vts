@@ -77,13 +77,13 @@ def test_is_singing_active_reads_pipeline_flag(monkeypatch):
     assert ns["is_singing_active"]() is False
 
 
-def test_pipeline_routes_state_through_core():
+def test_pipeline_routes_state_through_core(monkeypatch):
     calls = []
-    core = types.SimpleNamespace(set_ai_state=lambda new, reason="", only_from=None: calls.append((new, only_from)))
-    acp._core_set_ai_state(core, "IDLE", "測試", only_from="SINGING")
+    monkeypatch.setattr(acp, "_HOST", {"set_ai_state": lambda new, reason="", only_from=None: calls.append((new, only_from))})
+    acp._core_set_ai_state("IDLE", "測試", only_from="SINGING")
     assert calls == [("IDLE", "SINGING")]
-    acp._core_set_ai_state(None, "IDLE")  # 沒有主核心就安靜跳過
-    acp._core_set_ai_state(types.SimpleNamespace(), "IDLE")
+    monkeypatch.setattr(acp, "_HOST", {})
+    acp._core_set_ai_state("IDLE")  # main() 還沒交進來就安靜跳過
 
 
 def test_broadcast_without_history_keeps_replay(monkeypatch):
