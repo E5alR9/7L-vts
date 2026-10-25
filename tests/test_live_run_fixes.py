@@ -124,7 +124,7 @@ def _run_executor(text, target, recent=None):
           "execute_tool_dispatch": execute_tool_dispatch, "_song_ack": _song_ack,
           "is_live_brain_active": lambda: False, "LIVE_API_SYSTEM_PROMPT_QUEUE": collections.deque(),
           "_HARD_CMD_RECENT": {} if recent is None else recent, "_HARD_CMD_DEDUPE_SEC": 20.0}
-    for name in ("_hard_cmd_seen_recently", "background_tool_executor"):
+    for name in ("_hard_cmd_seen_recently", "_dispatch_in_background", "background_tool_executor"):
         exec(compile(ast.Module(body=[_fn(name)], type_ignores=[]), name, "exec"), ns)
 
     async def go():

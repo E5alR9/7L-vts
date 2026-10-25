@@ -321,6 +321,22 @@ def _owner_text_slip(owner: str, user_input: str) -> str:
     return slip
 
 
+def _dispatch_in_background(fn_name: str, fn_args: dict, **kw) -> asyncio.Task:
+    """工具丟背景跑，出錯要留日誌：create_task 的例外沒人接就無聲無息
+    （2026-10-25 實機：演奏中點「小星星」，CPU 有攔截，之後整個不見，日誌一行都沒有）。"""
+    task = asyncio.create_task(execute_tool_dispatch(fn_name, fn_args, **kw))
+
+    def _done(t):
+        if t.cancelled() or t.exception() is None:
+            return
+        import traceback
+        e = t.exception()
+        log_print(f"⚠️ [背景工具失敗] {fn_name}({fn_args}): {type(e).__name__}: {e}\n"
+                  + "".join(traceback.format_exception(e))[-1500:])
+    task.add_done_callback(_done)
+    return task
+
+
 async def execute_tool_dispatch(fn_name: str, fn_args: dict, caller_target: str = "", caller_user: str = "") -> str:
     """集中式工具調用派發器 (100% 執行底層動作，完全由 AI 自由發揮台詞，絕不硬塞罐頭文字)"""
     #  觀眾不可觸發破壞性工具（清記憶/改人格/睡眠/開瀏覽器/麥克風），也不能停鋼琴、停歌
@@ -7337,7 +7353,7 @@ async def nv_interpret_task(task_ins: str, target: str = "dad", requester_name: 
                 }.get(_who, "")
                 return "tool", build_slip_text(fn_name, fn_args, requester_name, via="") + _note
             else:
-                asyncio.create_task(execute_tool_dispatch(fn_name, fn_args, caller_target=target, caller_user=requester_name))
+                _dispatch_in_background(fn_name, fn_args, caller_target=target, caller_user=requester_name)
             # ⚠️ 同 CPU 路徑：唱歌/彈琴紙條必須寫明演唱者是 7L 本人，避免主腦說成「老爸唱的」
             return "tool", build_slip_text(fn_name, fn_args, requester_name, via="")
         # —— 第二棒：深度思考（第一棒乾淨無調用才到這裡；順序同第一棒，Gemini 先）——
@@ -7513,7 +7529,7 @@ async def background_tool_executor(user_text: str, target: str = "dad", requeste
                         asyncio.create_task(_mixed_piano_run(
                             _args.get("song_name", ""), _sing_title, target, requester_name))
                     else:
-                        asyncio.create_task(execute_tool_dispatch(_tool, _args, caller_target=target, caller_user=requester_name))
+                        _dispatch_in_background(_tool, _args, caller_target=target, caller_user=requester_name)
                     _slip = build_slip_text(_tool, _args, requester_name)
                     if _slip and is_live_brain_active() and not from_brain:
                         try:
@@ -7550,7 +7566,7 @@ async def background_tool_executor(user_text: str, target: str = "dad", requeste
                 except Exception:
                     log_swallowed()
             # CPU 只認點歌和鋼琴控制：一律走背景執行＋紙條（表情不歸 CPU，交主腦/A 架構）
-            asyncio.create_task(execute_tool_dispatch(fn_name, fn_args, caller_target=target, caller_user=requester_name))
+            _dispatch_in_background(fn_name, fn_args, caller_target=target, caller_user=requester_name)
             # 點歌強制應答：主腦常靜默，補一句 TTS 保證出聲（target 透傳，播出规则照舊）
             if fn_name in ("auto_sing_song", "sing_song", "pe.play_virtual_piano", "play_virtual_piano") and not from_brain:
                 if _o_need_file:
