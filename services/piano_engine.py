@@ -2604,6 +2604,10 @@ async def play_virtual_piano(song_name: str = "", custom_sheet: str = "", auto_r
     # ⚡ 若已有本機 MIDI 樂譜 ➔ 100% 絕對即刻開彈！
     # 可播性下限：時長/音符不夠的垃圾檔視同沒有，轉線上搜（2026-10-11 logo 事件）
     if target_midi and os.path.exists(target_midi) and not is_midi_playable(target_midi):
+        if midi_file:
+            # 呼叫方指定了自己的檔（作曲、合奏）：不合格就停，不要拿它的名字上網搜一首不相干的來彈
+            log_print(f"🛡️ [樂譜質檢拒收] 指定的《{os.path.basename(target_midi)}》時長/音符不足，不播。")
+            return "（系統回報：這份樂譜太短或是空的，沒辦法彈，請跟對方說這次沒寫好。）"
         log_print(f"🛡️ [樂譜質檢拒收] 《{os.path.basename(target_midi)}》時長/音符不足，不播，轉線上搜譜！")
         target_midi = None
     # 查曲庫這段（可能又問了一次 AI）後點的已經開彈：一樣排在它後面，不開新場次把它蓋掉
@@ -2854,42 +2858,48 @@ async def compose_and_play_original_piano(theme_or_title: str = "", mood_or_styl
     bpm = 100
     ticks_per_beat = 480
 
+    def _parse_score(txt: str) -> dict:
+        m_json = re.search(r'\{.*\}', txt or "", re.S)
+        d = json.loads(m_json.group(0) if m_json else txt)
+        return d if isinstance(d, dict) and d.get("notes") else {}
+
+    # 舊碼只問寫死的 gemini-2.5-flash（已下架回 404），每次都掉進保底旋律（2026-10-25 實機）。
+    # 整首音符是純文字 JSON：先走 Groq（快、不佔 Gemini 額度，同點曲意圖判斷），不成再輪 Gemini 現役梯隊
+    data = {}
     try:
-        active_keys = get_piano_gemini_keys()
-        if active_keys:
-            target_k_idx = get_pingpong_alternating_index(len(active_keys), CURRENT_GEMINI_KEY_STEP)
-            client = genai.Client(api_key=active_keys[target_k_idx])
-            resp = await asyncio.wait_for(
-                client.aio.models.generate_content(
-                    model="gemini-2.5-flash",
-                    contents=prompt,
-                    config=types.GenerateContentConfig(
-                        temperature=0.85,
-                        response_mime_type="application/json",
-                        max_output_tokens=2500
-                    )
-                ),
-                timeout=6.0
-            )
-            if resp.text:
-                try:
-                    data = json.loads(resp.text)
-                except Exception:
-                    clean_j = re.sub(r'^```json\s*', '', resp.text.strip())
-                    clean_j = re.sub(r'\s*```$', '', clean_j)
-                    data = json.loads(clean_j)
-                
-                raw_t = data.get("title", clean_theme).strip()
-                safe_t = re.sub(r'[\\/*?:"<>|]', '', raw_t)
-                if not safe_t.startswith("7L原創"):
-                    created_song_title = f"7L原創_{safe_t}"
-                else:
-                    created_song_title = safe_t
-                    
-                bpm = int(data.get("bpm", 100))
-                notes = data.get("notes", [])
+        from core.groq_router import groq_chat
+        g_resp = await groq_chat([{"role": "user", "content": prompt}], temperature=0.85, max_tokens=6000, timeout=40.0)
+        if g_resp and g_resp.text:
+            data = _parse_score(g_resp.text)
     except Exception as e:
-        log_print(f"⚠️ [7L 原創作曲生成異常]: {e}")
+        log_print(f"⚠️ [7L 原創作曲] Groq 沒寫成（{type(e).__name__} {str(e)[:60]}），改問 Gemini")
+    active_keys = get_piano_gemini_keys()
+    for model_name in [m for m in HIGH_IQ_GEMINI_MODELS if m not in DEAD_GEMINI_MODELS and not is_model_locked(m)][:3]:
+        if data or not active_keys:
+            break
+        target_k_idx = get_pingpong_alternating_index(len(active_keys), CURRENT_GEMINI_KEY_STEP)
+        client = genai.Client(api_key=active_keys[target_k_idx])
+        cfg = dict(temperature=0.85, response_mime_type="application/json",
+                   max_output_tokens=8192)   # 40~100 個音符要三四千 token，2500 會在半路截斷
+        if "lite" not in model_name:
+            cfg["thinking_config"] = types.ThinkingConfig(thinking_budget=0)   # lite 帶這個參數會回 400
+        try:
+            resp = await asyncio.wait_for(
+                client.aio.models.generate_content(model=model_name, contents=prompt,
+                                                   config=types.GenerateContentConfig(**cfg)),
+                timeout=45.0)
+            data = _parse_score(resp.text or "")
+        except Exception as e:
+            log_print(f"⚠️ [7L 原創作曲] {model_name} 沒寫成（{type(e).__name__} {str(e)[:60]}），換下一個")
+    if data:
+        raw_t = str(data.get("title", clean_theme)).strip()
+        safe_t = re.sub(r'[\\/*?:"<>|]', '', raw_t)
+        created_song_title = safe_t if safe_t.startswith("7L原創") else f"7L原創_{safe_t}"
+        try:
+            bpm = int(data.get("bpm", 100))
+        except (TypeError, ValueError):
+            bpm = 100
+        notes = [n for n in data.get("notes", []) if isinstance(n, dict)]
 
     # 若 AI 未生成或逾時，啟動 7L 原創和弦進行保底引擎
     if not notes:
@@ -2910,6 +2920,17 @@ async def compose_and_play_original_piano(theme_or_title: str = "", mood_or_styl
         for bar in progression:
             for p, sb, db, v in bar:
                 notes.append({"pitch": p, "start_beat": sb, "duration_beats": db, "velocity": v})
+
+    # 太短的曲子過不了可播性下限（至少 10 秒），舊碼被擋下後拿「7L原創_xxx」去網路搜譜，
+    # 抓了一部不相干的 YouTube 影片轉成 MIDI 當原創彈（2026-10-25 實機）：不夠長就整段重複
+    try:
+        _span = max(float(n.get("start_beat", 0)) + float(n.get("duration_beats", 0)) for n in notes) if notes else 0.0
+        _span = max(_span, 4.0)
+        _reps = max(1, math.ceil(16.0 / (_span * 60.0 / max(bpm, 1))))
+        if _reps > 1:
+            notes = [dict(n, start_beat=float(n.get("start_beat", 0)) + _span * r) for r in range(_reps) for n in notes]
+    except Exception:
+        log_swallowed()
 
     # 使用 mido 壓制為標準三軌樂隊 MIDI（主旋律 ch0 鋼琴＋貝斯 ch1＋鼓組 ch9）
     try:

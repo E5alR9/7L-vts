@@ -60,3 +60,67 @@ def test_online_result_is_checked_against_the_song_not_the_search_words(monkeypa
     assert seen == {"q": "周杰倫 晴天 鋼琴 MIDI", "ok": False, "right": True}
     src = __import__("inspect").getsource(pe.play_virtual_piano)
     assert "_fetch_validated_midi, song_str, c_song)" in src     # 排隊那條路有帶歌名
+
+
+def test_composed_piece_is_long_enough_to_play(monkeypatch, tmp_path):
+    """作曲寫死已下架的 gemini-2.5-flash，掉進 5 秒的保底旋律，被可播性下限擋掉後
+    拿「7L原創_xxx」上網搜，抓了不相干的 YouTube 影片來彈（2026-10-25 實機）。"""
+    import asyncio, inspect
+    played = {}
+
+    async def fake_play(song_name="", midi_file="", **k):
+        played["midi"] = midi_file
+        return "[EXPRESSION: 星星眼]"
+    import core.groq_router as gr
+
+    async def no_groq(*a, **k):
+        return None
+    monkeypatch.setattr(gr, "groq_chat", no_groq)
+    monkeypatch.setattr(pe, "get_piano_gemini_keys", lambda: [])          # 走保底旋律
+    monkeypatch.setattr(pe, "MIDI_SHEETS_DIR", str(tmp_path))
+    monkeypatch.setattr(pe, "save_midi_catalog_entry", lambda *a: None)
+    monkeypatch.setattr(pe, "play_virtual_piano", fake_play)
+    monkeypatch.setattr(pe, "log_print", lambda *a, **k: None)
+    asyncio.run(pe.compose_and_play_original_piano("開心的小日子", "輕快"))
+    assert played["midi"] and pe.is_midi_playable(played["midi"])
+    assert '"gemini-2.5-flash"' not in inspect.getsource(pe.compose_and_play_original_piano)
+
+
+def test_given_midi_that_is_too_short_is_not_searched_online(monkeypatch, tmp_path):
+    import asyncio
+    short = _write_mid(str(tmp_path / "7L原創_太短.mid"), notes=4, seconds=2.0)
+    for name in ("init_piano_synthesizer", "save_persisted_piano_state"):
+        monkeypatch.setattr(pe, name, lambda *a, **k: None)
+    monkeypatch.setattr(pe, "log_print", lambda *a, **k: None)
+    monkeypatch.setattr(pe, "_fetch_validated_midi", lambda *a, **k: (_ for _ in ()).throw(AssertionError("不該上網搜")))
+    r = asyncio.run(pe.play_virtual_piano("7L原創_太短", midi_file=short))
+    assert "沒辦法彈" in r
+
+
+def test_composer_uses_ai_notes_when_groq_answers(monkeypatch, tmp_path):
+    import asyncio, json as _j
+    import core.groq_router as gr
+    played = {}
+    score = {"title": "午後", "bpm": 120,
+             "notes": [{"pitch": 60 + (i % 12), "start_beat": i * 0.5, "duration_beats": 0.5, "velocity": 80}
+                       for i in range(48)]}
+
+    class _R:
+        text = "好的：\n" + _j.dumps(score, ensure_ascii=False)
+
+    async def fake_groq(*a, **k):
+        return _R()
+
+    async def fake_play(song_name="", midi_file="", **k):
+        played.update(title=song_name, midi=midi_file)
+        return ""
+    monkeypatch.setattr(gr, "groq_chat", fake_groq)
+    monkeypatch.setattr(pe, "get_piano_gemini_keys", lambda: [])
+    monkeypatch.setattr(pe, "MIDI_SHEETS_DIR", str(tmp_path))
+    monkeypatch.setattr(pe, "save_midi_catalog_entry", lambda *a: None)
+    monkeypatch.setattr(pe, "play_virtual_piano", fake_play)
+    logs = []
+    monkeypatch.setattr(pe, "log_print", lambda m, *a, **k: logs.append(m))
+    asyncio.run(pe.compose_and_play_original_piano("午後", "輕快"))
+    assert played["title"] == "7L原創_午後" and pe.is_midi_playable(played["midi"])
+    assert not any("保底" in m for m in logs)
