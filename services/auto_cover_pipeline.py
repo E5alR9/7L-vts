@@ -689,9 +689,10 @@ async def play_prepared_song(title: str, vocal_path: str, inst_path: str, gen: i
         if _rv is not None:
             start_at = await _mixed_rendezvous_sing(_rv, title, inst_path)
             if start_at:
-                def on_start(t0, midi=_rv["midi"]):
+                def _sync_piano(t0, midi=_rv["midi"]):
                     import services.piano_engine as pe
                     pe.sync_piano_clock(t0, midi)
+                on_start = _sync_piano
         # 開唱清場：準備期的暈（busy worker 掛的）別帶上台；臉有別的戲就不碰
         await _clear_prep_halo()
         try:
