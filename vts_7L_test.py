@@ -3953,7 +3953,8 @@ async def mic_volume_worker():
             CURRENT_MIC_VOL_PERCENT = 0
             await asyncio.sleep(0.5)
 
-def listen_once_fast(recognizer):
+def listen_once_fast(recognizer, wait_sec=None):
+    """wait_sec：等多久沒人開口就先回空的（呼叫端好回頭看 Live 回來了沒）；None 一直等。"""
     global is_user_listening, listen_start_time, current_mic_action_str
     # PROVIDER: GOOGLE-WEB-SPEECH 快覽＋GEMINI-LIVE 深層語音理解（audio_b64；見 docs/AI_SOURCES.md）
     text = ""
@@ -3965,7 +3966,7 @@ def listen_once_fast(recognizer):
             listen_start_time = time.time()
             #  純 VAD 語音活動偵測：單次發話上限提高至 30 秒（支援環境變數 MIC_PHRASE_TIME_LIMIT），避免長句或中途思考被強制截斷
             phrase_limit = float(os.getenv("MIC_PHRASE_TIME_LIMIT", "30.0"))
-            audio = recognizer.listen(source, timeout=None, phrase_time_limit=phrase_limit)
+            audio = recognizer.listen(source, timeout=wait_sec, phrase_time_limit=phrase_limit)
             
         is_user_listening = False
         current_mic_action_str = " 語音多模態分析中..."
@@ -4213,6 +4214,10 @@ _INSTINCT_SEND_LOCK = asyncio.Lock()
 # Live 主腦存活旗標：SDK 的 session 物件沒有 .active 屬性，
 # 用此旗標追蹤連線狀態（connect 成功置 True，斷線/重連置 False）
 LIVE_SESSION_ACTIVE = False
+# 主腦從什麼時候開始不在線（開機時還沒連上，就從開機算）
+_LIVE_DOWN_SINCE = time.time()
+# 斷線超過這麼久才換備援（麥克風改走舊 STT）：goaway 換線一兩秒就回來，不用換
+LIVE_FALLBACK_AFTER_SEC = 8.0
 
 def is_live_brain_active() -> bool:
     """Live 主腦是否在線。所有分流判斷一律走這裡，禁止直接 getattr(session, 'active')。"""
@@ -4220,6 +4225,19 @@ def is_live_brain_active() -> bool:
         return bool(LIVE_SESSION_ACTIVE)
     except Exception:
         return False
+
+
+def _set_live_active(active: bool) -> None:
+    """主腦連上／斷線都走這裡：斷線那一刻記下時間。"""
+    global LIVE_SESSION_ACTIVE, _LIVE_DOWN_SINCE
+    if LIVE_SESSION_ACTIVE and not active:
+        _LIVE_DOWN_SINCE = time.time()
+    LIVE_SESSION_ACTIVE = active
+
+
+def live_brain_down_for() -> float:
+    """Live 主腦已經斷線幾秒；在線回 0。"""
+    return 0.0 if is_live_brain_active() else time.time() - _LIVE_DOWN_SINCE
 
 def load_prompt(filename: str, **kwargs) -> str:
     """模組級提示詞載入器（唯一真相來源）：讀 prompts/*.md 並代入變數。
@@ -4539,7 +4557,7 @@ async def _handle_invoke_subagent(session, ws_send_lock, _fn_name, _fn_call_id, 
 
 async def continuous_live_worker(vts):
     """真・雙向串流 Live 大腦核心"""
-    global GLOBAL_LIVE_SESSION, LIVE_SESSION_ACTIVE
+    global GLOBAL_LIVE_SESSION
     log_print("🚀 啟動 7L 真・雙向串流 Live 大腦 (Continuous Stream)...")
     
     try:
@@ -4610,7 +4628,7 @@ async def continuous_live_worker(vts):
             
             async with client.aio.live.connect(model=live_m, config=live_cfg) as session:
                 GLOBAL_LIVE_SESSION = session
-                LIVE_SESSION_ACTIVE = True
+                _set_live_active(True)
                 log_print(f"✅ 已成功連線至 Live API！模型: {live_m} (通道 G{current_k_idx}) 麥克風持續收音中...")
                 clean_fail_count = 0  # 連上即歸零：上輪是健康連線。
                 if _resume_handle:
@@ -4948,7 +4966,7 @@ async def continuous_live_worker(vts):
                 else:
                     raise Exception("Live Session exited normally (possible graceful close or disconnect)")
         except Exception as e:
-            LIVE_SESSION_ACTIVE = False
+            _set_live_active(False)
             err_str = str(e).lower()
             _quota_hit = any(w in err_str for w in ["limit", "exceed", "quota", "403", "429"])
             if _quota_hit:
@@ -4979,31 +4997,52 @@ async def continuous_live_worker(vts):
             await asyncio.sleep(_wait)
 
 async def mic_worker(recognizer, input_queue):
+    """舊 STT 收音（Google 語音辨識＋聲紋＋回音過濾）：只在 Live 主腦斷線超過 LIVE_FALLBACK_AFTER_SEC 秒時收，
+    Live 在線時麥克風由 Live 原生音訊聽，這裡不碰麥克風。2026-10-07 起一度沒啟動，Live 斷線時老爸講話沒人聽。"""
     global current_mic_action_str, LATEST_REALWORLD_SPEECH_TEXT, LATEST_REALWORLD_SPEECH_TIME
-    
-    #  麥克風音量閥值初始化：避免安靜環境下自動將 energy_threshold 調得過低
-    try:
-        min_energy = int(os.getenv("MIC_ENERGY_THRESHOLD", "600"))
-        with sr.Microphone() as source:
-            recognizer.adjust_for_ambient_noise(source, duration=0.5)
-        # 強制設定門檻下限，防止微弱底噪/呼吸/風扇聲誤觸發長時間收音
-        recognizer.energy_threshold = max(min_energy, recognizer.energy_threshold)
-        recognizer.dynamic_energy_threshold = True
-        recognizer.dynamic_energy_adjustment_damping = 0.15
-        recognizer.dynamic_energy_ratio = 1.5
-        log_print(f"🎙️ [麥克風閥值就緒] 靈敏度門檻: {recognizer.energy_threshold:.0f} (最低下限: {min_energy})")
-    except Exception as e:
-        log_print(f"⚠️ [麥克風閥值] 初始化警告: {e}")
+    stt_on = False
+    calibrated = False
+    await asyncio.sleep(LIVE_FALLBACK_AFTER_SEC)   # 開機先給 Live 時間連上
 
     while True:
+        down = live_brain_down_for()
+        if down < LIVE_FALLBACK_AFTER_SEC:
+            if stt_on:
+                log_print("🎙️ [舊 STT] Live 主腦回來了，麥克風交回 Live 原生音訊")
+                stt_on = False
+            await asyncio.sleep(1.0)
+            continue
+        if not stt_on:
+            log_print(f"🎙️ [舊 STT] Live 主腦斷線 {down:.0f} 秒，麥克風改走 Google 語音辨識")
+            stt_on = True
+
         if not IS_MIC_ENABLED:
             current_mic_action_str = " 靜音"
             await asyncio.sleep(0.3)
             continue
 
+        if not calibrated:
+            calibrated = True
+            #  麥克風音量閥值初始化：避免安靜環境下自動將 energy_threshold 調得過低
+            try:
+                min_energy = int(os.getenv("MIC_ENERGY_THRESHOLD", "600"))
+                def _calibrate():
+                    with sr.Microphone() as source:
+                        recognizer.adjust_for_ambient_noise(source, duration=0.5)
+                await asyncio.to_thread(_calibrate)
+                # 強制設定門檻下限，防止微弱底噪/呼吸/風扇聲誤觸發長時間收音
+                recognizer.energy_threshold = max(min_energy, recognizer.energy_threshold)
+                recognizer.dynamic_energy_threshold = True
+                recognizer.dynamic_energy_adjustment_damping = 0.15
+                recognizer.dynamic_energy_ratio = 1.5
+                log_print(f"🎙️ [麥克風閥值就緒] 靈敏度門檻: {recognizer.energy_threshold:.0f} (最低下限: {min_energy})")
+            except Exception as e:
+                log_print(f"⚠️ [麥克風閥值] 初始化警告: {e}")
+
         #  7x24 全雙工真·不關麥監聽：7L 發話或 MP3 播放中時麥克風依然暢通，由專屬聲紋鎖精準防禦回音並支援隨時插話打斷！
         try:
-            listen_res = await asyncio.to_thread(lambda: listen_once_fast(recognizer))
+            # 3 秒沒人開口就回來看一次 Live 回來了沒
+            listen_res = await asyncio.to_thread(lambda: listen_once_fast(recognizer, wait_sec=3.0))
             if isinstance(listen_res, tuple):
                 user_text, audio_b64 = listen_res
             else:
@@ -6410,8 +6449,10 @@ async def prefetch_song_midi_background(song_query: str):
 
 
 # 這些來源的使用者名稱與內容是觀眾（或外部網站）提供的，進看板前要中和
-def add_to_streamer_mind_board(user_display: str, unique_id: str, content: str, source: str = "tiktok"):
-    """將接收到的彈幕/留言/事件寫入 7L 記憶腦袋，一排一排排列記錄，由主播自主排程讀取與發話"""
+def add_to_streamer_mind_board(user_display: str, unique_id: str, content: str, source: str = "tiktok",
+                               handled: bool = False):
+    """將接收到的彈幕/留言/事件寫入 7L 記憶腦袋，一排一排排列記錄，由主播自主排程讀取與發話。
+    handled：呼叫端自己會處理（老爸的話），只記下來、不給看板哨兵再接一次。"""
     if source in VIEWER_SOURCES:
         # 觀眾原文中和：看板與記憶之後都會進 prompt，不能讓觀眾偽造【老爸】或 [系統標籤] 格式
         user_display = neutralize_viewer_text(user_display, 60)
@@ -6424,7 +6465,7 @@ def add_to_streamer_mind_board(user_display: str, unique_id: str, content: str, 
         "unique_id": unique_id,
         "content": content,
         "source": source,
-        "status": "unread"
+        "status": "read" if handled else "unread"
     }
     STREAMER_MIND_BOARD.append(item)
     
@@ -7927,7 +7968,8 @@ async def process_chat_message(vts, input_queue, user_input: str, user_audio_b64
             user_display=current_custom_name,
             unique_id="dad",
             content=user_input,
-            source="mic" if is_voice_input else "text"
+            source="mic" if is_voice_input else "text",
+            handled=True,   # 老爸的話就在這裡處理（紙條或備援大腦），看板哨兵不用再接一次
         )
 
         #  2. 老爸發話全面直通主腦 (廢除麥克風潛意識哨兵，0 秒極速處理)
@@ -7944,11 +7986,14 @@ async def process_chat_message(vts, input_queue, user_input: str, user_audio_b64
                 spawn(background_tool_executor(user_input, target="dad", requester_name=current_custom_name))
                 send_brain_slip(f"[文字輸入] {current_custom_name} (在直播間留言)：{user_input}", origin="dad",
                                 said=user_input)
-            elif source == "mic" or user_audio_b64:
-                # mic 走 A：原生音訊 Live 直接聽見，由模型自主決定是否呼叫子智能體。
-                # 這裡刻意不跑 B（CPU 無條件開火只適合乾淨文本；STT 雜訊太多會誤觸唱歌/彈琴）。
-                pass
-            
+            else:
+                # 會到這裡的麥克風輸入是舊 STT 收的（它只在 Live 斷線時開）：Live 沒聽到，轉成紙條補給它。
+                # chat_input.txt 打的字也走這裡。以前這兩種都不送，看板哨兵再把它當觀眾留言遞給主腦（觀眾權限）。
+                if not user_audio_b64:
+                    # 語音不跑 CPU 硬指令（STT 雜訊太多會誤觸唱歌／彈琴），打字的才跑
+                    spawn(background_tool_executor(user_input, target="dad", requester_name=current_custom_name))
+                _how = "說（Live 斷線時用語音辨識聽到的，可能有錯字）" if user_audio_b64 else "傳來文字訊息"
+                send_brain_slip(f"[黑板同步] {current_custom_name}{_how}：{user_input}", origin="dad", said=user_input)
             return
         
         if not sentry_decision.get("should_speak", True):
@@ -8915,6 +8960,7 @@ async def main():
     #  操作者輸入預設停用（OPERATOR_INPUT=1 才開；vtuber 模式強制關）：直播輸入只收聊天室觀眾留言
     if operator_input_enabled():
         spawn(continuous_live_worker(vts))
+        spawn(mic_worker(recognizer, input_queue))   # Live 斷線時才收音
         spawn(instinct_live_worker())
         spawn(text_file_listener_worker(input_queue))
         spawn(console_keyboard_input_worker(input_queue))
