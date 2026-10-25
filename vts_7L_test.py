@@ -110,6 +110,7 @@ input_queue: Optional[asyncio.Queue] = None
 
 import logging
 from core.tool_schema import INTERACTIONS_TOOLS, LIVE_API_TOOLS, GENAI_TOOLS, GENAI_PROACTIVE_TOOLS
+from core.rest_brain import rest_chat
 
 
 
@@ -1533,7 +1534,7 @@ async def call_gemini_live_audience_reply(vts, input_queue, audience_user: str, 
             spawn(save_viewer_profile(vu_name, call=vu_call, relationship=vu_rel, impression=vu_imp))
             log_print(f"👥 [認人] 記住觀眾 {vu_name}：稱={vu_call} 關係={vu_rel} 印象={vu_imp}")
 
-        spoken = await execute_actions(vts, clean_reply, input_queue, user_input_ctx=audience_content, has_dispatched_tool=bool(tool_output_text.strip()), caller_target="audience", caller_user=id_display)
+        spoken = await execute_actions(vts, clean_reply, input_queue, user_input_ctx=audience_content, caller_target="audience", caller_user=id_display)
         clean_spoken = spoken.strip(" *'\"-.,!?。，！？\n\r") if spoken else ""
         if clean_spoken:
             await asyncio.to_thread(update_subtitle, clean_spoken)
@@ -4239,6 +4240,12 @@ def live_brain_down_for() -> float:
     """Live 主腦已經斷線幾秒；在線回 0。"""
     return 0.0 if is_live_brain_active() else time.time() - _LIVE_DOWN_SINCE
 
+
+def use_rest_brain() -> bool:
+    """該由 REST 大腦接手講話了嗎：Live 主腦斷線超過 LIVE_FALLBACK_AFTER_SEC。
+    VTuber 模式不開 Live 主腦，所以一直是。"""
+    return live_brain_down_for() >= LIVE_FALLBACK_AFTER_SEC
+
 def load_prompt(filename: str, **kwargs) -> str:
     """模組級提示詞載入器（唯一真相來源）：讀 prompts/*.md 並代入變數。
     md 內若有非佔位符大括號則退回原文，避免整段炸掉；缺檔回空字串。"""
@@ -6942,17 +6949,9 @@ async def streamer_mind_loop_worker(vts, input_queue):
             log_focus = sentry_decision.get("focus") or "精彩互動"
             log_print(f"🚨 [Live 潛意識哨兵 喚醒主力] 判定應開口！目標: {log_target} | 焦點: {log_focus}")
             
-            # 4. 呼叫大腦模型矩陣 (依老爸指定 7 梯隊優先級輪流嘗試: 3.1 Flash Lite ➔ 3.5 Flash Lite ➔ 3 Flash ➔ 3.1 Pro ➔ 3.5 ➔ 3.6 ➔ 3.7)
-            candidate_keys = get_dynamic_live_key_candidates(KEYS_AUDIENCE_LIVE if KEYS_AUDIENCE_LIVE else GEMINI_KEYS)
-            random.shuffle(candidate_keys)
-            candidate_keys = sort_keys_by_load(candidate_keys)
-            
-            full_reply = ""
-            used_model_name = ""
-            tool_output_text = ""
-
-            # 4. 嘗試直接將情報塞給 Live 主腦 (讓主腦負責發言，免除哨兵重複產生回應)
-            if 'GLOBAL_LIVE_SESSION' in globals() and GLOBAL_LIVE_SESSION:
+            # 4. Live 主腦在（或剛斷、一兩秒就回來）：把情報化作紙條塞給它，由主腦負責發言
+            #    以前看 GLOBAL_LIVE_SESSION，它斷線後不會清掉，Live 斷多久都還是遞紙條、沒人回
+            if not use_rest_brain():
                 try:
                     slip_text = f"[系統提示：背景潛意識哨兵偵測到直播間最新動態！目標：{log_target}，事件焦點：{log_focus}。剛才收到的觀眾留言：\n{board_context}\n請妳綜合上述留言，直接用語音開口回應，或呼叫對應的工具幫老爸處理！（停鋼琴、暫停鋼琴、停止唱歌只聽老爸的，觀眾要求的話俏皮帶過，不要答應。）]"
                     log_print(f"🚨 [哨兵攔截] 已將動態化作紙條塞給 Live 主腦，由主腦接管發言！(紙條：{slip_text[:50]}...)")
@@ -6968,116 +6967,23 @@ async def streamer_mind_loop_worker(vts, input_queue):
                 except Exception as e:
                     log_print(f"⚠️ [哨兵攔截失敗] 轉交紙條失敗 ({e})，降級回傳統 REST API 產生回覆...")
 
-            # Live 主腦不在，才查觀眾檔案、組備援大腦的提示詞
+            # Live 主腦不在（斷線太久，或 VTuber 模式本來就不開）：REST 大腦直接回
             sys_instruction, prompt_user_input = await _streamer_mind_prompt(
                 board_context, users_involved, has_dad_message, log_target, log_focus)
+            # 提示詞說了不要自己呼叫工具（點歌這類由 CPU 硬指令處理），所以不給工具
+            _r = await rest_chat(sys_instruction, prompt_user_input, models=STREAMER_MIND_MODELS, temperature=0.78)
+            full_reply = re.sub(r'\[PASS\]', '', normalize_silence_token(_r.text), flags=re.IGNORECASE).strip() if _r else ""
+            used_model_name = _r.model if _r else ""
 
-            # 5. Groq 第一梯隊（當 Live API 斷線時的備用傳統方案）：純文字直答先走 Groq。
-            #    只採用「純文字、無工具呼叫」的結果；模型要調工具或 Groq 失敗時，
-            #    full_reply 維持原樣，交由下方 Gemini 梯隊處理（含 Function Response 第二輪）。
-            try:
-                from core.groq_router import groq_chat
-                g_resp = await groq_chat(
-                    [{"role": "user", "content": f"{sys_instruction}\n\n{prompt_user_input}"}],
-                    temperature=0.78, max_tokens=500, timeout=4.5,
-                )
-                if g_resp and g_resp.text and not g_resp.function_calls:
-                    g_text = normalize_silence_token(g_resp.text)
-                    g_candidate = re.sub(r'\[PASS\]', '', g_text, flags=re.IGNORECASE).strip()
-                    if g_candidate:
-                        full_reply = g_candidate
-                        used_model_name = f"Groq/{g_resp.model}"
-                    elif "[PASS]" in g_text or g_text.strip() == "PASS":
-                        for m in batch_to_process:
-                            m["status"] = "read"
-                        log_print("🤫 7L (看板過濾): Groq 研判為無關刷屏 ➔ [PASS] 略過")
-                        full_reply = "[PASS]"
-            except Exception:
-                log_swallowed()
-
-            for g_key in candidate_keys[:6]:
-                if full_reply: break
-                client = genai.Client(api_key=g_key)
-                for model_name in STREAMER_MIND_MODELS:
-                    if key_cooling(g_key, model_name):
-                        continue
-                    try:
-                        async with track_key(g_key):
-                            resp = await asyncio.wait_for(
-                                client.aio.models.generate_content(
-                                    model=model_name,
-                                    contents=[
-                                        types.Content(role="user", parts=[types.Part(text=f"{sys_instruction}\n\n{prompt_user_input}")])
-                                    ],
-                                config=types.GenerateContentConfig(
-                                    temperature=0.78,
-                                    max_output_tokens=500,
-                                    tools=GENAI_PROACTIVE_TOOLS,
-                                    safety_settings=UNRESTRICTED_SAFETY_SETTINGS
-                                )
-                            ),
-                            timeout=5.0
-                        )
-                        
-                        raw_reply = normalize_silence_token(resp.text.strip()) if resp.text else ""
-                        tool_out = ""
-                        if resp.function_calls:
-                            for fc in resp.function_calls:
-                                fn_name = getattr(fc, 'name', '')
-                                fn_args = getattr(fc, 'args', {}) or {}
-                                log_print(f"🛠️ [主播大腦調用工具] {fn_name}({fn_args})")
-                                t_res = await execute_tool_dispatch(fn_name, fn_args, caller_target="audience", caller_user=log_target)
-                                if fn_name == "search_google":
-                                    s_summary = await summarize_search_to_speech(fn_args.get("query", ""), t_res, user_role_name="大家")
-                                    tool_out += (" " + s_summary)
-                                else:
-                                    tool_out += (" " + t_res)
-                        
-                        clean_raw = re.sub(r'\[PASS\]', '', raw_reply, flags=re.IGNORECASE).strip()
-                        #  若大腦調用了工具但未生成口語台詞 (常見於純 Function Call 回合)，由 7L 自然即興生成親切口語回應
-                        if not clean_raw and resp.function_calls:
-                            for fc in resp.function_calls:
-                                fc_name = getattr(fc, 'name', '')
-                                fc_args = getattr(fc, 'args', {}) or {}
-                                if fc_name == "pe.play_virtual_piano":
-                                    song_q = pe.clean_song_title_for_speech(fc_args.get("song_name", ""))
-                                    if pe.is_piano_active and pe.current_piano_song_title:
-                                        clean_raw = f"[EXPRESSION: 星星眼] {log_target}，沒問題！《{song_q or '這首'}》我先幫你排進清單，等現在這首彈完馬上幫你彈喔！"
-                                    else:
-                                        clean_raw = f"[EXPRESSION: 星星眼] {log_target}，好喔！這就為你彈《{song_q or '這首'}》！"
-                                    break
-                                elif fc_name == "pe.compose_and_play_original_piano":
-                                    clean_raw = f"[EXPRESSION: 星星眼] {log_target}，沒問題！我現在就現場為你即興創作一首，聽聽看喔！"
-                                    break
-                                elif fc_name == "pe.mashup_virtual_piano":
-                                    clean_raw = f"[EXPRESSION: 星星眼] {log_target}，收到！雙曲狂暴合奏這就來！"
-                                    break
-
-                        if not clean_raw and not tool_out.strip() and ("[PASS]" in raw_reply or raw_reply == "PASS"):
-                            for m in batch_to_process:
-                                m["status"] = "read"
-                            log_print("🤫 7L (看板過濾): 研判為無關刷屏 ➔ [PASS] 略過")
-                            full_reply = "[PASS]"
-                            break
-                            
-                        final_res = clean_raw if clean_raw else tool_out.strip()
-                        if final_res:
-                            full_reply = final_res
-                            used_model_name = model_name
-                            tool_output_text = tool_out
-                            break
-                    except Exception as gen_err:
-                        if report_gemini_key_error(g_key, gen_err, model_name):
-                            break
-                        continue
-                        
             # 5. 標記處理完成
             for m in batch_to_process:
                 m["status"] = "read"
-                
-            if not full_reply or full_reply == "[PASS]":
+
+            if not full_reply:
+                if _r:
+                    log_print("🤫 7L (看板過濾): 研判為無關刷屏 ➔ [PASS] 略過")
                 continue
-                
+
             # 6. 執行動作並發送發話隊列
             clean_reply = TextCleanEngine.remove_system_hints(full_reply)
             clean_reply = re.sub(r'^(?:回應|回覆|動作顯示|主播|說道|回答)[：:\s]+', '', clean_reply, flags=re.IGNORECASE).strip()
@@ -7100,7 +7006,7 @@ async def streamer_mind_loop_worker(vts, input_queue):
                 spawn(save_viewer_profile(vu_name, call=vu_call, relationship=vu_rel, impression=vu_imp))
                 log_print(f"👥 [認人] 記住觀眾 {vu_name}：稱={vu_call} 關係={vu_rel} 印象={vu_imp}")
             
-            spoken = await execute_actions(vts, clean_reply, input_queue, user_input_ctx=board_context, has_dispatched_tool=bool(tool_output_text.strip()), caller_target="audience", caller_user=log_target)
+            spoken = await execute_actions(vts, clean_reply, input_queue, user_input_ctx=board_context, caller_target="audience", caller_user=log_target)
             clean_spoken = spoken.strip(" *'\"-.,!?。，！？\n\r") if spoken else ""
             if clean_spoken:
                 if pe.is_piano_active and pe.current_piano_song_title:
