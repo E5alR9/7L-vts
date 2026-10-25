@@ -172,7 +172,7 @@ from core.utils import (
 )
 from core.identity import is_owner_account, claims_owner_identity
 import core.stage_state as stage
-from core.hard_command import parse_hard_command, build_slip_text, display_requester, parse_slip_for_song, strip_blob_noise, sanitize_search_query, rescue_claim, split_original_request, PIANO_CONTROL_TOOLS, STAGE_CONTROL_TOOLS, is_stage_control, structured_stage_command
+from core.hard_command import parse_hard_command, build_slip_text, display_requester, parse_slip_for_song, strip_blob_noise, sanitize_search_query, rescue_claim, split_original_request, PIANO_CONTROL_TOOLS, STAGE_CONTROL_TOOLS, is_stage_control, structured_stage_command, PLAY_TOOLS, stage_request_unasked
 from core.subagent_router import resolve_subagent_chain
 from core.db import *
 from core.live_timer_sensor import live_timer_hub
@@ -305,24 +305,58 @@ _AUDIENCE_DENIED_TOOLS = frozenset({
 #  主腦最近一則輸入是誰觸發的：觀眾彈幕／哨兵轉述的紙條 → audience；老爸打字、說話、主持插話 → dad。
 #  主腦只有一個，觀眾說「收起鋼琴」被 CPU 擋下後，哨兵照樣把留言轉給主腦，主腦呼叫子智能體時
 #  舊碼一律當老爸下令，鋼琴就被收掉了（2026-10-25 實機）。子智能體照這裡決定用誰的權限。
-_BRAIN_INPUT_ORIGIN = {"who": "dad", "ts": 0.0}
+#  said：那則的人話（不含紙條包裝），主腦自己要彈／唱時拿來對照有沒有人點歌；
+#  human：最近送進主腦的是人話還是系統通知（系統通知觸發的就不對照）。
+_BRAIN_INPUT_ORIGIN = {"who": "dad", "ts": 0.0, "said": "", "human": False}
 
 
+UNASKED_STAGE_DECLINE = ("[系統底層：剛才那句話沒有人點歌，系統沒有去彈／唱《{song}》。那是之前的點歌，不要自己翻出來；"
+                         "直接回應剛才那句話就好，剛才如果說了要彈要唱，就自然改口。]")
 AUDIENCE_STAGE_DECLINE = ("[系統底層：鋼琴的停止／暫停／繼續和停止唱歌只聽老爸的，觀眾說的不算，系統沒有執行。"
                           "請妳用一句話俏皮帶過；剛才如果說了「好」，就改口說這要老爸點頭。]")
 
 
-def _note_brain_origin(who: str) -> None:
-    _BRAIN_INPUT_ORIGIN["who"], _BRAIN_INPUT_ORIGIN["ts"] = who, time.time()
+def _note_brain_origin(who: str, said: str = "") -> None:
+    if not who:   # 系統通知：權限照舊，只記「最近一則不是人話」
+        _BRAIN_INPUT_ORIGIN["human"] = False
+        return
+    _BRAIN_INPUT_ORIGIN.update(who=who, ts=time.time(), said=said or "", human=True)
 
 
-def send_brain_slip(text: str, origin: str = "") -> bool:
+def _her_words_before(ts: float) -> str:
+    """她在 ts 之前兩分鐘內講的最後一句（她問「要不要我彈？」，老爸回「好啊」也算點了）。"""
+    try:
+        from core.memory import UNIFIED_DIALOGUE_MEMORY
+        for m in reversed(list(UNIFIED_DIALOGUE_MEMORY)[-30:]):   # deque 不能切片
+            t = m.get("time", 0)
+            if t >= ts:
+                continue
+            if ts - t > 120:
+                break
+            if m.get("role") == "assistant":
+                return str(m.get("content", ""))
+    except Exception:
+        log_swallowed()
+    return ""
+
+
+def _brain_replaying_old_request(songs) -> bool:
+    """主腦這輪是人話觸發的，那句話卻沒點歌：她在翻 Live 續接對話裡的舊點歌（2026-10-26 實機：
+    老爸說「7L 醒醒」她去彈小星星，觀眾問「還醒著嗎」她唱晴天）。"""
+    o = _BRAIN_INPUT_ORIGIN
+    if not o.get("human"):
+        return False
+    return stage_request_unasked(o.get("said", ""), songs, _her_words_before(o.get("ts", 0.0)))
+
+
+def send_brain_slip(text: str, origin: str = "", said: str = "") -> bool:
     """給 Live 主腦遞紙條的唯一出口（以前 14 處各自 put_nowait，「這張是誰觸發的」又在別處另外記）。
     進紙條佇列，由 send_system_prompts_to_live 統一去重、加鎖、掛看門狗。
     origin："audience"（觀眾彈幕、哨兵轉述）／"dad"（老爸打字、主持插話）；系統通知留空，不改「這輪算誰的」。
-    真的送出那一刻才記，排隊中的紙條不會搶先改掉身分。"""
+    真的送出那一刻才記，排隊中的紙條不會搶先改掉身分。
+    said：觸發的那句人話（不含紙條包裝），主腦自己要彈唱時對照用。"""
     try:
-        LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait((text, origin) if origin else text)
+        LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait((text, origin, said) if origin else text)
         return True
     except Exception:
         log_swallowed()
@@ -1237,9 +1271,11 @@ async def call_gemini_live_audience_reply(vts, input_queue, audience_user: str, 
         append_to_unified_memory(speaker=f"TikTok 觀眾「{id_display}」", target=recorded_target, content=audience_content, role="user", source="tiktok_live")
         try:
             if recorded_target == "7L":
-                send_brain_slip(f"[黑板同步] TikTok 觀眾 {id_display} 對妳說：{audience_content}", origin="audience")
+                send_brain_slip(f"[黑板同步] TikTok 觀眾 {id_display} 對妳說：{audience_content}", origin="audience",
+                                said=audience_content)
             else:
-                send_brain_slip(f"[黑板同步] TikTok 觀眾 {id_display} 在聊天室說：{audience_content}", origin="audience")
+                send_brain_slip(f"[黑板同步] TikTok 觀眾 {id_display} 在聊天室說：{audience_content}", origin="audience",
+                                said=audience_content)
         except Exception: log_swallowed()
 
         # 整理近期聊天室動態字串
@@ -4431,14 +4467,17 @@ async def _handle_invoke_subagent(session, ws_send_lock, _fn_name, _fn_call_id, 
                     log_print(f"🧩 [子智能體] 主腦填了結構化動作 {_intent}，直接執行")
                     _hit, _tname, _targs = await run_stage_commands(_cmds, target=_who, requester_name="",
                                                                     from_brain=True, said=_task_ins)
-                    if not _hit:   # 觀眾那輪的停鋼琴／停歌：擋下來，請她婉拒
-                        await _respond(AUDIENCE_STAGE_DECLINE, _speak)
-                        return
                 else:
                     _hit, _tname, _targs = await background_tool_executor(_task_ins, target=_who, requester_name="", from_brain=True)
             except Exception as _be:
                 log_print(f"⚠️ [子智能體執行異常]: {_be}")
                 _hit, _tname, _targs = False, "", {}
+            if not _hit and _tname == "audience_denied":   # 觀眾那輪的停鋼琴／停歌：擋下來，請她婉拒
+                await _respond(AUDIENCE_STAGE_DECLINE, _speak)
+                return
+            if not _hit and _tname == "unasked":
+                await _respond(UNASKED_STAGE_DECLINE.format(song=_targs.get("song_name", "")), _speak)
+                return
             if _hit and _tname == "mixed_play_sing":
                 _result_text = (f"[系統底層：《{_targs.get('desc', '')}》已在背景排程，彈琴和唱歌的都是妳 7L 本人。"
                                 f"請妳口頭答應一聲。]" + _if_said)
@@ -4701,7 +4740,7 @@ async def continuous_live_worker(vts):
                                     
                                     if c.input_transcription and c.input_transcription.text:
                                         user_transcription_buffer += c.input_transcription.text
-                                        _note_brain_origin("dad")
+                                        _note_brain_origin("dad", user_transcription_buffer)
                                         
                                     if c.output_transcription and c.output_transcription.text:
                                         if user_transcription_buffer.strip():
@@ -4788,7 +4827,7 @@ async def continuous_live_worker(vts):
                                 prompt = _LIVE_SLIP_RETRY.popleft()
                             else:
                                 prompt = await LIVE_API_SYSTEM_PROMPT_QUEUE.get()
-                            prompt, origin = prompt if isinstance(prompt, tuple) else (prompt, "")
+                            prompt, origin, said = (tuple(prompt) + ("", ""))[:3] if isinstance(prompt, tuple) else (prompt, "", "")
                             try:
                                 if _slip_is_dupe(prompt, time.time()):
                                     log_print("📄 [紙條去重] 10 秒內相同紙條已送過，跳過（一次點歌三張同字紙條會自斷風暴）。")
@@ -4800,8 +4839,7 @@ async def continuous_live_worker(vts):
                                 async with ws_send_lock:
                                     await session.send_realtime_input(text=prompt)
                                     sent_ts = time.time()
-                                    if origin:
-                                        _note_brain_origin(origin)
+                                    _note_brain_origin(origin, said)
                                     LIVE_CONTEXT_MEMORY.append((sent_ts, prompt))
                                     if len(LIVE_CONTEXT_MEMORY) > 10:
                                         LIVE_CONTEXT_MEMORY.pop(0)
@@ -4817,7 +4855,7 @@ async def continuous_live_worker(vts):
                                 log_print(f"⚠️ [黑板同步] 發送失敗 ({inner_e})，訊息已退回佇列等待重連...")
                                 # 沒送成功的紙條排到最前面，並撤銷去重記帳，重連後才不會被當重複丟掉
                                 _slip_forget(prompt)
-                                _LIVE_SLIP_RETRY.appendleft((prompt, origin) if origin else prompt)
+                                _LIVE_SLIP_RETRY.appendleft((prompt, origin, said) if origin else prompt)
                                 raise inner_e
                     except asyncio.CancelledError: pass
                     except Exception as e:
@@ -6837,7 +6875,8 @@ async def streamer_mind_loop_worker(vts, input_queue):
                     log_print(f"🚨 [哨兵攔截] 已將動態化作紙條塞給 Live 主腦，由主腦接管發言！(紙條：{slip_text[:50]}...)")
                     # 只有主持插話的那批照老爸的權限；夾了任何觀眾留言就當觀眾
                     send_brain_slip(slip_text, origin="dad" if all(m.get("source") == "owner_interject"
-                                                                   for m in batch_to_process) else "audience")
+                                                                   for m in batch_to_process) else "audience",
+                                    said="\n".join(str(m.get("content", "")) for m in batch_to_process))
                     for m in batch_to_process:
                         m["status"] = "read"
                     continue # 成功交棒給主腦，直接進入下一輪監控
@@ -7547,7 +7586,13 @@ async def run_stage_commands(cmds: list, target: str = "dad", requester_name: st
                              said: str = ""):
     """執行解析好的舞台指令 [(工具, 參數)]：兩個＝彈加唱（混用），一個＝單句。
     權限（觀眾不能停鋼琴／停歌）、去重、紙條、應答都在這裡，文字解析和主腦的結構化動作共用。
-    回傳 (是否執行, 工具名, 參數)。"""
+    回傳 (是否執行, 工具名, 參數)；主腦翻舊點歌回 (False, "unasked", …)，觀眾停鋼琴回 (False, "audience_denied", {})。"""
+    if from_brain:
+        _songs = [a.get("song_name", "") for t, a in cmds if t in PLAY_TOOLS]
+        if _songs and _brain_replaying_old_request(_songs):
+            log_print(f"🚫 [子智能體] 剛才那句沒人點歌，不自己翻出舊點歌：{'＋'.join(_songs)}"
+                      f"（那句：{_BRAIN_INPUT_ORIGIN.get('said', '')[:30]}）")
+            return False, "unasked", {"song_name": "＋".join(_songs)}
     if len(cmds) > 1:
         _mixed = cmds
         if _hard_cmd_seen_recently("mixed", [list(x) for x in _mixed], time.time()):
@@ -7577,7 +7622,7 @@ async def run_stage_commands(cmds: list, target: str = "dad", requester_name: st
     if is_stage_control(fn_name) and target == "audience":
         # 觀眾留言也會進 CPU：鋼琴的停止／暫停／繼續、停止唱歌只聽老爸的，不然一句「別彈了」就能把鋼琴收掉
         log_print(f"🛑 [CPU 硬體直連] 觀眾不能控制鋼琴／唱歌，不執行：{(said or fn_name)[:30]}")
-        return False, "", {}
+        return False, "audience_denied", {}
     if _hard_cmd_seen_recently(fn_name, fn_args, time.time()):
         log_print(f"⏭️ [CPU 硬體直連] {fn_name}({fn_args}) 剛剛已在處理，不重複執行")
         return True, fn_name, fn_args
@@ -7656,7 +7701,7 @@ async def _desktop_dad_reply(vts, input_queue, user_input: str, owner: str = "�
         except Exception:
             pass
         try:
-            send_brain_slip(_owner_text_slip(owner, user_input), origin="dad")
+            send_brain_slip(_owner_text_slip(owner, user_input), origin="dad", said=user_input)
         except Exception:
             log_swallowed()
         log_print("⚡ [極速直通主腦] Live 模式下，控制台訊息已轉交 Live 大腦處理。")
@@ -7724,7 +7769,7 @@ async def process_chat_message(vts, input_queue, user_input: str, user_audio_b64
                 log_print("📱 [桌機代答] 純閒聊走免費桌面版（省 Live 生成）。")
                 return
             try:
-                send_brain_slip(_owner_text_slip(owner, user_input), origin="dad")
+                send_brain_slip(_owner_text_slip(owner, user_input), origin="dad", said=user_input)
             except Exception: log_swallowed()
             return
         # （註：舊的 source == "tiktok_live" 分支已刪除——tiktok_listener 只會送出
@@ -7853,7 +7898,8 @@ async def process_chat_message(vts, input_queue, user_input: str, user_audio_b64
             if source == "tiktok_dad":
                 # 老爸直播間留言的硬指令同樣先過 CPU（零成本），再遞紙條給 Live 主腦接話
                 spawn(background_tool_executor(user_input, target="dad", requester_name=current_custom_name))
-                send_brain_slip(f"[文字輸入] {current_custom_name} (在直播間留言)：{user_input}", origin="dad")
+                send_brain_slip(f"[文字輸入] {current_custom_name} (在直播間留言)：{user_input}", origin="dad",
+                                said=user_input)
             elif source == "mic" or user_audio_b64:
                 # mic 走 A：原生音訊 Live 直接聽見，由模型自主決定是否呼叫子智能體。
                 # 這裡刻意不跑 B（CPU 無條件開火只適合乾淨文本；STT 雜訊太多會誤觸唱歌/彈琴）。

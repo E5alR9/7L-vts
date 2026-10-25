@@ -399,6 +399,31 @@ def structured_stage_command(action: str = "", song: str = "", song2: str = "", 
     return []
 
 
+# —— 主腦自己要彈／唱時，剛才那句話得真的有在點歌（2026-10-26）——
+# Live 續接的對話裡留著以前的點歌：老爸說「7L 醒醒」她去彈小星星，觀眾問「還醒著嗎」她唱晴天。
+PLAY_TOOLS = frozenset({"pe.play_virtual_piano", "play_virtual_piano", "auto_sing_song", "sing_song"})
+_MUSIC_INTENT_RE = re.compile(r"彈|弹|唱|歌|琴|曲|音樂|音乐|演奏|表演|才藝|才艺|來一首|来一首|再來|再来|安可|想聽|想听"
+                              r"|piano|sing|song|music|encore", re.I)
+_AGREE_RE = re.compile(r"好|可以|要|嗯|對|对|來|来|行|沒問題|没问题|當然|当然|隨便|随便|你決定|妳決定|ok|yes|sure|go", re.I)
+
+
+def stage_request_unasked(said: str, songs=(), her_last: str = "") -> bool:
+    """剛才那句話沒人點歌 → True（主腦是翻舊帳，不要執行）。
+    said：觸發這輪的人話（老爸打字／說話、觀眾留言）；看不到（空字串）就放行。
+    her_last：她在那句話之前講的話——她問「要不要我彈小星星？」老爸回「好啊」也算點了。"""
+    s = (said or "").strip()
+    if not s:
+        return False
+    if _MUSIC_INTENT_RE.search(s):
+        return False
+    ns = _norm_name(s)
+    if any(_norm_name(t) and _norm_name(t) in ns for t in songs or ()):
+        return False
+    if len(s) <= 15 and _AGREE_RE.search(s) and _MUSIC_INTENT_RE.search(her_last or ""):
+        return False
+    return True
+
+
 def parse_hard_command(text: Optional[str]) -> Tuple[Optional[str], Dict]:
     """B 架構入口：把純文字拆成 (工具名, 參數)。
 

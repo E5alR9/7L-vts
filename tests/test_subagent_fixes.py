@@ -87,6 +87,7 @@ def _run_handler(cpu, nv, total_timeout=45.0, task="幫我查日圓匯率", orig
                _BRAIN_INPUT_ORIGIN={"who": origin, "ts": 0.0},
                structured_stage_command=structured_stage_command, run_stage_commands=run_stage_commands,
                AUDIENCE_STAGE_DECLINE=_const("AUDIENCE_STAGE_DECLINE"),
+               UNASKED_STAGE_DECLINE=_const("UNASKED_STAGE_DECLINE"),
                _SUBAGENT_VISION_TASK_RE=__import__('re').compile(_const_pattern('_SUBAGENT_VISION_TASK_RE')))
     asyncio.run(ns["_handle_invoke_subagent"](sess, asyncio.Lock(), "invoke_subagent", "call-1", task, intent))
     assert all(r.id == "call-1" for r in sess.sent)
@@ -308,11 +309,11 @@ def test_brain_slips_have_one_exit_and_origin_is_noted_on_send():
                _BRAIN_INPUT_ORIGIN={"who": "dad", "ts": 0.0})
     assert ns["send_brain_slip"]("觀眾說收起鋼琴", origin="audience") is True
     assert ns["send_brain_slip"]("[系統底層：計時到了]") is True
-    assert list(q) == [("觀眾說收起鋼琴", "audience"), "[系統底層：計時到了]"]
+    assert list(q) == [("觀眾說收起鋼琴", "audience", ""), "[系統底層：計時到了]"]
     assert ns["_BRAIN_INPUT_ORIGIN"]["who"] == "dad"          # 排隊中不改身分，送出那一刻才記
     assert MAIN.count("LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait(") == 1   # 只剩出口裡那一處
     sender = ast.get_source_segment(MAIN, _fn("send_system_prompts_to_live"))
-    assert sender.index("send_realtime_input(text=prompt)") < sender.index("_note_brain_origin(origin)")
+    assert sender.index("send_realtime_input(text=prompt)") < sender.index("_note_brain_origin(origin, said)")
 
 
 def test_structured_stage_action_skips_text_parsing():
@@ -335,5 +336,55 @@ def test_structured_stage_control_from_an_audience_turn_is_declined():
     targets = []
     text, sched = _run_handler((True, "", {}), None, task="收起鋼琴", origin="audience", targets=targets,
                                intent={"action": "stop_piano", "song": "", "song2": "", "url": ""},
-                               staged=(False, "", {}))
+                               staged=(False, "audience_denied", {}))
     assert targets[0][:2] == ("struct", "audience") and "只聽老爸" in text
+
+
+def test_brain_does_not_replay_old_requests_on_unrelated_words():
+    """Live 續接的對話留著以前的點歌：老爸說「7L 醒醒」她去彈小星星（2026-10-26 實機）。
+    主腦自己要彈／唱時，對照觸發這輪的那句人話；沒人點就不執行、請她直接回那句話。"""
+    from core.hard_command import PLAY_TOOLS, stage_request_unasked
+    from core.memory import UNIFIED_DIALOGUE_MEMORY
+    ns = _load("_note_brain_origin", "_her_words_before", "_brain_replaying_old_request", time=time,
+               log_swallowed=lambda: None, stage_request_unasked=stage_request_unasked,
+               _BRAIN_INPUT_ORIGIN={"who": "dad", "ts": 0.0, "said": "", "human": False})
+    note, replaying = ns["_note_brain_origin"], ns["_brain_replaying_old_request"]
+    note("dad", "7L 醒醒")
+    assert replaying(["小星星"]) is True
+    note("audience", "7L 還醒著嗎？")
+    assert replaying(["晴天"]) is True
+    note("dad", "彈首妳喜歡的")
+    assert replaying(["小星星"]) is False
+    note("", "")                                   # 系統通知觸發的（計時、自主閒聊）：不對照
+    assert replaying(["小星星"]) is False and ns["_BRAIN_INPUT_ORIGIN"]["who"] == "dad"
+    # 她先問「要不要我彈小星星？」，老爸回「好啊」也算點了
+    UNIFIED_DIALOGUE_MEMORY.append({"speaker": "7L", "role": "assistant", "content": "要不要我彈小星星給你聽？",
+                                    "time": time.time() - 5})
+    try:
+        note("dad", "好啊")
+        assert replaying(["小星星"]) is False
+    finally:
+        UNIFIED_DIALOGUE_MEMORY.pop()
+
+
+def test_stage_runner_declines_replays_before_doing_anything():
+    from core.hard_command import PLAY_TOOLS
+    done = []
+    ns = _load("run_stage_commands", PLAY_TOOLS=PLAY_TOOLS, _brain_replaying_old_request=lambda songs: True,
+               _BRAIN_INPUT_ORIGIN={"said": "7L 醒醒"}, _hard_cmd_seen_recently=lambda *a: done.append(a) or False)
+    r = asyncio.run(ns["run_stage_commands"]([("pe.play_virtual_piano", {"song_name": "小星星"})], from_brain=True))
+    assert r == (False, "unasked", {"song_name": "小星星"}) and done == []
+    # 停鋼琴、停歌不是點歌，不對照
+    ns["_brain_replaying_old_request"] = lambda songs: (_ for _ in ()).throw(AssertionError("不該對照"))
+    ns.update(is_stage_control=lambda n: False, PIANO_CONTROL_TOOLS=frozenset(), _dispatch_in_background=lambda *a, **k: None,
+              build_slip_text=lambda *a, **k: "", is_live_brain_active=lambda: False, time=time)
+    assert asyncio.run(ns["run_stage_commands"]([("stop_singing", {})], from_brain=True))[0] is True
+
+
+def test_subagent_tells_her_not_to_replay_and_skips_the_reinterpreter():
+    targets = []
+    text, sched = _run_handler((True, "", {}), "hang", task="彈小星星", targets=targets,
+                               intent={"action": "play_piano", "song": "小星星", "song2": "", "url": ""},
+                               staged=(False, "unasked", {"song_name": "小星星"}))
+    assert [t[0] for t in targets] == ["struct"]
+    assert "沒有人點歌" in text and "小星星" in text and sched == types.FunctionResponseScheduling.WHEN_IDLE

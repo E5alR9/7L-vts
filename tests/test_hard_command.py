@@ -490,3 +490,19 @@ def test_live_brain_tool_declares_structured_fields():
     from core.hard_command import STAGE_ACTIONS
     assert set(props["action"].enum) == set(STAGE_ACTIONS) | {"other"}
     assert decl.parameters.required == ["task_instruction"]
+
+
+def test_stage_request_unasked_only_when_nobody_asked_for_music():
+    """主腦自己要彈／唱時對照觸發的那句人話（2026-10-26 實機：「7L 醒醒」她去彈小星星）。"""
+    from core.hard_command import stage_request_unasked as unasked
+    assert unasked("7L 醒醒", ["小星星"]) is True
+    assert unasked("7L 還醒著嗎？", ["晴天"]) is True
+    assert unasked("今天好累喔", ["小星星"]) is True
+    for said in ("彈首妳喜歡的", "來一首吧", "唱給我聽", "安可！", "再來", "想聽妳的歌", "弹小星星", "play piano"):
+        assert unasked(said, ["小星星"]) is False, said
+    assert unasked("小星星", ["小星星"]) is False                 # 只講歌名也算
+    assert unasked("", ["小星星"]) is False                       # 看不到那句話：放行
+    # 她先提議，老爸短短答應
+    assert unasked("好啊", ["小星星"], her_last="要不要我彈小星星給你聽？") is False
+    assert unasked("好啊", ["小星星"], her_last="今天天氣真好") is True
+    assert unasked("好啊我等一下要去洗澡然後就要睡覺了喔", ["小星星"], her_last="要不要聽我彈琴？") is True
