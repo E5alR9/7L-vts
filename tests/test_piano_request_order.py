@@ -115,3 +115,19 @@ def test_cpu_owner_stop_is_sent_with_force():
                 encoding="utf-8").read()
     assert 'await pe.stop_virtual_piano(force=bool(fn_args.get("force")))' in main
     assert 'if fn_name == "pe.stop_virtual_piano" and not from_brain:' in main
+
+
+def test_piano_does_not_wait_on_a_missing_vts(monkeypatch):
+    """VTS 關著，開彈前的走位卡在重連幾十秒，鋼琴視窗遲遲沒開、被看門狗收掉（2026-10-25 實機）。"""
+    import inspect
+    import time as _t
+    monkeypatch.setattr(pe, "log_swallowed", lambda *a, **k: None)
+
+    async def stuck(*a, **k):
+        await asyncio.sleep(30)
+    t0 = _t.time()
+    assert asyncio.run(pe._vts_soon(stuck(), timeout=0.2)) is None
+    assert _t.time() - t0 < 1.0
+    for fn in (pe.play_piano_worker, pe.open_virtual_piano, pe.stop_virtual_piano):
+        src = inspect.getsource(fn)
+        assert "await move_vts_spatial(" not in src and "await set_vts_expression(" not in src, fn.__name__

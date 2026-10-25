@@ -94,6 +94,16 @@ from services.vts_client import apply_spatial_position
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 os.makedirs(DATA_DIR, exist_ok=True)
+async def _vts_soon(coro, timeout: float = 3.0):
+    """VTS 走位／換表情最多等幾秒：VTS 沒開或卡在重連時鋼琴照彈。
+    （2026-10-25 實機：VTS 關著，開彈前的走位卡在重連幾十秒，鋼琴視窗遲遲沒開，看門狗判定離線把演奏收掉）"""
+    try:
+        return await asyncio.wait_for(coro, timeout)
+    except Exception:
+        log_swallowed()
+        return None
+
+
 def get_piano_gemini_keys() -> list:
     return GEMINI_KEYS
     return []
@@ -1259,11 +1269,11 @@ async def open_virtual_piano() -> str:
     current_piano_song_title = ""
     
     # 1. 走位到鋼琴位置
-    await move_vts_spatial(target_pos="鋼琴旁", duration=1.5)
+    await _vts_soon(move_vts_spatial(target_pos="鋼琴旁", duration=1.5))
     
     # 2. 切換表情
     if vc.GLOBAL_VTS:
-        await set_vts_expression(vc.GLOBAL_VTS, "星星眼")
+        await _vts_soon(set_vts_expression(vc.GLOBAL_VTS, "星星眼"))
         
     # 3. 檢查鋼琴視窗是否已經在運行
     if is_piano_window_alive():
@@ -1495,8 +1505,8 @@ async def stop_virtual_piano(force: bool = False) -> str:
     if SOUND_ENGINE:
         SOUND_ENGINE.all_notes_off()
     if vc.GLOBAL_VTS:
-        await set_vts_expression(vc.GLOBAL_VTS, "_RESET_")
-        await move_vts_spatial(target_pos="原位", duration=1.5)
+        await _vts_soon(set_vts_expression(vc.GLOBAL_VTS, "_RESET_"))
+        await _vts_soon(move_vts_spatial(target_pos="原位", duration=1.5))
     if current_ai_state == "PIANO":
         current_ai_state = "IDLE"
     await _show_subtitle("")
@@ -2001,7 +2011,7 @@ async def play_piano_worker(song_title: str, sheet_text: str, bpm: int, mode: st
         current_ai_state = "PIANO"
         
         # 1. 走位到鋼琴位置
-        await move_vts_spatial(target_pos="鋼琴旁", duration=1.2)
+        await _vts_soon(move_vts_spatial(target_pos="鋼琴旁", duration=1.2))
         
         # 🌟 溫柔等待：等待 7L 說完開場白 (例如「好喔，7L 這就為老爸演奏...」) 後再開始彈奏，絕不搶先發聲
         speech_wait_start = time.time()
@@ -2025,7 +2035,7 @@ async def play_piano_worker(song_title: str, sheet_text: str, bpm: int, mode: st
             
         # 2. 切換表情
         if vc.GLOBAL_VTS:
-            await set_vts_expression(vc.GLOBAL_VTS, "星星眼")
+            await _vts_soon(set_vts_expression(vc.GLOBAL_VTS, "星星眼"))
             
         # 3. 循環播放當前曲目、待播隊列與無限隨機電台
         while session_id == PIANO_SESSION_ID and is_piano_active:
@@ -2282,7 +2292,7 @@ async def play_piano_worker(song_title: str, sheet_text: str, bpm: int, mode: st
             if SOUND_ENGINE:
                 SOUND_ENGINE.all_notes_off()
             if vc.GLOBAL_VTS:
-                await set_vts_expression(vc.GLOBAL_VTS, "_RESET_")
+                await _vts_soon(set_vts_expression(vc.GLOBAL_VTS, "_RESET_"))
             if current_ai_state == "PIANO":
                 current_ai_state = "IDLE"
             await _show_subtitle("")
@@ -2775,7 +2785,7 @@ async def mashup_virtual_piano(*songs, song_name1: str = "", song_name2: str = "
     multi_path_str = "|".join([tr['midi_path'] for tr in resolved_tracks])
     
     # 3. 確保 7L 走位到鋼琴旁
-    await move_vts_spatial(target_pos="鋼琴旁", duration=1.2)
+    await _vts_soon(move_vts_spatial(target_pos="鋼琴旁", duration=1.2))
     
     # 4. 啟動或透過 IPC 發送多音軌即時並發演奏指令 (真正多音軌同時執行，無數量限制！)
     global current_piano_task, PIANO_SESSION_ID, is_piano_active, current_piano_song_title, current_piano_midi_file, current_piano_process, current_ai_state
