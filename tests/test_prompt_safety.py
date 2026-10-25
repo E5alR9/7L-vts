@@ -154,7 +154,16 @@ def test_host_interject_is_labeled_as_host_and_always_answered():
     src = ast.get_source_segment(MAIN_SRC, fn)
     board = ast.get_source_segment(MAIN_SRC, next(x for x in ast.walk(tree) if isinstance(x, ast.FunctionDef)
                                                   and x.name == "_format_board_batch"))
-    assert '【主持「{_host_nm}」】' in board and "_format_board_batch(batch_to_process)" in src
+    assert "_format_board_batch(batch_to_process)" in src
+    ns = {"is_operator": lambda s: False}
+    exec(compile(ast.Module(body=[next(x for x in tree.body if isinstance(x, ast.FunctionDef)
+                                        and x.name == "_format_board_batch")], type_ignores=[]), "x", "exec"), ns)
+    text, viewers, has_dad = ns["_format_board_batch"]([
+        {"unique_id": "owner:E5", "user": "E5（主持）", "source": "owner_interject", "time_str": "21:00", "content": "大家晚安"},
+        {"unique_id": "xm01", "user": "小明", "source": "tiktok", "time_str": "21:01", "content": "7L 好可愛"},
+        {"unique_id": "video:x", "user": "E5 點播的片", "source": "video_watch", "time_str": "21:02", "content": "📺 看完"}])
+    assert "【主持「E5」】：大家晚安" in text and "【TikTok 直播觀眾「小明」】" in text
+    assert "【點播看片筆記（E5 點播的片）】" in text and viewers == ["小明"] and has_dad is False
     assert "elif _host_msgs:" in src and src.index("elif _host_msgs:") < src.index("judge_subconscious_intent_via_live_api(")
 
 

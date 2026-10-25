@@ -393,11 +393,26 @@ def test_chinese_segments_are_not_read_as_japanese():
     assert run(False, ("ja", "今日も一日お疲れ様でした。")) == [("ja", "今日も一日お疲れ様でした。")]
 
 
-def test_chinese_with_english_uses_zh_mode_not_auto():
-    """有英文字母（連還沒換成「小七」的 7L 也算）舊碼就改 auto，auto 會把中文當日文念。"""
-    src = open(os.path.join(ROOT, "local_xiaoyi_service.py"), encoding="utf-8").read()
-    assert 'text_lang = "zh" if num_kana == 0 else "auto"' in src
-    assert "has_english" not in src
+def test_chinese_with_english_uses_zh_mode_not_auto(monkeypatch):
+    """有英文字母（連還沒換成「小七」的 7L 也算）舊碼就改 auto，auto 會把中文當日文念。實際送進 GPT-SoVITS 的模式為準。"""
+    import numpy as np
+    import local_xiaoyi_service as lx
+    sr, modes = 32000, []
+    good = (np.sign(np.sin(np.arange(sr * 3) * 0.05)) * 8000).astype(np.int16)
+
+    class FakePipe:
+        configs = pytypes.SimpleNamespace(max_sec=54)
+
+        def run(self, inputs):
+            modes.append(inputs["text_lang"])
+            yield sr, good
+    monkeypatch.setattr(lx, "_tts_pipeline", FakePipe())
+    monkeypatch.setattr(lx, "_REF_ZH", "ref.wav")
+    monkeypatch.setattr(lx, "_REF_JA", "ref_ja.wav")
+    for text in ("7L 覺得沒問題。", "老爸一邊聽Lemon Tree一邊敲代碼呀？", "這首歌叫做夜に駆ける喔。"):
+        modes.clear()
+        assert lx.synthesize_xiaoyi_bytes(text)
+        assert modes[0] == ("auto" if "に" in text else "zh"), (text, modes)
     import services.tts_router as tr
     assert tr.TTS_CACHE_VERSION not in ("v2", "v3", "v4")   # 舊快取裡有念錯的，要重抽
 
@@ -477,9 +492,18 @@ def test_nothing_is_spoken_while_asleep():
 
 def test_instinct_worker_survives_an_empty_key_pool():
     """金鑰池空的時候 random.choice 丟錯，except 裡又用到還沒設定的 live_key，本能腦整個掛掉（2026-10-25 實機）。"""
-    src = _src("instinct_live_worker")
-    assert src.index('live_key = ""') < src.index("try:")
-    assert "if not _pool:" in src
+    import asyncio as _a
+    logs = []
+    fn = next(n for n in ast.walk(ast.parse(MAIN)) if isinstance(n, ast.AsyncFunctionDef) and n.name == "instinct_live_worker")
+
+    async def _stop(*a, **k):
+        raise _a.CancelledError()
+    fake_asyncio = pytypes.SimpleNamespace(sleep=_stop, CancelledError=_a.CancelledError)
+    ns = {"asyncio": fake_asyncio, "log_print": logs.append, "KEYS_AUDIENCE_LIVE": [], "GEMINI_KEYS": [],
+          "INSTINCT_LIVE_SESSION": None, "report_gemini_key_error": lambda *a, **k: None}
+    exec(compile(ast.Module(body=[fn], type_ignores=[]), "x", "exec"), ns)
+    _a.run(ns["instinct_live_worker"]())                 # 舊碼在這裡丟 UnboundLocalError
+    assert any("沒有可用的 Gemini 金鑰" in m for m in logs)
 
 
 def test_owner_text_carries_companion_notes_to_the_live_brain():

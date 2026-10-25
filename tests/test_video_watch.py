@@ -57,5 +57,18 @@ def test_frames_are_described_as_video_not_the_owners_screen():
 def test_watch_note_is_not_shown_as_a_viewer_comment():
     import os
     main = open(os.path.join(ROOT, "vts_7L_test.py"), encoding="utf-8").read()
-    assert '【點播看片筆記（{u_name}）】' in main
-    assert 'req_u = caller_user or ("觀眾" if caller_target == "audience" else "老爸")' in main
+    import ast, types
+    seen = []
+
+    async def request_watch(url, requester="觀眾"):
+        seen.append(requester)
+        return {"ok": True, "queued": True}
+    fn = next(n for n in ast.walk(ast.parse(main)) if isinstance(n, ast.AsyncFunctionDef) and n.name == "execute_tool_dispatch")
+    from core.hard_command import is_stage_control
+    ns = {"_AUDIENCE_DENIED_TOOLS": frozenset(), "is_stage_control": is_stage_control, "log_print": lambda *a: None,
+          "video_watch": types.SimpleNamespace(request_watch=request_watch)}
+    exec(compile(ast.Module(body=[fn], type_ignores=[]), "x", "exec"), ns)
+    for target, user in (("dad", ""), ("audience", ""), ("audience", "小明")):
+        asyncio.run(ns["execute_tool_dispatch"]("video.request_watch", {"url": "youtu.be/jNQXAC9IVRw"},
+                                                caller_target=target, caller_user=user))
+    assert seen == ["老爸", "觀眾", "小明"]            # 子智能體不帶名字時照身分記，不再一律「觀眾」
