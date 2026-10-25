@@ -27,6 +27,10 @@ os.makedirs(WATCH_DIR, exist_ok=True)
 
 WATCH_QUEUE: asyncio.Queue = None
 WATCH_HISTORY = []
+REWATCH_GAP_SEC = 600.0   # 同一部片 10 分鐘內不重看
+# 抽出來的是影片畫面，不是老爸的螢幕：用看螢幕的提示詞，摘要會冒出「這不是老爸的電腦畫面」（2026-10-25 實機）
+FRAME_PROMPT = ("這是一部 YouTube 影片裡的一格畫面。請用 1~2 句中文客觀描述畫面裡有什麼"
+                "（人物、場景、動作、畫面上的文字）；不要提電腦螢幕或視窗，也不要猜是誰在操作。")
 
 
 def normalize_video_url(raw: str) -> str:
@@ -81,6 +85,11 @@ async def request_watch(url: str, requester: str = "觀眾") -> dict:
     for q in list(WATCH_QUEUE._queue):
         if isinstance(q, dict) and q.get("video_id") == vid:
             return {"ok": True, "queued": False, "video_id": vid, "message": "該片已在隊列中"}
+    # 正在看或剛看完的也算：只查隊列的話，老爸點一次、主腦換個網址寫法又點一次，
+    # 第一筆已經被 worker 拿走，同一部片就看兩遍、講兩遍（2026-10-25 實機）
+    now = time.time()
+    if any(h.get("video_id") == vid and now - h.get("at", 0) < REWATCH_GAP_SEC for h in WATCH_HISTORY):
+        return {"ok": True, "queued": False, "video_id": vid, "message": "該片剛點播過"}
     await WATCH_QUEUE.put({"video_id": vid, "requester": requester, "at": time.time()})
     try:
         WATCH_HISTORY.append({"video_id": vid, "requester": requester, "at": time.time()})
@@ -217,7 +226,7 @@ async def digest_video(video_id: str, requester: str) -> dict:
                         with open(p, "rb") as fh:
                             return _b64.b64encode(fh.read()).decode()
                     b64 = await asyncio.to_thread(_read_b64)
-                    d = await get_lightweight_gemini_vision(b64)
+                    d = await get_lightweight_gemini_vision(b64, prompt=FRAME_PROMPT)
                     if d:
                         descs.append(d)
                 frames_desc = "\n".join(f"【畫面{i+1}】{d}" for i, d in enumerate(descs))

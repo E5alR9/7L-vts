@@ -423,7 +423,8 @@ async def execute_tool_dispatch(fn_name: str, fn_args: dict, caller_target: str 
             extracted_text += f" {band_res}"
     elif fn_name in ["video.request_watch", "request_watch"]:
         vw_url = fn_args.get("url", "")
-        req_u = caller_user or "觀眾"
+        # 子智能體不帶名字：老爸點的片以前一律記成「觀眾 點播」
+        req_u = caller_user or ("觀眾" if caller_target == "audience" else "老爸")
         vw_res = await video_watch.request_watch(vw_url, requester=req_u)
         if vw_res.get("ok"):
             extracted_text += " （系統回報：已排入點播隊列，看完播報）" if vw_res.get("queued") else " （系統回報：該片已在隊列中）"
@@ -548,7 +549,7 @@ def build_rag_section(query: str, k: int = 3) -> str:
 VISION_TIME_BUDGET_SEC = 15.0   # 餘光視覺一次最多花這麼久（超過看到的也是舊畫面）
 
 
-async def get_lightweight_gemini_vision(image_base64: str, temporal_frames: list | None = None) -> str:
+async def get_lightweight_gemini_vision(image_base64: str, temporal_frames: list | None = None, prompt: str = "") -> str:
     """PROVIDER: GEMINI-VISION（3.1-flash-lite→3.6-flash；見 docs/AI_SOURCES.md） 【3.1-flash-lite 深度視覺認真看】：受 Live API 哨兵喚醒時才精準啟動，支援傳入上次看到現在的所有時序影格，形成動態視覺感知。"""
     if not image_base64:
         return ""
@@ -587,7 +588,9 @@ async def get_lightweight_gemini_vision(image_base64: str, temporal_frames: list
                     continue
         
         n_hist = len(temporal_frames) if temporal_frames else 0
-        if n_hist > 0:
+        if prompt:
+            pass   # 呼叫方自帶提示詞（點播看片的影片畫面不是老爸的螢幕）
+        elif n_hist > 0:
             prompt = (
                 f"妳是 7L 的視覺神經。以下共有 {n_hist} 張歷史影格（從舊到新）加上最新當前畫面，請把這些畫面當成一段連續的動態影片來解讀：\n"
                 "1. 老爸在這段時間裡做了什麼操作或有什麼變化？（例如：切換了視窗、打完了一段程式碼、開啟了新遊戲、出現報錯等）\n"
@@ -6636,6 +6639,8 @@ async def streamer_mind_loop_worker(vts, input_queue):
                     # 主持插話以前被標成「TikTok 直播觀眾「E5（主持）」」，哨兵當路人閒聊就略過了（2026-10-25 實機）
                     _host_nm = u_name.replace("（主持）", "") or "主持"
                     board_lines.append(f"- [{m['time_str']}] 【主持「{_host_nm}」】：{m['content']}")
+                elif u_source == "video_watch":
+                    board_lines.append(f"- [{m['time_str']}] 【點播看片筆記（{u_name}）】：{m['content']}")
                 else:
                     board_lines.append(f"- [{m['time_str']}] 【TikTok 直播觀眾「{u_name}」】：{m['content']}")
                     if u_name not in users_involved:

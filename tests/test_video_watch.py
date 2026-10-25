@@ -30,3 +30,32 @@ def test_request_watch_dedup():
     assert r2["ok"] and r2["queued"] is False
     r3 = asyncio.run(request_watch("嗯嗯", requester="丙"))
     assert r3["ok"] is False
+
+
+def test_video_being_watched_is_not_queued_again():
+    """第一筆被 worker 拿走後，主腦換個網址寫法再點一次，同一部片看兩遍講兩遍（2026-10-25 實機）。"""
+    vw.WATCH_QUEUE, vw.WATCH_HISTORY[:] = None, []
+    assert asyncio.run(request_watch("https://www.youtube.com/watch?v=jNQXAC9IVRw", "E5"))["queued"] is True
+    vw.WATCH_QUEUE.get_nowait()                    # worker 拿走開始看
+    assert asyncio.run(request_watch("youtube.com/watch?v=jNQXAC9IVRw", "老爸"))["queued"] is False
+    vw.WATCH_HISTORY[-1]["at"] -= vw.REWATCH_GAP_SEC + 1
+    assert asyncio.run(request_watch("youtu.be/jNQXAC9IVRw", "E5"))["queued"] is True   # 隔夠久可以再看
+
+
+def test_frames_are_described_as_video_not_the_owners_screen():
+    """抽幀用看螢幕的提示詞，摘要冒出「這並非老爸操作電腦螢幕的畫面」（2026-10-25 實機）。"""
+    import ast, os
+    assert "螢幕" not in vw.FRAME_PROMPT.replace("不要提電腦螢幕", "")
+    src = open(os.path.join(ROOT, "services", "video_watch.py"), encoding="utf-8").read()
+    assert "get_lightweight_gemini_vision(b64, prompt=FRAME_PROMPT)" in src
+    main = open(os.path.join(ROOT, "vts_7L_test.py"), encoding="utf-8").read()
+    fn = next(n for n in ast.walk(ast.parse(main)) if isinstance(n, ast.AsyncFunctionDef)
+              and n.name == "get_lightweight_gemini_vision")
+    assert "prompt" in [a.arg for a in fn.args.args]
+
+
+def test_watch_note_is_not_shown_as_a_viewer_comment():
+    import os
+    main = open(os.path.join(ROOT, "vts_7L_test.py"), encoding="utf-8").read()
+    assert '【點播看片筆記（{u_name}）】' in main
+    assert 'req_u = caller_user or ("觀眾" if caller_target == "audience" else "老爸")' in main
