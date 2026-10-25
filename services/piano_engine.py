@@ -101,6 +101,9 @@ CURRENT_SPEAKING_TARGET = "none"
 current_ai_state = "IDLE"
 CURRENT_GEMINI_KEY_STEP = 0
 LAST_PLAY_REQUEST_TIME: Dict[str, float] = {}
+# 點曲先後：AI 判斷意圖要好幾秒，先點的還在判斷、後點的已經開彈，先點的判斷完不能把後點的蓋掉
+_PLAY_REQ_SEQ = 0        # 每次 play_virtual_piano 進來就 +1
+_PLAY_STARTED_SEQ = 0    # 最後一個真的開彈（或開始抓譜）的請求編號
 
 def get_current_speaking_target() -> str:
     """當前說話對象（主程式交進來的；沒綁就用本模組自己記的），預設 dad。"""
@@ -2344,6 +2347,9 @@ async def play_virtual_piano(song_name: str = "", custom_sheet: str = "", auto_r
         is_direct_song_name: (可選) 是否為明確傳入之曲名（如 Python 調用或預先判定為點歌），避免二次 AI 意圖檢測誤判為純對話。
     """
     global current_piano_task, PIANO_SESSION_ID, is_piano_active, current_piano_song_title, current_piano_midi_file, IS_PIANO_AUTO_RADIO_MODE, LAST_PIANO_PLAY_START_TIME, CURRENT_SPEAKING_TARGET, LAST_PIANO_OPEN_TIME
+    global _PLAY_REQ_SEQ, _PLAY_STARTED_SEQ
+    _PLAY_REQ_SEQ += 1
+    my_seq = _PLAY_REQ_SEQ
     LAST_PIANO_PLAY_START_TIME = time.time()
     LAST_PIANO_OPEN_TIME = time.time()
     init_piano_synthesizer()
@@ -2442,16 +2448,21 @@ async def play_virtual_piano(song_name: str = "", custom_sheet: str = "", auto_r
     is_switch_version = ai_intent.get("is_switch_version", False)
     is_replay_command = ai_intent.get("is_replay", False)
 
+    # 判斷意圖這幾秒內，後點的已經開彈：這首排在它後面。舊碼直接開新場次把後點的取消掉，
+    # 被取消的連一行日誌都沒有（2026-10-25 實機：先點稻香、再點小星星，小星星先開彈又被稻香蓋掉）
+    newer_request_started = _PLAY_STARTED_SEQ > my_seq
+
     # 🛑 演奏中排隊接續機制：若目前已有曲目正在真實演奏中（非強制線上指定且非重播指令且非Gemini判定換版本指令）
-    is_actively_playing_now = bool(
-        is_piano_active 
-        and is_piano_window_alive() 
+    is_actively_playing_now = bool(newer_request_started or (
+        is_piano_active
+        and is_piano_window_alive()
         and (
             GLOBAL_PIANO_REALTIME_STATE.get("is_playing", False)
             or (current_piano_task is not None and not current_piano_task.done() and current_piano_song_title)
         )
-    )
-    if not is_explicit_yt and is_actively_playing_now and current_piano_song_title and not is_switch_version:
+    ))
+    async def _queue_request():
+        """排在台上那首後面。回傳給主腦的提示；不用排（重播、空曲名）回 None。"""
         bring_piano_window_to_front()
         clean_q_lower = clean_q.lower()
         current_title_lower = current_piano_song_title.lower()
@@ -2523,6 +2534,12 @@ async def play_virtual_piano(song_name: str = "", custom_sheet: str = "", auto_r
             display_name = current_piano_song_title
             log_print(f"🎹 [7L 鋼琴曲庫] 7L 目前正在演奏《{display_name}》，保持沉醉演奏狀態，不重頭重播。")
             return "[EXPRESSION: 星星眼]"
+        return None
+
+    if not is_explicit_yt and is_actively_playing_now and current_piano_song_title and not is_switch_version:
+        _queued = await _queue_request()
+        if _queued is not None:
+            return _queued
 
     if not target_midi and not is_explicit_yt:
         # 1. 檢查是否為無限電台模式
@@ -2587,6 +2604,12 @@ async def play_virtual_piano(song_name: str = "", custom_sheet: str = "", auto_r
     if target_midi and os.path.exists(target_midi) and not is_midi_playable(target_midi):
         log_print(f"🛡️ [樂譜質檢拒收] 《{os.path.basename(target_midi)}》時長/音符不足，不播，轉線上搜譜！")
         target_midi = None
+    # 查曲庫這段（可能又問了一次 AI）後點的已經開彈：一樣排在它後面，不開新場次把它蓋掉
+    if not is_explicit_yt and _PLAY_STARTED_SEQ > my_seq and current_piano_song_title:
+        _queued = await _queue_request()
+        if _queued is not None:
+            return _queued
+    _PLAY_STARTED_SEQ = max(_PLAY_STARTED_SEQ, my_seq)
     if target_midi and os.path.exists(target_midi):
         _start_piano_worker(target_title, target_midi, custom_sheet=custom_sheet or "")
         return "[EXPRESSION: 星星眼]"
