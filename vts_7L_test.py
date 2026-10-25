@@ -4207,8 +4207,13 @@ async def instinct_live_worker():
     global INSTINCT_LIVE_SESSION
     log_print("🦊 啟動 7L 身體本能 (Instinct) 平行 Live 大腦...")
     while True:
+        live_key = ""   # 下面 except 會用到；金鑰池空的時候舊碼在這裡丟 UnboundLocalError，整個本能腦掛掉
         try:
             _pool = KEYS_AUDIENCE_LIVE if KEYS_AUDIENCE_LIVE else GEMINI_KEYS
+            if not _pool:
+                log_print("⚠️ [本能大腦] 沒有可用的 Gemini 金鑰，1 分鐘後再試")
+                await asyncio.sleep(60)
+                continue
             live_key = random.choice([k for k in _pool if not key_cooling(k, "gemini-3.8-live")] or _pool)
             client = genai.Client(api_key=live_key)
             

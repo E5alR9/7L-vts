@@ -440,6 +440,13 @@ def test_nothing_is_spoken_while_asleep():
     assert src.index("if IS_SLEEPING:") < src.index('set_ai_state("TALKING"')
 
 
+def test_instinct_worker_survives_an_empty_key_pool():
+    """金鑰池空的時候 random.choice 丟錯，except 裡又用到還沒設定的 live_key，本能腦整個掛掉（2026-10-25 實機）。"""
+    src = _src("instinct_live_worker")
+    assert src.index('live_key = ""') < src.index("try:")
+    assert "if not _pool:" in src
+
+
 def test_owner_text_carries_companion_notes_to_the_live_brain():
     """伴看筆記以前只給 REST 備援大腦，Live 主腦看不到，問影片在演什麼只能靠舊記憶亂接（2026-10-25 實機）。"""
     import types as _t
