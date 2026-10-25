@@ -237,21 +237,40 @@ def test_nv_model_and_404_pauses_nv():
     assert ns["_nv_subagent_down"]()
 
 
-def test_screen_task_gets_one_silent_reply():
+def test_screen_task_is_handed_to_the_vision_brain():
+    """主腦把「看螢幕」丟給子智能體：子智能體看不到畫面，以前只回「視覺大腦會回報」卻沒人去叫，
+    她就一直不講話（2026-10-26 實機）。現在直接啟動看畫面，請她先說「我看看」；剛看過就不重看。"""
     import re as _re
     from core.hard_command import build_slip_text
 
     async def never(*a, **k):
         raise AssertionError("看畫面不該跑 CPU 或副腦")
 
-    sess = _FakeSession()
-    ns = _load("_handle_invoke_subagent", types=types, asyncio=asyncio, session=sess, ws_send_lock=asyncio.Lock(),
-               background_tool_executor=never, nv_interpret_task=never, build_slip_text=build_slip_text,
-               _SUBAGENT_TOTAL_TIMEOUT=45.0, _SUBAGENT_VISION_TASK_RE=_re.compile(_const_pattern("_SUBAGENT_VISION_TASK_RE")))
-    asyncio.run(ns["_handle_invoke_subagent"](sess, asyncio.Lock(), "invoke_subagent", "c1", "看老爸螢幕上面有什麼"))
-    assert len(sess.sent) == 1
-    assert sess.sent[0].scheduling == types.FunctionResponseScheduling.SILENT
-    assert "不要描述畫面" in sess.sent[0].response["result"]
+    looked = []
+
+    async def live_vision_tool_task(session, vts):
+        looked.append(session)
+
+    def run(recent):
+        sess = _FakeSession()
+        ns = _load("_handle_invoke_subagent", types=types, asyncio=asyncio, time=time,
+                   background_tool_executor=never, nv_interpret_task=never, build_slip_text=build_slip_text,
+                   _SUBAGENT_TOTAL_TIMEOUT=45.0, _SUBAGENT_VISION_TASK_RE=_re.compile(_const_pattern("_SUBAGENT_VISION_TASK_RE")),
+                   _vision_report_recent=lambda now: recent, live_vision_tool_task=live_vision_tool_task,
+                   vc=pytypes.SimpleNamespace(GLOBAL_VTS=None))
+
+        async def go():
+            ns["spawn"] = lambda c: asyncio.ensure_future(c)
+            await ns["_handle_invoke_subagent"](sess, asyncio.Lock(), "invoke_subagent", "c1", "看老爸螢幕上面有什麼")
+            await asyncio.sleep(0)
+        asyncio.run(go())
+        return sess
+    sess = run(False)
+    assert looked == [sess] and len(sess.sent) == 1
+    assert sess.sent[0].scheduling == types.FunctionResponseScheduling.WHEN_IDLE
+    assert "不要描述畫面" in sess.sent[0].response["result"] and "我看看" in sess.sent[0].response["result"]
+    sess = run(True)                                      # 剛看過：不重看，照剛才的回報回答
+    assert len(looked) == 1 and sess.sent[0].scheduling == types.FunctionResponseScheduling.SILENT
 
 
 def test_background_tool_failures_are_logged(monkeypatch):

@@ -4399,9 +4399,15 @@ async def _handle_invoke_subagent(session, ws_send_lock, _fn_name, _fn_call_id, 
     try:
         if _task_ins and _SUBAGENT_VISION_TASK_RE.search(_task_ins):
             # 子智能體看不到畫面：照舊流程會回「沒結果，請妳自己回答」，她就自己編畫面內容
-            # （2026-10-25 實機：視覺結果還沒回來，她先說「螢幕上滿滿的都是舊照片」）
-            await _respond("[系統底層：看畫面不歸子智能體管，視覺大腦（[TOOL:VISION]）會回報，"
-                           "在那之前不要描述畫面內容。]", _quiet)
+            # （2026-10-25 實機：視覺結果還沒回來，她先說「螢幕上滿滿的都是舊照片」）。
+            # 直接請視覺大腦去看：以前只回「視覺大腦會回報」卻沒人去叫，她就一直不講話（2026-10-26 實機）
+            if _vision_report_recent(time.time()):
+                await _respond("[系統底層：剛剛才看過畫面，照剛才的視覺回報回答就好，不要再看一次。]", _quiet)
+            else:
+                log_print("⚡ [子智能體] 看畫面交給視覺大腦")
+                spawn(live_vision_tool_task(session, vc.GLOBAL_VTS))
+                await _respond("[系統底層：已經請視覺大腦去看畫面，幾秒後回報。在那之前不要描述畫面內容，"
+                               "可以先說一句「我看看～」。]", _speak)
             return
         if _task_ins:
             # ⚠️ requester 傳空字串：task_ins 是主腦自己寫的指令，
