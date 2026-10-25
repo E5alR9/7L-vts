@@ -326,3 +326,36 @@ def test_whole_sentence_first_then_segments_as_fallback(monkeypatch):
     calls.clear()
     assert lx.synthesize_xiaoyi_bytes("收到。沒問題。")
     assert [c[0] for c in calls] == ["收到。沒問題。"]           # 短句整句一次就過
+
+
+def test_mixed_zh_ja_boundary_repair():
+    """中日交界的漢字歸屬（2026-10-25 實測 split-lang 分錯：夜→中文、老爸→日文）。"""
+    import local_xiaoyi_service as lx
+
+    def seg(*pairs):
+        return [{"lang": l, "text": t} for l, t in pairs]
+
+    def run(*pairs):
+        return [(s["lang"], s["text"]) for s in lx._repair_lang_segments(seg(*pairs))]
+
+    # 假名助詞前的漢字屬於日文詞
+    assert run(("zh", "這首歌叫做夜"), ("ja", "に駆ける，"), ("zh", "是的歌喔。")) == [
+        ("zh", "這首歌叫做"), ("ja", "夜に駆ける，"), ("zh", "是的歌喔。")]
+    # 中文專用字不搬（說）
+    assert run(("zh", "老爸說"), ("ja", "の歌。")) == [("zh", "老爸說"), ("ja", "の歌。")]
+    # 不是助詞開頭的日文詞不搬（謝謝｜ありがとう）
+    assert run(("zh", "謝謝"), ("ja", "ありがとう。")) == [("zh", "謝謝"), ("ja", "ありがとう。")]
+    # 假名後面的中文稱呼切回中文
+    assert run(("ja", "さすが老爸，"), ("zh", "這個太厲害了。")) == [("ja", "さすが"), ("zh", "老爸，這個太厲害了。")]
+    assert run(("ja", "ありがとう大家。")) == [("ja", "ありがとう"), ("zh", "大家。")]
+    # 日文本身的漢字不動（様、一日）
+    assert run(("ja", "今日も一日お疲れ様でした。"), ("zh", "晚安囉老爸。")) == [
+        ("ja", "今日も一日お疲れ様でした。"), ("zh", "晚安囉老爸。")]
+    # 其他語言原樣
+    assert run(("zh", "是"), ("en", "YOASOBI"), ("zh", "的歌")) == [("zh", "是"), ("en", "YOASOBI"), ("zh", "的歌")]
+
+
+def test_lang_repair_is_installed_on_pipeline_init():
+    src = open(os.path.join(ROOT, "local_xiaoyi_service.py"), encoding="utf-8").read()
+    assert "_tts_pipeline = TTS(config)\n            _install_lang_repair()" in src
+    assert "segs if (default_lang or not _LANG_REPAIR_ON) else _repair_lang_segments(segs)" in src

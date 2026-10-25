@@ -199,6 +199,73 @@ def _split_for_tts(text: str, limit: int = None) -> list:
     return out or [text]
 
 
+# ── 中日混合句的語言分段修正 ──────────────────────────────────────────
+# GPT-SoVITS 的 auto 模式靠 split-lang 分段，漢字中日共用，只能看鄰居猜，交界處常猜錯（2026-10-25 實測）：
+#   「這首歌叫做夜に駆ける」→「夜」被分進中文念成 yè；「さすが老爸」→「老爸」被分進日文念成「ろう」。
+# 在它分完之後補一層交界修正；整句仍是一次合成，語氣連貫。
+_KANA_RE = re.compile(r"[぀-ゟ゠-ヿ｡-ﾟ]")
+_HAN_RE = re.compile(r"[一-鿿]")
+# 漢字後面緊接這些假名，通常是助詞，前面的漢字屬於日文詞（夜に、歌を、空が、君の）
+_JA_PARTICLE_START = set("にをがのはへでともやか")
+# 中文才會出現在這種位置的字：看到就不搬進日文、或從日文切回中文
+_ZH_ONLY_CHARS = set("爸媽們這那嗎呢吧啦喔囉哦嘛妳你您誰麼啊呀咧欸唷耶喲我他她的了是在叫做說唱彈聽跟和給把被讓很超也都就還")
+_ZH_WORDS = ("老爸", "老媽", "大家", "各位", "觀眾", "朋友")
+_LANG_REPAIR_ON = os.getenv("XIAOYI_LANG_REPAIR", "1") != "0"
+
+
+def _repair_lang_segments(segs: list) -> list:
+    """修正 split-lang 在中日交界的分段：[{'lang','text'}...] → 同格式。只動 zh/ja 交界，其他原樣。"""
+    segs = [dict(s) for s in segs]
+    # 1. 中文段尾巴的漢字其實是後面日文詞的一部分（夜|に駆ける）：最多搬 2 個字，遇到中文才有的字就停
+    for i in range(len(segs) - 1):
+        a, b = segs[i], segs[i + 1]
+        if a.get("lang") != "zh" or b.get("lang") != "ja" or b["text"][:1] not in _JA_PARTICLE_START:
+            continue
+        keep, move = a["text"], ""
+        while keep and len(move) < 2 and _HAN_RE.match(keep[-1]) and keep[-1] not in _ZH_ONLY_CHARS:
+            move, keep = keep[-1] + move, keep[:-1]
+        if move and keep.strip():
+            a["text"], b["text"] = keep, move + b["text"]
+    # 2. 日文段尾巴接著中文詞（さすが老爸、ありがとう大家）：最後一個假名之後的漢字切回中文
+    out = []
+    for s in segs:
+        if s.get("lang") == "ja":
+            m = re.search(r"([一-鿿]+)([，,。！？!?、\s]*)$", s["text"])
+            if m and _KANA_RE.search(s["text"][:m.start()]) and (
+                    set(m.group(1)) & _ZH_ONLY_CHARS or any(w in m.group(1) for w in _ZH_WORDS)):
+                out.append({"lang": "ja", "text": s["text"][:m.start()]})
+                out.append({"lang": "zh", "text": m.group(1) + m.group(2)})
+                continue
+        out.append(s)
+    merged = []
+    for s in out:
+        if not s.get("text"):
+            continue
+        if merged and merged[-1].get("lang") == s.get("lang"):
+            merged[-1]["text"] += s["text"]
+        else:
+            merged.append(s)
+    return merged
+
+
+def _install_lang_repair():
+    """把 _repair_lang_segments 接到 GPT-SoVITS 的 auto 分段後面（只影響 auto，指定語言的不動）。"""
+    try:
+        from text.LangSegmenter import LangSegmenter
+        if getattr(LangSegmenter, "_7l_lang_repair", False):
+            return
+        original = LangSegmenter.getTexts
+
+        def _get_texts(text, default_lang=""):
+            segs = original(text, default_lang)
+            return segs if (default_lang or not _LANG_REPAIR_ON) else _repair_lang_segments(segs)
+
+        LangSegmenter.getTexts = staticmethod(_get_texts)
+        LangSegmenter._7l_lang_repair = True
+    except Exception as e:
+        print(f"⚠️ [GPT-SoVITS] 中日分段修正沒掛上（照原本分段）：{e}")
+
+
 def _synth_segments(inputs: dict, segs: list, tries: int):
     """逐段合成，每段最多 tries 次（不合格才重抽）。回 (取樣率, 各段音訊, 是否每段都合格)。
     每段不合格到最後就用第一次的結果，交給整句檢查（tts_router）再把關。呼叫端要持有 _thread_lock。"""
@@ -297,6 +364,7 @@ def init_gpt_sovits():
             config.bert_base_path = "pretrained_models/chinese-roberta-wwm-ext-large"
             
             _tts_pipeline = TTS(config)
+            _install_lang_repair()
             
             #  核心預熱與常駐快取：初始化時即完成參考音與文字 BERT 萃取，使後續所有合成省去 80% 時間！
             _REF_ZH = _tight_ref(REF_VOICE_ZH)
