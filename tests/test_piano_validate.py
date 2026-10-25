@@ -35,3 +35,28 @@ def test_playable_floor():
         assert pe.is_midi_playable(empty) is False
         assert pe.is_midi_playable(os.path.join(d, "nope.mid")) is False
         assert pe.is_midi_playable("") is False
+
+
+def test_queue_path_uses_the_same_checks_as_playing_now():
+    """演奏中點歌走排隊那條路，舊碼直接拿曲庫別名，晴天排進 91 bytes 的 logo（2026-10-25 實機）。"""
+    import inspect
+    src = inspect.getsource(pe.play_virtual_piano)
+    queue = src[src.index("exact_local = AUTHENTIC_MIDI_MAP.get(norm_k)"):src.index("PIANO_REQUEST_QUEUE.append(")]
+    assert "is_midi_match_valid(clean_target_song, os.path.basename(exact_local))" in queue
+    assert "is_midi_playable(req_midi)" in queue
+
+
+def test_online_result_is_checked_against_the_song_not_the_search_words(monkeypatch):
+    """搜尋字帶歌手（周杰倫 晴天 鋼琴 MIDI），拿它比對的話同歌手的夜曲也會過關（2026-10-25 實機）。"""
+    seen = {}
+
+    def fake_fetch(q, out_dir, validate=None):
+        seen["q"] = q
+        seen["ok"] = validate("周杰倫 Jay Chou - 夜曲 Nocturne (Instrumental)")
+        seen["right"] = validate("周杰倫 晴天 Sunny Day piano")
+        return None
+    monkeypatch.setattr(pe.pianist_midi_engine, "fetch_and_download_pianist_match", fake_fetch)
+    pe._fetch_validated_midi("周杰倫 晴天 鋼琴 MIDI", "晴天")
+    assert seen == {"q": "周杰倫 晴天 鋼琴 MIDI", "ok": False, "right": True}
+    src = __import__("inspect").getsource(pe.play_virtual_piano)
+    assert "_fetch_validated_midi, song_str, c_song)" in src     # 排隊那條路有帶歌名

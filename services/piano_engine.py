@@ -1812,11 +1812,14 @@ def is_midi_playable(midi_path: str, min_sec: float = 10.0, min_notes: int = 20)
     except Exception:
         return False
 
-def _fetch_validated_midi(song_query: str) -> Optional[str]:
-    """線上抓譜＋標題驗證（2026-10-11 logo 事件）：標題不符的直接不要，往下一個來源掉。"""
+def _fetch_validated_midi(song_query: str, title: str = "") -> Optional[str]:
+    """線上抓譜＋標題驗證（2026-10-11 logo 事件）：標題不符的直接不要，往下一個來源掉。
+    title：要比對的歌名。搜尋字常帶歌手（「周杰倫 晴天 鋼琴 MIDI」），拿它比對的話
+    同歌手的別首也會過關（2026-10-25 實機：點晴天排進《周杰倫 - 夜曲》）。"""
+    want = title or song_query
     return pianist_midi_engine.fetch_and_download_pianist_match(
         song_query, MIDI_SHEETS_DIR,
-        validate=lambda t: is_midi_match_valid(song_query, t))
+        validate=lambda t: is_midi_match_valid(want, t))
 
 async def match_midi_with_ai(song_query: str, available_files: list) -> str:
     """相容保留：透過 resolve_piano_intent_by_ai 取得匹配檔名"""
@@ -2473,7 +2476,10 @@ async def play_virtual_piano(song_name: str = "", custom_sheet: str = "", auto_r
             # 1. 優先查本地精準同名或 Gemini 已匹配檔案
             norm_k = clean_target_song.lower().strip()
             exact_local = AUTHENTIC_MIDI_MAP.get(norm_k)
-            req_midi = exact_local if (exact_local and os.path.exists(exact_local)) else None
+            # 跟直接開彈同一套檢查：曲庫別名可能指到不相干的壞檔
+            # （2026-10-25 實機：演奏中點「晴天」，排進去的是 91 bytes 的 onlinesequencer.net logo）
+            req_midi = exact_local if (exact_local and os.path.exists(exact_local)
+                                       and is_midi_match_valid(clean_target_song, os.path.basename(exact_local))) else None
             req_title = clean_song_title_for_speech(os.path.splitext(os.path.basename(exact_local))[0] if req_midi else clean_target_song)
             
             if not req_midi and ai_intent.get("matched_files"):
@@ -2487,7 +2493,10 @@ async def play_virtual_piano(song_name: str = "", custom_sheet: str = "", auto_r
                 if local_p and is_midi_match_valid(clean_target_song, os.path.basename(local_p)):
                     req_midi = local_p
                     req_title = clean_song_title_for_speech(matched_t or clean_target_song)
-                    
+
+            if req_midi and not is_midi_playable(req_midi):
+                log_print(f"🛡️ [樂譜質檢拒收] 《{os.path.basename(req_midi)}》時長/音符不足，不排，轉線上搜譜！")
+                req_midi = None
             if req_midi and os.path.exists(req_midi):
                 PIANO_REQUEST_QUEUE.append({"title": req_title, "midi_path": req_midi, "requester": requester_name, "target": target})
                 log_print(f"🎵 [鋼琴點歌排隊] 成功預約《{req_title}》（來自 {requester_name}）排入下一首！（目前待播隊列中共 {len(PIANO_REQUEST_QUEUE)} 首）")
@@ -2499,7 +2508,7 @@ async def play_virtual_piano(song_name: str = "", custom_sheet: str = "", auto_r
                 async def preload_and_queue_worker(song_str: str, req_n: str, req_t: str, c_song: str):
                     try:
                         log_print(f"🌐 [點歌排隊線上搜譜] 正在異步背景搜尋預載《{song_str}》...")
-                        dl_p = await asyncio.to_thread(_fetch_validated_midi, song_str)
+                        dl_p = await asyncio.to_thread(_fetch_validated_midi, song_str, c_song)
                         if dl_p and os.path.exists(dl_p):
                             t_name = clean_song_title_for_speech(os.path.splitext(os.path.basename(dl_p))[0])
                             save_midi_catalog_entry(song_str, dl_p)
