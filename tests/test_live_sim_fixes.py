@@ -76,7 +76,7 @@ def test_tight_reference_shortens_pauses(tmp_path, monkeypatch):
     dur = float(subprocess.run(["ffprobe", "-v", "quiet", "-show_entries", "format=duration", "-of", "csv=p=0", out],
                                capture_output=True, text=True).stdout.strip())
     assert dur < 4.0                                  # 原本 5.4 秒，停頓壓短
-    monkeypatch.setenv("XIAOYI_TIGHT_REF", "0")
+    monkeypatch.setattr(lx, "_USE_TIGHT_REF", False)
     assert lx._tight_ref(str(src)) == str(src)       # 可以關掉
     assert lx._tight_ref(str(tmp_path / "沒有這個檔.wav")).endswith("沒有這個檔.wav")
 
@@ -359,3 +359,16 @@ def test_lang_repair_is_installed_on_pipeline_init():
     src = open(os.path.join(ROOT, "local_xiaoyi_service.py"), encoding="utf-8").read()
     assert "_tts_pipeline = TTS(config)\n            _install_lang_repair()" in src
     assert "segs if (default_lang or not _LANG_REPAIR_ON) else _repair_lang_segments(segs)" in src
+
+
+def test_tuning_knobs_are_constants_not_env():
+    """.env 只放 API 金鑰（2026-10-25 老爸要求）：這些調整值寫在程式裡，不從環境變數讀。"""
+    names = ["XIAOYI_TIGHT_REF", "XIAOYI_TOP_P", "XIAOYI_SEGMENT_CHARS", "XIAOYI_LANG_REPAIR", "NV_SUBAGENT_MODEL",
+             "TTS_QUALITY_RETRIES", "FASTEMBED_CACHE_DIR", "OWNER_ACCOUNT_IDS", "CONSOLE_QUICKEDIT",
+             "VISION_TIME_BUDGET_SEC", "VTS_PORT"]
+    files = ["vts_7L_test.py", "local_xiaoyi_service.py", "services/tts_router.py", "services/embedder.py",
+             "services/vts_client.py", "core/identity.py", "core/env_config.py"]
+    for f in files:
+        src = open(os.path.join(ROOT, f), encoding="utf-8").read()
+        for n in names:
+            assert f'getenv("{n}"' not in src and f'"key": "{n}"' not in src, (f, n)

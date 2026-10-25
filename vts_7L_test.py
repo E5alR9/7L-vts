@@ -540,6 +540,8 @@ try:
 except Exception:
     pass
 
+KEEP_CONSOLE_QUICKEDIT = False   # True = 保留主控台的 QuickEdit（滑鼠點一下就會凍結整個 7L，見下方）
+
 #  設定 Windows 控制台為 UTF-8 代碼頁 (CP 65001) 並開啟 ANSI 虛擬終端處理，徹底修復中文字元重複、動態刷新與換行殘影
 if sys.platform == "win32":
     try:
@@ -559,8 +561,8 @@ if sys.platform == "win32":
         if kernel32.GetConsoleMode(hStdOut, ctypes.byref(mode)):
             kernel32.SetConsoleMode(hStdOut, mode.value | 0x0004 | 0x0002)
         # 關閉 QuickEdit：傳統主控台視窗裡滑鼠一點選取，輸出就會暫停，所有 print 都在 event loop 上，
-        # 整個 7L（追蹤、TTS、Live）會跟著凍結到按 Esc。要保留可在 .env 設 CONSOLE_QUICKEDIT=1。
-        if os.getenv("CONSOLE_QUICKEDIT", "0") != "1":
+        # 整個 7L（追蹤、TTS、Live）會跟著凍結到按 Esc。
+        if not KEEP_CONSOLE_QUICKEDIT:
             hStdIn = kernel32.GetStdHandle(-10)
             in_mode = ctypes.c_ulong()
             if kernel32.GetConsoleMode(hStdIn, ctypes.byref(in_mode)):
@@ -1089,6 +1091,9 @@ def build_rag_section(query: str, k: int = 3) -> str:
     except Exception:
         return ""
 
+VISION_TIME_BUDGET_SEC = 15.0   # 餘光視覺一次最多花這麼久（超過看到的也是舊畫面）
+
+
 async def get_lightweight_gemini_vision(image_base64: str, temporal_frames: list | None = None) -> str:
     """PROVIDER: GEMINI-VISION（3.1-flash-lite→3.6-flash；見 docs/AI_SOURCES.md） 【3.1-flash-lite 深度視覺認真看】：受 Live API 哨兵喚醒時才精準啟動，支援傳入上次看到現在的所有時序影格，形成動態視覺感知。"""
     if not image_base64:
@@ -1152,7 +1157,7 @@ async def get_lightweight_gemini_vision(image_base64: str, temporal_frames: list
         all_parts.append(types.Part.from_bytes(data=img_bytes, mime_type="image/jpeg"))
 
         # 總時間上限：舊版 4 把 key × 4 個模型 × 6 秒，最壞 96 秒才回來，看到的早就是舊畫面
-        deadline = time.time() + float(os.getenv("VISION_TIME_BUDGET_SEC", "15"))
+        deadline = time.time() + VISION_TIME_BUDGET_SEC
         for idx, g_key in enumerate(candidate_keys[:4]):
             client = genai.Client(api_key=g_key)
             for model_name in GEMINI_MODELS:
@@ -8333,17 +8338,13 @@ _SUBAGENT_TOTAL_TIMEOUT = 45.0     # 工具判定＋搜尋／深度思考整段�
 _SUBAGENT_THINK_SUFFIX = ("\n（深度思考模式：先在 [THINK]...[/THINK] 裡一步一步寫出你的思考步驟（分析意圖、拆解問題、檢查歧義），"
                           "再在 [REPLY]...[/REPLY] 裡給出最終結論。結論要簡潔、直接可用。不要呼叫任何工具，必須輸出文字。）")
 
-# NV 子智能體：模型可用 NV_SUBAGENT_MODEL 換（熱切換免重啟）。舊的 nemotron-3-super-120b-a12b
+# NV 子智能體用的模型。舊的 nemotron-3-super-120b-a12b
 # 2026-10-24 在 3 把金鑰上都回 404，每次都白試一次才換 Gemini；回 404 就先停用 NV 一段時間。
-_NV_SUBAGENT_DEFAULT_MODEL = "nvidia/nemotron-3-ultra-550b-a55b"
+_NV_SUBAGENT_MODEL = "nvidia/nemotron-3-ultra-550b-a55b"
 _NV_SUBAGENT_TOOL_TIMEOUT = 12.0
 _NV_SUBAGENT_THINK_TIMEOUT = 25.0
 _NV_SUBAGENT_DOWN_SEC = 600.0
 _NV_SUBAGENT_DOWN_UNTIL = 0.0
-
-
-def _nv_subagent_model() -> str:
-    return (os.getenv("NV_SUBAGENT_MODEL") or "").strip() or _NV_SUBAGENT_DEFAULT_MODEL
 
 
 def _nv_subagent_down() -> bool:
@@ -8355,7 +8356,7 @@ def _nv_subagent_note_error(e, model: str):
     global _NV_SUBAGENT_DOWN_UNTIL
     if getattr(e, "status_code", None) == 404:
         _NV_SUBAGENT_DOWN_UNTIL = time.time() + _NV_SUBAGENT_DOWN_SEC
-        log_print(f"⚠️ [NV 子智能體] 模型 {model} 回 404，先停用 NV {_NV_SUBAGENT_DOWN_SEC / 60:.0f} 分鐘；請檢查 NV_SUBAGENT_MODEL。")
+        log_print(f"⚠️ [NV 子智能體] 模型 {model} 回 404，先停用 NV {_NV_SUBAGENT_DOWN_SEC / 60:.0f} 分鐘；請檢查 _NV_SUBAGENT_MODEL。")
 
 
 # 交給主腦轉述的結果：舊文案寫「不要照唸」，主腦就自由發揮把事實丟了——
@@ -8404,7 +8405,7 @@ async def _nv_tool_pass(task_ins, target, requester_name, system_instruction_tex
     # NVIDIA 不允許函數名稱包含點號 (.)，先 wire
     for wt in openai_tools:
         wt["function"]["name"] = gr._wire_name(wt["function"]["name"])
-    nv_model = _nv_subagent_model()
+    nv_model = _NV_SUBAGENT_MODEL
     try:
         async with track_key(nv_key):
             nv_resp = await asyncio.wait_for(nv_client.chat.completions.create(
@@ -8452,7 +8453,7 @@ async def _nv_think_pass(task_ins, target, requester_name, system_instruction_te
     # 強制先寫思考步驟再給結論（step-by-step 推理顯著提升複雜問題正確率）：
     # 不掛 tools（掛著它只會想著調用，不會好好想），temp 0.8 保證想得開
     log_print("🧠 [NV 深思] 第一棒無工具調用，轉深度思考模式重想一次...")
-    nv_model = _nv_subagent_model()
+    nv_model = _NV_SUBAGENT_MODEL
     try:
         async with track_key(nv_key):
             think_resp = await asyncio.wait_for(nv_client.chat.completions.create(

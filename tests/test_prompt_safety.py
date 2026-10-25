@@ -22,12 +22,11 @@ MAIN_SRC = open(os.path.join(ROOT, "vts_7L_test.py"), encoding="utf-8").read()
 
 # ── 擁有者認證 ──
 def test_owner_by_account_id_only(monkeypatch):
-    monkeypatch.delenv("OWNER_ACCOUNT_IDS", raising=False)
     assert ident.is_owner_account("qiwai")
     assert ident.is_owner_account("@7L_official")   # 正規化：大小寫、底線、@
     assert not ident.is_owner_account("")
     assert not ident.is_owner_account("老爸")          # 暱稱不算
-    monkeypatch.setenv("OWNER_ACCOUNT_IDS", "my_real_id")
+    monkeypatch.setattr(ident, "OWNER_ACCOUNT_IDS", "my_real_id")
     assert ident.is_owner_account("myrealid")
     assert not ident.is_owner_account("qiwai")         # 設了就只認設定的
 

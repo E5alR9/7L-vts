@@ -161,8 +161,8 @@ class RobustVTSClient:
             "authentication_token_path": "./vts_token.txt"
         }
         self.token_file = self.plugin_info.get("authentication_token_path", "./vts_token.txt")
-        # 埠號：參數 > .env 的 VTS_PORT > 8001；連不上時會自動掃 8001~8010（VTS 設定裡的 API 埠可能被改過）
-        self.port = int(port or os.getenv("VTS_PORT") or 8001)
+        # 埠號：參數 > 8001；連不上時會自動掃 8001~8010（VTS 設定裡的 API 埠可能被改過）
+        self.port = int(port or 8001)
         self.uri = f"ws://127.0.0.1:{self.port}"
         self.ws = None
         self.authentic_token = None
@@ -211,7 +211,7 @@ class RobustVTSClient:
                     except Exception: pass
                     continue
                 if p != self.port:
-                    log_print(f"🔎 [VTS] Port {self.port} 連不上，在 Port {p} 找到 VTube Studio（可在 .env 設 VTS_PORT={p}）")
+                    log_print(f"🔎 [VTS] Port {self.port} 連不上，在 Port {p} 找到 VTube Studio，改用這個埠")
                     self.port = p
                     self.uri = f"ws://127.0.0.1:{p}"
                 self.ws = ws

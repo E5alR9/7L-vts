@@ -465,7 +465,7 @@ def _ffmpeg_exe() -> str:
 # 連續靜音超過幾秒判缺段（自娛自樂事故：18 秒音訊裡 14 秒數位靜音，時長反而超標）。
 # TTS 都是短句，正常標點停頓 <0.5s；2.0s 以上的洞一定是合成端掉片。
 MAX_SILENCE_SEC = 2.0
-QUALITY_RETRIES = int(os.getenv("TTS_QUALITY_RETRIES", "2"))   # 品質不合格時同引擎重抽次數
+QUALITY_RETRIES = 2   # 品質不合格時同引擎重抽次數
 
 
 def _quality_problem(text: str, data) -> str:

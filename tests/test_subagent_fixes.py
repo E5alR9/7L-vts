@@ -172,14 +172,11 @@ def test_search_result_is_a_report_to_be_spoken():
     assert kind == "report" and "159.4" in text
 
 
-def test_nv_model_is_configurable_and_404_pauses_nv(monkeypatch):
-    ns = _load("_nv_subagent_model", "_nv_subagent_down", "_nv_subagent_note_error", os=os, time=time,
-               _NV_SUBAGENT_DEFAULT_MODEL=_const("_NV_SUBAGENT_DEFAULT_MODEL"),
+def test_nv_model_and_404_pauses_nv():
+    assert _const("_NV_SUBAGENT_MODEL") != "nvidia/nemotron-3-super-120b-a12b"   # 2026-10-24 已 404
+    assert "os.getenv" not in ast.get_source_segment(MAIN, _fn("_nv_tool_pass"))  # 模型名寫死在程式，不讀 .env
+    ns = _load("_nv_subagent_down", "_nv_subagent_note_error", time=time,
                _NV_SUBAGENT_DOWN_SEC=600.0, _NV_SUBAGENT_DOWN_UNTIL=0.0)
-    monkeypatch.delenv("NV_SUBAGENT_MODEL", raising=False)
-    assert ns["_nv_subagent_model"]() != "nvidia/nemotron-3-super-120b-a12b"   # 2026-10-24 已 404
-    monkeypatch.setenv("NV_SUBAGENT_MODEL", "nvidia/some-other")
-    assert ns["_nv_subagent_model"]() == "nvidia/some-other"
     ns["_nv_subagent_note_error"](pytypes.SimpleNamespace(status_code=429), "m")
     assert not ns["_nv_subagent_down"]()
     ns["_nv_subagent_note_error"](pytypes.SimpleNamespace(status_code=404), "m")

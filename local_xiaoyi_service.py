@@ -169,8 +169,9 @@ _REF_JA = None   # 日文同理：實測失敗率 4/12 → 1/12
 # top_p 必須是 1.0（不做核心取樣）：0.8 時念到停頓處，「靜音」單位的機率就佔滿那 80%，候選裡只剩靜音，
 # 「結束」和「繼續說話」都被排除，於是空白一路生成到長度上限＝念一半就停。這是 TTS 失敗的根本原因：
 # 2026-10-25 實測一次只改一個參數，top_p 0.8→1.0 失敗 15%→0/16；只升溫度 12%、只降 top_k 反而 38%。
-_TOP_P = float(os.getenv("XIAOYI_TOP_P", "1.0"))
-_SEGMENT_CHARS = int(os.getenv("XIAOYI_SEGMENT_CHARS", "22"))   # 整句不合格時的備援切段長度；0 = 不切段
+_TOP_P = 1.0
+_SEGMENT_CHARS = 22   # 整句不合格時的備援切段長度；0 = 不切段
+_USE_TIGHT_REF = True  # 參考音用句間停頓壓短版（見 _tight_ref）；False = 用原檔
 _SEGMENT_TRIES = 3
 
 
@@ -210,7 +211,7 @@ _JA_PARTICLE_START = set("にをがのはへでともやか")
 # 中文才會出現在這種位置的字：看到就不搬進日文、或從日文切回中文
 _ZH_ONLY_CHARS = set("爸媽們這那嗎呢吧啦喔囉哦嘛妳你您誰麼啊呀咧欸唷耶喲我他她的了是在叫做說唱彈聽跟和給把被讓很超也都就還")
 _ZH_WORDS = ("老爸", "老媽", "大家", "各位", "觀眾", "朋友")
-_LANG_REPAIR_ON = os.getenv("XIAOYI_LANG_REPAIR", "1") != "0"
+_LANG_REPAIR_ON = True
 
 
 def _repair_lang_segments(segs: list) -> list:
@@ -326,8 +327,8 @@ def _tight_ref(path: str) -> str:
 
     原參考音 7.3 秒裡有一半是句間停頓，模型會學著「念一兩個字就停住、後面全是靜音」：
     實測 12 次失敗 7 次；只壓停頓、音色不變，0/12 失敗，合成也從平均 10 秒變 2.5 秒（2026-10-25）。
-    XIAOYI_TIGHT_REF=0 可關掉，改回原檔。"""
-    if os.getenv("XIAOYI_TIGHT_REF", "1") == "0" or not path or not os.path.exists(path):
+    _USE_TIGHT_REF = False 可改回原檔（top_p 修好後兩者都穩定，差別只在句間停頓 0.32 vs 0.49 秒）。"""
+    if not _USE_TIGHT_REF or not path or not os.path.exists(path):
         return path
     root, ext = os.path.splitext(path)
     out = f"{root}_tight{ext or '.wav'}"

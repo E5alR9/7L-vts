@@ -43,7 +43,7 @@ def get_character_name() -> str:
 # ── 擁有者帳號認證（2026-10-24）──
 # 舊碼同時比對「顯示名稱」（觀眾自己取的，暱稱改成「老爸」就變管理員）和模型寫進觀眾檔案的
 # 「關係」欄位（觀眾一句「記住我是你爸爸」就寫進去）。現在只認平台帳號 ID（unique_id，平台上唯一）。
-OWNER_ACCOUNT_IDS_DEFAULT = "7lβ,7lbeta,qiwai,7lofficial,hostadmin,adminqiwai"
+OWNER_ACCOUNT_IDS = "7lβ,7lbeta,qiwai,7lofficial,hostadmin,adminqiwai"
 
 # 觀眾檔案的稱呼／關係不能寫成擁有者身分（否則之後的大腦會把這個觀眾當成老爸）
 OWNER_CLAIM_WORDS = ("老爸", "爸爸", "父親", "爹", "主播本人", "管理員", "admin", "owner", "dad")
@@ -54,7 +54,7 @@ def _norm_account(s: str) -> str:
 
 
 def get_owner_account_ids() -> frozenset:
-    raw = os.getenv("OWNER_ACCOUNT_IDS") or OWNER_ACCOUNT_IDS_DEFAULT
+    raw = OWNER_ACCOUNT_IDS   # 要改擁有者帳號就改上面的 OWNER_ACCOUNT_IDS（不放 .env：.env 只放 API 金鑰）
     return frozenset(_norm_account(x) for x in raw.split(",") if _norm_account(x))
 
 
