@@ -833,19 +833,27 @@ class VirtualPianoGUI:
                         midi_path = cmd_obj.get("midi_path", "")
                         vol = cmd_obj.get("volume")
                         spd = cmd_obj.get("speed")
+                        start_at = cmd_obj.get("start_at")   # 彈唱同步：譜上第 0 秒對準這個時間點
                         if vol is not None:
                             self.root.after(0, lambda v=vol: self.set_piano_volume(v))
                         if spd is not None:
                             self.root.after(0, lambda s=spd: self.set_playback_speed(s))
                         if midi_path and os.path.exists(midi_path):
-                            def do_play(t=title, p=midi_path):
+                            def do_play(t=title, p=midi_path, sa=start_at):
                                 try:
                                     self.root.deiconify()
                                     self.root.lift()
                                 except Exception:
                                     pass
                                 self.start_midi_playback(t, p)
+                                if sa:
+                                    self.align_to_clock(float(sa))
                             self.root.after(0, do_play)
+                    elif cmd == "sync":
+                        # 彈唱同步：人聲實際開播的時間點，鋼琴照它校時
+                        start_at = cmd_obj.get("start_at")
+                        if start_at:
+                            self.root.after(0, lambda sa=float(start_at): self.align_to_clock(sa))
                     elif cmd in ["play_simultaneous", "play_multi", "mashup"]:
                         #  多曲同時並發演奏 (無數量限制！)
                         tracks = cmd_obj.get("tracks", [])
@@ -2077,6 +2085,32 @@ class VirtualPianoGUI:
 
         events.sort(key=lambda x: x[0])
         return events
+
+    def align_to_clock(self, start_at: float):
+        """彈唱同步（2026-10-25）：譜上第 0 秒對準 start_at（time.time() 的時間點，跟主程式同一個時鐘）。
+
+        還沒到：演奏時間設成負的，方塊照常提前落下。往前跳 0.1 秒以上：中間沒彈到的音不補彈
+        （不然會一次全砸下去），差不到 0.1 秒的照彈免得掉音。往回撥：只撥時鐘，方塊自己往回挪。
+        """
+        if not self.is_playing or not (self.active_tracks or self.playback_events):
+            return
+        target = (time.time() - float(start_at)) * self.playback_speed
+        if target - self.current_song_time >= 0.1:
+            for bar in [b for b in self.active_falling_bars if not b['played'] and b['hit_time'] < target]:
+                self.canvas.delete(bar['id'])
+                self.active_falling_bars.remove(bar)
+            for track in self.active_tracks:
+                track['event_idx'] = max(track['event_idx'], bisect.bisect_left(track['event_times'], target))
+            if self.playback_events:
+                self.playback_event_idx = max(self.playback_event_idx,
+                                              bisect.bisect_left(self.playback_event_times, target))
+        for track in self.active_tracks:
+            track['current_song_time'] = target
+            track['paused_song_time'] = target
+        self.current_song_time = target
+        self.paused_song_time = target
+        self.last_perf_time = time.perf_counter()
+        self.playback_start_perf = self.last_perf_time - (target + self.FALL_TIME)
 
     def start_midi_playback(self, title: str, midi_path: str, clear_existing: bool = True):
         """開始/切換 Synthesia 前置下落時間軸演奏 (支援單曲與多軌無縫切歌)"""

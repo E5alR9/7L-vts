@@ -2720,12 +2720,16 @@ async def _desktop_ask_and_report(question: str, target: str = "dad", user: str 
 async def _mixed_piano_run(piano_title: str, sing_title: str, target: str, requester: str):
     """混用鋼琴側（2026-10-11：先開著等，兩邊備好同時放）。
 
-    1. 立刻開鋼琴視窗（開啟要時間）＋找本地譜 → 舉 piano 旗
-    2. 等翻唱舉 sing 旗（備好要開唱了）；掉隊/超時就自己先彈，不乾等
-    3. 開彈（有譜直彈，沒譜走正常搜譜流程）
+    1. 立刻開鋼琴視窗（開啟要時間）→ 舉 piano 旗
+    2. 等翻唱舉 sing 旗（要開唱了）；掉隊/超時就自己先彈，不乾等
+    3. 彈唱同一首歌（2026-10-25）：翻唱側把伴奏轉成譜、排好共同起點，鋼琴照起點開彈，
+       跟原曲真的對拍（網路上的 MIDI 速度、前奏都跟 YT 原曲不一樣，一定對不上）。
+       不同首、沒有同步譜就照舊用曲名找譜彈。
     """
     import services.auto_cover_pipeline as ac
-    rv = ac.arm_mixed_rendezvous(sing_title)
+    pk, sk = ac._dedupe_key(piano_title), ac._dedupe_key(sing_title)
+    want_sync = bool(pk and sk and (pk in sk or sk in pk))
+    rv = ac.arm_mixed_rendezvous(sing_title, want_sync=want_sync)
     midi_file = ""
     try:
         try:
@@ -2738,28 +2742,41 @@ async def _mixed_piano_run(piano_title: str, sing_title: str, target: str, reque
                 log_print("⚠️ [混用鋼琴] 子進程 25 秒未就緒，照跑（播放端有無聲驗證兜底）。")
         except Exception:
             pass
-        try:
-            midi_file, _ = await pe.resolve_local_midi_file(piano_title)
-        except Exception:
-            midi_file = ""
+        if not want_sync:
+            try:
+                midi_file, _ = await pe.resolve_local_midi_file(piano_title)
+            except Exception:
+                midi_file = ""
         rv["piano"].set()
-        log_print(f"🎹 [混用會合] 鋼琴就位（視窗開＋{'譜到手' if midi_file else '譜待搜'}），等麥克風就位...")
+        log_print(f"🎹 [混用會合] 鋼琴就位（{'等伴奏轉譜同步' if want_sync else ('譜到手' if midi_file else '譜待搜')}），等麥克風就位...")
         waited = 0.0
         while waited < MIXED_PIANO_WAIT_SEC:
-            try:
-                if rv["sing"].is_set():
-                    break
-                if not ac.is_song_active(sing_title) and not ac.cover_ready_or_playing(sing_title):
-                    log_print("⚠️ [混用會合] 翻唱掉隊（失敗/取消），鋼琴自己先彈。")
-                    break
-            except Exception:
+            if rv["sing"].is_set():
                 break
-            await asyncio.sleep(5.0)
-            waited += 5.0
+            if not ac.is_song_active(sing_title) and not ac.cover_ready_or_playing(sing_title):
+                log_print("⚠️ [混用會合] 翻唱掉隊（失敗/取消），鋼琴自己先彈。")
+                break
+            try:
+                await asyncio.wait_for(rv["sing"].wait(), timeout=5.0)
+                break
+            except asyncio.TimeoutError:
+                waited += 5.0
         else:
             log_print("⚠️ [混用會合] 等翻唱超時，先開彈。")
     except Exception as e:
         log_print(f"⚠️ [混用鋼琴異常]: {e}")
+    if rv.get("start_at") and rv.get("midi"):
+        try:
+            await pe.play_synced_midi(piano_title, rv["midi"], rv["start_at"])
+        except Exception as e:
+            log_print(f"❌ [彈唱同步開彈失敗]: {e}")
+        return
+    rv["piano_gave_up"] = True   # 翻唱側之後才到也別再排同步起點
+    if want_sync and not midi_file:
+        try:
+            midi_file, _ = await pe.resolve_local_midi_file(piano_title)
+        except Exception:
+            midi_file = ""
     try:
         await pe.play_virtual_piano(piano_title, midi_file=midi_file or "",
                                     requester_name=requester, target=target,

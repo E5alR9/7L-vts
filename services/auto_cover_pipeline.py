@@ -360,17 +360,54 @@ def is_song_active(song_name: str) -> bool:
 _NOW_PLAYING_TITLE = ""  # 台上正在唱的歌名（混用鋼琴同步用：備好或開唱才跟著彈）
 
 # ── 混用會合（2026-10-11：邊彈邊唱要互相等）──
-# 鋼琴先開＋譜到手舉 piano 旗；翻唱備好（要開唱了）舉 sing 旗；兩旗都舉才同時放。
+# 鋼琴視窗開好舉 piano 旗；翻唱要開唱了先等 piano 旗，再舉 sing 旗；兩旗都舉才放。
+# 彈唱同一首歌（want_sync，2026-10-25）：翻唱側順便把伴奏轉成鋼琴譜（midi），
+# 排一個共同起點（start_at）交給鋼琴側，人聲跟鋼琴照同一個時間點開始，才會真的對拍。
 # 任一超時就自己先上，絕不綁架對方。stop_singing 全清。
-_MIXED_RENDEZVOUS = {}  # dedupe_key(sing_title) -> {"piano": Event, "sing": Event}
+_MIXED_RENDEZVOUS = {}  # dedupe_key(sing_title) -> 見 arm_mixed_rendezvous
 _MIXED_SING_WAIT_SEC = 300.0  # 翻唱等鋼琴上限（譜搜尋再慢也夠了）
+_MIXED_LEAD_SEC = 5.0         # 排定起點到開唱的預備時間：鋼琴走位、載譜、方塊先落 1.6 秒都在這段裡
+_MIXED_INST_VOLUME = 0.4      # 彈唱同步時原曲伴奏收小（平常 0.55），鋼琴才聽得出來
 
 
-def arm_mixed_rendezvous(sing_title):
-    """混用開場：建會合點回傳。重複點同首直接覆蓋（去重保證同時只有一單）。"""
-    rv = {"piano": asyncio.Event(), "sing": asyncio.Event()}
+def arm_mixed_rendezvous(sing_title, want_sync=False):
+    """混用開場：建會合點回傳。重複點同首直接覆蓋（去重保證同時只有一單）。
+    want_sync：彈的跟唱的是同一首，要用伴奏轉出來的譜同步彈。"""
+    rv = {"piano": asyncio.Event(), "sing": asyncio.Event(), "want_sync": bool(want_sync),
+          "midi": "", "start_at": None, "piano_gave_up": False}
     _MIXED_RENDEZVOUS[_dedupe_key(sing_title)] = rv
     return rv
+
+
+async def _mixed_rendezvous_sing(rv, title, inst_path):
+    """混用會合（翻唱側）：等鋼琴就位；want_sync 就同時把伴奏轉成鋼琴譜。
+    兩邊都好了排共同起點（現在＋_MIXED_LEAD_SEC）寫進 rv 交給鋼琴側並回傳；
+    鋼琴沒到、已經自己先彈、轉不出譜都回 None（照舊直接唱）。"""
+    midi_task = None
+    if rv.get("want_sync"):
+        from services.audio_to_score import instrumental_to_piano_midi
+        midi_task = asyncio.create_task(asyncio.to_thread(instrumental_to_piano_midi, inst_path or ""))
+    print(f"🎤 [混用會合] 《{title}》麥克風就位，等鋼琴就位會合（最多 {_MIXED_SING_WAIT_SEC:.0f} 秒）...")
+    piano_ready = False
+    try:
+        await asyncio.wait_for(rv["piano"].wait(), timeout=_MIXED_SING_WAIT_SEC)
+        piano_ready = True
+    except asyncio.TimeoutError:
+        print("⚠️ [混用會合] 等鋼琴超時，先開唱，鋼琴隨後跟上。")
+    if midi_task is not None:
+        try:
+            rv["midi"] = await midi_task or ""
+        except Exception as e:
+            print(f"⚠️ [混用會合] 伴奏轉譜異常: {e}")
+    start_at = None
+    if piano_ready and rv.get("midi") and not rv.get("piano_gave_up"):
+        start_at = time.time() + _MIXED_LEAD_SEC
+        rv["start_at"] = start_at
+        print(f"🎤 [混用會合] 鋼琴就位＋伴奏譜到手，{_MIXED_LEAD_SEC:.0f} 秒後邊彈邊唱同步開演！")
+    elif piano_ready:
+        print("🎤 [混用會合] 鋼琴就位，邊彈邊唱開演（沒有同步譜，鋼琴照曲名找譜）。")
+    rv["sing"].set()
+    return start_at
 
 
 def disarm_mixed_rendezvous(sing_title):
@@ -645,16 +682,15 @@ async def play_prepared_song(title: str, vocal_path: str, inst_path: str, gen: i
             print(f"🛑 [翻唱隊列] 《{title}》開唱前已被停止，跳過。")
             return f"《{title}》已停止，不開唱。"
         _NOW_PLAYING_TITLE = title
-        # 混用會合：麥克風就位舉旗，等鋼琴旗（300 秒不到就自己先唱，不綁架）
+        # 混用會合：等鋼琴旗（300 秒不到就自己先唱，不綁架）；同一首歌排共同起點，開播後鋼琴照人聲校時
+        start_at, on_start = None, None
         _rv = _MIXED_RENDEZVOUS.pop(key, None)
         if _rv is not None:
-            _rv["sing"].set()
-            print(f"🎤 [混用會合] 《{title}》麥克風就位，等鋼琴就位會合（最多 {_MIXED_SING_WAIT_SEC:.0f} 秒）...")
-            try:
-                await asyncio.wait_for(_rv["piano"].wait(), timeout=_MIXED_SING_WAIT_SEC)
-                print("🎤 [混用會合] 鋼琴就位，邊彈邊唱同步開演！")
-            except Exception:
-                print("⚠️ [混用會合] 等鋼琴超時/異常，先開唱，鋼琴隨後跟上。")
+            start_at = await _mixed_rendezvous_sing(_rv, title, inst_path)
+            if start_at:
+                def on_start(t0, midi=_rv["midi"]):
+                    import services.piano_engine as pe
+                    pe.sync_piano_clock(t0, midi)
         # 開唱清場：準備期的暈（busy worker 掛的）別帶上台；臉有別的戲就不碰
         await _clear_prep_halo()
         try:
@@ -664,7 +700,7 @@ async def play_prepared_song(title: str, vocal_path: str, inst_path: str, gen: i
                 "percent": 100, "detail": title})
         except Exception:
             pass
-        await play_cover_audio(vocal_path, title, inst_path=inst_path)
+        await play_cover_audio(vocal_path, title, inst_path=inst_path, start_at=start_at, on_start=on_start)
     except asyncio.CancelledError:
         raise
     except Exception as e:
@@ -854,11 +890,13 @@ async def prepare_cover_song(song_name: str, source_mp3: str = "", origin: str =
         print(f"❌ [翻唱準備異常] 《{song_name}》: {e}")
         return None, None
 
-async def play_cover_audio(vocal_path: str, song_name: str, inst_path: str = None):
+async def play_cover_audio(vocal_path: str, song_name: str, inst_path: str = None, start_at: float = None, on_start=None):
     """
     雙軌同步極致舞台放音：
     - 軌道 6 (Vocal Track): 7L 純淨人聲，專門連動 Live2D 對嘴包絡（0 伴奏鼓點干擾）
     - 軌道 7 (Instrumental Track): 獨立伴奏立體聲同步齊發（無需混音壓制成同一個 MP3）
+    - start_at（彈唱同步）：等到這個時間點（time.time()）才齊發，伴奏收小讓鋼琴出來；
+      開播的實際時間交給 on_start（鋼琴照它校時）
     """
     global IS_SINGING_ACTIVE
     try:
@@ -904,13 +942,26 @@ async def play_cover_audio(vocal_path: str, song_name: str, inst_path: str = Non
         # 🎛️ 專業立體聲即時動態混音平衡：人聲清晰飽滿 (0.67)，伴奏音樂襯托 (0.55)
         ch_vocal.set_volume(0.67)
         if snd_inst:
-            ch_inst.set_volume(0.55)
+            ch_inst.set_volume(_MIXED_INST_VOLUME if start_at else 0.55)
+
+        if start_at:
+            # 彈唱同步：等到共同起點才放（asyncio.sleep 在 Windows 只準到 15ms 左右，最後一小段空轉）
+            remain = start_at - time.time()
+            if remain > 0.03:
+                await asyncio.sleep(remain - 0.03)
+            while time.time() < start_at:
+                pass
 
         # 🚀 雙軌同毫秒精準齊發，同微秒記錄對嘴起步基準時間戳
         if snd_inst:
             ch_inst.play(snd_inst)
         ch_vocal.play(snd_vocal)
         stage.start_playback()   # 播放旗標＋對嘴起點（嘴型包絡上面已經設好）
+        if on_start:
+            try:
+                on_start(stage.CURRENT_SPEECH_START_TIME)
+            except Exception as sync_err:
+                print(f"⚠️ [彈唱同步] 鋼琴校時失敗: {sync_err}")
         if core_vts:
             _core_set_ai_state(core_vts, "SINGING", f"雙軌齊發《{song_name}》")
             

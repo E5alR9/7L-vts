@@ -10,7 +10,12 @@ PROVIDER: LOCAL（yt-dlp＋librosa 必備；demucs／basic-pitch 選配，有則
            → write MIDI（三軌：旋律 ch0／根音貝斯 ch1／鼓 ch9 簡配）→ 曲庫
 
 依賴安裝（需要才裝）：
-  python -m pip install demucs basic-pitch
+  python -m pip install demucs
+  python -m pip install --no-deps basic-pitch pretty_midi mir_eval
+  （basic-pitch 一定要 --no-deps：它在 Windows＋Python 3.12 會硬拉 TensorFlow 把 numpy 降回 1.x；
+    不裝 TF 它自動改用 onnxruntime 跑同一個模型）
+
+另外：instrumental_to_piano_midi 把翻唱分離出的伴奏轉成鋼琴譜（彈唱同步用）。
 """
 import os
 import re
@@ -85,14 +90,32 @@ def _load_mono(path: str, sr: int = 22050):
     return y, sr
 
 
+_BP_MODEL = None  # basic-pitch 模型（載一次約 2 秒，留著重用）
+
+
+def _basic_pitch_note_events(audio_path: str) -> list:
+    """basic-pitch 轉音符 → [(起秒, 止秒, 音高, 強度0~1, 彎音)]。沒裝就丟 ImportError。"""
+    global _BP_MODEL
+    import logging
+    root = logging.getLogger()
+    level = root.level
+    root.setLevel(logging.ERROR)   # 匯入時會對沒裝的 TF／CoreML／TFLite 各喊一次 WARNING
+    try:
+        from basic_pitch.inference import Model, predict
+        from basic_pitch import ICASSP_2022_MODEL_PATH
+    finally:
+        root.setLevel(level)
+    if _BP_MODEL is None:
+        _BP_MODEL = Model(ICASSP_2022_MODEL_PATH)
+    _, _, note_events = predict(audio_path, _BP_MODEL)
+    return list(note_events or [])
+
+
 def transcribe_melody(audio_path: str) -> list:
     """旋律轉音符 [(midi, 起秒, 時值秒, 力度)]。basic-pitch 優先，無則 piptrack 粗追蹤。"""
     try:
-        from basic_pitch.inference import predict
-        from basic_pitch import ICASSP_2022_MODEL_PATH
-        _, _, note_events = predict(audio_path, ICASSP_2022_MODEL_PATH)
         notes = []
-        for ev in (note_events or []):
+        for ev in _basic_pitch_note_events(audio_path):
             start, end, pitch = float(ev[0]), float(ev[1]), int(ev[2])
             vel = float(ev[3]) if len(ev) > 3 else 0.8
             if 21 <= pitch <= 108 and end - start >= 0.08:
@@ -100,10 +123,9 @@ def transcribe_melody(audio_path: str) -> list:
                               round(end - start, 2), max(40, min(127, int(vel * 127)))))
         notes.sort(key=lambda n: n[1])
         log_print(f"🎼 [逆向譜面] basic-pitch 轉出 {len(notes)} 音符")
-        log_print(f"🎼 [逆向譜面] basic-pitch 轉出 {len(notes)} 音符")
         return notes
     except ImportError:
-        log_print("ℹ️ [逆向譜面] 無 basic-pitch，用 piptrack 粗追蹤（可 pip install basic-pitch 升級）")
+        log_print("ℹ️ [逆向譜面] 無 basic-pitch，用 piptrack 粗追蹤（安裝見檔頭說明）")
     except Exception as e:
         log_print(f"⚠️ [逆向譜面] basic-pitch 異常，退 piptrack: {e}")
     try:
@@ -243,6 +265,115 @@ def write_score_midi(title: str, melody: list, chords: list) -> str:
     except Exception as e:
         log_print(f"⚠️ [逆向譜面] 存檔異常: {e}")
         return ""
+
+
+# —— 彈唱同步：翻唱分離出的伴奏 → 鋼琴譜（2026-10-25）——
+# 網路上的 MIDI 跟 YT 原曲的速度、前奏長度、段落都不一樣，邊彈邊唱一定對不上；
+# 直接把同一份伴奏轉成譜，譜上的時間就是原曲的時間。
+PIANO_MIDI_SUFFIX = "_piano.mid"
+_PIANO_MIN_NOTE_SEC = 0.08        # 比這短的音丟掉（多半是鼓、刷弦的雜訊）
+_PIANO_ONSET_CLUSTER_SEC = 0.03   # 30ms 內一起出來的算同一下
+_PIANO_MAX_PER_ONSET = 6          # 同一下最多按幾個音（多的丟最小聲的）
+
+
+def piano_midi_path_for(inst_path: str) -> str:
+    """伴奏 wav → 放在旁邊的鋼琴譜路徑（晴天_instrumental.wav → 晴天_piano.mid）。"""
+    base = os.path.splitext(inst_path)[0]
+    if base.endswith("_instrumental"):
+        base = base[:-len("_instrumental")]
+    return base + PIANO_MIDI_SUFFIX
+
+
+def arrange_for_piano(events) -> list:
+    """basic-pitch 音符 [(起秒, 止秒, 音高, 強度0~1, ...)] → 鋼琴能彈的 [(起秒, 時值秒, 音高, 力度)]。
+
+    超出 88 鍵、太短的丟掉；同音重疊時前一個在後一個開始時收掉；
+    同一下按太多只留最大聲的；強度照整首的分布換成力度 40~105。
+    """
+    notes = []
+    for ev in events or []:
+        s, e, p, a = float(ev[0]), float(ev[1]), int(ev[2]), float(ev[3])
+        if 21 <= p <= 108 and e - s >= _PIANO_MIN_NOTE_SEC:
+            notes.append([s, e, p, a])
+    notes.sort(key=lambda n: (n[0], n[2]))
+    last = {}
+    for n in notes:
+        prev = last.get(n[2])
+        if prev is not None and prev[1] > n[0]:
+            prev[1] = n[0]
+        last[n[2]] = n
+    notes = [n for n in notes if n[1] - n[0] >= _PIANO_MIN_NOTE_SEC]
+    kept, i = [], 0
+    while i < len(notes):
+        j = i
+        while j < len(notes) and notes[j][0] - notes[i][0] <= _PIANO_ONSET_CLUSTER_SEC:
+            j += 1
+        kept.extend(sorted(notes[i:j], key=lambda n: -n[3])[:_PIANO_MAX_PER_ONSET])
+        i = j
+    if not kept:
+        return []
+    amps = np.array([n[3] for n in kept])
+    lo, hi = float(np.percentile(amps, 10)), float(np.percentile(amps, 95))
+    span = max(hi - lo, 1e-6)
+    out = []
+    for s, e, p, a in sorted(kept, key=lambda n: (n[0], n[2])):
+        vel = int(round(40 + 65 * min(1.0, max(0.0, (a - lo) / span))))
+        out.append((round(s, 3), round(e - s, 3), p, vel))
+    return out
+
+
+def write_piano_midi(notes, out_path: str) -> str:
+    """兩軌鋼琴譜：Right Hand（中央 C 以上）／Left Hand（以下），鋼琴視窗看軌名分左右手配色。
+    480 ticks = 1 秒，跟 write_score_midi 一樣；先寫暫存檔再換名，寫到一半不留壞檔。"""
+    import mido
+    tps = 480
+    mid = mido.MidiFile(type=1, ticks_per_beat=tps)
+    for name, is_right in (("Right Hand", True), ("Left Hand", False)):
+        tr = mido.MidiTrack()
+        tr.append(mido.MetaMessage("track_name", name=name, time=0))
+        tr.append(mido.MetaMessage("set_tempo", tempo=1000000, time=0))
+        items = []
+        for s, d, p, v in notes:
+            if (p >= 60) != is_right:
+                continue
+            t0 = int(round(s * tps))
+            t1 = max(t0 + 1, int(round((s + d) * tps)))
+            items.append((t0, 1, mido.Message("note_on", note=p, velocity=v, time=0)))
+            items.append((t1, 0, mido.Message("note_off", note=p, velocity=0, time=0)))
+        last = 0
+        for tick, _, msg in sorted(items, key=lambda x: (x[0], x[1])):   # 同一刻先放鍵再按鍵
+            msg.time = tick - last
+            last = tick
+            tr.append(msg)
+        mid.tracks.append(tr)
+    tmp = out_path + ".tmp"
+    mid.save(tmp)
+    os.replace(tmp, out_path)
+    return out_path
+
+
+def instrumental_to_piano_midi(inst_path: str) -> str:
+    """翻唱分離出的伴奏 → 鋼琴譜（彈唱同步用），存在伴奏旁邊；轉過且比伴奏新就直接用。
+    回譜路徑；沒裝 basic-pitch 或轉不出東西回 ""（調用方退回用曲名找譜）。"""
+    if not inst_path or not os.path.exists(inst_path):
+        return ""
+    out = piano_midi_path_for(inst_path)
+    if os.path.exists(out) and os.path.getmtime(out) >= os.path.getmtime(inst_path):
+        return out
+    try:
+        t0 = time.time()
+        notes = arrange_for_piano(_basic_pitch_note_events(inst_path))
+        if not notes:
+            log_print(f"⚠️ [伴奏轉譜] {os.path.basename(inst_path)} 轉不出音符")
+            return ""
+        write_piano_midi(notes, out)
+        log_print(f"🎹 [伴奏轉譜] {os.path.basename(inst_path)} → {len(notes)} 音（{time.time() - t0:.1f}s）")
+        return out
+    except ImportError:
+        log_print("ℹ️ [伴奏轉譜] 沒裝 basic-pitch，彈唱改用曲名找譜（不會跟原曲同步；安裝見檔頭說明）")
+    except Exception as e:
+        log_print(f"⚠️ [伴奏轉譜] 失敗: {e}")
+    return ""
 
 
 async def transcribe_song(url_or_id: str, title: str = "") -> dict:

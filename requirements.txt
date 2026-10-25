@@ -27,6 +27,8 @@ espeakng-loader            # phonemizer 的 espeak-ng 資料（Windows 內建）
 phonemizer
 soundfile
 librosa
+# basic-pitch（彈唱同步：翻唱伴奏轉鋼琴譜）另外裝，一定要 --no-deps（不然會拉 TensorFlow 把 numpy 降版）：
+#   python -m pip install --no-deps basic-pitch pretty_midi mir_eval
 pygame
 soundcard                  # WASAPI loopback（擷取系統音）
 SpeechRecognition

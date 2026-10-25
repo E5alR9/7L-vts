@@ -46,7 +46,7 @@ def test_play_lifecycle_broadcasts(monkeypatch, tmp_path):
     events, bcast = _recorder()
     monkeypatch.setattr(web_dash, "broadcast_event", bcast)
 
-    async def fake_play(vocal_path, title, inst_path=None):
+    async def fake_play(vocal_path, title, inst_path=None, **kw):
         return None
 
     monkeypatch.setattr(acp, "play_cover_audio", fake_play)

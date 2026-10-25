@@ -1955,7 +1955,7 @@ async def generate_dynamic_piano_chatter(song_title: str, target: str = "dad", r
         pass
     return ""
 
-async def play_piano_worker(song_title: str, sheet_text: str, bpm: int, mode: str, midi_file: str = None, session_id: int = 0):
+async def play_piano_worker(song_title: str, sheet_text: str, bpm: int, mode: str, midi_file: str = None, session_id: int = 0, start_at: float = 0.0):
     """背景鋼琴演奏與 Live2D 姿態連動協程 (自動喚出視覺化 88 鍵瀑布流視窗並支援點播隊列與連續隨機電台自動接續)"""
     global is_piano_active, current_piano_song_title, current_piano_midi_file, current_piano_process, current_ai_state, PIANO_SESSION_ID, IS_PIANO_AUTO_RADIO_MODE, LAST_PIANO_OPEN_TIME
     if session_id != PIANO_SESSION_ID:
@@ -2008,8 +2008,20 @@ async def play_piano_worker(song_title: str, sheet_text: str, bpm: int, mode: st
                     sub_paths = [midi_file]
                     raw_dur = get_midi_file_duration(midi_file)
                     tracks_payload = [{"title": song_title, "midi_path": midi_file}]
-                    
-                song_dur = (raw_dur / GLOBAL_PIANO_SPEED) if GLOBAL_PIANO_SPEED > 0 else raw_dur
+
+                # 彈唱同步只管第一首：照起點開彈、倍速固定 1.0（不然對不上原曲）；接續的曲目照常
+                sync_at, start_at = start_at, 0.0
+                play_speed = 1.0 if sync_at else GLOBAL_PIANO_SPEED
+                play_payload = {
+                    "cmd": "play",
+                    "title": song_title,
+                    "midi_path": midi_file,
+                    "volume": GLOBAL_PIANO_VOLUME,
+                    "speed": play_speed
+                }
+                if sync_at:
+                    play_payload["start_at"] = sync_at
+                song_dur = (raw_dur / play_speed) if play_speed > 0 else raw_dur
                 
                 # 🌟 若鋼琴視窗已經在桌面上運行 ➔ 直接發送 IPC 指令無縫切換曲目，絕不關閉或重開視窗！
                 if is_piano_window_alive():
@@ -2023,14 +2035,8 @@ async def play_piano_worker(song_title: str, sheet_text: str, bpm: int, mode: st
                             "speed": GLOBAL_PIANO_SPEED
                         })
                     else:
-                        log_print(f"🎹 [鋼琴舞台] 88 鍵鋼琴視窗已在桌面上，無縫切換曲目: 《{song_title}》 (原時長: {raw_dur:.1f}s | 倍速: {GLOBAL_PIANO_SPEED}x ➔ 實際時長: {song_dur:.1f}s)")
-                        send_piano_ipc_command({
-                            "cmd": "play",
-                            "title": song_title,
-                            "midi_path": midi_file,
-                            "volume": GLOBAL_PIANO_VOLUME,
-                            "speed": GLOBAL_PIANO_SPEED
-                        })
+                        log_print(f"🎹 [鋼琴舞台] 88 鍵鋼琴視窗已在桌面上，無縫切換曲目: 《{song_title}》 (原時長: {raw_dur:.1f}s | 倍速: {play_speed}x ➔ 實際時長: {song_dur:.1f}s)")
+                        send_piano_ipc_command(play_payload)
                 else:
                     # 鋼琴視窗尚未開啟 ➔ 啟動新視窗
                     LAST_PIANO_OPEN_TIME = time.time()
@@ -2068,13 +2074,7 @@ async def play_piano_worker(song_title: str, sheet_text: str, bpm: int, mode: st
                                     "speed": GLOBAL_PIANO_SPEED
                                 })
                             else:
-                                send_piano_ipc_command({
-                                    "cmd": "play",
-                                    "title": song_title,
-                                    "midi_path": midi_file,
-                                    "volume": GLOBAL_PIANO_VOLUME,
-                                    "speed": GLOBAL_PIANO_SPEED
-                                })
+                                send_piano_ipc_command(play_payload)
                             if not await wait_piano_sounding(session_id, timeout=15.0):
                                 log_print("❌ [鋼琴無聲] 重啟重發仍無播放回報！請檢查子進程音訊輸出（音效卡獨佔/驅動）。本次放行，不抱著等。")
                                 is_piano_active = False
@@ -2082,7 +2082,7 @@ async def play_piano_worker(song_title: str, sheet_text: str, bpm: int, mode: st
                             log_print("❌ [鋼琴無聲] 視窗重啟失敗，本次放行。")
                             is_piano_active = False
                 # 🎹 即時鋼琴狀態驅動等待迴圈（以 UDP 即時播放狀態為第一優先，時間為極端斷線保底）
-                song_start_time = time.time()
+                song_start_time = max(time.time(), sync_at or 0.0)
                 has_started_playing = False
                 globals()["IS_PIANO_PAUSED"] = False   # 新曲開始：清掉上一首殘留的暫停狀態
 
@@ -2264,6 +2264,60 @@ async def play_piano_worker(song_title: str, sheet_text: str, bpm: int, mode: st
 import bitmidi_engine
 import onlinesequencer_engine
 import pianist_midi_engine
+
+def _start_piano_worker(song_title: str, midi_file: str, custom_sheet: str = "", start_at: float = 0.0):
+    """有譜直接開彈：開新場次、記下台上曲目、換掉舊的演奏協程。"""
+    global current_piano_task, PIANO_SESSION_ID, is_piano_active, current_piano_song_title, current_piano_midi_file
+    PIANO_SESSION_ID += 1
+    session_id = PIANO_SESSION_ID
+    is_piano_active = True
+    current_piano_song_title = song_title
+    current_piano_midi_file = midi_file
+    try:
+        main_obj.append_to_unified_memory(speaker="系統", target="所有人", content=f"鋼琴開始演奏《{song_title}》", role="system", source="piano")
+    except Exception:
+        pass
+
+    if current_piano_task and not current_piano_task.done():
+        current_piano_task.cancel()
+
+    current_piano_task = asyncio.create_task(
+        play_piano_worker(
+            song_title=song_title,
+            sheet_text=custom_sheet,
+            bpm=180,
+            mode="16th",
+            midi_file=midi_file,
+            session_id=session_id,
+            start_at=start_at
+        )
+    )
+
+
+async def play_synced_midi(song_title: str, midi_file: str, start_at: float) -> str:
+    """彈唱同步開彈（2026-10-25）：譜上第 0 秒對準 start_at（time.time() 的時間點），人聲同一刻開播。
+    譜是翻唱伴奏轉出來的，彈唱指令自己指定的，不走 AI 意圖判斷、排隊、防插歌。"""
+    global IS_PIANO_AUTO_RADIO_MODE, LAST_PIANO_PLAY_START_TIME, LAST_PIANO_OPEN_TIME
+    if not midi_file or not os.path.exists(midi_file):
+        return "（系統回報：彈唱同步譜不存在）"
+    LAST_PIANO_PLAY_START_TIME = time.time()
+    LAST_PIANO_OPEN_TIME = time.time()
+    init_piano_synthesizer()
+    IS_PIANO_AUTO_RADIO_MODE = False
+    save_persisted_piano_state(True, song_title, True)
+    log_print(f"🎹 [彈唱同步] 《{song_title}》照原曲伴奏轉出的譜開彈，{max(0.0, start_at - time.time()):.1f} 秒後跟人聲一起進")
+    _start_piano_worker(song_title, midi_file, start_at=start_at)
+    return "[EXPRESSION: 星星眼]"
+
+
+def sync_piano_clock(start_at: float, midi_file: str) -> bool:
+    """人聲實際開播後校時：台上還在彈這份同步譜才送（換了別首就不動它）。"""
+    if not (is_piano_active and midi_file and current_piano_midi_file
+            and os.path.abspath(current_piano_midi_file) == os.path.abspath(midi_file)):
+        return False
+    send_piano_ipc_command({"cmd": "sync", "start_at": start_at})
+    return True
+
 
 async def play_virtual_piano(song_name: str = "", custom_sheet: str = "", auto_radio_mode: bool = False, midi_file: str = "", force_online: bool = False, requester_name: str = "", target: str = "", is_direct_song_name: bool = False) -> str:
     """讓 7L 在大家面前彈奏 88 鍵鋼琴名曲（支援單曲、多曲同時並發合奏、立即秒切新曲與無限隨機連續電台模式）。
@@ -2517,29 +2571,7 @@ async def play_virtual_piano(song_name: str = "", custom_sheet: str = "", auto_r
         log_print(f"🛡️ [樂譜質檢拒收] 《{os.path.basename(target_midi)}》時長/音符不足，不播，轉線上搜譜！")
         target_midi = None
     if target_midi and os.path.exists(target_midi):
-        PIANO_SESSION_ID += 1
-        session_id = PIANO_SESSION_ID
-        is_piano_active = True
-        current_piano_song_title = target_title
-        current_piano_midi_file = target_midi
-        try:
-            main_obj.append_to_unified_memory(speaker="系統", target="所有人", content=f"鋼琴開始演奏《{target_title}》", role="system", source="piano")
-        except Exception:
-            pass
-        
-        if current_piano_task and not current_piano_task.done():
-            current_piano_task.cancel()
-            
-        current_piano_task = asyncio.create_task(
-            play_piano_worker(
-                song_title=target_title,
-                sheet_text=custom_sheet or "",
-                bpm=180,
-                mode="16th",
-                midi_file=target_midi,
-                session_id=session_id
-            )
-        )
+        _start_piano_worker(target_title, target_midi, custom_sheet=custom_sheet or "")
         return "[EXPRESSION: 星星眼]"
 
     # 🌐 若指定 YouTube 或本地無樂譜 ➔ 啟動非阻塞背景線上抓譜並接續開彈協程
