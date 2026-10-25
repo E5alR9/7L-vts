@@ -86,7 +86,8 @@ def _run_handler(cpu, nv, total_timeout=45.0, task="幫我查日圓匯率", orig
 
     from core.hard_command import build_slip_text, structured_stage_command
     sess = _FakeSession()
-    ns = _load("_handle_invoke_subagent", types=types, asyncio=asyncio, session=sess, ws_send_lock=asyncio.Lock(),
+    ns = _load("_run_subagent_task", "_handle_invoke_subagent", types=types, asyncio=asyncio, session=sess,
+               ws_send_lock=asyncio.Lock(),
                background_tool_executor=background_tool_executor, nv_interpret_task=nv_interpret_task,
                build_slip_text=build_slip_text, _SUBAGENT_TOTAL_TIMEOUT=total_timeout,
                _BRAIN_INPUT_ORIGIN={"who": origin, "ts": 0.0}, _brain_requester=lambda: requester,
@@ -262,12 +263,12 @@ def test_screen_task_is_handed_to_the_vision_brain():
 
     looked = []
 
-    async def live_vision_tool_task(session, vts):
-        looked.append(session)
+    async def live_vision_tool_task():
+        looked.append(True)
 
     def run(recent):
         sess = _FakeSession()
-        ns = _load("_handle_invoke_subagent", types=types, asyncio=asyncio, time=time,
+        ns = _load("_run_subagent_task", "_handle_invoke_subagent", types=types, asyncio=asyncio, time=time,
                    background_tool_executor=never, nv_interpret_task=never, build_slip_text=build_slip_text,
                    _SUBAGENT_TOTAL_TIMEOUT=45.0, _SUBAGENT_VISION_TASK_RE=_re.compile(_const_pattern("_SUBAGENT_VISION_TASK_RE")),
                    _vision_report_recent=lambda now: recent, live_vision_tool_task=live_vision_tool_task,
@@ -280,7 +281,7 @@ def test_screen_task_is_handed_to_the_vision_brain():
         asyncio.run(go())
         return sess
     sess = run(False)
-    assert looked == [sess] and len(sess.sent) == 1
+    assert looked == [True] and len(sess.sent) == 1
     assert sess.sent[0].scheduling == types.FunctionResponseScheduling.WHEN_IDLE
     assert "不要描述畫面" in sess.sent[0].response["result"] and "我看看" in sess.sent[0].response["result"]
     sess = run(True)                                      # 剛看過：不重看，照剛才的回報回答

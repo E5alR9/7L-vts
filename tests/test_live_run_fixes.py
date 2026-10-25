@@ -59,7 +59,7 @@ def test_hard_command_dedupe_window():
 
 
 def test_brain_initiated_subagent_does_not_echo_slips():
-    src = ast.get_source_segment(MAIN, _fn("_handle_invoke_subagent"))   # 2026-10-25 從主腦收訊函式搬到模組層
+    src = ast.get_source_segment(MAIN, _fn("_run_subagent_task"))   # 2026-10-26 從 _handle_invoke_subagent 拆出來，Live 和 REST 共用
     assert "from_brain=True" in src
 
 

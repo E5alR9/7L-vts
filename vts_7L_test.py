@@ -109,7 +109,7 @@ GLOBAL_INPUT_QUEUE: Optional[asyncio.Queue] = None
 input_queue: Optional[asyncio.Queue] = None
 
 import logging
-from core.tool_schema import INTERACTIONS_TOOLS, LIVE_API_TOOLS, GENAI_TOOLS, GENAI_PROACTIVE_TOOLS
+from core.tool_schema import INTERACTIONS_TOOLS, LIVE_API_TOOLS, REST_BRAIN_TOOLS, GENAI_TOOLS, GENAI_PROACTIVE_TOOLS
 from core.rest_brain import rest_chat
 
 
@@ -375,6 +375,13 @@ def send_brain_slip(text: str, origin: str = "", said: str = "", name: str = "")
     except Exception:
         log_swallowed()
         return False
+
+
+def _unpack_slip(item) -> tuple:
+    """佇列裡的紙條 → (文字, origin, said, name)；系統紙條只有文字。"""
+    if isinstance(item, tuple):
+        return (tuple(item) + ("", "", ""))[:4]
+    return item, "", "", ""
 
 
 def _owner_text_slip(owner: str, user_input: str) -> str:
@@ -1256,308 +1263,6 @@ def normalize_silence_token(text: str) -> str:
     觀眾路徑內部仍用 [PASS] 當判斷標記，所以這裡把 [SILENCE]／[SKIP] 正規化成 [PASS]。"""
     t = re.sub(r"\[(?:SILENCE|SKIP)\]", "[PASS]", text or "", flags=re.IGNORECASE)
     return "PASS" if t.strip().upper() in ("SILENCE", "SKIP") else t
-
-
-async def call_gemini_live_audience_reply(vts, input_queue, audience_user: str, audience_content: str, is_owner: bool = False) -> bool:
-    """PROVIDER: GEMINI-LIVE（gemini-3.8-live 全雙工；見 docs/AI_SOURCES.md）"""
-    """ 【TikTok 直播觀眾專屬 Live 管道】：具備雙軌熱備 Live API、觀眾檔案識別、自身帳號意識與嚴格 [PASS] 靜默過濾"""
-    global last_interaction_time
-    start_t = time.time()
-    realtime_task_mgr.start_audience_task(audience_user, audience_content)
-    
-    try:
-        # 0. 觀眾原文中和：暱稱與留言之後會進 prompt、記憶和送給主腦的紙條，不能偽造系統格式
-        if not is_owner:
-            audience_user = neutralize_viewer_text(audience_user, 80)
-            audience_content = neutralize_viewer_text(audience_content, 300)
-
-        # 1. 提取觀眾暱稱與 ID / 帳號 (支援 @帳號 或 純暱稱)
-        raw_user_str = audience_user.strip()
-        id_match = re.search(r'^(.*?)\s*\(@?([a-zA-Z0-9_.\-]+)\)$', raw_user_str)
-        if id_match:
-            v_display_name = id_match.group(1).strip()
-            v_unique_id = id_match.group(2).strip()
-        else:
-            v_display_name = raw_user_str
-            v_unique_id = raw_user_str
-
-        id_display = f"{v_display_name} (@{v_unique_id})" if v_unique_id != v_display_name else v_display_name
-
-        #  記錄到全集中即時記憶中樞（無論是否開口回覆，都記住大家在聊什麼）
-        lower_c = audience_content.lower()
-        #  通化受話對象判定：觀眾明確指名 7L（名字/代號/Tag）才歸 7L，其餘直播間彈幕預設皆屬老爸/直播間
-        is_addressed_to_7l = any(tag in lower_c for tag in ["7l", "@7l", "小7", "7寶"])
-        recorded_target = "7L" if is_addressed_to_7l else "老爸/直播間"
-        append_to_unified_memory(speaker=f"TikTok 觀眾「{id_display}」", target=recorded_target, content=audience_content, role="user", source="tiktok_live")
-        try:
-            if recorded_target == "7L":
-                send_brain_slip(f"[黑板同步] TikTok 觀眾 {id_display} 對妳說：{audience_content}", origin="audience",
-                                said=audience_content, name=id_display)
-            else:
-                send_brain_slip(f"[黑板同步] TikTok 觀眾 {id_display} 在聊天室說：{audience_content}", origin="audience",
-                                said=audience_content, name=id_display)
-        except Exception: log_swallowed()
-
-        # 整理近期聊天室動態字串
-        recent_chat_lines = []
-        for item in TIKTOK_CHATROOM_MEMORY[-8:-1]:
-            recent_chat_lines.append(f"- {item['user']}：{item['content']}")
-        recent_chat_context = "\n".join(recent_chat_lines) if recent_chat_lines else "（聊天室剛開台，尚無先前留言）"
-
-        # 查詢觀眾個人資料 (Firebase + 本地)
-        v_prof = await get_viewer_profile(v_unique_id if v_unique_id != v_display_name else v_display_name)
-        v_call = v_prof.get("call")
-        v_rel  = v_prof.get("relationship")
-        v_imp  = v_prof.get("impression")
-        if not is_owner:
-            # TikTok 觀眾檔案以暱稱為 key：別人改成同暱稱就會讀到這份檔案，擁有者稱謂一律不給觀眾用
-            if claims_owner_identity(v_call or ""): v_call = None
-            if claims_owner_identity(v_rel or ""): v_rel = None
-        
-        #  是否為老爸本人：由呼叫端依平台帳號驗證後傳入（is_owner）。
-        #  不再看暱稱或觀眾檔案的「關係」——暱稱觀眾自己取、關係是模型寫的，都能被拿來冒充老爸
-        is_dad_account = bool(is_owner)
-
-        target_audience_desc = "老爸" if is_dad_account else (v_call or v_display_name or "大家")
-
-        if is_dad_account:
-            id_display = f"{v_display_name} ( 老爸幕後操作)"
-            v_info = "【 幕後最高管理員】：面前的訊息是「老爸」直接使用主播/管理員帳號在聊天室打字！"
-            speaker_role_prompt = """【 對話對象】：這是妳的「老爸」在幕後透過主播帳號打字！
--  平常叫他名字，撒嬌可以叫老爸！
--  若老爸在文字中給妳下達指令（如點歌、換表情、講話、調整動作），請 100% 優先執行！
--  若老爸只是在聊天室打字發公告/引導觀眾，妳可以簡短可愛地附和（如「對呀老爸說得對」）或輸出 [SILENCE] 讓文字公告顯示！"""
-        else:
-            if v_call or v_rel or v_imp:
-                id_parts = []
-                if v_rel:  id_parts.append(f"關係：{v_rel}")
-                if v_call: id_parts.append(f"慣用稱呼：「{v_call}」")
-                if v_imp:  id_parts.append(f"印象：{v_imp}")
-                v_info = f"【 已知熟人/觀眾檔案】：{id_display}（{'，'.join(id_parts)}）。請稱呼他「{v_call or v_display_name}」！"
-            else:
-                v_info = f"【新進觀眾】：{id_display}（目前尚未記錄特殊關係，可稱呼他「{v_display_name}」）。"
-
-            # 動態加載外部 prompt 檔案
-            speaker_role_prompt = load_prompt("7L_audience.md", id_display=id_display, v_info=v_info, v_call_name=(v_call or v_display_name), v_unique_id=v_unique_id)
-
-        #  當前即時鋼琴狀態感知
-        if pe.is_piano_active and pe.current_piano_song_title:
-            current_playing_info = f"【 妳目前正坐在鋼琴前彈奏《{pe.current_piano_song_title}》】！若觀眾詢問當前曲名，請直接回答這首是《{pe.current_piano_song_title}》，避免列出完整曲庫清單。"
-        else:
-            current_playing_info = "【 妳目前沒有在彈鋼琴】。"
-
-        # 2. 準備 Live 專屬實況主 Instruction (100% 雲端 Firestore 動態加載人設 + 技術規則)
-        cloud_kn = await get_cloud_knowledge()
-        cloud_kn_prompt = PromptTemplateEngine.format_cloud_knowledge_prompt(cloud_kn, is_tiktok=True)
-        ck_sec = f"\n{cloud_kn_prompt}\n" if cloud_kn_prompt else ""
-        rag_sec = build_rag_section(audience_content)   #  觀眾留言的 RAG 記憶檢索
-
-        sys_instruction = f"""<system_root>
-{PromptTemplateEngine.HARD_TECHNICAL_RULES}
-</system_root>
-
-<runtime_state>
-時間：{get_current_time_string()}
-{current_playing_info}
-</runtime_state>
-
-<sensory_memory>
-{ck_sec}
-{rag_sec}
-【 聊天室近期彈幕動態】：
-{recent_chat_context}
-</sensory_memory>
-
-<immediate_task>
-{speaker_role_prompt}
-
-</immediate_task>
-"""
-
-        # 3. 提取直播間最新 100 句全景記憶
-        memory_100_context = get_recent_100_memory_context()
-        unread_desc = f"- [即時] {id_display}: {audience_content}"
-
-        #  階段 1：由 Live API 潛意識哨兵（無限額度雙軌熱備）快速審查 100 句記憶做發言決策
-        sentry_decision = await judge_subconscious_intent_via_live_api(memory_100_context, unread_desc)
-        if not sentry_decision["should_speak"]:
-            dur = time.time() - start_t
-            log_print(f"🤫 7L (Live 哨兵過濾): 審查 100 句記憶判定為無關發言/刷屏 ➔ [PASS] 靜默略過 (0 消耗主力額度, 耗時: {dur:.2f}s)")
-            realtime_task_mgr.finish_audience_task(audience_user)
-            return True
-
-        log_target = sentry_decision.get("target") or v_display_name
-        log_focus = sentry_decision.get("focus") or "熱情互動"
-        log_print(f"🚨 [Live 哨兵喚醒主力] 判定應開口回應觀眾！目標: {log_target} | 焦點: {log_focus}")
-
-        # 預熱背景鋼琴曲譜（若觀眾發言包含歌名）
-        spawn(prefetch_song_midi_background(audience_content))
-
-        #  階段 2：喚醒 7 大高智商主力模型梯隊 (3.1 Flash Lite ➔ 3.5 Flash Lite ➔ 3 Flash ➔ 3.1 Pro ➔ 3.5 ➔ 3.6 ➔ 3.7) 讀取 100 句記憶精準開口
-        sys_instruction_with_100m = f"""{sys_instruction}
-
-【 直播間最新 100 句滾動記憶歷史（掌握全局話題與脈絡）】：
-{memory_100_context}
-
-【 潛意識焦點提示】：回應對象：{log_target}，焦點：{log_focus}。"""
-
-        prompt_user_input = f"【TikTok 直播觀眾 {id_display} 留言】：{audience_content}"
-
-        all_candidate_keys = get_dynamic_live_key_candidates(KEYS_AUDIENCE_LIVE if KEYS_AUDIENCE_LIVE else GEMINI_KEYS)
-        random.shuffle(all_candidate_keys)
-        all_candidate_keys = sort_keys_by_load(all_candidate_keys)
-
-        full_reply = ""
-        used_model_name = ""
-        tool_output_text = ""
-
-        #  Groq 第一梯隊：純文字直答先走 Groq（實測 0.4s 級）。
-        #    只接受「純文字、無工具呼叫」的結果；模型想調工具或 Groq 失敗時，
-        #    full_reply 維持空字串，交由下方 Gemini 完整管線處理。
-        try:
-            from core.groq_router import groq_chat
-            g_resp = await groq_chat(
-                [{"role": "user", "content": f"{sys_instruction_with_100m}\n\n{prompt_user_input}"}],
-                temperature=0.78, max_tokens=500, timeout=4.5,
-            )
-            if g_resp and g_resp.text and not g_resp.function_calls:
-                g_candidate = normalize_silence_token(g_resp.text.strip())
-                if g_candidate:
-                    # 與 Gemini 迴圈內的 [PASS] 靜默過濾保持一致語意
-                    if "[PASS]" in g_candidate or g_candidate == "PASS":
-                        dur = time.time() - start_t
-                        log_print(f"🤫 7L (大腦過濾): Groq 判定為無關發言 ➔ [PASS] 靜默略過 (耗時: {dur:.2f}s)")
-                        realtime_task_mgr.finish_audience_task(audience_user)
-                        return True
-                    full_reply = g_candidate
-                    used_model_name = f"Groq/{g_resp.model.split('/')[-1]}"
-        except Exception:
-            log_swallowed()
-
-        for idx, g_key in enumerate(all_candidate_keys[:6]):
-            if full_reply: break
-            client = genai.Client(api_key=g_key)
-            for model_name in STREAMER_MIND_MODELS:
-                if key_cooling(g_key, model_name):
-                    continue
-                try:
-                    async with track_key(g_key):
-                        resp = await asyncio.wait_for(
-                            client.aio.models.generate_content(
-                                model=model_name,
-                                contents=[
-                                    types.Content(role="user", parts=[types.Part(text=f"{sys_instruction_with_100m}\n\n{prompt_user_input}")])
-                                ],
-                            config=types.GenerateContentConfig(
-                                temperature=0.78,
-                                max_output_tokens=500,
-                                tools=GENAI_PROACTIVE_TOOLS,
-                                safety_settings=UNRESTRICTED_SAFETY_SETTINGS
-                            )
-                        ),
-                        timeout=4.5
-                    )
-                    raw_reply = normalize_silence_token(resp.text.strip()) if resp.text else ""
-                    tool_out = ""
-                    if resp.function_calls:
-                        for fc in resp.function_calls:
-                            fn_name = getattr(fc, 'name', '')
-                            fn_args = getattr(fc, 'args', {}) or {}
-                            log_print(f"🛠️ [觀眾大腦調用工具] {fn_name}({fn_args})")
-                            t_res = await execute_tool_dispatch(fn_name, fn_args, caller_target="audience", caller_user=audience_user)
-                            if fn_name == "search_google":
-                                s_summary = await summarize_search_to_speech(fn_args.get("query", ""), t_res, user_role_name=target_audience_desc)
-                                tool_out += (" " + s_summary)
-                            else:
-                                tool_out += (" " + t_res)
-                            
-                    clean_raw = re.sub(r'\[PASS\]', '', raw_reply, flags=re.IGNORECASE).strip()
-                    #  若大腦調用了工具但未生成口語台詞，自然生成親切口語回應
-                    if not clean_raw and resp.function_calls:
-                        for fc in resp.function_calls:
-                            fc_name = getattr(fc, 'name', '')
-                            fc_args = getattr(fc, 'args', {}) or {}
-                            if fc_name == "pe.play_virtual_piano":
-                                song_q = pe.clean_song_title_for_speech(fc_args.get("song_name", ""))
-                                if pe.is_piano_active and pe.current_piano_song_title:
-                                    clean_raw = f"[EXPRESSION: 星星眼] {target_audience_desc}，沒問題！《{song_q or '這首'}》我先幫你排進清單，等現在這首彈完馬上幫你彈喔！"
-                                else:
-                                    clean_raw = f"[EXPRESSION: 星星眼] {target_audience_desc}，好喔！這就為你彈《{song_q or '這首'}》！"
-                                break
-                            elif fc_name == "pe.compose_and_play_original_piano":
-                                clean_raw = f"[EXPRESSION: 星星眼] {target_audience_desc}，沒問題！我現在就現場為你即興創作一首，聽聽看喔！"
-                                break
-                            elif fc_name == "pe.mashup_virtual_piano":
-                                clean_raw = f"[EXPRESSION: 星星眼] {target_audience_desc}，收到！雙曲狂暴合奏這就來！"
-                                break
-
-                    if not clean_raw and not tool_out.strip() and ("[PASS]" in raw_reply or raw_reply == "PASS"):
-                        dur = time.time() - start_t
-                        log_print(f"🤫 7L (大腦過濾): 研判為無關發言 ➔ [PASS] 靜默略過 (耗時: {dur:.2f}s)")
-                        realtime_task_mgr.finish_audience_task(audience_user)
-                        return True
-                        
-                    final_res = clean_raw if clean_raw else tool_out.strip()
-                    if final_res:
-                        full_reply = final_res
-                        used_model_name = model_name
-                        tool_output_text = tool_out
-                        break
-                except Exception as gen_err:
-                    if report_gemini_key_error(g_key, gen_err, model_name):
-                        break
-                    continue
-
-        if not full_reply or full_reply == "[PASS]":
-            realtime_task_mgr.finish_audience_task(audience_user)
-            return False
-
-        # 6. 執行動作並發送發話隊列
-        clean_reply = TextCleanEngine.remove_system_hints(full_reply)
-        clean_reply = re.sub(r'^(?:回應|回覆|動作顯示|主播|說道|回答)[：:\s]+', '', clean_reply, flags=re.IGNORECASE).strip()
-        clean_reply = re.sub(r'(?<=[\u4e00-\u9fa5])\s+(?=[\u4e00-\u9fa5])', '', clean_reply)
-        clean_reply = re.sub(r'\s+([，。！？,.!?:;])', r'\1', clean_reply)
-        clean_reply = re.sub(r'\s{2,}', ' ', clean_reply).strip()
-
-        m_tag = f" Live-Stream ({used_model_name.replace('gemini-', '')})"
-        log_print(f"🤖 原始大腦輸出: {clean_reply} ({m_tag})")
-
-        #  記錄觀眾資料標籤
-        for v_match in re.finditer(
-            r'\[VIEWER_UPDATE[：:]\s*([^|\]]+?)(?:\|CALL[：:]\s*([^|\]]+?))?(?:\|REL[：:]\s*([^|\]]+?))?(?:\|IMP[：:]\s*([^|\]]+?))?\]',
-            clean_reply, re.IGNORECASE
-        ):
-            vu_name = v_match.group(1).strip()
-            vu_call = v_match.group(2).strip() if v_match.group(2) else None
-            vu_rel  = v_match.group(3).strip() if v_match.group(3) else None
-            vu_imp  = v_match.group(4).strip() if v_match.group(4) else None
-            spawn(save_viewer_profile(vu_name, call=vu_call, relationship=vu_rel, impression=vu_imp))
-            log_print(f"👥 [認人] 記住觀眾 {vu_name}：稱={vu_call} 關係={vu_rel} 印象={vu_imp}")
-
-        spoken = await execute_actions(vts, clean_reply, input_queue, user_input_ctx=audience_content, caller_target="audience", caller_user=id_display)
-        clean_spoken = spoken.strip(" *'\"-.,!?。，！？\n\r") if spoken else ""
-        if clean_spoken:
-            await asyncio.to_thread(update_subtitle, clean_spoken)
-            record_bot_message(clean_spoken)
-            log_print(f"💬 7L (回應觀眾 {id_display}): {clean_spoken} ({m_tag})")
-            await speech_queue.put({"text": clean_spoken, "target": "audience", "raw_text": clean_reply})
-            last_interaction_time = time.time()
-            
-            #  寫入全集中記憶中樞（確保所有大腦掌握 7L 最新發言）
-            append_to_unified_memory(speaker="7L", target=f"觀眾「{target_audience_desc}」", content=clean_spoken, role="assistant", source="tts")
-            
-            # 寫入歷史 (獨立儲存於 tiktok_live_stream 頻道，不污染老爸的主對話記憶)
-            fresh_hist = await fetch_from_long_term_memory("tiktok_live_stream")
-            fresh_hist.append({"role": "user", "content": f"【TikTok 觀眾 {id_display}】：{audience_content}"})
-            fresh_hist.append({"role": "assistant", "content": clean_spoken})
-            spawn(save_to_long_term_memory("tiktok_live_stream", fresh_hist))
-            
-        realtime_task_mgr.finish_audience_task(audience_user)
-        return True
-    except Exception as e:
-        log_print(f"⚠️ [觀眾 Live 管道異常]: {e}")
-        realtime_task_mgr.finish_audience_task(audience_user)
-        return False
 
 
 from core.prompts import TextCleanEngine, PromptTemplateEngine, neutralize_viewer_text
@@ -4111,7 +3816,44 @@ def _vision_report_recent(now: float) -> bool:
 _SUBAGENT_VISION_TASK_RE = re.compile(r"螢幕|屏幕|畫面|截圖|桌面上")
 
 
-async def live_vision_tool_task(session, vts):
+def _start_marker_tools(text: str) -> str:
+    """她話裡的副腦標籤：[TOOL:SEARCH] 關鍵字／[TOOL:VISION]／[TOOL:MIRROR]。拔掉標籤、背景叫對應的副腦，回剩下的話。
+    Live 主腦和 REST 大腦共用。"""
+    text = strip_blob_noise(text)
+    search_match = re.search(r'\[TOOL:SEARCH\]\s*(.*?)(?=\[|$)', text)
+    if search_match:
+        query = sanitize_search_query(search_match.group(1))
+        text = text.replace(search_match.group(0), "").strip()
+        if query:
+            log_print(f"🌐 [攔截暗號] 啟動平行代理人：搜網專家！關鍵字：{query}")
+            spawn(live_search_tool_task(query))
+        else:
+            log_print("⚠️ [攔截暗號] 搜尋關鍵字全是雜訊，跳過不搜。")
+    if "[TOOL:VISION]" in text:
+        text = text.replace("[TOOL:VISION]", "").strip()
+        if _vision_report_recent(time.time()):
+            log_print("👁️ [視覺] 她正在回答剛看到的畫面，這次的 [TOOL:VISION] 不重看（防看完又看的迴圈）")
+        else:
+            log_print("⚡ [攔截暗號] 啟動平行代理人：視覺大腦！")
+            spawn(live_vision_tool_task())
+
+    if "[TOOL:MIRROR]" in text:
+        log_print("🪞 [攔截暗號] 啟動平行代理人：照鏡子！")
+        text = text.replace("[TOOL:MIRROR]", "").strip()
+        spawn(live_mirror_tool_task())
+    return text
+
+
+def _brain_text_for_memory(text: str) -> str:
+    """主腦說的一段話存進記憶前的清洗。記憶會注入回 prompt：存原文的話，內心戲段落與 [INTERRUPT_SELF]
+    會被模型照著學（2026-10-24）；語速／音高標籤只給 TTS 用，存進去只會佔上下文（一句話常夾十幾個）。表情標籤留著。"""
+    t = TextCleanEngine.extract_thought((text or "").strip())[1]
+    t = re.sub(r'\[(?:INTERRUPT_SELF|CUT_IN|INTERRUPT|SELF_INTERRUPT|插話|中斷|打斷自己)\]', '', t, flags=re.IGNORECASE).strip()
+    t = re.sub(r'\[(?:SPEED|PITCH|VOLUME|RATE)\b[^\]]*\]', '', t, flags=re.IGNORECASE)  # 也吃模型漏寫冒號的 [SPEED+8%]
+    return re.sub(r' {2,}', ' ', t).strip() or (text or "").strip()
+
+
+async def live_vision_tool_task():
     """背景視覺打工人：使用現有 fetch_ai_response 備援機制分析截圖"""
     try:
         log_print("👁️ [視覺大腦啟動] 正在背景截圖並分析畫面...")
@@ -4141,7 +3883,7 @@ async def live_vision_tool_task(session, vts):
         except Exception as inner_e:
             log_print(f"⚠️ [視覺大腦] 無法傳送 fallback: {inner_e}")
 
-async def live_mirror_tool_task(session, vts):
+async def live_mirror_tool_task():
     """鏡子代理人：讓她看看自己的圖片"""
     try:
         import base64
@@ -4178,7 +3920,7 @@ async def live_mirror_tool_task(session, vts):
         except Exception as inner_e:
             log_print(f"⚠️ [鏡子] 無法傳送 fallback: {inner_e}")
 
-async def live_search_tool_task(session, query):
+async def live_search_tool_task(query):
     """搜網專家副腦：使用 Tavily API 搜尋並將原始結果回傳給主腦"""
     try:
         log_print(f"🌐 [搜網專家啟動] 正在背景搜尋關鍵字：{query}...")
@@ -4186,9 +3928,9 @@ async def live_search_tool_task(session, query):
             # 同步 HTTP 必須扔線程池：在 event loop 裡直打會凍住麥克風/紙條幾秒
             res = await asyncio.to_thread(tavily_client.search, query, "general", "basic")
             if res and isinstance(res, dict):
-                results_text = "\\n".join([f"- {r.get('title', '')}: {r.get('content', '')}" for r in res.get('results', [])[:3]])
+                results_text = "\n".join([f"- {r.get('title', '')}: {r.get('content', '')}" for r in res.get('results', [])[:3]])
                 log_print(f"🌐 [搜網專家回報] 找到 {len(res.get('results', []))} 筆結果。")
-                send_brain_slip(f"[系統提示：搜網專家回報搜尋結果，請自然地把這段資料告訴老爸（不要全唸，要口語化提煉）：]\\n{_clean_result_for_brain(results_text)}")
+                send_brain_slip(f"[系統提示：搜網專家回報搜尋結果，請自然地把這段資料告訴老爸（不要全唸，要口語化提煉）：]\n{_clean_result_for_brain(results_text)}")
                 return
         raise Exception("Tavily 搜尋客戶端未初始化或搜尋無結果")
     except Exception as e:
@@ -4245,6 +3987,25 @@ def use_rest_brain() -> bool:
     """該由 REST 大腦接手講話了嗎：Live 主腦斷線超過 LIVE_FALLBACK_AFTER_SEC。
     VTuber 模式不開 Live 主腦，所以一直是。"""
     return live_brain_down_for() >= LIVE_FALLBACK_AFTER_SEC
+
+async def build_brain_system_prompt(owner: str, char_name: str) -> str:
+    """主腦的系統提示詞：人設、限制、說話規則、雲端知識、技術硬規則。Live 主腦和 REST 大腦共用。"""
+    cloud_kn = await get_cloud_knowledge()
+    cloud_kn_prompt = PromptTemplateEngine.format_cloud_knowledge_prompt(cloud_kn, current_custom_name=owner)
+    p_persona = load_prompt("7L_persona.md", char_name=char_name, owner=owner)
+    p_constraints = load_prompt("7L_constraints.md", char_name=char_name, owner=owner)
+    p_responses = load_prompt("7L_responses.md", char_name=char_name, owner=owner,
+                              expression_menu=vc.EXPRESSION_MENU_TEXT)
+    return f"""{p_persona}
+
+{p_constraints}
+
+{p_responses}
+
+{cloud_kn_prompt}
+{PromptTemplateEngine.HARD_TECHNICAL_RULES}
+"""
+
 
 def load_prompt(filename: str, **kwargs) -> str:
     """模組級提示詞載入器（唯一真相來源）：讀 prompts/*.md 並代入變數。
@@ -4465,8 +4226,9 @@ def _take_live_resume_handle(model: str, key_idx: int, now: Optional[float] = No
     return handle if ok else None
 
 
-async def _handle_invoke_subagent(session, ws_send_lock, _fn_name, _fn_call_id, _task_ins, _intent=None):
-    """單個子智能體任務全流程（CPU→副腦→回報），獨立背景執行、互不堵塞。
+async def _run_subagent_task(_task_ins, _intent, _respond):
+    """子智能體任務全流程（CPU→副腦→回報）。_respond(文字, 排程, 還有下文) 把結果交回主腦：
+    Live 主腦是送工具回應（_handle_invoke_subagent），REST 大腦是帶著結果再問她一次（_rest_answer_slip）。
     invoke_subagent 是非阻塞工具。實測主腦呼叫時幾乎都不開口（2026-10-24），所以：
     CPU 硬指令命中（不到 1 秒）→ 一則回應請她答應；
     要等副腦（幾秒到半分鐘）→ 先回中間回應（will_continue）讓她答應，結果回來再補。
@@ -4478,18 +4240,6 @@ async def _handle_invoke_subagent(session, ws_send_lock, _fn_name, _fn_call_id, 
                   "就老實說這次沒查到，不要自己編數字。]")
     _if_said = "（妳剛才如果已經答應過，就輸出 [SILENCE]，不要再講一次。）"
 
-    async def _respond(_text, _sched, _more=False):
-        _fr = {"name": _fn_name, "response": {"result": _text}, "scheduling": _sched}
-        if _more:
-            _fr["will_continue"] = True
-        if _fn_call_id:
-            _fr["id"] = _fn_call_id
-        try:
-            async with ws_send_lock:
-                await session.send_tool_response(function_responses=[types.FunctionResponse(**_fr)])
-        except Exception as _se:
-            log_print(f"⚠️ [子智能體回報失敗]: {_se}")
-
     try:
         if _task_ins and _SUBAGENT_VISION_TASK_RE.search(_task_ins):
             # 子智能體看不到畫面：照舊流程會回「沒結果，請妳自己回答」，她就自己編畫面內容
@@ -4499,7 +4249,7 @@ async def _handle_invoke_subagent(session, ws_send_lock, _fn_name, _fn_call_id, 
                 await _respond("[系統底層：剛剛才看過畫面，照剛才的視覺回報回答就好，不要再看一次。]", _quiet)
             else:
                 log_print("⚡ [子智能體] 看畫面交給視覺大腦")
-                spawn(live_vision_tool_task(session, vc.GLOBAL_VTS))
+                spawn(live_vision_tool_task())
                 await _respond("[系統底層：已經請視覺大腦去看畫面，幾秒後回報。在那之前不要描述畫面內容，"
                                "可以先說一句「我看看～」。]", _speak)
             return
@@ -4562,6 +4312,98 @@ async def _handle_invoke_subagent(session, ws_send_lock, _fn_name, _fn_call_id, 
         log_print(f"⚠️ [子智能體任務異常]: {_e}")
 
 
+async def _handle_invoke_subagent(session, ws_send_lock, _fn_name, _fn_call_id, _task_ins, _intent=None):
+    """Live 主腦呼叫 invoke_subagent：每通獨立背景跑 _run_subagent_task，結果用工具回應交回去。"""
+    async def _respond(_text, _sched, _more=False):
+        _fr = {"name": _fn_name, "response": {"result": _text}, "scheduling": _sched}
+        if _more:
+            _fr["will_continue"] = True
+        if _fn_call_id:
+            _fr["id"] = _fn_call_id
+        try:
+            async with ws_send_lock:
+                await session.send_tool_response(function_responses=[types.FunctionResponse(**_fr)])
+        except Exception as _se:
+            log_print(f"⚠️ [子智能體回報失敗]: {_se}")
+
+    await _run_subagent_task(_task_ins, _intent, _respond)
+
+
+async def _rest_speak(vts, input_queue, raw: str, origin: str) -> str:
+    """REST 大腦的一段回覆，照 Live 主腦說完一段話的方式處理：叫副腦、執行動作標籤、排進說話佇列、寫記憶。
+    回實際要念的字（她選擇不講就是空字串）。"""
+    text = re.sub(r'\[PASS\]', '', normalize_silence_token(raw or ""), flags=re.IGNORECASE).strip()
+    if not text:
+        return ""
+    text = _start_marker_tools(text)
+    owner = _owner_name()
+    to_dad = origin == "dad"
+    target = "dad" if to_dad else "audience"
+    spoken = (await execute_actions(vts, text, input_queue, caller_target=target,
+                                    caller_user=owner if to_dad else _BRAIN_INPUT_ORIGIN.get("name", ""))).strip()
+    if spoken and not is_singing_active():
+        await speech_queue.put({"text": spoken, "target": target, "raw_text": text, "private": to_dad})
+    append_to_unified_memory(speaker="7L", target=owner if to_dad else "直播間", content=_brain_text_for_memory(text),
+                             role="assistant", source="rest_brain")
+    log_print(f"💬 7L (REST 大腦): {spoken or text}")
+    return spoken
+
+
+async def _rest_answer_slip(vts, input_queue, slip: str, origin: str) -> None:
+    """一張紙條交給 REST 大腦。系統提示詞跟 Live 主腦同一份，另外帶最近的對話和鋼琴狀態（REST 沒有連線記憶）。
+    她可以呼叫 invoke_subagent，跟 Live 走同一套子智能體；子智能體要她講結果時，帶著結果再問她一次。"""
+    from core.identity import get_character_name
+    owner = _owner_name()
+    system = await build_brain_system_prompt(owner, get_character_name())
+    system += ("\n\n[最近的對話]\n" + get_unified_memory_context(limit=20, thought_char_limit=0)
+               + "\n\n" + pe.get_piano_realtime_prompt())
+    r = await rest_chat(system, slip, models=STREAMER_MIND_MODELS, tools=REST_BRAIN_TOOLS)
+    if not r:
+        return
+    said = await _rest_speak(vts, input_queue, r.text, origin)
+    for name, args in r.calls:
+        if name != "invoke_subagent":
+            continue
+        log_print(f"🤖 [REST 大腦決策] 呼叫工具: {name}({args})")
+
+        async def _respond(text, sched, _more=False):
+            if sched == types.FunctionResponseScheduling.SILENT or (_more and said):
+                return   # 做完記著就好；或是「先答應一聲」而她剛才已經答應了
+            r2 = await rest_chat(system, f"{slip}\n\n[妳剛才說：{said or '（還沒說話）'}]\n{text}",
+                                 models=STREAMER_MIND_MODELS)
+            if r2:
+                await _rest_speak(vts, input_queue, r2.text, origin)
+
+        await _run_subagent_task(args.get("task_instruction", ""),
+                                 {k: args.get(k, "") for k in ("action", "song", "song2", "url")}, _respond)
+
+
+async def rest_slip_worker(vts, input_queue):
+    """沒有 Live 主腦時接紙條（2026-10-26）：Live 斷線太久，或 VTuber 模式本來就不開 Live 主腦，
+    紙條就由 REST 大腦一張一張回。以前紙條只有 Live 主腦會收：沒 Live 時老爸的話、唱完的謝幕、
+    看完畫面的回報都堆在佇列裡沒人接，Live 回來才一口氣倒給它。"""
+    while True:
+        if not use_rest_brain():
+            await asyncio.sleep(1.0)
+            continue
+        if _LIVE_SLIP_RETRY:
+            item = _LIVE_SLIP_RETRY.popleft()
+        else:
+            try:
+                item = await asyncio.wait_for(LIVE_API_SYSTEM_PROMPT_QUEUE.get(), timeout=1.0)
+            except asyncio.TimeoutError:
+                continue
+        prompt, origin, said, name = _unpack_slip(item)
+        try:
+            if _slip_is_dupe(prompt, time.time()):
+                continue
+            log_print(f"📥 [REST 大腦] Live 主腦不在，接紙條: {prompt[:80]}")
+            _note_brain_origin(origin, said, name)
+            await _rest_answer_slip(vts, input_queue, prompt, origin)
+        except Exception as e:
+            log_print(f"⚠️ [REST 大腦] 這張紙條沒回成：{e}")
+
+
 async def continuous_live_worker(vts):
     """真・雙向串流 Live 大腦核心"""
     global GLOBAL_LIVE_SESSION
@@ -4591,28 +4433,7 @@ async def continuous_live_worker(vts):
             live_m = live_models[current_m_idx]
             api_key = GEMINI_KEYS[current_k_idx]
             client = genai.Client(api_key=api_key)
-            from core.memory import get_cloud_knowledge
-            from core.prompts import PromptTemplateEngine
-            cloud_kn = await get_cloud_knowledge()
-            cloud_kn_prompt = PromptTemplateEngine.format_cloud_knowledge_prompt(cloud_kn, current_custom_name=owner)
-            
-            _load_prompt = load_prompt  # 統一走模組級載入器（唯一真相來源）
-
-            p_persona = _load_prompt("7L_persona.md", char_name=char_name, owner=owner)
-            p_constraints = _load_prompt("7L_constraints.md", char_name=char_name, owner=owner)
-            import services.vts_client as _vc_menu
-            p_responses = _load_prompt("7L_responses.md", char_name=char_name, owner=owner,
-                                       expression_menu=_vc_menu.EXPRESSION_MENU_TEXT)
-
-            system_instruction = f"""{p_persona}
-
-{p_constraints}
-
-{p_responses}
-
-{cloud_kn_prompt}
-{PromptTemplateEngine.HARD_TECHNICAL_RULES}
-"""
+            system_instruction = await build_brain_system_prompt(owner, char_name)
             import time
             from core.memory import get_unified_memory_context
             _resume_handle = _take_live_resume_handle(live_m, current_k_idx)
@@ -4809,28 +4630,7 @@ async def continuous_live_worker(vts):
                                         import re
                                         # 先拔 blob（腦偶爾會吐幾 MB 的 base64 音訊；不先清，正則橫跨、
                                         # 日誌刷屏、搜尋燒額度、TTS 會去唸亂碼——一律視為雜訊）
-                                        text_chunk = strip_blob_noise(text_chunk)
-                                        search_match = re.search(r'\[TOOL:SEARCH\]\s*(.*?)(?=\[|$)', text_chunk)
-                                        if search_match:
-                                            query = sanitize_search_query(search_match.group(1))
-                                            text_chunk = text_chunk.replace(search_match.group(0), "").strip()
-                                            if query:
-                                                log_print(f"🌐 [攔截暗號] 啟動平行代理人：搜網專家！關鍵字：{query}")
-                                                spawn(live_search_tool_task(session, query))
-                                            else:
-                                                log_print("⚠️ [攔截暗號] 搜尋關鍵字全是雜訊，跳過不搜。")
-                                        if "[TOOL:VISION]" in text_chunk:
-                                            text_chunk = text_chunk.replace("[TOOL:VISION]", "").strip()
-                                            if _vision_report_recent(time.time()):
-                                                log_print("👁️ [視覺] 她正在回答剛看到的畫面，這次的 [TOOL:VISION] 不重看（防看完又看的迴圈）")
-                                            else:
-                                                log_print("⚡ [攔截暗號] 啟動平行代理人：視覺大腦！")
-                                                spawn(live_vision_tool_task(session, vts))
-                                        
-                                        if "[TOOL:MIRROR]" in text_chunk:
-                                            log_print("🪞 [攔截暗號] 啟動平行代理人：照鏡子！")
-                                            text_chunk = text_chunk.replace("[TOOL:MIRROR]", "").strip()
-                                            spawn(live_mirror_tool_task(session, vts))
+                                        text_chunk = _start_marker_tools(text_chunk)
                                         
                                         if text_chunk:
                                             chunk_buffer += text_chunk
@@ -4848,13 +4648,8 @@ async def continuous_live_worker(vts):
                                             global LAST_BRAIN_TURN_TS
                                             LAST_BRAIN_TURN_TS = time.time()
                                             from core.memory import append_to_unified_memory
-                                            # 記憶會注入回 prompt：存原文的話，內心戲段落與 [INTERRUPT_SELF] 會被模型照著學（2026-10-24）
-                                            _mem_text = TextCleanEngine.extract_thought(turn_buffer.strip())[1]
-                                            _mem_text = re.sub(r'\[(?:INTERRUPT_SELF|CUT_IN|INTERRUPT|SELF_INTERRUPT|插話|中斷|打斷自己)\]', '', _mem_text, flags=re.IGNORECASE).strip()
-                                            # 語速／音高標籤只給 TTS 用，存進記憶只會佔掉上下文（一句話常夾十幾個）；表情標籤留著
-                                            _mem_text = re.sub(r'\[(?:SPEED|PITCH|VOLUME|RATE)\b[^\]]*\]', '', _mem_text, flags=re.IGNORECASE)  # 也吃模型漏寫冒號的 [SPEED+8%]
-                                            _mem_text = re.sub(r' {2,}', ' ', _mem_text).strip()
-                                            append_to_unified_memory(speaker="7L", target="dad", content=_mem_text or turn_buffer.strip(), role="assistant", source="live_api")
+                                            append_to_unified_memory(speaker="7L", target="dad", content=_brain_text_for_memory(turn_buffer),
+                                                                     role="assistant", source="live_api")
                                             log_print(f"📝 [黑板紀錄] 7L Live 大腦: {turn_buffer.strip()}")
                                             turn_buffer = ""
                                         if goaway_pending:
@@ -4875,8 +4670,7 @@ async def continuous_live_worker(vts):
                                 prompt = _LIVE_SLIP_RETRY.popleft()
                             else:
                                 prompt = await LIVE_API_SYSTEM_PROMPT_QUEUE.get()
-                            prompt, origin, said, name = ((tuple(prompt) + ("", "", ""))[:4] if isinstance(prompt, tuple)
-                                                          else (prompt, "", "", ""))
+                            prompt, origin, said, name = _unpack_slip(prompt)
                             try:
                                 if _slip_is_dupe(prompt, time.time()):
                                     log_print("📄 [紙條去重] 10 秒內相同紙條已送過，跳過（一次點歌三張同字紙條會自斷風暴）。")
@@ -7044,7 +6838,6 @@ async def streamer_mind_loop_worker(vts, input_queue):
 current_dad_task = None
 current_audience_task = None
 current_chat_task = None
-CURRENT_CHAT_SESSION_ID = 0
 CURRENT_PROCESSING_USER_INPUT = ""
 
 def _extract_think_reply(text: str):
@@ -7722,13 +7515,11 @@ async def _desktop_dad_reply(vts, input_queue, user_input: str, owner: str = "�
 
 
 async def process_chat_message(vts, input_queue, user_input: str, user_audio_b64: Optional[str] = None, request_start_time: Optional[float] = None, interrupted_context: str = "", source: str = "unknown"):
-    """單一對話回合的核心處理常式 (即時神經大腦一步到位生成回覆與工具調用)"""
-    global last_interaction_time
-    global IS_MIC_ENABLED, CURRENT_CHAT_SESSION_ID
-    
-    CURRENT_CHAT_SESSION_ID += 1
-    my_session_id = CURRENT_CHAT_SESSION_ID
-    
+    """老爸的一句話（麥克風、打字、直播間的老爸帳號）：寫進記憶，遞紙條給主腦。
+    Live 主腦在就由它接，不在就由 REST 大腦接（rest_slip_worker），這裡不用分。
+    以前 Live 不在時這裡自己組一套提示詞、截圖、查時事、跑影子大腦加串流嘴巴，跟主腦是兩套行為（2026-10-26 拿掉）。"""
+    global IS_MIC_ENABLED
+
     try:
         if source in ["console", "web_console"]:
             import services.web_dashboard as _wd
@@ -7744,7 +7535,7 @@ async def process_chat_message(vts, input_queue, user_input: str, user_audio_b64
                 _wd.broadcast_event("chat_sent", {"text": user_input, "from": owner})
             except Exception: pass
 
-            log_print("⚡ [極速直通主腦] Live 模式下，控制台訊息已轉交 Live 大腦處理。")
+            log_print("⚡ [極速直通主腦] 控制台訊息遞紙條給主腦（Live 不在就由 REST 大腦接）。")
             # 老爸明確指令（唱歌/彈琴）走 CPU 硬拆解先斬後奏：零成本零幻覺，
             # 紙條照樣遞（主腦只負責口頭答應），Live 不調工具也不會漏執行
             spawn(background_tool_executor(user_input, target="dad", requester_name=owner))
@@ -7764,25 +7555,16 @@ async def process_chat_message(vts, input_queue, user_input: str, user_audio_b64
                 send_brain_slip(_owner_text_slip(owner, user_input), origin="dad", said=user_input)
             except Exception: log_swallowed()
             return
-        # （註：舊的 source == "tiktok_live" 分支已刪除——tiktok_listener 只會送出
-        # tiktok / tiktok_gift / tiktok_ambient，從無此 source，屬死碼）
-
-        req_start = request_start_time if request_start_time else time.time()
-        set_ai_state("THINKING", "處理對話")
-        touch_interaction()
-        user_profile = await get_user_profile()
-        current_custom_name = user_profile.get("custom_name", DEFAULT_USER_TITLE)
-        current_impression = user_profile.get("impression", "")
-
-        #  0.001 秒緊急硬終止過濾
         if check_immediate_shutdown(user_input):
             return
+        touch_interaction()
+        owner = _owner_name()
 
         #  API Live 持續時間感測：智慧捕捉「多久後叫我 / 提醒我」意圖
         timer_intent = live_timer_hub.detect_timer_intent(user_input)
         if timer_intent:
             t_sec, t_action = timer_intent
-            live_timer_hub.add_timer(t_sec, t_action, source="老爸發言", caller_user=current_custom_name)
+            live_timer_hub.add_timer(t_sec, t_action, source="老爸發言", caller_user=owner)
             try:
                 web_dash.broadcast_event("timer_added", live_timer_hub.get_sensor_summary())
             except Exception:
@@ -7797,270 +7579,33 @@ async def process_chat_message(vts, input_queue, user_input: str, user_audio_b64
             IS_MIC_ENABLED = True
             log_print("🎙️ [麥克風控制] 已重新開啟麥克風收音！")
 
-        #   【TikTok 直播觀眾專屬 Live 管道】：所有 TikTok 彈幕/提問/送禮/動態 100% 分流至專屬 Live 管道！
-        tt_match_early = re.search(r'【TikTok (?:直播觀眾|官方提問箱|直播動態)\s*([^】]*?)\s*(?:留言|送禮|動態|提問)?】[：:]\s*(.*)', user_input)
-        if not tt_match_early and "【TikTok" in user_input:
-            tt_match_early = re.search(r'【TikTok\s*([^】]*?)】[：:]\s*(.*)', user_input)
-
-        if tt_match_early:
-            aud_u = tt_match_early.group(1).strip() or "直播觀眾"
-            aud_c = tt_match_early.group(2).strip()
-            live_ok = await call_gemini_live_audience_reply(vts, input_queue, aud_u, aud_c,
-                                                            is_owner=(source == "tiktok_dad"))
-            if live_ok:
-                last_interaction_time = time.time()
-                set_ai_state("PIANO" if pe.is_piano_active else "IDLE", "TikTok Live 管道已接手")
-                return  #  Live 專屬管道處理完成，直接返回！
-            log_print("⚠️ [TikTok 降級] Live 專屬管道暫不可用，自動無縫回退至極速文字/Gemini Flash Lite 保底大腦...")
-
-        if tk_listener.IS_STREAMING:
-            situation_prompt = f"【當前情境】：我們現在正在「開台實況 (Live Streaming)」！\n{tk_listener.get_tiktok_live_telemetry()}"
-        else:
-            situation_prompt = f"【當前情境】：現在是妳與{current_custom_name}私下的日常相處時間。"
-        
-        #  7L 實時全域狀態與進行中任務感知 (由 realtime_tasks 雲端中樞統一供給)
-        situation_prompt += f"\n{realtime_task_mgr.get_realtime_summary()}"
-        if interrupted_context:
-            situation_prompt += f"\n【 實時前情提要（關鍵上下文）】：老爸前一秒剛說：「{interrupted_context}」，但該思考隨即被老爸當前這句「{user_input}」即時打斷/修正！請將兩句話結合理解（例如老爸可能是在澄清、指正聽錯、或接著上一句說）！"
-    
-        impression_text = f"- 妳對他的印象: {current_impression}\n" if current_impression else ""
-        system_specs = get_system_performance()
-
-        is_voice_input = bool(user_audio_b64)
-        effective_audio_b64 = user_audio_b64 if is_voice_input else None
-        if effective_audio_b64:
-            saved_local_path = save_local_audio_clip(effective_audio_b64)
-            if saved_local_path:
-                log_print(f"🎙️ [本機音訊快取] 語音 WAV 已保存至本機: {os.path.basename(saved_local_path)}")
-
-        #  7L 自主判定記憶與感知需求深度（自適應調節：拒絕無腦強塞幾十句歷史導致大腦思考卡頓！）
-        mem_decision = evaluate_memory_demand(
-            user_input, 
-            is_voice_input=is_voice_input, 
-            source=source
-        )
-        mem_level = mem_decision.level
-        u_lim = mem_decision.u_lim
-        h_lim = mem_decision.h_lim
-        th_lim = mem_decision.th_lim
-        need_news = mem_decision.need_news
-        single_screen = mem_decision.single_screen
-        mem_reason = mem_decision.reason
-        
-        view_mode_str = "單圖快照 (0.1s)" if single_screen else "7圖時序多視角"
-        log_print(f"🧠 [7L 自主記憶裁決] 模式: 【{mem_level}】(歷史:{h_lim}輪, 全景:{u_lim}句, 心流:{th_lim}字, 視覺:{view_mode_str}, 時事:{need_news}) | {mem_reason}")
-
-        #  畫面截圖快照處理（依 7L 自主判定：極速/輕量使用單圖快照節省 1.5s；深度時使用 7 圖時序動態）
-        if single_screen:
-            if latest_screen_cache and isinstance(latest_screen_cache, list) and len(latest_screen_cache) > 0:
-                current_screen_snapshot = latest_screen_cache[0][1] if isinstance(latest_screen_cache[0], (tuple, list)) else latest_screen_cache[0]
-            else:
-                current_screen_snapshot = latest_screen_cache
-        else:
-            current_screen_snapshot = get_combined_temporal_screen_snapshot()
-
-        #  動態獲取 7L 雲端認知庫 (Firestore 永久大腦) 與 即時重大時事情報 (按需加載)
-        cloud_kn = await get_cloud_knowledge()
-        cloud_kn_prompt = PromptTemplateEngine.format_cloud_knowledge_prompt(cloud_kn)
-        rag_sec = build_rag_section(user_input)   #  主對話路徑的 RAG 記憶檢索（離線、失敗自動略過）
-        
-        trending_news_prompt = ""
-        if need_news:
-            trending_news_prompt = await get_trending_news_briefing()
-
-        #  依據自主判定配額動態調取歷史記憶（h_lim=0 時 0 毫秒秒過，完全不讀舊資料庫；最高調取上百句）
-        history = (await fetch_from_long_term_memory(DEFAULT_CHANNEL_ID, user_input, limit=max(h_lim, 150))) if h_lim > 0 else []
-        #  1. 統一寫入全集中大腦記憶看板 (STREAMER_MIND_BOARD & 全局記憶中樞)
         add_to_streamer_mind_board(
-            user_display=current_custom_name,
+            user_display=owner,
             unique_id="dad",
             content=user_input,
-            source="mic" if is_voice_input else "text",
-            handled=True,   # 老爸的話就在這裡處理（紙條或備援大腦），看板哨兵不用再接一次
+            source="mic" if user_audio_b64 else "text",
+            handled=True,   # 老爸的話在這裡遞紙條，看板哨兵不用再接一次
         )
-
-        #  2. 老爸發話全面直通主腦 (廢除麥克風潛意識哨兵，0 秒極速處理)
-        is_direct_event = True
-        sentry_decision = {"should_speak": True, "focus": "老爸發話/直通主腦"}
-        log_print("⚡ [極速直通主腦] 老爸麥克風指令 ➔ 0秒跳過潛意識哨兵，立即由主腦秒級開口！")
-        
-        if is_live_brain_active():
-            # 若為 Live 模式，在此處攔截，不往下執行 REST 雙架構！
-            log_print("⚡ [Live 模式切換] 偵測到 Live API 運行中，取消舊的 REST 主腦與影子大腦呼叫，避免雙重觸發！")
-            
-            if source == "tiktok_dad":
-                # 老爸直播間留言的硬指令同樣先過 CPU（零成本），再遞紙條給 Live 主腦接話
-                spawn(background_tool_executor(user_input, target="dad", requester_name=current_custom_name))
-                send_brain_slip(f"[文字輸入] {current_custom_name} (在直播間留言)：{user_input}", origin="dad",
-                                said=user_input)
-            else:
-                # 會到這裡的麥克風輸入是舊 STT 收的（它只在 Live 斷線時開）：Live 沒聽到，轉成紙條補給它。
-                # chat_input.txt 打的字也走這裡。以前這兩種都不送，看板哨兵再把它當觀眾留言遞給主腦（觀眾權限）。
-                if not user_audio_b64:
-                    # 語音不跑 CPU 硬指令（STT 雜訊太多會誤觸唱歌／彈琴），打字的才跑
-                    spawn(background_tool_executor(user_input, target="dad", requester_name=current_custom_name))
-                _how = "說（Live 斷線時用語音辨識聽到的，可能有錯字）" if user_audio_b64 else "傳來文字訊息"
-                send_brain_slip(f"[黑板同步] {current_custom_name}{_how}：{user_input}", origin="dad", said=user_input)
-            return
-        
-        if not sentry_decision.get("should_speak", True):
-            log_print(f"🤫 [Live 潛意識哨兵] 審查全集中記憶判定：{current_custom_name}在專注自語/無發話需求 ➔ [SILENCE] 保持靈動安靜陪伴 (0 消耗主力額度)")
-            realtime_task_mgr.mark_dad_input_read()
-            mark_streamer_mind_board_as_read(unique_id="dad", content=user_input)
-            set_ai_state("PIANO" if pe.is_piano_active else "IDLE", "哨兵判定靜默")
-            return
-            
-        log_focus = sentry_decision.get("focus") or "深度對話"
-        if not is_direct_event:
-            log_print(f"🚨 [Live 潛意識哨兵 喚醒主力] 判定應回應老爸！焦點: {log_focus}")
-
-        #  模組化 Context 注入 (Modular Context Injection)
-        context_blocks = []
-        if situation_prompt: context_blocks.append(f"【即時情境】\n{situation_prompt.strip()}")
-        if trending_news_prompt: context_blocks.append(trending_news_prompt.strip())
-        if yt_comp.get_yt_memory_context(): context_blocks.append(yt_comp.get_yt_memory_context().strip())
-        if rag_sec: context_blocks.append(rag_sec.strip())
-
-        effective_situation = "\n\n".join(context_blocks)
-
-        # ──  老爸全能旗艦主腦大腦 (語音多模態 + 螢幕截圖視覺 + 深度記憶 + 完整系統提示詞) ──
-        
-        #  注入動態時序記憶（由 7L 自主裁剪至最適長度，拒絕多餘負擔拖慢速度）
-        if th_lim > 0:
-            unified_mem_prompt = f"""【 直播現場潛意識與背景事件（7L 最近 {th_lim} 字內心流動與動作）】：
-{get_unified_memory_context(limit=u_lim, thought_char_limit=0, include_dialogue=False)}"""
+        if not user_audio_b64:
+            # 打字的跑 CPU 硬指令；語音不跑（STT 雜訊太多會誤觸唱歌／彈琴）
+            spawn(background_tool_executor(user_input, target="dad", requester_name=owner))
+        if source == "tiktok_dad":
+            slip = f"[文字輸入] {owner} (在直播間留言)：{user_input}"
         else:
-            unified_mem_prompt = ""
-
-        system_prompt = PromptTemplateEngine.build_chat_system_prompt(
-            is_tiktok=False,
-            current_custom_name=current_custom_name,
-            stage2_target_prompt="",
-            stage2_instructions="",
-            current_target_desc=current_custom_name,
-            is_piano_active=pe.is_piano_active,
-            current_piano_song_title=pe.current_piano_song_title,
-            live_audio_emotion_prompt="",
-            situation_prompt=effective_situation,
-            system_specs=system_specs,
-            impression_text=impression_text,
-            cloud_knowledge_prompt=cloud_kn_prompt,
-            unified_memory_prompt=unified_mem_prompt
-        )
-
-        user_prefix = f"【{current_custom_name}開口語音對妳說話】" if is_voice_input else f"【{current_custom_name}在電腦打字發送】"
-        user_msg_content = f"{user_prefix}：{user_input}"
-        #  滑動窗口防記憶迴音：依 7L 自主判定結果動態注入歷史輪次
-        effective_history = history[-h_lim:] if (history and h_lim > 0) else []
-        messages = [{"role": "system", "content": system_prompt}] + effective_history + [{"role": "user", "content": user_msg_content}]
-        
-                # --- 影子平行大腦架構 ---
-        shadow_prompt = f"【影子大腦任務】老爸剛剛說：{user_input}\n請評估是否需要查資料、彈鋼琴、改編MIDI或切換表情等工具。若需要，直接呼叫對應Tool。不需要則請保持沉默。請保持安靜，只調用工具！"
-        shadow_msgs = [{"role": "system", "content": system_prompt}] + effective_history + [{"role": "user", "content": shadow_prompt}]
-        async def run_shadow_brain():
-            try:
-                await fetch_ai_response(shadow_msgs, image_base64=current_screen_snapshot, is_proactive=True, request_start_time=req_start)
-            except Exception:
-                log_swallowed()
-        spawn(run_shadow_brain())
-        
-        # 嘴巴神經（極速串流，無Tool負擔）
-        stream_iter = await fetch_ai_response(
-            messages, 
-            image_base64=current_screen_snapshot, 
-            audio_base64=effective_audio_b64, 
-            request_start_time=req_start,
-            is_mouth_stream=True
-        )
-        
-        if my_session_id != CURRENT_CHAT_SESSION_ID:
-            return
-            
-        full_raw = ""
-        full_clean = ""
-        buffer = ""
-        sentence_buffer = ""
-        sentence_count = 0
-        
-        async def process_sentence(sentence):
-            if not sentence.strip(): return
-            bot_reply = re.sub(r'\[SKIP\]|\[SILENCE\]', '', sentence, flags=re.IGNORECASE).strip()
-            if not bot_reply: return
-            
-            spoken = await execute_actions(vts, bot_reply, input_queue, user_input_ctx=user_input, caller_target="dad", caller_user=current_custom_name)
-            clean_spoken = spoken.strip(" *'\"-.,!?。，！？\n\r") if spoken else ""
-            
-            if clean_spoken and my_session_id == CURRENT_CHAT_SESSION_ID:
-                await asyncio.to_thread(update_subtitle, clean_spoken)
-                await speech_queue.put({"text": clean_spoken, "target": "dad", "raw_text": bot_reply,
-                                        "private": not str(source).startswith("tiktok")})
-                return clean_spoken
-            return ""
-
-        async for chunk in stream_iter:
-            if chunk.text:
-                buffer += chunk.text
-                full_raw += chunk.text
-                parts = re.split(r'([。，！？\n]+)', buffer)
-                if len(parts) > 1:
-                    for i in range(0, len(parts)-1, 2):
-                        phrase = parts[i] + parts[i+1]
-                        sentence_buffer += phrase
-                        sentence_count += 1
-                        
-                        if sentence_count >= 2:
-                            c = await process_sentence(sentence_buffer)
-                            if c: full_clean += c + " "
-                            sentence_buffer = ""
-                            sentence_count = 0
-                    buffer = parts[-1]
-                    
-        if buffer.strip():
-            sentence_buffer += buffer
-            
-        if sentence_buffer.strip():
-            c = await process_sentence(sentence_buffer)
-            if c: full_clean += c + " "
-            
-        log_print(f"🤖 原始大腦輸出: {full_raw} ({current_model_tag})")
-        
-        if full_clean.strip() and my_session_id == CURRENT_CHAT_SESSION_ID:
-            record_bot_message(full_clean.strip())
-            log_print(f"💬 7L (主腦回覆): {full_clean.strip()} ({current_model_tag})")
-            append_to_unified_memory(speaker="7L", target=current_custom_name, content=full_clean.strip(), role="assistant", source="tts")
-            
-        raw_spoken_text = full_raw
-        bot_reply = re.sub(r'\[SKIP\]|\[SILENCE\]', '', raw_spoken_text, flags=re.IGNORECASE).strip()
-        clean_spoken = full_clean.strip()
-        
-        if not clean_spoken:
-            is_pure_silence = any(k in raw_spoken_text.upper() for k in ["[SILENCE]", "[SKIP]", "[PASS]"])
-            if not is_pure_silence:
-                clean_asst_history = TextCleanEngine.clean_for_tts(bot_reply, apply_phonetics=False) or "[演奏鋼琴/動作執行]"
-                append_to_unified_memory(speaker="7L", target=current_custom_name, content=clean_asst_history, role="assistant", source="action")
-        
-        last_interaction_time = time.time()
-        #  靜默輪不污染記憶：若大腦判定保持安靜 [SILENCE]，不寫入空動作或假對話
-        if clean_spoken or not any(k in raw_spoken_text.upper() for k in ["[SILENCE]", "[SKIP]", "[PASS]"]):
-            fresh_history = await fetch_from_long_term_memory(DEFAULT_CHANNEL_ID)
-            clean_user_history = re.sub(r'\[[A-Z_]+(?::\s*[^\]]+)?\]', '', user_input).strip()
-            fresh_history.append({"role": "user", "content": clean_user_history or user_input})
-            #  防心想污染記憶庫鐵律：若未開口說話，儲存純淨動作標籤，避免將未清洗之 [THOUGHT] 存入歷史
-            clean_asst_history = clean_spoken if clean_spoken else (TextCleanEngine.clean_for_tts(bot_reply, apply_phonetics=False) or "[演奏鋼琴/動作執行]")
-            fresh_history.append({"role": "assistant", "content": clean_asst_history})
-            spawn(save_to_long_term_memory(DEFAULT_CHANNEL_ID, fresh_history))
-            
+            # 麥克風輸入會到這裡的是舊 STT 收的（它只在 Live 斷線時開）：Live 沒聽到，要用紙條補給它
+            _how = "說（Live 斷線時用語音辨識聽到的，可能有錯字）" if user_audio_b64 else "傳來文字訊息"
+            slip = f"[黑板同步] {owner}{_how}：{user_input}"
+        if interrupted_context:
+            slip += f"（他前一句「{interrupted_context}」還沒講完就接了這句，兩句一起理解）"
+        send_brain_slip(slip, origin="dad", said=user_input)
     except asyncio.CancelledError:
         pass
     except Exception as e:
-        import traceback
-        traceback.print_exc()
-        print(f"\n❌ [對話處理發生異常]: {repr(e)}")
+        log_print(f"❌ [老爸訊息處理異常]: {e!r}")
     finally:
         realtime_task_mgr.finish_dad_task()
         realtime_task_mgr.mark_dad_input_read()
-        mark_streamer_mind_board_as_read(unique_id="dad", content=user_input)
-        set_ai_state("PIANO" if pe.is_piano_active else "IDLE", "對話處理結束", only_from="THINKING")
+
 
 async def execute_punish_action(reason: str = "", is_severe: bool = None):
     """
@@ -8887,6 +8432,7 @@ async def main():
         spawn(peripheral_vision_worker())
         spawn(system_audio_worker())
     spawn(chat_processor_worker(vts, input_queue))
+    spawn(rest_slip_worker(vts, input_queue))   # 沒有 Live 主腦時接紙條
     spawn(streamer_mind_loop_worker(vts, input_queue))
     spawn(anti_watermark_worker(vts))
     spawn(cma_monitor_worker())

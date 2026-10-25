@@ -207,8 +207,14 @@ def test_dashboard_strips_control_tags():
 
 
 def test_memory_drops_prosody_tags():
-    recv = _src("receive_from_live")
-    assert "(?:SPEED|PITCH|VOLUME|RATE)" in recv
+    """主腦說的話存進記憶前拿掉語速／音高標籤（一句話常夾十幾個），表情標籤和內容留著。Live 和 REST 共用。"""
+    import re
+    from core.prompts import TextCleanEngine
+    ns = {"re": re, "TextCleanEngine": TextCleanEngine}
+    exec(compile(ast.Module(body=[_fn("_brain_text_for_memory")], type_ignores=[]), "m", "exec"), ns)
+    out = ns["_brain_text_for_memory"]("[EXPRESSION: 花花] [SPEED:+8%][PITCH:+2Hz] 好呀 [SPEED+8%]～[INTERRUPT_SELF]")
+    assert out == "[EXPRESSION: 花花] 好呀 ～"
+    assert "_brain_text_for_memory(turn_buffer)" in _src("receive_from_live")
 
 
 def test_expression_aliases_and_action_only_tags():
@@ -249,7 +255,8 @@ def test_vision_report_does_not_retrigger_vision():
     assert ns["_vision_report_recent"](now + 5)          # 她在回答剛看到的畫面：不重看
     assert not ns["_vision_report_recent"](now + 20)     # 之後老爸再叫她看：照看
     assert '_VISION_STATE["report_ts"] = time.time()' in _src("live_vision_tool_task")
-    assert "_vision_report_recent(time.time())" in _src("receive_from_live")
+    assert "_vision_report_recent(time.time())" in _src("_start_marker_tools")
+    assert "_start_marker_tools(text_chunk)" in _src("receive_from_live")
 
 
 def test_screen_requests_sent_to_subagent_are_not_answered_by_guessing():
@@ -260,7 +267,7 @@ def test_screen_requests_sent_to_subagent_are_not_answered_by_guessing():
         assert re.search(pat, t), t
     for t in ("查明天台北天氣", "彈琴 小星星", "一分鐘後提醒關瓦斯"):
         assert not re.search(pat, t), t
-    src = _src("_handle_invoke_subagent")
+    src = _src("_run_subagent_task")
     assert "_SUBAGENT_VISION_TASK_RE.search(_task_ins)" in src
 
 
