@@ -8,6 +8,8 @@ import types as pytypes
 
 from google.genai import types
 
+from core.tool_schema import resolve_tool_name
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MAIN = open(os.path.join(ROOT, "vts_7L_test.py"), encoding="utf-8").read()
 TREE = ast.parse(MAIN)
@@ -30,6 +32,7 @@ def _const_pattern(name):
 
 def _load(*names, **ns):
     ns.setdefault("log_print", lambda *a, **k: None)
+    ns.setdefault("resolve_tool_name", resolve_tool_name)
     for n in names:
         exec(compile(ast.Module(body=[_fn(n)], type_ignores=[]), n, "exec"), ns)
     return ns
@@ -413,3 +416,15 @@ def test_subagent_acts_for_whoever_prompted_the_brain_by_name():
     text, _ = _run_handler((True, "auto_sing_song", {"song_name": "晴天"}), None, task="唱晴天",
                            requester="歌迷阿華", requesters=requesters)
     assert requesters == ["歌迷阿華"] and "歌迷阿華" in text
+
+
+def test_tool_names_the_subagent_made_up_are_mapped_or_dropped():
+    """副腦查匯率回了宣告裡沒有的 search_query，派發器不認得就默默沒做，她答應「我去查」之後就沒下文（2026-10-26 實機）。"""
+    from core.tool_schema import resolve_tool_name, DECLARED_TOOL_NAMES
+    assert resolve_tool_name("search_query") == "search_google"
+    assert resolve_tool_name("web_search") == "search_google"
+    assert resolve_tool_name("search_google") == "search_google"
+    assert resolve_tool_name("play_virtual_piano") == "pe.play_virtual_piano"     # 少了前綴
+    assert resolve_tool_name("pe_stop_virtual_piano") == "pe.stop_virtual_piano"  # 點寫成底線
+    assert resolve_tool_name("make_coffee") == "" and resolve_tool_name("") == ""
+    assert all(resolve_tool_name(n) == n for n in DECLARED_TOOL_NAMES)

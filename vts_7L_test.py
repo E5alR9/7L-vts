@@ -109,7 +109,8 @@ GLOBAL_INPUT_QUEUE: Optional[asyncio.Queue] = None
 input_queue: Optional[asyncio.Queue] = None
 
 import logging
-from core.tool_schema import INTERACTIONS_TOOLS, LIVE_API_TOOLS, REST_BRAIN_TOOLS, GENAI_TOOLS, GENAI_PROACTIVE_TOOLS
+from core.tool_schema import (INTERACTIONS_TOOLS, LIVE_API_TOOLS, REST_BRAIN_TOOLS, GENAI_TOOLS, GENAI_PROACTIVE_TOOLS,
+                              resolve_tool_name)
 from core.rest_brain import rest_chat
 
 
@@ -193,7 +194,7 @@ from core.llm_engine import (
     KEYS_AUDIENCE_LIVE,
     KEYS_VISION,
     DEAD_GEMINI_MODELS,
-    STREAMER_MIND_MODELS,
+    STREAMER_MIND_MODELS, REST_BRAIN_MODELS,
     HIGH_IQ_GEMINI_MODELS,
     PROACTIVE_EXCLUDED_MODELS,
     GROQ_CLIENTS,
@@ -4357,7 +4358,8 @@ async def _rest_answer_slip(vts, input_queue, slip: str, origin: str) -> None:
     system = await build_brain_system_prompt(owner, get_character_name())
     system += ("\n\n[最近的對話]\n" + get_unified_memory_context(limit=20, thought_char_limit=0)
                + "\n\n" + pe.get_piano_realtime_prompt())
-    r = await rest_chat(system, slip, models=STREAMER_MIND_MODELS, tools=REST_BRAIN_TOOLS)
+    # 3.6-flash 帶工具要 4～6 秒（2026-10-26 實測），單次時限放寬到 10 秒
+    r = await rest_chat(system, slip, models=REST_BRAIN_MODELS, tools=REST_BRAIN_TOOLS, timeout=10.0)
     if not r:
         return
     said = await _rest_speak(vts, input_queue, r.text, origin)
@@ -7173,6 +7175,9 @@ async def nv_interpret_task(task_ins: str, target: str = "dad", requester_name: 
             if fn_name:
                 break
             break  # 乾淨無調用：信任它，不問下一棒（省一顆腦的額度與延遲）
+        if fn_name and not resolve_tool_name(fn_name):
+            log_print(f"⚠️ [子智能體] 副腦回了不存在的工具 {fn_name}，當沒呼叫，交給深度思考")
+        fn_name = resolve_tool_name(fn_name) if fn_name else None
         if fn_name and target == "audience" and is_stage_control(fn_name):
             log_print(f"🛑 [子智能體] 這輪是觀眾觸發的，{fn_name} 只聽老爸的，不執行")
             return "advice", AUDIENCE_STAGE_DECLINE

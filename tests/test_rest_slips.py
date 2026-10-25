@@ -115,7 +115,7 @@ def _answer(first, calls, subagent_says):
                build_brain_system_prompt=build, _owner_name=lambda: "老爸", types=types,
                get_unified_memory_context=lambda **k: "（最近對話）",
                pe=pytypes.SimpleNamespace(get_piano_realtime_prompt=lambda: "（鋼琴）"),
-               STREAMER_MIND_MODELS=["m"], REST_BRAIN_TOOLS=["T"])
+               STREAMER_MIND_MODELS=["m"], REST_BRAIN_MODELS=["m"], REST_BRAIN_TOOLS=["T"])
     asyncio.run(ns["_rest_answer_slip"](None, None, "[黑板同步] 老爸傳來文字訊息：查天氣", "dad"))
     return asked, spoken
 

@@ -466,3 +466,23 @@ REST_BRAIN_TOOLS = [types.Tool(function_declarations=[_invoke_subagent_declarati
 
 GENAI_TOOLS = build_genai_declarations(is_proactive=False)
 GENAI_PROACTIVE_TOOLS = build_genai_declarations(is_proactive=True)
+
+DECLARED_TOOL_NAMES = frozenset(t["name"] for t in INTERACTIONS_TOOLS)
+# 副腦偶爾回宣告裡沒有的工具名（2026-10-26 實機：查匯率回 search_query），常見的搜尋說法對回 search_google
+_TOOL_NAME_ALIASES = {"search_query": "search_google", "web_search": "search_google", "google_search": "search_google",
+                      "search_web": "search_google", "search": "search_google", "google": "search_google"}
+
+
+def resolve_tool_name(name: str) -> str:
+    """模型回的工具名 → 宣告裡的名字；不認得回空字串（呼叫端當作沒呼叫）。
+    也認少了 pe.／video. 這類前綴、或把點寫成底線的。以前不認得的名字照樣派發，派發器不認得就默默沒做，
+    主腦還收到「已經做了」。"""
+    n = (name or "").strip()
+    if n in DECLARED_TOOL_NAMES:
+        return n
+    if n in _TOOL_NAME_ALIASES:
+        return _TOOL_NAME_ALIASES[n]
+    for d in DECLARED_TOOL_NAMES:
+        if n and (d.split(".")[-1] == n or d.replace(".", "_") == n):
+            return d
+    return ""
