@@ -189,3 +189,16 @@ def test_stop_current_song_disarms_rendezvous():
     assert acp.stop_current_song() is True
     assert acp._dedupe_key("混用歌") not in acp._MIXED_RENDEZVOUS
     acp.stop_singing()
+
+
+def test_cover_subprocess_output_decoded_as_utf8():
+    """yt-dlp／demucs 輸出是 UTF-8；text=True 不指定編碼會用 cp950 解，讀取執行緒噴 UnicodeDecodeError（2026-10-25 實機）。"""
+    import ast
+    import os
+    src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            "services", "auto_cover_pipeline.py"), encoding="utf-8").read()
+    for n in ast.walk(ast.parse(src)):
+        if isinstance(n, ast.Call) and ast.unparse(n.func) == "subprocess.run":
+            kw = {k.arg: ast.unparse(k.value) for k in n.keywords}
+            if kw.get("text") == "True":
+                assert kw.get("encoding") == "'utf-8'", ast.unparse(n)[:80]

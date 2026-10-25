@@ -81,7 +81,7 @@ def download_youtube_audio(song_query: str, output_wav: str) -> bool:
             "--max-filesize", "50M"
         ]
         try:
-            res = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)  # 不指定會用 cp950 解 yt-dlp 的 UTF-8 輸出，讀取執行緒直接炸
             for f in os.listdir(CACHE_DIR):
                 if f.startswith("temp_dl_") and f.endswith(".wav"):
                     src = os.path.join(CACHE_DIR, f)
@@ -155,7 +155,7 @@ def separate_stems_gpu(input_wav: str, song_name: str, tag: str = "") -> tuple[s
         input_wav
     ]
     try:
-        ret = subprocess.run(demucs_cmd, capture_output=True, text=True, timeout=180)
+        ret = subprocess.run(demucs_cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=180)
         if ret.returncode == 0:
             # 尋找 htdemucs_ft/{track_name}/vocals.wav & no_vocals.wav
             base_name = os.path.splitext(os.path.basename(input_wav))[0]
