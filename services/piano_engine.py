@@ -30,22 +30,20 @@ from core.hard_command import display_requester
 
 from core.utils import log_print, to_tw
 from core.identity import get_owner_name
-from core.llm_engine import (GEMINI_KEYS, HIGH_IQ_GEMINI_MODELS, DEAD_GEMINI_MODELS,
+from core.llm_engine import (GEMINI_KEYS, HIGH_IQ_GEMINI_MODELS, DEAD_GEMINI_MODELS, is_model_locked,
                              get_pingpong_alternating_index, get_pingpong_ring_indices)
 from realtime_tasks.task_manager import realtime_task_mgr
 
 # —— 主程式交進來的東西（2026-10-25）——
 # 以前用 MainProxy 從 __main__ 動態撈：撈不到（改名、換啟動方式）就默默變成什麼都不做的空函式。
 # 現在主程式啟動時呼叫 bind_host 明確交進來；沒綁（單元測試）字幕、說話就略過。
-_HOST = {"update_subtitle": None, "speech_queue": None, "get_user_profile": None,
-         "get_speaking_target": None, "is_model_locked": None}
+_HOST = {"update_subtitle": None, "speech_queue": None, "get_user_profile": None, "get_speaking_target": None}
 
 
-def bind_host(update_subtitle=None, speech_queue=None, get_user_profile=None,
-              get_speaking_target=None, is_model_locked=None):
-    """主程式啟動時呼叫：字幕、說話佇列、使用者檔案、目前說話對象、模型熔斷查詢（都只有主程式有）。"""
+def bind_host(update_subtitle=None, speech_queue=None, get_user_profile=None, get_speaking_target=None):
+    """主程式啟動時呼叫：字幕、說話佇列、使用者檔案、目前說話對象（都只有主程式有）。"""
     _HOST.update(update_subtitle=update_subtitle, speech_queue=speech_queue, get_user_profile=get_user_profile,
-                 get_speaking_target=get_speaking_target, is_model_locked=is_model_locked)
+                 get_speaking_target=get_speaking_target)
 
 
 async def _show_subtitle(text: str):
@@ -1716,9 +1714,8 @@ async def resolve_piano_intent_by_ai(
     active_keys = get_piano_gemini_keys()
     if active_keys:
         # 👑 倒序高智商模型梯隊：3.8 ➔ 3.7 ➔ 3.6 ➔ 3.5 ➔ 3.1-pro ➔ 3-flash ➔ 3.5-flash-lite
-        is_locked_fn = _HOST["is_model_locked"]
         for m in HIGH_IQ_GEMINI_MODELS:
-            if m in DEAD_GEMINI_MODELS or (is_locked_fn and is_locked_fn(m)):
+            if m in DEAD_GEMINI_MODELS or is_model_locked(m):
                 continue
             ring_indices = get_pingpong_ring_indices(len(active_keys), CURRENT_GEMINI_KEY_STEP)[:3]
             for idx in ring_indices:

@@ -32,7 +32,7 @@ def test_bound_host_is_used(monkeypatch):
     async def run():
         q = asyncio.Queue()
         pe.bind_host(update_subtitle=subs.append, speech_queue=q, get_user_profile=profile,
-                     get_speaking_target=lambda: target["v"], is_model_locked=lambda m: False)
+                     get_speaking_target=lambda: target["v"])
         await pe._show_subtitle("🎹 晴天")
         await pe._say({"text": "來了"})
         return q, await pe._user_profile()

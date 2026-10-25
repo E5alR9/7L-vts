@@ -598,12 +598,14 @@ from core.llm_engine import (
     HIGH_IQ_GEMINI_MODELS,
     PROACTIVE_EXCLUDED_MODELS,
     GROQ_CLIENTS,
-    DualHotStandbyLiveManager,
     get_dynamic_live_key_candidates,
     track_key, sort_keys_by_load, key_load,
     cool_key, key_cooling,
     parse_cooldown_seconds, get_seconds_until_pt_midnight, report_gemini_key_error,
     live_one_shot, get_pingpong_alternating_index, get_pingpong_ring_indices,
+    KEYS_MIC_LIVE, KEYS_PROACTIVE, KEYS_DAD_MAIN,
+    API_LOCKS, save_api_locks, is_locked, lock_target, is_model_locked, lock_entire_model,
+    MODEL_FAIL_COUNT, record_model_failure,
     UNRESTRICTED_SAFETY_SETTINGS
 )
 from core.memory import init_unified_memory, flush_unified_memory, fetch_from_long_term_memory, save_to_long_term_memory, append_to_unified_memory, clear_all_memories, get_recent_100_memory_context, get_viewer_profile, save_viewer_profile, record_bot_message, get_cloud_knowledge, update_cloud_prompt_field, TIKTOK_CHATROOM_MEMORY, STREAMER_MIND_BOARD, DEFAULT_CHANNEL_ID, save_cloud_knowledge, get_unified_memory_context, RECENT_BOT_MESSAGES, evaluate_memory_demand, USER_PROFILE_FILE
@@ -615,24 +617,6 @@ from core.memory import init_unified_memory, flush_unified_memory, fetch_from_lo
 
 
 
-def record_model_failure(model_name: str, err_str: str):
-    
-    MODEL_FAIL_COUNT[model_name] = MODEL_FAIL_COUNT.get(model_name, 0) + 1
-    #  換模型門檻：依序輪詢 API 金鑰總數的 2/3，輪完 2/3 都失敗才切換下一個備用模型
-    num_keys = len(GEMINI_KEYS)
-    threshold = max(1, num_keys)  # 老爸的 34 把金鑰皆為獨立帳號，必須全部輪詢過一遍均失敗，才執行模型級熔斷
-    if MODEL_FAIL_COUNT[model_name] >= threshold:
-        if "503" in err_str or "unavailable" in err_str or "high demand" in err_str:
-            reason = f"依序輪詢 {threshold} 把金鑰均遇 503 伺服器超載"
-            m_duration = 180.0  # 503 模型級熔斷 3 分鐘
-        elif "429" in err_str or "rate limit" in err_str:
-            reason = f"依序輪詢 {threshold} 把金鑰均遇 429 頻率上限"
-            m_duration = 60.0
-        else:
-            reason = f"依序輪詢 {threshold} 把金鑰均異常"
-            m_duration = 60.0
-        lock_entire_model(model_name, duration=m_duration, reason=reason)
-        MODEL_FAIL_COUNT[model_name] = 0
 
 def get_prioritized_gemini_models(user_query: str = "", has_image: bool = False, is_proactive: bool = False) -> list:
     """根據老爸當前的對話指令與多模態情境，動態計算專屬的模型升級排程佇列"""
@@ -2067,15 +2051,7 @@ print(f"✅ 找到 {len(GROQ_KEYS)} 把 Groq 金鑰")
 #  Gemini 核心金鑰矩陣（支援多達 31 把 API Key 輪流調度與熔斷管理）
 print(f"✅ 找到 {len(GEMINI_KEYS)} 把 Gemini 核心金鑰")
 
-#  專屬獨立金鑰池劃分 (背景/Live通道專屬分工，老爸主腦享有全量金鑰矩陣)：
-#    - KEYS_AUDIENCE_LIVE: 100 句記憶與彈幕潛意識發言審查 Live 專用通道 (6把)
-#    - KEYS_MIC_LIVE: 麥克風語音/情緒即時 Live 分析 (6把)
-#    - KEYS_VISION: 電腦螢幕截圖與眼角餘光視覺 (6把)
-#    - KEYS_PROACTIVE: 鋼琴電台與主播自主巡邏 (6把)
-#    - KEYS_DAD_MAIN: 老爸主腦享有全量 31 把金鑰完整矩陣！
-KEYS_MIC_LIVE      = GEMINI_KEYS[6:12] if len(GEMINI_KEYS) >= 12 else GEMINI_KEYS
-KEYS_PROACTIVE     = GEMINI_KEYS
-KEYS_DAD_MAIN      = GEMINI_KEYS #  老爸旗艦主腦享有全部金鑰全量矩陣！
+#  專屬獨立金鑰池劃分（定義在 core.llm_engine）：
 
 print(f"  ⚡ 哨兵 Live 通道: 偏好 {len(KEYS_AUDIENCE_LIVE)} 把＋全池借調（有缺就補，用完即退）")
 print(f"  🎙️ 麥克風情緒感知 Live 通道: 偏好 {len(KEYS_MIC_LIVE)} 把＋全池借調")
@@ -2086,7 +2062,6 @@ print(f"  👑 老爸主腦專屬對話: 享有全量 {len(KEYS_DAD_MAIN)} 把�
 mic_live_analyzer.set_api_keys(KEYS_MIC_LIVE)
 
 
-dual_audience_live_mgr = DualHotStandbyLiveManager(KEYS_AUDIENCE_LIVE)
 
 
 #  Tavily 網路即時搜尋金鑰載入
@@ -2240,88 +2215,17 @@ def save_local_audio_clip(audio_base64: str) -> Optional[str]:
 
 
 
-API_LOCKS_FILE = os.path.join(DATA_DIR, "api_locks_cache.json")
-API_LOCKS = {}
-
-# ────────────────────────────────────────────────────────
-#  3. API 頻率限制、冷卻與熔斷管理系統 (Circuit Breaker)
-# ────────────────────────────────────────────────────────
-#  功能目的：
-#    當某金鑰或模型回傳 429 / 503 / 資源耗盡時，自動對該通道加鎖冷卻，
-#    並將鎖定狀態持久化到本地 JSON，防止開台期間重複呼叫故障通道。
-
-def load_api_locks():
-    """載入並清理已過期的 API 鎖定快取"""
-    global API_LOCKS
-    if os.path.exists(API_LOCKS_FILE):
-        try:
-            with open(API_LOCKS_FILE, "r", encoding="utf-8") as f:
-                locks = json.load(f)
-            now = time.time()
-            API_LOCKS = {k: v for k, v in locks.items() if v > now}
-        except Exception:
-            API_LOCKS = {}
-
-def save_api_locks():
-    """持久化 API 鎖定狀態到本地檔案"""
-    try:
-        with open(API_LOCKS_FILE, "w", encoding="utf-8") as f:
-            json.dump(API_LOCKS, f)
-    except Exception:
-        pass
-
-load_api_locks()
 
 
 
-def is_locked(target_id):
-    if target_id in API_LOCKS:
-        if time.time() < API_LOCKS[target_id]:
-            return True
-        else:
-            del API_LOCKS[target_id] 
-            save_api_locks()
-    return False
 
-def lock_target(target_id, error_msg="", headers=None, key="", model=""):
-    duration = parse_cooldown_seconds(error_msg, headers)
-    API_LOCKS[target_id] = time.time() + duration
-    save_api_locks()
-    if key:
-        cool_key(key, duration, model)  # 同步進共用冷卻表，其他 Gemini 呼叫點也會避開
-    
-    if duration >= 3600: dur_str = f"{duration/3600:.1f}h"
-    elif duration >= 60: dur_str = f"{duration/60:.1f}m"
-    else: dur_str = f"{int(duration)}s"
-        
-    reason_label = ""
-    err_low = str(error_msg).lower()
-    if any(k in err_low for k in ["per day", "requests per day", "daily requests", "rpd", "tokens per day", "tpd"]):
-        reason_label = " (今日配額已滿 RPD)"
-    elif "429" in err_low or "rate limit" in err_low:
-        reason_label = " (頻率超限 429)"
-    elif "503" in err_low or "high demand" in err_low or "unavailable" in err_low:
-        reason_label = " (伺服器過載 503)"
-    elif "404" in err_low or "not_found" in err_low:
-        reason_label = " (模型未開通/下架 404)"
 
-    sys_notify(f" 封印通道 {target_id}{reason_label} ({dur_str})", duration=3.0)
-    log_print(f"🔒 [通道冷卻] 通道 {target_id} 封印 {dur_str}{reason_label}")
 
-MODEL_FAIL_COUNT = {}
 
-def is_model_locked(model_name: str) -> bool:
-    short_m = model_name.replace("gemini-", "").replace("openai/", "").replace("llama-", "").replace("gemma-", "")
-    model_lock_id = f"MODEL_{short_m}"
-    return is_locked(model_lock_id)
 
-def lock_entire_model(model_name: str, duration: float = 60.0, reason: str = "伺服器超載"):
-    short_m = model_name.replace("gemini-", "").replace("openai/", "").replace("llama-", "").replace("gemma-", "")
-    model_lock_id = f"MODEL_{short_m}"
-    API_LOCKS[model_lock_id] = time.time() + duration
-    save_api_locks()
-    dur_str = f"{int(duration)}s" if duration < 60 else (f"{duration/60:.1f}m" if duration < 3600 else f"{duration/3600:.1f}h")
-    log_print(f"⚡ [大腦極速熔斷] 模型 [{model_name}] 遇 {reason} ➔ 暫停此模型 {dur_str}，秒切下一個備用模型！")
+
+
+
 
 
 
@@ -9864,7 +9768,7 @@ async def main():
         asyncio.create_task(safe_discord_runner())
 
     pe.bind_host(update_subtitle=update_subtitle, speech_queue=speech_queue, get_user_profile=get_user_profile,
-                 get_speaking_target=lambda: CURRENT_SPEAKING_TARGET, is_model_locked=is_model_locked)
+                 get_speaking_target=lambda: CURRENT_SPEAKING_TARGET)
     pe.register_piano_state_callback(_on_piano_liveness_change)
 
     #  啟動 7L Web 視覺化即時監控與控制後台 (Port 7860 -> http://localhost:7860)

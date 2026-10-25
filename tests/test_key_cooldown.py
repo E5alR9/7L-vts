@@ -78,3 +78,48 @@ def test_cooldown_helpers_only_in_llm_engine():
     for name in ("get_seconds_until_pt_midnight", "parse_cooldown_seconds", "report_gemini_key_error"):
         assert f"def {name}(" not in main
     assert "_KEY_LIMIT_MARKERS = " not in main
+
+
+def test_channel_locks_live_in_llm_engine(tmp_path, monkeypatch):
+    """通道／模型熔斷鎖 2026-10-25 從主程式搬進來：存檔讀檔原地換內容（主程式 import 的是同一個 dict）。"""
+    monkeypatch.setattr(le, "API_LOCKS_FILE", str(tmp_path / "locks.json"))
+    monkeypatch.setattr(le, "log_print", lambda *a, **k: None)
+    monkeypatch.setattr(le, "sys_notify", lambda *a, **k: None)
+    same = le.API_LOCKS
+    saved = dict(same)
+    try:
+        same.clear()
+        le.lock_entire_model("gemini-3.6-flash", duration=60, reason="測試")
+        assert le.is_model_locked("gemini-3.6-flash") and not le.is_model_locked("gemini-3.8-flash")
+        le.lock_target("G3_3.8-flash", "429 rate limit", key="K9", model="gemini-3.8-flash")
+        assert le.is_locked("G3_3.8-flash") and le.key_cooling("K9", "gemini-3.8-flash")
+        same["G1_old"] = time.time() - 5                                   # 過期的讀回來要清掉
+        le.save_api_locks()
+        same.clear()
+        le.load_api_locks()
+        assert le.API_LOCKS is same and "MODEL_3.6-flash" in same and "G1_old" not in same
+    finally:
+        same.clear()
+        same.update(saved)
+
+
+def test_record_model_failure_locks_after_every_key_failed(monkeypatch):
+    monkeypatch.setattr(le, "GEMINI_KEYS", ["K1", "K2"])
+    monkeypatch.setattr(le, "lock_entire_model", lambda m, duration, reason: locked.append((m, duration)))
+    locked = []
+    le.MODEL_FAIL_COUNT.pop("gemini-x", None)
+    le.record_model_failure("gemini-x", "503 unavailable")
+    assert locked == []                                                   # 一把失敗還不熔斷
+    le.record_model_failure("gemini-x", "503 unavailable")
+    assert locked == [("gemini-x", 180.0)] and le.MODEL_FAIL_COUNT["gemini-x"] == 0
+
+
+def test_key_pools_and_locks_not_left_in_main():
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    main = open(os.path.join(root, "vts_7L_test.py"), encoding="utf-8").read()
+    for name in ("load_api_locks", "save_api_locks", "is_locked", "lock_target", "is_model_locked",
+                 "lock_entire_model", "record_model_failure"):
+        assert f"def {name}(" not in main
+    for name in ("API_LOCKS = ", "KEYS_MIC_LIVE = ", "KEYS_PROACTIVE = ", "KEYS_DAD_MAIN = ", "DualHotStandbyLiveManager("):
+        assert name not in main
+    assert not hasattr(le, "DualHotStandbyLiveManager") and not hasattr(le, "KEYS_MIND_LIVE")
