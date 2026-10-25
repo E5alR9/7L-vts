@@ -608,6 +608,8 @@ from core.llm_engine import (
     MODEL_FAIL_COUNT, record_model_failure,
     UNRESTRICTED_SAFETY_SETTINGS
 )
+from core.input_sources import (parse_input_item, classify, sleep_wake_decision, is_operator,
+                                VIEWER_SOURCES, WAKE_WORDS)
 from core.memory import init_unified_memory, flush_unified_memory, fetch_from_long_term_memory, save_to_long_term_memory, append_to_unified_memory, clear_all_memories, get_recent_100_memory_context, get_viewer_profile, save_viewer_profile, record_bot_message, get_cloud_knowledge, update_cloud_prompt_field, TIKTOK_CHATROOM_MEMORY, STREAMER_MIND_BOARD, DEFAULT_CHANNEL_ID, save_cloud_knowledge, get_unified_memory_context, RECENT_BOT_MESSAGES, evaluate_memory_demand, USER_PROFILE_FILE
 
 
@@ -7244,12 +7246,9 @@ async def prefetch_song_midi_background(song_query: str):
 
 
 # 這些來源的使用者名稱與內容是觀眾（或外部網站）提供的，進看板前要中和
-_VIEWER_SOURCES = frozenset({"tiktok", "tiktok_gift", "twitch", "youtube", "video_watch"})
-
-
 def add_to_streamer_mind_board(user_display: str, unique_id: str, content: str, source: str = "tiktok"):
     """將接收到的彈幕/留言/事件寫入 7L 記憶腦袋，一排一排排列記錄，由主播自主排程讀取與發話"""
-    if source in _VIEWER_SOURCES:
+    if source in VIEWER_SOURCES:
         # 觀眾原文中和：看板與記憶之後都會進 prompt，不能讓觀眾偽造【老爸】或 [系統標籤] 格式
         user_display = neutralize_viewer_text(user_display, 60)
         content = neutralize_viewer_text(content, 300)
@@ -7266,7 +7265,7 @@ def add_to_streamer_mind_board(user_display: str, unique_id: str, content: str, 
     STREAMER_MIND_BOARD.append(item)
     
     #  寫入全集中記憶中樞（確保老爸輸入與觀眾彈幕統一匯流，精準辨別對話目標）
-    if unique_id == "dad" or source in ["mic", "text_file", "console"]:
+    if unique_id == "dad" or is_operator(source):
         try:
             from core.identity import get_owner_name, get_character_name
             speaker = get_owner_name()
@@ -7304,7 +7303,7 @@ def add_to_streamer_mind_board(user_display: str, unique_id: str, content: str, 
     # 即時推送老爸發言給網頁後台
     try:
         import services.web_dashboard as _wd
-        if source in ["mic", "text_file", "console", "web_console"]:
+        if is_operator(source):
             _wd.broadcast_event("chat_sent", {"text": content, "from": speaker})
     except Exception:
         pass
@@ -7583,7 +7582,7 @@ async def streamer_mind_loop_worker(vts, input_queue):
                 u_id = m.get('unique_id', '')
                 u_name = m.get('user', '')
                 u_source = m.get('source', '')
-                if u_id == 'dad' or u_source in ['mic', 'text_file', 'console']:
+                if u_id == 'dad' or is_operator(u_source):
                     has_dad_message = True
                     board_lines.append(f"- [{m['time_str']}] 【老爸】：{m['content']}")
                 else:
@@ -9092,28 +9091,12 @@ async def chat_processor_worker(vts, input_queue):
     while True:
         try:
             raw_input_item = await input_queue.get()
-            if not raw_input_item:
+            item = parse_input_item(raw_input_item)
+            if item is None:
                 input_queue.task_done()
                 continue
-            
-            user_input = ""
-            user_audio_b64 = None
-            req_time = time.time()
-            source = "unknown"
-            platform_uid = ""
-            if isinstance(raw_input_item, dict):
-                user_input = raw_input_item.get("text", "").strip()
-                user_audio_b64 = raw_input_item.get("audio_base64")
-                req_time = raw_input_item.get("timestamp", time.time())
-                source = raw_input_item.get("source", "mic" if user_audio_b64 else "unknown")
-                # 監聽器放的平台唯一帳號（不在觀眾可控的文字裡）；認老爸只信這個
-                platform_uid = str(raw_input_item.get("platform_uid") or "")
-            else:
-                user_input = str(raw_input_item).strip()
-
-            if not user_input:
-                input_queue.task_done()
-                continue
+            user_input, user_audio_b64, req_time = item.text, item.audio_b64, item.timestamp
+            source, platform_uid = item.source, item.platform_uid   # 認老爸只信監聽器給的平台帳號
 
             #  收到新輸入時，若包含立即關機指令，0.001 秒內立即安全退出！
             if check_immediate_shutdown(user_input):
@@ -9146,21 +9129,14 @@ async def chat_processor_worker(vts, input_queue):
 
             #  7L 深層休眠模式：老爸語音或觀眾彈幕皆可喚醒；醒來不一定說話
             if IS_SLEEPING:
-                wake_keywords = ["起床", "醒醒", "醒來", "睜開眼", "早安", "早上好", "醒來吧", "別睡了", "/wake", "喚醒", "睜開眼睛", "別睡"]
-                is_dad_source = (source in ["mic", "text_file", "console", "web_console"] or user_audio_b64)
-                has_wake_word = any(w in user_input for w in wake_keywords)
-                # 老爸打字是刻意對她說話，不用喚醒詞也叫醒（麥克風才要喚醒詞，免得雜音吵醒）。
-                # 舊碼老爸打字被忽略，觀眾隨便留一句卻能叫醒她（2026-10-25 實機）
-                is_dad_typed = source in ("text_file", "console", "web_console") and not user_audio_b64
-                # 觀眾彈幕（不含點讚/進房等瑣碎動態）：睜眼即可，不強制說話，掉下去正常處理
-                is_audience_chat = source in ("tiktok", "tiktok_gift", "twitch", "youtube", "owner_interject")
-
-                if is_audience_chat:
+                wake = sleep_wake_decision(item, operator_input_enabled())
+                if wake == "wake_audience":
                     log_print("👀 [彈幕喚醒] 觀眾有新留言，7L 睜眼（說不說話交給哨兵決定）...")
                     await set_sleep_mode(False)
                     # 不 task_done、不 continue：掉下去走正常觀眾軌道
-                elif is_dad_source and (has_wake_word or is_dad_typed) and operator_input_enabled():
-                    log_print(f"☀️ [語音喚醒] 收到老爸{'訊息' if is_dad_typed and not has_wake_word else '喚醒指令'}：「{user_input}」，7L 睜眼！")
+                elif wake == "wake_operator":
+                    typed_only = not any(w in user_input for w in WAKE_WORDS)
+                    log_print(f"☀️ [語音喚醒] 收到老爸{'訊息' if typed_only else '喚醒指令'}：「{user_input}」，7L 睜眼！")
                     await set_sleep_mode(False)
                     # 不強制招呼、不 continue：讓主腦直接回老爸的話
                 else:
@@ -9171,7 +9147,8 @@ async def chat_processor_worker(vts, input_queue):
             # -------------------------------------------------------------
             #  軌道 1：老爸專屬全能主腦通道 (mic / text_file / console / web_console)
             # -------------------------------------------------------------
-            if source in ["mic", "text_file", "console", "web_console"] or user_audio_b64:
+            route = classify(item)   # operator／audience／owner_interject／ambient／unknown（core.input_sources）
+            if route == "operator":
                 #  操作者輸入通道預設停用：直播輸入只收 Twitch/YouTube Live 觀眾留言
                 if not operator_input_enabled():
                     log_print(f"🚫 [輸入通道已停用] 忽略操作者輸入 ({source}): {str(user_input)[:60]}")
@@ -9217,7 +9194,7 @@ async def chat_processor_worker(vts, input_queue):
             # -------------------------------------------------------------
             #  軌道 2：TikTok 直播專屬「記憶腦袋」滾動黑板 (tiktok / tiktok_gift)
             # -------------------------------------------------------------
-            elif source in ["tiktok", "tiktok_gift", "twitch", "youtube"]:
+            elif route == "audience":
                 # 提取觀眾用戶名與留言內容
                 m_aud = re.search(r'【\w+ (?:直播觀眾|官方提問箱|直播動態)\s*([^\】]*?)\s*(?:留言|送禮|動態|提問)?】[：:]\s*(.*)', user_input)
                 if m_aud:
@@ -9265,19 +9242,19 @@ async def chat_processor_worker(vts, input_queue):
             # -------------------------------------------------------------
             #  擁有者公開插話（owner_interject）：走觀眾軌道公開播出，不私聊、走觀眾工具牆
             # -------------------------------------------------------------
-            elif source == "owner_interject":
+            elif route == "owner_interject":
                 from core.identity import get_owner_name as _gon2
                 try:
-                    _owner_nm = raw_input_item.get("user") or _gon2()
+                    _owner_nm = item.user or _gon2()
                 except Exception:
-                    _owner_nm = raw_input_item.get("user") or "主持"
+                    _owner_nm = item.user or "主持"
                 log_print(f"📢 [擁有者公開插話] {_owner_nm}：{user_input[:80]}")
                 add_to_streamer_mind_board(f"{_owner_nm}（主持）", f"owner:{_owner_nm}", user_input, "owner_interject")
 
             # -------------------------------------------------------------
             #  軌道 3：TikTok 背景瑣碎動態 (tiktok_ambient: 點讚/進房/分享)
             # -------------------------------------------------------------
-            elif source == "tiktok_ambient":
+            elif route == "ambient":
                 tk_listener.current_tiktok_status_str = f"[ {user_input[:20]}]"
                 is_piano_playing = pe.GLOBAL_PIANO_REALTIME_STATE.get("is_playing", False)
                 # 若 7L 正在彈琴、或老爸正在說話/主腦正在思考，直接靜默丟棄瑣碎動態

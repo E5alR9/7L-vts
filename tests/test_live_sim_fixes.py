@@ -165,8 +165,10 @@ def test_idle_chatter_respects_switch_and_waiting_piano():
 
 
 def test_dad_typing_wakes_her_up():
-    src = _src("chat_processor_worker")
-    assert "is_dad_typed" in src and "(has_wake_word or is_dad_typed)" in src
+    """老爸打字是刻意對她說話，不用喚醒詞也叫醒（判斷 2026-10-25 搬到 core.input_sources）。"""
+    from core.input_sources import InputItem, sleep_wake_decision
+    assert sleep_wake_decision(InputItem(text="在嗎", source="web_console"), True) == "wake_operator"
+    assert "sleep_wake_decision(item, operator_input_enabled())" in _src("chat_processor_worker")
 
 
 def test_desktop_helper_absence_is_remembered():
