@@ -465,3 +465,20 @@ def test_voice_playback_streams_split_chunks():
     fn = next(n for n in ast.walk(ast.parse(main)) if isinstance(n, ast.AsyncFunctionDef) and n.name == "play_voice_complete")
     src = ast.get_source_segment(main, fn)
     assert "split_for_streaming(clean_for_tts_text)" in src and '"text": clean_for_tts_text' not in src
+
+
+def test_reduplicated_cha_is_read_as_check_not_zha():
+    """「我去查查」本機 GPT-SoVITS 念成「喳喳」zhā（2026-10-26 老爸實聽）；「查一下」「查查看」本來就對。"""
+    from core.prompts import TextCleanEngine as C
+    out = C.clean_for_tts("好嘞老爸，我去查查明天台北的天氣～")
+    assert "查查" not in out and "茶茶" in out
+    assert "查一下" in C.clean_for_tts("我去查一下")
+
+
+def test_decimals_are_read_with_dian():
+    """報匯率「0.21」以前點號被當程式碼標點換成空格，念成「零 二十一」（2026-10-26 實機）。"""
+    from core.prompts import TextCleanEngine as C
+    assert C.normalize_spoken_form("賣出是 0.21 台幣") == "賣出是 零點二一 台幣"
+    assert C.normalize_spoken_form("1.5倍速、17.5度、120.25元") == "一點五倍速、十七點五度、120點二五元"
+    assert C.normalize_spoken_form("world.execute(me)").strip() == "world execute me"   # 程式碼標點照舊轉空格
+    assert "零點二一" in C.clean_for_tts("台銀最新日圓現鈔賣出是 0.21 台幣喔！")

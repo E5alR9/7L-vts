@@ -657,6 +657,10 @@ class TextCleanEngine:
         for ph, w in ji_placeholders.items():
             t = t.replace(ph, w)
 
+        # 68. 查 (chá vs zhā) - 疊字「查查」本機 GPT-SoVITS 的 g2pW 念成「喳喳」zhā（2026-10-26 老爸實聽）；
+        #     「查一下」「查查看」念得對。換成「茶茶」得到 chá cha，第二字輕聲剛好是口語念法
+        t = t.replace('查查', '茶茶')
+
         # 67. 載入自訂字典 (data/tts_heteronym_dictionary.json)
         dict_file = os.path.join(DATA_DIR, "tts_heteronym_dictionary.json")
         if os.path.exists(dict_file):
@@ -729,6 +733,13 @@ class TextCleanEngine:
         return cls._ZH_DIGITS[t] + "十" + (cls._ZH_DIGITS[o] if o else "")
 
     @classmethod
+    def _decimal_zh(cls, m) -> str:
+        """0.21→零點二一、17.5→十七點五；整數部分三位以上留數字給引擎念。"""
+        whole, frac = m.group(1), m.group(2)
+        head = cls._num_zh(whole) if len(whole) <= 2 else whole
+        return head + "點" + "".join(cls._ZH_DIGITS[int(d)] for d in frac)
+
+    @classmethod
     def _time_zh(cls, m) -> str:
         h, mi, ap = int(m.group(1)), int(m.group(2)), (m.group(3) or "").lower()
         if not (0 <= h <= 23 and 0 <= mi <= 59):
@@ -755,6 +766,8 @@ class TextCleanEngine:
         t = t.replace(";", "，")  # SoVITS 前端靜默吞半形分號，轉逗號保留斷句（2026-10-11）
         if for_chinese:
             t = cls._TIME_RE.sub(cls._time_zh, t)
+            # 小數點念「點」：下面會把 . 當程式碼標點換成空格，0.21 念成「零 二十一」（2026-10-26 實機報匯率）
+            t = re.sub(r'(\d+)\.(\d+)', cls._decimal_zh, t)
             #  2026-10-11：程式碼標點會毒死 SoVITS 語言切分——實測
             #  《Mili - world.execute(me)》交給我 整段消失，後面「背景準備中」被帶成日文讀音。
             #  拉丁 token 內的 .()_/\ 轉空格（world.execute(me)→world execute me），
