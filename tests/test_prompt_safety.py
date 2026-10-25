@@ -133,7 +133,7 @@ def test_proactive_tools_have_no_google_search():
 
 def _streamer_prompt_text():
     tree = ast.parse(MAIN_SRC)
-    fn = next(x for x in ast.walk(tree) if isinstance(x, ast.AsyncFunctionDef) and x.name == "streamer_mind_loop_worker")
+    fn = next(x for x in ast.walk(tree) if isinstance(x, ast.AsyncFunctionDef) and x.name == "_streamer_mind_prompt")
     return "".join(ast.get_source_segment(MAIN_SRC, n) or "" for n in ast.walk(fn) if isinstance(n, ast.Assign)
                    and isinstance(n.targets[0], ast.Name) and n.targets[0].id in ("role_strict_block", "sys_instruction", "prompt_user_input"))
 
@@ -152,5 +152,35 @@ def test_host_interject_is_labeled_as_host_and_always_answered():
     tree = ast.parse(MAIN_SRC)
     fn = next(x for x in ast.walk(tree) if isinstance(x, ast.AsyncFunctionDef) and x.name == "streamer_mind_loop_worker")
     src = ast.get_source_segment(MAIN_SRC, fn)
-    assert '【主持「{_host_nm}」】' in src
+    board = ast.get_source_segment(MAIN_SRC, next(x for x in ast.walk(tree) if isinstance(x, ast.FunctionDef)
+                                                  and x.name == "_format_board_batch"))
+    assert '【主持「{_host_nm}」】' in board and "_format_board_batch(batch_to_process)" in src
     assert "elif _host_msgs:" in src and src.index("elif _host_msgs:") < src.index("judge_subconscious_intent_via_live_api(")
+
+
+def test_fallback_prompt_is_built_only_when_live_brain_is_away():
+    """哨兵以前每批留言都先查觀眾檔案、讀老爸資料和雲端知識組好提示詞，Live 主腦在時直接遞紙條，白做（2026-10-25 健檢）。"""
+    tree = ast.parse(MAIN_SRC)
+    fn = next(x for x in ast.walk(tree) if isinstance(x, ast.AsyncFunctionDef) and x.name == "streamer_mind_loop_worker")
+    src = ast.get_source_segment(MAIN_SRC, fn)
+    assert "get_viewer_profile(" not in src and "get_cloud_knowledge(" not in src
+    assert src.index("send_brain_slip(slip_text") < src.index("await _streamer_mind_prompt(")
+
+
+def test_gemini_contents_builder():
+    """fetch_ai_response 開頭的輸入組裝抽成函式（2026-10-25 健檢）；組完沒人用的 interaction_input 拿掉。"""
+    import base64
+    from google.genai import types
+    tree = ast.parse(MAIN_SRC)
+    fn = next(x for x in tree.body if isinstance(x, ast.FunctionDef) and x.name == "_build_gemini_contents")
+    ns = {"types": types, "base64": base64, "log_print": lambda *a: None}
+    exec(compile(ast.Module(body=[fn], type_ignores=[]), "x", "exec"), ns)
+    img = base64.b64encode(b"\xff\xd8fakejpeg").decode()
+    out = ns["_build_gemini_contents"]([{"role": "system", "content": "妳是 7L。"},
+                                        {"role": "user", "content": "早安"},
+                                        {"role": "assistant", "content": "早～"},
+                                        {"role": "user", "content": "看這張"}], image_base64=img)
+    assert [c.role for c in out] == ["user", "model", "user"]
+    assert out[0].parts[0].text.startswith("妳是 7L。") and out[0].parts[0].text.endswith("早安")
+    assert len(out[-1].parts) == 2 and out[-1].parts[1].inline_data.mime_type == "image/jpeg"
+    assert "interaction_input = []" not in MAIN_SRC
