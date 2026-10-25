@@ -495,7 +495,7 @@ async def execute_tool_dispatch(fn_name: str, fn_args: dict, caller_target: str 
     elif fn_name in ["pe.resume_virtual_piano", "resume_virtual_piano"]:
         await pe.resume_virtual_piano()
     elif fn_name in ["pe.stop_virtual_piano", "stop_virtual_piano"]:
-        await pe.stop_virtual_piano()
+        await pe.stop_virtual_piano(force=bool(fn_args.get("force")))
     elif fn_name in ["auto_sing_song", "sing_song"]:
         s_name = fn_args.get("song_name", "")
         _origin = (fn_args.get("origin") or "")
@@ -7566,7 +7566,10 @@ async def background_tool_executor(user_text: str, target: str = "dad", requeste
                 except Exception:
                     log_swallowed()
             # CPU 只認點歌和鋼琴控制：一律走背景執行＋紙條（表情不歸 CPU，交主腦/A 架構）
-            _dispatch_in_background(fn_name, fn_args, caller_target=target, caller_user=requester_name)
+            _d_args = fn_args
+            if fn_name == "pe.stop_virtual_piano" and not from_brain:
+                _d_args = dict(fn_args or {}, force=True)   # 老爸親口說的：不受「剛拿出 3.5 秒」防護擋
+            _dispatch_in_background(fn_name, _d_args, caller_target=target, caller_user=requester_name)
             # 點歌強制應答：主腦常靜默，補一句 TTS 保證出聲（target 透傳，播出规则照舊）
             if fn_name in ("auto_sing_song", "sing_song", "pe.play_virtual_piano", "play_virtual_piano") and not from_brain:
                 if _o_need_file:

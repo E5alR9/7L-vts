@@ -1460,10 +1460,12 @@ async def resume_virtual_piano() -> str:
     return "（系統回報：已從暫停處繼續鋼琴演奏）"
 
 
-async def stop_virtual_piano() -> str:
-    """收起鋼琴（停止演奏、關閉桌面鋼琴介面並讓 7L 回到原本位置）。"""
+async def stop_virtual_piano(force: bool = False) -> str:
+    """收起鋼琴（停止演奏、關閉桌面鋼琴介面並讓 7L 回到原本位置）。
+    force：老爸親口說的或後台按的。3.5 秒防護是擋主腦剛開琴又自己收；老爸的指令不擋
+    （2026-10-25 實機：主腦自己點了曲剛拿出鋼琴，老爸說「收起鋼琴」被忽略，主腦還說收好了）。"""
     global is_piano_active, current_piano_song_title, current_piano_task, current_piano_process, current_ai_state, PIANO_SESSION_ID, IS_PIANO_AUTO_RADIO_MODE, LAST_PIANO_OPEN_TIME
-    if time.time() - LAST_PIANO_OPEN_TIME < 3.5:
+    if not force and time.time() - LAST_PIANO_OPEN_TIME < 3.5:
         log_print("🛡️ [鋼琴安全防護] 88 鍵鋼琴剛在 3.5 秒內被拿出，自動忽略衝突的【收起鋼琴】指令！")
         return ""
         

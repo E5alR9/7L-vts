@@ -295,7 +295,7 @@ class DashboardBridge:
             await pe.resume_virtual_piano()
             return "已恢復繼續鋼琴演奏"
         elif tool_name in ["pe.stop_virtual_piano", "stop_virtual_piano"]:
-            await pe.stop_virtual_piano()
+            await pe.stop_virtual_piano(force=True)
             return "已停止鋼琴演奏並關閉鋼琴"
         elif tool_name == "move_spatial_position":
             pos = args.get("target_position", "正中間")

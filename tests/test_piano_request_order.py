@@ -85,3 +85,33 @@ def test_requests_in_order_still_play_right_away(monkeypatch):
         pe.current_piano_task.cancel()
     asyncio.run(go())
     assert started == ["小星星"]
+
+
+def test_owner_stop_is_not_swallowed_by_the_just_opened_guard(monkeypatch):
+    """主腦自己點曲剛拿出鋼琴，老爸說「收起鋼琴」被「3.5 秒內忽略」擋掉，主腦還說收好了（2026-10-25 實機）。"""
+    import time
+    monkeypatch.setattr(pe, "log_print", lambda *a, **k: None)
+    monkeypatch.setattr(pe, "save_persisted_piano_state", lambda *a, **k: None)
+    monkeypatch.setattr(pe, "is_piano_window_alive", lambda: False)
+    monkeypatch.setattr(pe, "_remember", lambda *a: None)
+    monkeypatch.setattr(pe.vc, "GLOBAL_VTS", None)
+    monkeypatch.setattr(pe, "SOUND_ENGINE", None)
+    monkeypatch.setattr(pe, "current_piano_process", None)
+    monkeypatch.setattr(pe, "current_piano_task", None)
+
+    async def _noop(*a, **k):
+        return None
+    monkeypatch.setattr(pe, "_show_subtitle", _noop)
+    pe.LAST_PIANO_OPEN_TIME = time.time()
+    pe.is_piano_active = True
+    assert asyncio.run(pe.stop_virtual_piano()) == "" and pe.is_piano_active      # 主腦轉述的：照舊擋
+    assert "收起鋼琴" in asyncio.run(pe.stop_virtual_piano(force=True))           # 老爸親口說的：照收
+    assert pe.is_piano_active is False
+
+
+def test_cpu_owner_stop_is_sent_with_force():
+    import os
+    main = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "vts_7L_test.py"),
+                encoding="utf-8").read()
+    assert 'await pe.stop_virtual_piano(force=bool(fn_args.get("force")))' in main
+    assert 'if fn_name == "pe.stop_virtual_piano" and not from_brain:' in main
