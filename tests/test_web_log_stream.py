@@ -41,7 +41,7 @@ def test_other_thread_passthrough_no_broadcast(monkeypatch):
     th.join()
     assert events == []  # 一個廣播都沒有
     assert "275/1500" in real.getvalue()  # 原樣去了真終端
-    assert s.buffer == ""  # 沒污染解析緩衝
+    assert s._pending == ""  # 沒污染解析緩衝
 
 
 def test_capture_sets_owner():
@@ -49,3 +49,28 @@ def test_capture_sets_owner():
         pass
     import sys
     assert not isinstance(sys.stdout, xs._WebLogStream)  # 還原了
+
+
+def test_other_thread_flush_does_not_steal_pending_line(monkeypatch):
+    """狀態列每 0.1 秒 print(flush=True)；別人的 flush 不能把 TTS 還沒寫完的那一行搶去解析（2026-10-25）。"""
+    events = []
+    monkeypatch.setattr(web_dash, "broadcast_event", lambda et, data: events.append((et, dict(data))))
+    s = xs._WebLogStream()
+    s._owner = threading.get_ident()
+    s._real_out = io.StringIO()
+    s.write("实际输入的目标文本")          # 主人寫了半行
+    th = threading.Thread(target=s.flush)
+    th.start()
+    th.join()
+    assert s._pending == "实际输入的目标文本" and events == []
+
+
+def test_unknown_attributes_delegate_to_real_terminal():
+    """sys.stdout 全進程共用：TTS 攔截期間別人拿 encoding／buffer／isatty 不能炸（2026-10-25 狀態列崩潰：
+    '_WebLogStream' object has no attribute 'buffer'）。"""
+    real = io.TextIOWrapper(io.BytesIO(), encoding="utf-8")
+    s = xs._WebLogStream()
+    s._real_out = real
+    assert s.encoding == "utf-8" and s.buffer is real.buffer and s.isatty() is False
+    s._real_out = None                                    # 沒記到原終端就找 sys.__stdout__
+    assert callable(s.fileno)

@@ -44,7 +44,7 @@ class _WebLogStream:
     """攔截終端輸出並轉發至 Web Dashboard 後台，避免在主終端洗畫面，並即時解析生成進度"""
     def __init__(self, prefix="[GPT-SoVITS] "):
         self.prefix = prefix
-        self.buffer = ""
+        self._pending = ""   # 還沒湊滿一行的輸出（別叫 buffer：那是標準輸出的二進位通道名）
         self.total_bert_steps = 1
         self.current_bert_step = 0
         self._owner = None  # 進入 capture 的線程 id：只解析主人的輸出（2026-10-11）
@@ -116,11 +116,11 @@ class _WebLogStream:
             except Exception:
                 pass
             return
-        self.buffer += s
-        while "\n" in self.buffer or "\r" in self.buffer:
-            split_idx = min([i for i in [self.buffer.find("\n"), self.buffer.find("\r")] if i != -1])
-            line = self.buffer[:split_idx].strip()
-            self.buffer = self.buffer[split_idx+1:]
+        self._pending += s
+        while "\n" in self._pending or "\r" in self._pending:
+            split_idx = min([i for i in [self._pending.find("\n"), self._pending.find("\r")] if i != -1])
+            line = self._pending[:split_idx].strip()
+            self._pending = self._pending[split_idx+1:]
             if line:
                 try:
                     import services.web_dashboard as web_dash
@@ -129,9 +129,22 @@ class _WebLogStream:
                     pass
                 self._dispatch_progress(line)
 
+    def __getattr__(self, name):
+        # 其他屬性（encoding、buffer、isatty、fileno…）交給真正的終端：sys.stdout 是全進程共用的，
+        # 別的執行緒、套件拿 sys.stdout.buffer 之類的不能因為 TTS 正在攔截就炸掉（2026-10-25 狀態列崩潰）
+        if name.startswith("_"):
+            raise AttributeError(name)
+        return getattr(self._real_out or sys.__stdout__, name)
+
     def flush(self):
-        line = self.buffer.strip()
-        self.buffer = ""
+        if self._owner is not None and threading.get_ident() != self._owner:
+            try:
+                (self._real_out or sys.__stdout__).flush()   # 別人的 flush 不能搶走 TTS 還沒寫完的那一行
+            except Exception:
+                pass
+            return
+        line = self._pending.strip()
+        self._pending = ""
         if line:
             try:
                 import services.web_dashboard as web_dash

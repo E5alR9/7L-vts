@@ -8566,46 +8566,52 @@ async def _status_bar_loop():
     spinner_chars = ['/', '-', '\\', '|']
     idx = 0
     while True:
-        char = spinner_chars[idx % len(spinner_chars)]
-        term_cols = shutil.get_terminal_size((80, 20)).columns
-        max_cols = max(30, term_cols - 1)  # 留 1 個 column 絕對防止 Windows 控制台自動換行
-        
-        # 依據是否有即時通知，動態組合尾端文字 (通知放在最後面，絕不佔用整行)
-        has_notif = time.time() < notification_expire_time
-        if has_notif:
-            tail_str = f" {current_system_notification}"
-            if tk_listener.current_tiktok_status_str and tk_listener.current_tiktok_status_str != "[ TikTok: 待命中]":
-                tail_str = f"{tk_listener.current_tiktok_status_str} | {tail_str}"
-        else:
-            tail_str = tk_listener.current_tiktok_status_str
-
-        #  若 YouTube 伴看活躍中，優先顯示伴看狀態
-        if yt_comp.IS_YT_COMPANION_ACTIVE:
-            yt_info = f" 伴看中: {yt_comp.CURRENT_YT_TITLE[:15]}..."
-            tail_str = f"{yt_info} | {tail_str}" if tail_str else yt_info
-
-        # 依據終端寬度動態分配狀態文字、動作文字、音量與 尾端通知/動態 (排在最後面)
-        if max_cols < 85:
-            status_text = fit_text_to_width(current_ai_status_str, max(18, max_cols - 48))
-            action_text = " 聆聽中" if is_user_listening else fit_text_to_width(current_mic_action_str, 8)
-            tail_text = fit_text_to_width(tail_str, max(14, max_cols - 45))
-            raw_msg = f"[{char}] {status_text} | {action_text} | {current_mic_volume_str} | {tail_text}"
-        else:
-            status_text = fit_text_to_width(current_ai_status_str, max(28, max_cols - 65))
-            action_text = " 聆聽中..." if is_user_listening else fit_text_to_width(current_mic_action_str, 12)
-            tail_text = fit_text_to_width(tail_str, max(20, max_cols - 75))
-            raw_msg = f"[{char}] {status_text} | {action_text} | {current_mic_volume_str} | {tail_text}"
-        out_msg = fit_text_to_width(raw_msg, max_cols)
-        
-        out_msg = out_msg.replace('\n', ' ').replace('\r', '')
-        disp_w = get_display_width(out_msg)
-        padding = " " * max(0, max_cols - disp_w)
-        
-        # 使用 ANSI 擦除 + 精準寬度填充，徹底根除 Windows 終端換行與尾端空格殘影
-        print(f"\r\033[2K\r{out_msg}{padding}", end="", flush=True)
-        
+        try:
+            _draw_status_bar(spinner_chars[idx % len(spinner_chars)])
+        except Exception:
+            log_swallowed()   # 狀態列只是顯示：畫不出來就跳過這一格，絕不能把整個 7L 帶走（2026-10-25 實機崩潰）
         idx += 1
         await asyncio.sleep(0.1)
+
+
+def _draw_status_bar(char: str):
+    """畫一格狀態列。"""
+    term_cols = shutil.get_terminal_size((80, 20)).columns
+    max_cols = max(30, term_cols - 1)  # 留 1 個 column 絕對防止 Windows 控制台自動換行
+    
+    # 依據是否有即時通知，動態組合尾端文字 (通知放在最後面，絕不佔用整行)
+    has_notif = time.time() < notification_expire_time
+    if has_notif:
+        tail_str = f" {current_system_notification}"
+        if tk_listener.current_tiktok_status_str and tk_listener.current_tiktok_status_str != "[ TikTok: 待命中]":
+            tail_str = f"{tk_listener.current_tiktok_status_str} | {tail_str}"
+    else:
+        tail_str = tk_listener.current_tiktok_status_str
+
+    #  若 YouTube 伴看活躍中，優先顯示伴看狀態
+    if yt_comp.IS_YT_COMPANION_ACTIVE:
+        yt_info = f" 伴看中: {yt_comp.CURRENT_YT_TITLE[:15]}..."
+        tail_str = f"{yt_info} | {tail_str}" if tail_str else yt_info
+
+    # 依據終端寬度動態分配狀態文字、動作文字、音量與 尾端通知/動態 (排在最後面)
+    if max_cols < 85:
+        status_text = fit_text_to_width(current_ai_status_str, max(18, max_cols - 48))
+        action_text = " 聆聽中" if is_user_listening else fit_text_to_width(current_mic_action_str, 8)
+        tail_text = fit_text_to_width(tail_str, max(14, max_cols - 45))
+        raw_msg = f"[{char}] {status_text} | {action_text} | {current_mic_volume_str} | {tail_text}"
+    else:
+        status_text = fit_text_to_width(current_ai_status_str, max(28, max_cols - 65))
+        action_text = " 聆聽中..." if is_user_listening else fit_text_to_width(current_mic_action_str, 12)
+        tail_text = fit_text_to_width(tail_str, max(20, max_cols - 75))
+        raw_msg = f"[{char}] {status_text} | {action_text} | {current_mic_volume_str} | {tail_text}"
+    out_msg = fit_text_to_width(raw_msg, max_cols)
+    
+    out_msg = out_msg.replace('\n', ' ').replace('\r', '')
+    disp_w = get_display_width(out_msg)
+    padding = " " * max(0, max_cols - disp_w)
+    
+    # 使用 ANSI 擦除 + 精準寬度填充，徹底根除 Windows 終端換行與尾端空格殘影
+    print(f"\r\033[2K\r{out_msg}{padding}", end="", flush=True)
 
 
 # ────────────────────────────────────────────────────────
@@ -8803,7 +8809,7 @@ async def main():
     except Exception as e:
         import traceback
         print(f"\n❌ [底層系統異常崩潰]: {e}")
-        traceback.print_exc()
+        traceback.print_exc(file=sys.__stderr__)   # sys.stderr 可能正被 TTS 攔截到網頁後台，印到真終端才看得到
         try:
             flush_unified_memory()
         except Exception:

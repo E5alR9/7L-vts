@@ -401,3 +401,24 @@ def test_playback_state_lives_in_stage_module():
     assert not [n for n in names if f'"{n}"' in pipe]
     main_defs = [n.targets[0].id for n in TREE.body if isinstance(n, ast.Assign) and isinstance(n.targets[0], ast.Name)]
     assert not [n for n in names if n in main_defs]
+
+
+def test_status_bar_error_does_not_kill_7l():
+    """狀態列畫壞一格就跳過，不能讓 main() 的 _status_bar_loop 丟例外把整個 7L 帶走（2026-10-25 實機崩潰）。"""
+    import asyncio
+    tree = ast.parse(MAIN)
+    fn = next(n for n in tree.body if isinstance(n, ast.AsyncFunctionDef) and n.name == "_status_bar_loop")
+    calls, swallowed = [], []
+
+    def boom(ch):
+        calls.append(ch)
+        raise AttributeError("'_WebLogStream' object has no attribute 'buffer'")
+    ns = {"asyncio": asyncio, "_draw_status_bar": boom, "log_swallowed": lambda: swallowed.append(1)}
+    exec(compile(ast.Module(body=[fn], type_ignores=[]), "x", "exec"), ns)
+
+    async def run():
+        try:
+            await asyncio.wait_for(ns["_status_bar_loop"](), timeout=0.35)
+        except asyncio.TimeoutError:
+            return "still running"
+    assert asyncio.run(run()) == "still running" and len(calls) >= 3 and len(swallowed) == len(calls)
