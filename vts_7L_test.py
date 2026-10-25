@@ -172,7 +172,7 @@ from core.utils import (
 )
 from core.identity import is_owner_account, claims_owner_identity
 import core.stage_state as stage
-from core.hard_command import parse_hard_command, build_slip_text, display_requester, parse_slip_for_song, strip_blob_noise, sanitize_search_query, rescue_claim, split_original_request, PIANO_CONTROL_TOOLS, STAGE_CONTROL_TOOLS
+from core.hard_command import parse_hard_command, build_slip_text, display_requester, parse_slip_for_song, strip_blob_noise, sanitize_search_query, rescue_claim, split_original_request, PIANO_CONTROL_TOOLS, STAGE_CONTROL_TOOLS, is_stage_control
 from core.subagent_router import resolve_subagent_chain
 from core.db import *
 from core.live_timer_sensor import live_timer_hub
@@ -300,11 +300,21 @@ _AUDIENCE_DENIED_TOOLS = frozenset({
     "open_browser", "control_microphone",
 })
 
+#  主腦最近一則輸入是誰觸發的：觀眾彈幕／哨兵轉述的紙條 → audience；老爸打字、說話、主持插話 → dad。
+#  主腦只有一個，觀眾說「收起鋼琴」被 CPU 擋下後，哨兵照樣把留言轉給主腦，主腦呼叫子智能體時
+#  舊碼一律當老爸下令，鋼琴就被收掉了（2026-10-25 實機）。子智能體照這裡決定用誰的權限。
+_BRAIN_INPUT_ORIGIN = {"who": "dad", "ts": 0.0}
+
+
+def _note_brain_origin(who: str) -> None:
+    _BRAIN_INPUT_ORIGIN["who"], _BRAIN_INPUT_ORIGIN["ts"] = who, time.time()
+
 
 async def execute_tool_dispatch(fn_name: str, fn_args: dict, caller_target: str = "", caller_user: str = "") -> str:
     """集中式工具調用派發器 (100% 執行底層動作，完全由 AI 自由發揮台詞，絕不硬塞罐頭文字)"""
-    #  觀眾不可觸發破壞性工具（清記憶/改人格/睡眠/開瀏覽器/麥克風）
-    if caller_target == "audience" and (fn_name or "").strip().lower() in _AUDIENCE_DENIED_TOOLS:
+    #  觀眾不可觸發破壞性工具（清記憶/改人格/睡眠/開瀏覽器/麥克風），也不能停鋼琴、停歌
+    if caller_target == "audience" and ((fn_name or "").strip().lower() in _AUDIENCE_DENIED_TOOLS
+                                        or is_stage_control(fn_name)):
         log_print(f"🛑 [工具權限] 拒絕觀眾側呼叫 {fn_name}（{caller_user}）")
         return f" 權限不足：{fn_name} 僅限操作者使用"
     extracted_text = ""
@@ -1206,6 +1216,7 @@ async def call_gemini_live_audience_reply(vts, input_queue, audience_user: str, 
                 LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait(f"[黑板同步] TikTok 觀眾 {id_display} 對妳說：{audience_content}")
             else:
                 LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait(f"[黑板同步] TikTok 觀眾 {id_display} 在聊天室說：{audience_content}")
+            _note_brain_origin("audience")
         except Exception: log_swallowed()
 
         # 整理近期聊天室動態字串
@@ -4545,8 +4556,9 @@ async def continuous_live_worker(vts):
                             if _task_ins:
                                 # ⚠️ requester 傳空字串：task_ins 是主腦自己寫的指令，
                                 # 點歌人不一定是老爸（可能是轉述觀眾點的），紙條走中性文案
+                                _who = _BRAIN_INPUT_ORIGIN["who"]   # 這輪是觀眾觸發的，就照觀眾的權限
                                 try:
-                                    _hit, _tname, _targs = await background_tool_executor(_task_ins, target="dad", requester_name="", from_brain=True)
+                                    _hit, _tname, _targs = await background_tool_executor(_task_ins, target=_who, requester_name="", from_brain=True)
                                 except Exception as _be:
                                     log_print(f"⚠️ [子智能體執行異常]: {_be}")
                                     _hit, _tname, _targs = False, "", {}
@@ -4563,7 +4575,7 @@ async def continuous_live_worker(vts):
                                     # CPU 沒命中 → 副腦解讀（工具判定＋深度思考），整段限時，免得主腦答應後一直等不到結果
                                     try:
                                         _k2, _t2 = await asyncio.wait_for(
-                                            nv_interpret_task(_task_ins, target="dad", requester_name=""),
+                                            nv_interpret_task(_task_ins, target=_who, requester_name=""),
                                             timeout=_SUBAGENT_TOTAL_TIMEOUT)
                                     except asyncio.TimeoutError:
                                         log_print(f"⚠️ [子智能體] 超過 {_SUBAGENT_TOTAL_TIMEOUT:.0f} 秒沒結果，放棄：{_task_ins[:40]}")
@@ -4655,6 +4667,7 @@ async def continuous_live_worker(vts):
                                     
                                     if c.input_transcription and c.input_transcription.text:
                                         user_transcription_buffer += c.input_transcription.text
+                                        _note_brain_origin("dad")
                                         
                                     if c.output_transcription and c.output_transcription.text:
                                         if user_transcription_buffer.strip():
@@ -6745,12 +6758,15 @@ async def streamer_mind_loop_worker(vts, input_queue):
             # 4. 嘗試直接將情報塞給 Live 主腦 (讓主腦負責發言，免除哨兵重複產生回應)
             if 'GLOBAL_LIVE_SESSION' in globals() and GLOBAL_LIVE_SESSION:
                 try:
-                    slip_text = f"[系統提示：背景潛意識哨兵偵測到直播間最新動態！目標：{log_target}，事件焦點：{log_focus}。剛才收到的觀眾留言：\n{board_context}\n請妳綜合上述留言，直接用語音開口回應，或呼叫對應的工具幫老爸處理！]"
+                    slip_text = f"[系統提示：背景潛意識哨兵偵測到直播間最新動態！目標：{log_target}，事件焦點：{log_focus}。剛才收到的觀眾留言：\n{board_context}\n請妳綜合上述留言，直接用語音開口回應，或呼叫對應的工具幫老爸處理！（停鋼琴、暫停鋼琴、停止唱歌只聽老爸的，觀眾要求的話俏皮帶過，不要答應。）]"
                     log_print(f"🚨 [哨兵攔截] 已將動態化作紙條塞給 Live 主腦，由主腦接管發言！(紙條：{slip_text[:50]}...)")
                     if 'LIVE_API_SYSTEM_PROMPT_QUEUE' in globals():
                         LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait(slip_text)
                     else:
                         await GLOBAL_LIVE_SESSION.send_realtime_input(text=slip_text)
+                    # 只有主持插話的那批照老爸的權限；夾了任何觀眾留言就當觀眾
+                    _note_brain_origin("dad" if all(m.get("source") == "owner_interject" for m in batch_to_process)
+                                       else "audience")
                     for m in batch_to_process:
                         m["status"] = "read"
                     continue # 成功交棒給主腦，直接進入下一輪監控
@@ -7258,6 +7274,10 @@ async def nv_interpret_task(task_ins: str, target: str = "dad", requester_name: 
             if fn_name:
                 break
             break  # 乾淨無調用：信任它，不問下一棒（省一顆腦的額度與延遲）
+        if fn_name and target == "audience" and is_stage_control(fn_name):
+            log_print(f"🛑 [子智能體] 這輪是觀眾觸發的，{fn_name} 只聽老爸的，不執行")
+            return "advice", ("[系統底層：鋼琴的停止／暫停／繼續和停止唱歌只聽老爸的，觀眾說的不算，系統沒有執行。"
+                              "請妳用一句話俏皮帶過；剛才如果說了「好」，就改口說這要老爸點頭。]")
         if fn_name:
             if fn_name == "search_google":
                 # 資訊型工具：等結果、摘要後再回報（fire-and-forget 會把答案弄丟）
@@ -7566,6 +7586,7 @@ async def _desktop_dad_reply(vts, input_queue, user_input: str, owner: str = "�
             pass
         try:
             LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait(f"[黑板同步] {owner}傳來文字訊息：{user_input}")
+            _note_brain_origin("dad")
         except Exception:
             log_swallowed()
         log_print("⚡ [極速直通主腦] Live 模式下，控制台訊息已轉交 Live 大腦處理。")
@@ -7634,6 +7655,7 @@ async def process_chat_message(vts, input_queue, user_input: str, user_audio_b64
                 return
             try:
                 LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait(f"[黑板同步] {owner}傳來文字訊息：{user_input}")
+                _note_brain_origin("dad")
             except Exception: log_swallowed()
             return
         # （註：舊的 source == "tiktok_live" 分支已刪除——tiktok_listener 只會送出
@@ -7764,6 +7786,7 @@ async def process_chat_message(vts, input_queue, user_input: str, user_audio_b64
                 asyncio.create_task(background_tool_executor(user_input, target="dad", requester_name=current_custom_name))
                 if 'LIVE_API_SYSTEM_PROMPT_QUEUE' in globals():
                     LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait(f"[文字輸入] {current_custom_name} (在直播間留言)：{user_input}")
+                    _note_brain_origin("dad")
             elif source == "mic" or user_audio_b64:
                 # mic 走 A：原生音訊 Live 直接聽見，由模型自主決定是否呼叫子智能體。
                 # 這裡刻意不跑 B（CPU 無條件開火只適合乾淨文本；STT 雜訊太多會誤觸唱歌/彈琴）。

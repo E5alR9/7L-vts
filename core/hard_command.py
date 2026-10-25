@@ -306,6 +306,13 @@ _SING_CONTROLS = (
 )
 SING_CONTROL_TOOLS = frozenset(t for t, _ in _SING_CONTROLS)
 STAGE_CONTROL_TOOLS = PIANO_CONTROL_TOOLS | SING_CONTROL_TOOLS   # 只聽老爸的（觀眾一句「別唱了」不能把歌停掉）
+# 副腦／派發器收到的工具名可能沒有 pe. 前綴、或是舊別名，比對前先統一
+_STAGE_CONTROL_NAMES = frozenset(t.split(".")[-1] for t in STAGE_CONTROL_TOOLS) | {"stop_singing_song", "stop_cover"}
+
+
+def is_stage_control(fn_name: Optional[str]) -> bool:
+    """鋼琴停止／暫停／繼續、停止唱歌（含 pe. 前綴、大小寫、舊別名）→ True。"""
+    return (fn_name or "").strip().lower().split(".")[-1] in _STAGE_CONTROL_NAMES
 
 
 def extract_piano_control(text: Optional[str], controls=_PIANO_CONTROLS) -> Optional[str]:

@@ -409,3 +409,13 @@ def test_stop_singing_is_declared_and_owner_only():
     from core.tool_schema import INTERACTIONS_TOOLS
     assert "stop_singing" in [t["name"] for t in INTERACTIONS_TOOLS]      # 子智能體解讀時有正確的工具可選
     assert "stop_singing" in STAGE_CONTROL_TOOLS                          # 觀眾一句「別唱了」不能把歌停掉
+
+
+def test_stage_control_names_match_with_or_without_prefix():
+    """副腦回的工具名可能沒有 pe. 前綴或用舊別名，權限檢查要都認得。"""
+    from core.hard_command import is_stage_control
+    for name in ("pe.stop_virtual_piano", "stop_virtual_piano", "PE.PAUSE_VIRTUAL_PIANO", "resume_virtual_piano",
+                 "stop_singing", "stop_singing_song", "stop_cover"):
+        assert is_stage_control(name), name
+    for name in ("pe.play_virtual_piano", "auto_sing_song", "set_piano_volume", "", None):
+        assert not is_stage_control(name), name

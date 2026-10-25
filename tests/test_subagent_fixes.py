@@ -61,11 +61,15 @@ class _FakeSession:
         self.sent += function_responses
 
 
-def _run_handler(cpu, nv, total_timeout=45.0, task="幫我查日圓匯率"):
+def _run_handler(cpu, nv, total_timeout=45.0, task="幫我查日圓匯率", origin="dad", targets=None):
+    targets = [] if targets is None else targets
+
     async def background_tool_executor(*a, **k):
+        targets.append(("cpu", k.get("target")))
         return cpu
 
     async def nv_interpret_task(*a, **k):
+        targets.append(("nv", k.get("target")))
         if nv == "hang":
             await asyncio.sleep(10)
         return nv
@@ -75,6 +79,7 @@ def _run_handler(cpu, nv, total_timeout=45.0, task="幫我查日圓匯率"):
     ns = _load("_handle_invoke_subagent", types=types, asyncio=asyncio, session=sess, ws_send_lock=asyncio.Lock(),
                background_tool_executor=background_tool_executor, nv_interpret_task=nv_interpret_task,
                build_slip_text=build_slip_text, _SUBAGENT_TOTAL_TIMEOUT=total_timeout,
+               _BRAIN_INPUT_ORIGIN={"who": origin, "ts": 0.0},
                _SUBAGENT_VISION_TASK_RE=__import__('re').compile(_const_pattern('_SUBAGENT_VISION_TASK_RE')))
     asyncio.run(ns["_handle_invoke_subagent"]("invoke_subagent", "call-1", task))
     assert all(r.id == "call-1" for r in sess.sent)
@@ -112,6 +117,53 @@ def test_results_to_say_wait_until_idle():
     text, sched = _run_handler((False, "", {}), ("miss", ""))
     assert sched == types.FunctionResponseScheduling.WHEN_IDLE
     assert "不要自己編" in text
+
+
+def test_subagent_acts_with_the_rights_of_whoever_prompted_the_brain():
+    """觀眾說「收起鋼琴」被 CPU 擋下，哨兵把留言轉給主腦，主腦呼叫子智能體，
+    舊碼一律當老爸下令，鋼琴真的被收掉（2026-10-25 實機）。"""
+    targets = []
+    _run_handler((False, "", {}), ("advice", "[婉拒]"), task="停止播放鋼琴", origin="audience", targets=targets)
+    assert targets == [("cpu", "audience"), ("nv", "audience")]
+    targets = []
+    _run_handler((False, "", {}), ("advice", "[好]"), task="停止播放鋼琴", origin="dad", targets=targets)
+    assert targets == [("cpu", "dad"), ("nv", "dad")]
+
+
+def test_audience_turn_cannot_stop_the_stage_through_the_subagent():
+    from core.hard_command import is_stage_control, build_slip_text
+    dispatched = []
+
+    async def dispatch(*a, **k):
+        dispatched.append(a[0])
+
+    async def tool_pass(*a, **k):
+        return "pe.stop_virtual_piano", {}
+    ns = _load("nv_interpret_task", asyncio=asyncio, resolve_subagent_chain=lambda: ["gemini"],
+               load_prompt=lambda n: "", execute_tool_dispatch=dispatch, is_stage_control=is_stage_control,
+               build_slip_text=build_slip_text, _gemini_tool_pass=tool_pass)
+
+    async def go(target):
+        r = await ns["nv_interpret_task"]("停止播放鋼琴", target=target)
+        await asyncio.sleep(0)
+        return r
+    kind, text = asyncio.run(go("audience"))
+    assert kind == "advice" and "只聽老爸" in text and dispatched == []
+    kind, _ = asyncio.run(go("dad"))
+    assert kind == "tool" and dispatched == ["pe.stop_virtual_piano"]
+
+
+def test_dispatcher_refuses_stage_control_from_the_audience():
+    from core.hard_command import is_stage_control
+    ns = _load("execute_tool_dispatch", is_stage_control=is_stage_control,
+               _AUDIENCE_DENIED_TOOLS=_const_frozenset("_AUDIENCE_DENIED_TOOLS"))
+    for name in ("pe.stop_virtual_piano", "stop_virtual_piano", "pause_virtual_piano", "stop_singing", "stop_cover"):
+        assert "權限不足" in asyncio.run(ns["execute_tool_dispatch"](name, {}, caller_target="audience"))
+
+
+def _const_frozenset(name):
+    node = next(n.value for n in TREE.body if isinstance(n, ast.Assign) and getattr(n.targets[0], "id", "") == name)
+    return frozenset(ast.literal_eval(node.args[0]))
 
 
 def test_subagent_has_a_total_time_limit():
