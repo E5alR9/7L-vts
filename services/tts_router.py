@@ -26,6 +26,8 @@ import os
 import re
 import io
 import time
+
+from core.lang import KANA_RE, HAN_RE, has_kana, is_japanese_sentence
 from typing import Optional
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -156,7 +158,7 @@ def transliterate_kana_to_zh(text: str) -> str:
     例：ロンリーユニバース → 羅恩利優尼巴斯；バカ → 巴卡。
     日文路徑不要呼叫（Nanami 直接唸假名）。
     """
-    if not text or not re.search(r'[\u3040-\u309F\u30A0-\u30FF\uFF61-\uFF9F]', text):
+    if not text or not has_kana(text):
         return text
     # 半形浊点组合先合併（ﾊﾞ → バ），再整串 fold 成全形片假名（一對一，不改長度）
     for half, full in _HALF_VOICED.items():
@@ -198,17 +200,7 @@ def detect_language(text: str) -> str:
     - 全漢字日文（無假名）啟發式無解，維持 zh；純英文維持 zh（引擎鏈無 EN
       聲線可接，接了也沒地方去——kokoro 引擎與 EN_VOICE 已同步清掉）。
     """
-    num_kana = len(re.findall(r'[\u3040-\u309F\u30A0-\u30FF\uFF61-\uFF9F]', text))
-    num_hanzi = len(re.findall(r'[\u4E00-\u9FFF]', text))
-    has_chinese_markers = bool(re.search(r'[的了嗎吧呢這那是在說妳你我他們著啦喔呀嘛欸咦啥誰怎麼盧搞弄為什麼]', text))
-    if num_kana > 0:
-        if num_hanzi == 0:
-            return "ja"
-        if not has_chinese_markers and (num_kana / (num_kana + num_hanzi) >= 0.35):
-            return "ja"
-        if has_chinese_markers and (num_kana / (num_kana + num_hanzi) >= 0.65):
-            return "ja"
-    return "zh"
+    return "ja" if is_japanese_sentence(text) else "zh"   # 規則見 core.lang
 
 def _clean_text(text: str, lang: str) -> str:
     # lang 參數保留（標示呼叫時的判定語境），目前不分支：假名一律原樣保留，
@@ -232,8 +224,8 @@ def sovits_text_lang(text: str) -> str:
     跟本地曉伊同一哲學（見 local_xiaoyi_service.synthesize_xiaoyi_bytes）：
     模型是多語言的，不要硬鎖單一語系逼它唸錯另一種文字。
     """
-    num_kana = len(re.findall(r'[\u3040-\u309F\u30A0-\u30FF\uFF61-\uFF9F]', text))
-    num_hanzi = len(re.findall(r'[\u4E00-\u9FFF]', text))
+    num_kana = len(KANA_RE.findall(text))
+    num_hanzi = len(HAN_RE.findall(text))
     has_latin = bool(re.search(r'[A-Za-z]', text))
     if num_kana > 0 and num_hanzi == 0 and not has_latin:
         return "ja"
@@ -246,7 +238,7 @@ async def _synth_edge(text: str) -> bytes:
     """微軟 Edge-TTS 雲端合成（台灣腔女聲 / 日文聲線），回傳 MP3 bytes"""
     import edge_tts
     lang = detect_language(text)
-    if lang == "zh" and re.search(r'[\u3040-\u309F\u30A0-\u30FF\uFF61-\uFF9F]', text):
+    if lang == "zh" and has_kana(text):
         # HsiaoChen 是純中文聲線、假名會唸爛：先音譯成中文再唸。
         # （多語言 SoVITS 不走這條，不受影響）
         text = transliterate_kana_to_zh(text)

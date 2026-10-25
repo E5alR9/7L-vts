@@ -8,6 +8,7 @@ from typing import Tuple
 
 # Project imports
 from core.utils import log_print, get_current_time_string, get_unified_time_prompt, get_silence_ticks, get_uptime_ticks, format_ticks_to_human
+from core.lang import has_kana
 import services.piano_engine as pe
 from services.piano_engine import get_piano_realtime_prompt
 from mic_live_plugin import os_desktop_sensor
@@ -706,7 +707,7 @@ class TextCleanEngine:
         t = cls.natural_clause_segmentation(t)
         #  日語原生支援：若包含日文平假名/片假名，保留原生正統日文字串交由本機 RTX 3080 Ti GPT-SoVITS (pyopenjtalk) 發音
         #  徹底停用舊版 Edge-TTS 的假音標置換 (如 歐托桑/knee/搭一 soo kee)，並避開中文破音字替換以免破壞日文漢字
-        has_japanese = bool(re.search(r'[\u3040-\u309F\u30A0-\u30FF]', t))
+        has_japanese = has_kana(t)
         t = cls.normalize_spoken_form(t, for_chinese=not has_japanese)
         if apply_phonetics and not has_japanese:
             t = cls.fix_heteronyms_for_tts(t)

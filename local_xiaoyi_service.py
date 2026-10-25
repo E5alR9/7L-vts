@@ -25,6 +25,7 @@ if hasattr(sys, '__stdout__') and hasattr(sys.__stdout__, 'reconfigure'):
 #  路徑改為「環境變數優先、退回使用者家目錄」，不再寫死原作者電腦
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from core.paths import GPT_SOVITS_DIR, FINETUNE_DATA_DIR, REF_VOICE_ZH, REF_VOICE_JA
+from core.lang import KANA_RE, HAN_RE, is_japanese_sentence
 
 BASE_DIR = GPT_SOVITS_DIR
 if BASE_DIR not in sys.path:
@@ -204,8 +205,6 @@ def _split_for_tts(text: str, limit: int = None) -> list:
 # GPT-SoVITS 的 auto 模式靠 split-lang 分段，漢字中日共用，只能看鄰居猜，交界處常猜錯（2026-10-25 實測）：
 #   「這首歌叫做夜に駆ける」→「夜」被分進中文念成 yè；「さすが老爸」→「老爸」被分進日文念成「ろう」。
 # 在它分完之後補一層交界修正；整句仍是一次合成，語氣連貫。
-_KANA_RE = re.compile(r"[぀-ゟ゠-ヿ｡-ﾟ]")
-_HAN_RE = re.compile(r"[一-鿿]")
 # 漢字後面緊接這些假名，通常是助詞，前面的漢字屬於日文詞（夜に、歌を、空が、君の）
 _JA_PARTICLE_START = set("にをがのはへでともやか")
 # 中文才會出現在這種位置的字：看到就不搬進日文、或從日文切回中文
@@ -223,7 +222,7 @@ def _repair_lang_segments(segs: list) -> list:
         if a.get("lang") != "zh" or b.get("lang") != "ja" or b["text"][:1] not in _JA_PARTICLE_START:
             continue
         keep, move = a["text"], ""
-        while keep and len(move) < 2 and _HAN_RE.match(keep[-1]) and keep[-1] not in _ZH_ONLY_CHARS:
+        while keep and len(move) < 2 and HAN_RE.match(keep[-1]) and keep[-1] not in _ZH_ONLY_CHARS:
             move, keep = keep[-1] + move, keep[:-1]
         if move and keep.strip():
             a["text"], b["text"] = keep, move + b["text"]
@@ -232,7 +231,7 @@ def _repair_lang_segments(segs: list) -> list:
     for s in segs:
         if s.get("lang") == "ja":
             m = re.search(r"([一-鿿]+)([，,。！？!?、\s]*)$", s["text"])
-            if m and _KANA_RE.search(s["text"][:m.start()]) and (
+            if m and KANA_RE.search(s["text"][:m.start()]) and (
                     set(m.group(1)) & _ZH_ONLY_CHARS or any(w in m.group(1) for w in _ZH_WORDS)):
                 out.append({"lang": "ja", "text": s["text"][:m.start()]})
                 out.append({"lang": "zh", "text": m.group(1) + m.group(2)})
@@ -410,25 +409,11 @@ def synthesize_xiaoyi_bytes(text: str) -> bytes:
             return b""
             
         try:
-            #  智能全自動語言邊界判定 (精準區分「正統日語」vs「中文夾雜日文梗/外來語」)
+            #  語言判定：整句是不是日文（規則見 core.lang，跟 tts_router 共用同一份）
             import re
-            # 半形片假名（U+FF61–FF9F，YT 歌名常見）也算假名——之前漏掉會誤鎖 zh
-            num_kana = len(re.findall(r'[\u3040-\u309F\u30A0-\u30FF\uFF61-\uFF9F]', text))
-            num_hanzi = len(re.findall(r'[\u4E00-\u9FFF]', text))
-            has_chinese_markers = bool(re.search(r'[的了嗎吧呢這那是在說妳你我他們著啦喔呀嘛欸咦啥誰怎麼盧搞弄為什麼]', text))
-            
-            # 判斷是否為「正統日語句子」：
-            # 1. 純日語假名（如 "こんにちは", "ありがとう", "だいすき"）
-            # 2. 假名佔比豐富 (>= 35%) 且無典型中文獨有語氣助詞
-            # 3. 若含有中文助詞（如 "想被罵バカ的話，去找老爸盧啦"），判定為中文語境！
-            is_real_japanese = False
-            if num_kana > 0:
-                if num_hanzi == 0:
-                    is_real_japanese = True
-                elif not has_chinese_markers and (num_kana / (num_kana + num_hanzi) >= 0.35):
-                    is_real_japanese = True
-                elif has_chinese_markers and (num_kana / (num_kana + num_hanzi) >= 0.65):
-                    is_real_japanese = True
+            num_kana = len(KANA_RE.findall(text))
+            num_hanzi = len(HAN_RE.findall(text))
+            is_real_japanese = is_japanese_sentence(text)
             
             if is_real_japanese:
                 #  正統日語模式：採用高音甜美版曉伊日語提示音（360Hz 少女高音）
