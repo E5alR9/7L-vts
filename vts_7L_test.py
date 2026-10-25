@@ -92,7 +92,6 @@ from typing import Optional
 import collections
 from collections import deque
 import shutil
-import webbrowser
 import platform
 import warnings
 from datetime import datetime, timedelta
@@ -175,7 +174,7 @@ from core.utils import (
 )
 from core.identity import is_owner_account, claims_owner_identity
 import core.stage_state as stage
-from core.hard_command import parse_hard_command, build_slip_text, display_requester, parse_slip_for_song, strip_blob_noise, sanitize_search_query, rescue_claim, split_original_request, PIANO_CONTROL_TOOLS, STAGE_CONTROL_TOOLS, is_stage_control, structured_stage_command, PLAY_TOOLS, stage_request_unasked
+from core.hard_command import asks_to_remember_model_position, parse_hard_command, build_slip_text, display_requester, parse_slip_for_song, strip_blob_noise, sanitize_search_query, rescue_claim, split_original_request, PIANO_CONTROL_TOOLS, STAGE_CONTROL_TOOLS, is_stage_control, structured_stage_command, PLAY_TOOLS, stage_request_unasked
 from core.subagent_router import resolve_subagent_chain
 from core.db import *
 from core.live_timer_sensor import live_timer_hub
@@ -1437,34 +1436,6 @@ async def get_user_profile():
 
 
 
-async def add_few_shot_example(scenario: str, user_input: str, thought: str = "", reply: str = ""):
-    """7L 自主新增神回覆範例到雲端示範庫"""
-    kn = await get_cloud_knowledge()
-    examples = kn.get("few_shot_examples", [])
-    new_ex = {
-        "scenario": str(scenario).strip(),
-        "input": str(user_input).strip(),
-        "reply": str(reply).strip()
-    }
-    examples.append(new_ex)
-    del examples[:-20]  # 上限 20，超了丟最舊（讀時只取前 6）
-    kn["few_shot_examples"] = examples
-    await save_cloud_knowledge(kn)
-    log_print(f"🎯 [7L 雲端示範演進] 7L 自主新增神回覆案例：『{scenario} ➔ {reply}』")
-
-async def learn_new_meme(meme_desc: str):
-    """7L 自主學習並記憶新梗到雲端知識庫"""
-    await update_cloud_prompt_field("memes_and_slang", meme_desc)
-
-async def learn_new_fact(fact_desc: str):
-    """7L 自主學習並記憶新事實/知識到雲端知識庫"""
-    await update_cloud_prompt_field("learned_facts", fact_desc)
-
-async def update_custom_rule(rule_desc: str):
-    """7L 自主更新或設定心智原則"""
-    await update_cloud_prompt_field("custom_rules", rule_desc)
-
-
 # ────────────────────────────────────────────────────────
 #  6. Live2D / VTube Studio 表情與姿態控制 & 雙軌空間走位系統 (Spatial Movement)
 # ────────────────────────────────────────────────────────
@@ -2723,52 +2694,25 @@ async def live_timer_sensor_worker(vts, input_queue):
             await asyncio.sleep(1.0)
 
 
-async def execute_actions(vts, text, input_queue, user_input_ctx: str = "", has_dispatched_tool: bool = False, execute_visuals: bool = False, caller_target: str = "", caller_user: str = ""):
-    """集中式系統動作與指令過濾器 (即刻執行底層系統動作/工具，並產出口語純淨文字)"""
-    
-    
+def _save_model_position() -> None:
+    log_print("📐 [VTS 模型記憶] 正在向 VTube Studio 讀取並保存當前模型座標與大小為基準...")
+    spawn(vc.fetch_vts_base_model_pos(vc.GLOBAL_VTS))
+
+
+async def execute_actions(vts, text, input_queue, execute_visuals: bool = False, caller_target: str = "", caller_user: str = ""):
+    """她這段話裡夾的控制標籤：拿掉心想、[TIMER]、[INTERRUPT_SELF]、老爸要她記住模型位置；回剩下要念的字。
+    表情、走位、視線標籤留在文字裡，說話時由時間軸執行。
+    點歌、停歌、收鋼琴、開網頁、畫圖這些動作一律走 invoke_subagent（有權限檢查），不再從她講出口的話裡
+    挑關鍵字或函式呼叫樣子的文字去執行：以前她回觀眾「好啦別唱了」就真的停歌（觀眾沒這權限），
+    話裡出現 clear_all_memories()、execute_local_python_code(...)、[OPEN_BROWSER: 網址] 也照做（2026-10-26 拿掉）。"""
     #  徹底去除開頭與內部殘留之 LLM 內部 token (如 get_output, tool_output 等)
     text = re.sub(r'^(?:get_outputs?|tool_outputs?|function_calls?|tool_responses?)[：:\s_]*', '', text.strip(), flags=re.IGNORECASE).strip()
     text = re.sub(r'\b(?:get_outputs?|tool_outputs?)\b', '', text, flags=re.IGNORECASE).strip()
 
-    #  提取並過濾殘留心想/思考內容 (已有背景即時心流協程，對話不再輸出或記錄腦內心想)
+    #  心想不念、不記（背景有獨立心流協程）
     extracted_thought, text_without_thought = TextCleanEngine.extract_thought(text)
     if extracted_thought:
         text = text_without_thought
-
-    #  7L 自主雲端大腦演進標籤攔截 [UPDATE_PROMPT: ...] / [ADD_EXAMPLE: ...] / [LEARN_MEME: ...] / [LEARN_FACT: ...] / [UPDATE_RULE: ...]
-    for up in re.finditer(r'\[(?:UPDATE_PROMPT|UPDATE_KNOWLEDGE|SET_PROMPT)[：:]\s*([^|\]]+)\|([^\]]+)\]', text, re.IGNORECASE):
-        f_name = up.group(1).strip()
-        f_val = up.group(2).strip()
-        if f_name and f_val:
-            spawn(update_cloud_prompt_field(f_name, f_val))
-            text = text.replace(up.group(0), "")
-
-    for ae in re.finditer(r'\[(?:ADD_EXAMPLE|LEARN_EXAMPLE)[：:]\s*([^|\]]+)\|([^|\]]+)\|([^\]]+)\]', text, re.IGNORECASE):
-        sc = ae.group(1).strip()
-        ui = ae.group(2).strip()
-        rp = ae.group(3).strip()
-        if sc and rp:
-            spawn(add_few_shot_example(sc, ui, "", rp))
-            text = text.replace(ae.group(0), "")
-
-    for lm in re.finditer(r'\[LEARN_MEME[：:]\s*([^\]]+)\]', text, re.IGNORECASE):
-        meme_val = lm.group(1).strip()
-        if meme_val:
-            spawn(learn_new_meme(meme_val))
-            text = text.replace(lm.group(0), "")
-
-    for lf in re.finditer(r'\[LEARN_FACT[：:]\s*([^\]]+)\]', text, re.IGNORECASE):
-        fact_val = lf.group(1).strip()
-        if fact_val:
-            spawn(learn_new_fact(fact_val))
-            text = text.replace(lf.group(0), "")
-
-    for lr in re.finditer(r'\[(?:UPDATE_RULE|SET_RULE|LEARN_RULE)[：:]\s*([^\]]+)\]', text, re.IGNORECASE):
-        rule_val = lr.group(1).strip()
-        if rule_val:
-            spawn(update_custom_rule(rule_val))
-            text = text.replace(lr.group(0), "")
 
     for tm in re.finditer(r'\[(?:TOOL[：:]\s*)?(?:TIMER|SET_TIMER|ALARM|鬧鐘|計時器)[：:]\s*([0-9]+)\s*\|?\s*([^\]]*)\]', text, re.IGNORECASE):
         t_sec = int(tm.group(1))
@@ -2783,168 +2727,15 @@ async def execute_actions(vts, text, input_queue, user_input_ctx: str = "", has_
         # 必須 await：create_task 會晚一步執行，清掉的變成呼叫端剛排進佇列的「這一句」（7L 整句消失）
         await interrupt_current_speech(clear_queue=True, reason="7L 自由意志自我插話")
 
-    #  記住 VTS 模型基準位置與大小 (當老爸說「記住大小」、「記住位置」時即刻執行)
-    if any(k in text or k in user_input_ctx for k in ["記住大小", "記住位置", "記住現在位置", "記住當前位置", "記住現在大小", "記錄位置", "記錄大小", "記住模型位置", "記住模型", "記錄基準大小", "記錄基準位置", "記住當前大小"]):
-        log_print("📐 [VTS 模型記憶] 正在向 VTube Studio 讀取並保存當前模型座標與大小為基準...")
-        spawn(vc.fetch_vts_base_model_pos(vc.GLOBAL_VTS))
-
-    #  翻唱手動終止指令 (當老爸或觀眾說「別唱了」、「停止唱歌」、「不要唱了」時即刻終止)
-    if any(k in text or k in user_input_ctx for k in ["別唱了", "停止唱歌", "不要唱了", "別唱歌了", "停唱", "停止翻唱", "關閉音樂", "不要唱歌"]):
-        stop_singing()
-        log_print("🛑 [翻唱終止] 收到停止唱歌指令，已立即中斷演唱！")
-
-    #  通用 Python 函數直接調用攔截 (Universal Python Call Interceptor)
-    universal_tool_calls = [
-        (r'(?:\[SPEED:[^\]]+\]\s*)?(?:pe\.)?set_piano_speed\(\s*(?:speed\s*=\s*)?[\'"]?([0-9.]+)x?[\'"]?\s*\)', lambda m: pe.set_piano_speed(speed=float(m.group(1)))),
-        (r'(?:pe\.)?set_piano_volume\(\s*(?:volume\s*=\s*)?[\'"]?([0-9]+)[\'"]?\s*\)', lambda m: pe.set_piano_volume(volume=int(m.group(1)))),
-        (r'(?:pe\.)?set_piano_instrument\(\s*(?:instrument\s*=\s*)?[\'"]([^\'"]+)[\'"]\s*\)', lambda m: pe.set_piano_instrument(instrument=m.group(1))),
-        (r'(?:pe\.)?open_virtual_piano\(\s*\)', lambda m: pe.open_virtual_piano()),
-        (r'(?:pe\.)?pause_virtual_piano\(\s*\)', lambda m: pe.pause_virtual_piano()),
-        (r'(?:pe\.)?resume_virtual_piano\(\s*\)', lambda m: pe.resume_virtual_piano()),
-        (r'(?:pe\.)?stop_virtual_piano\(\s*\)', lambda m: pe.stop_virtual_piano()),
-        (r'(?:pe\.)?list_piano_sheets\(\s*\)', lambda m: pe.list_piano_sheets()),
-        (r'\[?(?:stop_singing|stop_singing_song|stop_cover)(?:\(\s*\))?\]?', lambda m: stop_singing()),
-        (r'\[(?:STOP_SINGING|STOP_COVER|停止唱歌|停止翻唱)\]', lambda m: stop_singing()),
-        (r'\[?(?:TOOL:[A-Z_]*:?\s*)?(?:pe\.)?(?:auto_sing(?:_song|_sing)?|sing_song|SING_AI)\(\s*(?:song_name\s*=\s*)?[\'"]?([^\'")\]]+)[\'"]?(?:[^)]*)\)\]?', lambda m: produce_and_sing_cover(re.sub(r'^(?:song_name\s*=\s*)?[\'"]?', '', m.group(1)).strip().rstrip('\'"'), caller_user)),
-        (r'\[?(?:TOOL:[A-Z_]*:?\s*)?(?:AUTO_SING_SONG|SING_SONG|AUTO_SING|SING_AI|SING|翻唱|唱歌)[：:]\s*([^\]]+)\]?', lambda m: produce_and_sing_cover(re.sub(r'^(?:song_name\s*=\s*)?[\'"]?', '', m.group(1)).strip().rstrip('\'"'), caller_user)),
-        (r'\[(?:TOOL:\s*)?(?:AUTO_SING_SONG|SING_SONG|AUTO_SING|SING_AI|SING|翻唱|唱歌)\]\s*([^\[\]\n]+)', lambda m: produce_and_sing_cover(m.group(1).strip().rstrip('\'"'), caller_user)),
-        (r'\[(?:PLAY_PIANO|PLAY_VIRTUAL_PIANO|彈琴|點歌)[：:]\s*([^\]]+)\]', lambda m: pe.play_virtual_piano(
-            song_name=m.group(1).strip(),
-            target=(caller_target or ("audience" if CURRENT_SPEAKING_TARGET == "audience" else "dad")),
-            requester_name=display_requester(caller_user, (caller_target or ("audience" if CURRENT_SPEAKING_TARGET == "audience" else "dad"))),
-            is_direct_song_name=True
-        )),
-        (r'\[?(?:pe\.)?play_virtual_piano\s*\([^)]*\)\]?', lambda m: pe.play_virtual_piano(
-            song_name=(
-                re.search(r'song_name\s*=\s*[\'"]?([^\'",)]+)[\'"]?', m.group(0)).group(1) 
-                if re.search(r'song_name\s*=\s*[\'"]?([^\'",)]+)[\'"]?', m.group(0)) 
-                else (re.findall(r'[\'"]([^\'"]+)[\'"]', m.group(0))[0] if re.findall(r'[\'"]([^\'"]+)[\'"]', m.group(0)) else "鋼琴曲")
-            ), 
-            force_online=bool(re.search(r'force_online\s*=\s*True', m.group(0), re.I)), 
-            target=(caller_target or ("audience" if CURRENT_SPEAKING_TARGET == "audience" else "dad")),
-            requester_name=display_requester(caller_user, (caller_target or ("audience" if CURRENT_SPEAKING_TARGET == "audience" else "dad"))),
-            is_direct_song_name=True
-        )),
-        (r'(?:pe\.)?compose_and_play_original_piano\((?:[^)]*)\)', lambda m: pe.compose_and_play_original_piano(
-            theme_or_title=(re.search(r'(?:theme_or_title|theme|title)\s*=\s*[\'"]([^\'"]+)[\'"]', m.group(0)).group(1) if re.search(r'(?:theme_or_title|theme|title)\s*=\s*[\'"]([^\'"]+)[\'"]', m.group(0)) else ""), 
-            mood_or_style=(re.search(r'(?:mood_or_style|mood|style)\s*=\s*[\'"]([^\'"]+)[\'"]', m.group(0)).group(1) if re.search(r'(?:mood_or_style|mood|style)\s*=\s*[\'"]([^\'"]+)[\'"]', m.group(0)) else ""), 
-            target=(caller_target or ("audience" if CURRENT_SPEAKING_TARGET == "audience" else "dad")),
-            requester_name=display_requester(caller_user, (caller_target or ("audience" if CURRENT_SPEAKING_TARGET == "audience" else "dad")))
-        )),
-        (r'(?:pe\.)?mashup_virtual_piano\((?:[^)]*)\)', lambda m: pe.mashup_virtual_piano(*(re.findall(r'[\'"]([^\'"]+)[\'"]', m.group(0))))),
-        (r'(?:pe\.)?insert_virtual_piano\(\s*(?:song_name\s*=\s*)?[\'"]([^\'"]+)[\'"](?:[^)]*)\)', lambda m: pe.insert_virtual_piano(song_name=m.group(1))),
-        (r'(?:generate_ai_image|draw_illustration)\(\s*(?:prompt\s*=\s*)?[\'"]([^\'"]+)[\'"]\s*\)', lambda m: generate_ai_image(m.group(1))),
-        (r'execute_local_python_code\(\s*(?:code_string\s*=\s*)?[\'"]([^\'"]+)[\'"]\s*\)', lambda m: execute_local_python_code(m.group(1))),
-        (r'move_spatial_position\(\s*(?:target_position\s*=\s*|position_name\s*=\s*)?[\'"]([^\'"]+)[\'"](?:[^)]*)\)', lambda m: apply_spatial_position(m.group(1))),
-        (r'trigger_vts_expression\(\s*(?:expression_name\s*=\s*)?[\'"]([^\'"]+)[\'"]\s*\)', lambda m: set_vts_expression(vts, m.group(1))),
-        (r'control_microphone\(\s*(?:is_enabled\s*=\s*)?(True|False)\s*\)', lambda m: control_microphone(m.group(1).lower() == 'true')),
-        (r'clear_all_memories\(\s*\)', lambda m: clear_all_memories()),
-        (r'(?:pe\.)?set_timer\((?:[^)]*)\)', lambda m: set_timer(
-            int(re.search(r'\b(\d+)\b', m.group(0)).group(1)) if re.search(r'\b(\d+)\b', m.group(0)) else 60,
-            (re.findall(r'[\'"]([^\'"]+)[\'"]', m.group(0))[0] if re.findall(r'[\'"]([^\'"]+)[\'"]', m.group(0)) else "鬧鐘時間到"),
-            input_queue,
-            caller_user=caller_user
-        )),
-        (r'search_google\(\s*(?:query\s*=\s*)?[\'"]([^\'"]+)[\'"]\s*\)', lambda m: asyncio.to_thread(search_google, m.group(1))),
-        (r'update_cloud_knowledge\((?:[^)]*)\)', lambda m: update_cloud_prompt_field(
-            (re.search(r'category\s*=\s*[\'"]([^\'"]+)[\'"]', m.group(0)).group(1) if re.search(r'category\s*=\s*[\'"]([^\'"]+)[\'"]', m.group(0)) else "facts"),
-            (re.search(r'content\s*=\s*[\'"]([^\'"]+)[\'"]', m.group(0)).group(1) if re.search(r'content\s*=\s*[\'"]([^\'"]+)[\'"]', m.group(0)) else (re.findall(r'[\'"]([^\'"]+)[\'"]', m.group(0))[-1] if re.findall(r'[\'"]([^\'"]+)[\'"]', m.group(0)) else ""))
-        ))
-    ]
-    
-    for pattern, func in universal_tool_calls:
-        while True:
-            match = re.search(pattern, text, re.IGNORECASE)
-            if not match:
-                break
-            cmd_name = match.group(0).strip()
-            log_print(f"🛠️ [通用指令攔截] 檢測到 Python 呼叫: {cmd_name}，立即自動執行！")
-            
-            # 將系統動作推播到前端 UI 中間置中顯示 (排除鋼琴，因鋼琴內部已推播)
-            if "play_virtual_piano" not in cmd_name and "compose_and_play" not in cmd_name:
-                from core.memory import append_to_unified_memory
-                display_msg = f"⚡ 系統啟動動作: {cmd_name}"
-                if "auto_sing" in cmd_name or "sing_song" in cmd_name or "翻唱" in cmd_name or "唱歌" in cmd_name:
-                    s_name = re.search(r'[\'"]([^\'"]+)[\'"]', cmd_name)
-                    display_msg = f"🎤 準備翻唱演唱《{s_name.group(1)}》" if s_name else "🎤 準備開始翻唱演唱"
-                elif "generate_ai_image" in cmd_name or "draw_illustration" in cmd_name:
-                    display_msg = "🎨 啟動 AI 繪圖生成"
-                elif "search_google" in cmd_name:
-                    q_str = re.search(r'[\'"]([^\'"]+)[\'"]', cmd_name)
-                    display_msg = f"🌐 執行線上搜尋: {q_str.group(1)}" if q_str else "🌐 執行線上搜尋"
-                elif "set_timer" in cmd_name or "TIMER" in cmd_name or "鬧鐘" in cmd_name:
-                    display_msg = "⏱️ 設定計時器/鬧鐘"
-                elif "trigger_vts_expression" in cmd_name:
-                    exp_name = re.search(r'[\'"]([^\'"]+)[\'"]', cmd_name)
-                    display_msg = f"✨ 切換神態表情: {exp_name.group(1)}" if exp_name else "✨ 切換神態表情"
-                elif "clear_all_memories" in cmd_name:
-                    display_msg = "🧹 正在清除所有短期記憶與黑板"
-
-                append_to_unified_memory(
-                    speaker="系統",
-                    target="所有人",
-                    content=display_msg,
-                    role="system",
-                    source="action"
-                )
-
-            
-            # 登錄至 7L 工具調用即時紀錄
-            t_raw_name = cmd_name.split('(')[0].split(':')[0].split('：')[0].replace('[', '').replace(']', '').replace('pe.', '').strip()
-            t_name = f"pe.{t_raw_name}" if hasattr(pe, t_raw_name) else t_raw_name
-            t_call_start = time.time()
-            try:
-                web_dash.record_tool_call(
-                    tool_name=t_name,
-                    args={"command": cmd_name},
-                    result="已觸發執行",
-                    caller="7L (大腦自主)",
-                    status="success"
-                )
-            except Exception:
-                log_swallowed()
-
-            async def _safe_run_intercepted_tool(coro, cmd_s, name_s, start_t):
-                try:
-                    res = None
-                    if asyncio.iscoroutine(coro):
-                        res = await coro
-                    elif callable(coro):
-                        res = coro()
-                        if asyncio.iscoroutine(res):
-                            res = await res
-                    dur = (time.time() - start_t) * 1000
-                    try:
-                        web_dash.record_tool_call(name_s, {"command": cmd_s}, res or "執行成功", caller="7L (大腦自主)", status="success", duration_ms=dur)
-                    except Exception:
-                        log_swallowed()
-                except Exception as err:
-                    log_print(f"❌ [通用指令執行異常]: {cmd_s} ➔ {err}")
-                    dur = (time.time() - start_t) * 1000
-                    try:
-                        web_dash.record_tool_call(name_s, {"command": cmd_s}, None, caller="7L (大腦自主)", status="error", duration_ms=dur, error=str(err))
-                    except Exception:
-                        log_swallowed()
-            spawn(_safe_run_intercepted_tool(func(match), cmd_name, t_name, t_call_start))
-            text = text.replace(match.group(0), "")
-
-    url_match = re.search(r'\[OPEN_BROWSER:\s*([^\]]+)\]', text, re.IGNORECASE)
-    if url_match:
-        url = url_match.group(1).strip()
-        if not url.startswith('http'):
-            url = 'https://' + url
-        try:
-            webbrowser.open(url)
-            log_print(f"🌐 [系統動作] 7L 幫你打開了網頁: {url}")
-        except Exception as e:
-            log_print(f"❌ [開啟網頁失敗]: {e}")
+    #  老爸用講的要她記住模型位置：Live 直接聽麥克風，只有她答應時說到這幾個字才知道；觀眾那輪不算
+    if caller_target == "dad" and asks_to_remember_model_position(text):
+        _save_model_position()
 
     # 若指定立即執行視覺動作 (例如安靜沉思不發聲時的微眼神/微表情)
     if execute_visuals:
         await execute_speech_visual_actions(vts, text)
 
-    clean_text = TextCleanEngine.clean_speech_text(text)
-    return clean_text
+    return TextCleanEngine.clean_speech_text(text)
 
 # ────────────────────────────────────────────────────────
 #  14. 專屬背景工作協程群 (Workers)
@@ -6088,7 +5879,7 @@ async def streamer_mind_loop_worker(vts, input_queue):
                 spawn(save_viewer_profile(vu_name, call=vu_call, relationship=vu_rel, impression=vu_imp))
                 log_print(f"👥 [認人] 記住觀眾 {vu_name}：稱={vu_call} 關係={vu_rel} 印象={vu_imp}")
             
-            spoken = await execute_actions(vts, clean_reply, input_queue, user_input_ctx=board_context, caller_target="audience", caller_user=log_target)
+            spoken = await execute_actions(vts, clean_reply, input_queue, caller_target="audience", caller_user=log_target)
             clean_spoken = spoken.strip(" *'\"-.,!?。，！？\n\r") if spoken else ""
             if clean_spoken:
                 if pe.is_piano_active and pe.current_piano_song_title:
@@ -6819,6 +6610,8 @@ async def process_chat_message(vts, input_queue, user_input: str, user_audio_b64
                 
             # 寫入記憶並廣播到後台
             append_to_unified_memory(speaker=owner, target="7L", content=user_input, role="user", source=source)
+            if asks_to_remember_model_position(user_input):   # 老爸打字說「記住位置」：照他的話做，不等她答應時剛好說到
+                _save_model_position()
             try:
                 _wd.broadcast_event("chat_sent", {"text": user_input, "from": owner})
             except Exception: pass
@@ -6867,6 +6660,8 @@ async def process_chat_message(vts, input_queue, user_input: str, user_audio_b64
             IS_MIC_ENABLED = True
             log_print("🎙️ [麥克風控制] 已重新開啟麥克風收音！")
 
+        if asks_to_remember_model_position(user_input):
+            _save_model_position()
         add_to_streamer_mind_board(
             user_display=owner,
             unique_id="dad",

@@ -185,7 +185,8 @@ def _dad_message(source, text, audio=None):
                    _owner_name=lambda: "老爸", live_timer_hub=pytypes.SimpleNamespace(detect_timer_intent=lambda t: None),
                    add_to_streamer_mind_board=lambda **k: board.append(k), background_tool_executor=background_tool_executor,
                    spawn=spawn, send_brain_slip=lambda s, **k: slips.append((s, k)),
-                   asyncio=asyncio, IS_MIC_ENABLED=True, Optional=__import__("typing").Optional)
+                   asyncio=asyncio, IS_MIC_ENABLED=True, Optional=__import__("typing").Optional,
+                   asks_to_remember_model_position=lambda t: False)
         await ns["process_chat_message"](None, None, text, audio, source=source)
         await asyncio.sleep(0)
     asyncio.run(go())
@@ -200,3 +201,10 @@ def test_dad_text_and_speech_become_dad_slips_whether_or_not_live_is_up():
     assert "語音辨識" in slips[0][0] and slips[0][1]["origin"] == "dad" and cpu == []   # 語音不跑 CPU 硬指令
     slips, _, _ = _dad_message("tiktok_dad", "大家好")
     assert slips[0][0] == "[文字輸入] 老爸 (在直播間留言)：大家好"
+
+
+def test_dad_asking_to_remember_the_model_position_is_done_from_his_words():
+    """「7L 記住位置」以前只有她答應時剛好說到這幾個字才會存（2026-10-26 實機她說「記在大腦最深處」，沒存）。"""
+    from core.hard_command import asks_to_remember_model_position
+    assert asks_to_remember_model_position("7L 記住位置") and asks_to_remember_model_position("幫我記住現在大小")
+    assert not asks_to_remember_model_position("記住我說的話")

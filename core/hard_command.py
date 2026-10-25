@@ -345,6 +345,15 @@ STAGE_CONTROL_TOOLS = PIANO_CONTROL_TOOLS | SING_CONTROL_TOOLS   # 只聽老爸�
 _STAGE_CONTROL_NAMES = frozenset(t.split(".")[-1] for t in STAGE_CONTROL_TOOLS) | {"stop_singing_song", "stop_cover"}
 
 
+_MODEL_POSITION_WORDS = ("記住大小", "記住位置", "記住現在位置", "記住當前位置", "記住現在大小", "記錄位置", "記錄大小",
+                         "記住模型位置", "記住模型", "記錄基準大小", "記錄基準位置", "記住當前大小")
+
+
+def asks_to_remember_model_position(text: str) -> bool:
+    """「記住位置」這類：把 VTube Studio 模型現在的位置和大小存成基準（之後走位都以它為準）。"""
+    return any(k in (text or "") for k in _MODEL_POSITION_WORDS)
+
+
 def is_stage_control(fn_name: Optional[str]) -> bool:
     """鋼琴停止／暫停／繼續、停止唱歌（含 pe. 前綴、大小寫、舊別名）→ True。"""
     return (fn_name or "").strip().lower().split(".")[-1] in _STAGE_CONTROL_NAMES
