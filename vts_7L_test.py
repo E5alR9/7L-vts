@@ -512,7 +512,7 @@ async def execute_tool_dispatch(fn_name: str, fn_args: dict, caller_target: str 
                     s_name, _src, _origin = _clean, _src2, "original"
                     log_print(f"📀 [自創曲直通] originals 有檔，《{s_name}》走自創曲管線（不用前綴）。")
             except Exception:
-                pass
+                log_swallowed()
         #  點歌進隊列（同步、零等待）：台上有歌就排隊＋背景 RVC 照做，不再直接丟掉
         return request_cover_song(s_name, caller_user, source_mp3=_src, origin=_origin)
     elif fn_name in ["stop_singing_song", "stop_singing", "stop_cover"]:
@@ -759,7 +759,7 @@ async def fetch_ai_response(messages, image_base64=None, audio_base64=None, is_p
     try:
         TOTAL_API_CALLS += 1
     except Exception:
-        pass
+        log_swallowed()
     overall_start_time = request_start_time if request_start_time else time.time()
 
     # 防卡死機制：讓渡運算權，確保皮套滑順
@@ -1696,13 +1696,13 @@ def get_screen_resolution():
             try:
                 user32.SetProcessDPIAware()
             except Exception:
-                pass
+                log_swallowed()
         w = user32.GetSystemMetrics(0) # SM_CXSCREEN
         h = user32.GetSystemMetrics(1) # SM_CYSCREEN
         if w > 0 and h > 0:
             return w, h
     except Exception:
-        pass
+        log_swallowed()
     return 1920, 1080
 
 try:
@@ -1895,7 +1895,7 @@ async def _song_ack(song: str, target: str = "dad", piano: bool = False):
         speech_queue.put_nowait({"text": text, "expression": "星星眼", "action": "",
                                  "target": target, "priority": 90, "skip_if_singing": True})
     except Exception:
-        pass
+        log_swallowed()
 
 
 async def _song_ack_missing_original(song: str, target: str = "dad"):
@@ -1906,7 +1906,7 @@ async def _song_ack_missing_original(song: str, target: str = "dad"):
         speech_queue.put_nowait({"text": text, "expression": "問號", "action": "",
                                  "target": target, "priority": 90})
     except Exception:
-        pass
+        log_swallowed()
 
 
 MIXED_PIANO_WAIT_SEC = 900.0  # 混用鋼琴等翻唱上限（RVC 慢，給足；掉隊/超時就自己先彈）
@@ -1937,7 +1937,7 @@ async def _deliver_desktop_findings(vts, input_queue, user_text: str, findings: 
         try:
             await speech_queue.put({"text": _say, "target": target, "raw_text": findings})
         except Exception:
-            pass
+            log_swallowed()
         return
     try:
         send_brain_slip(
@@ -1966,7 +1966,7 @@ async def _desktop_ask_and_report(question: str, target: str = "dad", user: str 
                                      "expression": "", "action": "",
                                      "target": target, "priority": 80})
         except Exception:
-            pass
+            log_swallowed()
 
 async def _mixed_piano_run(piano_title: str, sing_title: str, target: str, requester: str):
     """混用鋼琴側（2026-10-11：先開著等，兩邊備好同時放）。
@@ -1992,7 +1992,7 @@ async def _mixed_piano_run(piano_title: str, sing_title: str, target: str, reque
             if not await pe.wait_piano_subprocess_ready(timeout=25.0):
                 log_print("⚠️ [混用鋼琴] 子進程 25 秒未就緒，照跑（播放端有無聲驗證兜底）。")
         except Exception:
-            pass
+            log_swallowed()
         if not want_sync:
             try:
                 midi_file, _ = await pe.resolve_local_midi_file(piano_title)
@@ -2061,7 +2061,7 @@ async def set_sleep_mode(enable: bool):
                 log_print("🚫 [系統] VTuber 模式禁用休眠（7x24 觀眾互動不打烊）")
                 return False
         except Exception:
-            pass
+            log_swallowed()
     IS_SLEEPING = bool(enable)
     if IS_SLEEPING:
         current_ai_status_str = " 閉眼沉睡中 (0 API 消耗)"
@@ -2069,12 +2069,12 @@ async def set_sleep_mode(enable: bool):
         try:
             await interrupt_current_speech(clear_queue=True, reason="老爸開啟休眠模式")
         except Exception:
-            pass
+            log_swallowed()
         if vc.GLOBAL_VTS:
             try:
                 await set_vts_expression(vc.GLOBAL_VTS, "_RESET_")
             except Exception:
-                pass
+                log_swallowed()
         log_print("🌙 [系統] 7L 已進入深層睡眠模式（雙眼安詳閉合，0 API 消耗，安靜沉睡中...）")
     else:
         current_ai_status_str = " 正常運作中"
@@ -2083,7 +2083,7 @@ async def set_sleep_mode(enable: bool):
             try:
                 await set_vts_expression(vc.GLOBAL_VTS, "_RESET_")
             except Exception:
-                pass
+                log_swallowed()
         log_print("☀️ [系統] 7L 已被喚醒，雙眼睜開，恢復全神經系統運作！")
     return IS_SLEEPING
 
@@ -2212,7 +2212,7 @@ def is_system_overloaded():
         if cpu > 60.0 or mem > 60.0:
             return True
     except Exception:
-        pass
+        log_swallowed()
     return False
 
 # ────────────────────────────────────────────────────────
@@ -2798,7 +2798,7 @@ async def _director_drop_session():
         try:
             await cm.__aexit__(None, None, None)
         except Exception:
-            pass
+            log_swallowed()
 
 
 async def _director_drain_then_release(session, timeout: float = 12.0):
@@ -3054,7 +3054,9 @@ async def play_voice_complete(text, target: str = "dad", raw_actions_text: str =
                                     live_tl = await asyncio.wait_for(asyncio.shield(director_task), timeout=2.0)
                                     if live_tl and target_vts and not timeline_cancel_event.is_set():
                                         spawn(execute_action_timeline(target_vts, live_tl, timeline_cancel_event))
-                                except Exception: pass
+                                except asyncio.TimeoutError:
+                                    pass   # 神態導演 2 秒內沒排好：這句就不加句中表情（正常情況，不算錯）
+                                except Exception: log_swallowed()
                             spawn(_attach_live_timeline())
 
                     #  無縫播放：使用 Sound Channel + queue() 消除分段拼接停頓感
@@ -3321,7 +3323,7 @@ def capture_screen_multi_view():
                 mx_raw, my_raw = pyautogui.position()
                 screenshot.paste(cursor_icon, (max(0, min(w - 1, mx_raw)), max(0, min(h - 1, my_raw))), cursor_icon)
             except Exception:
-                pass
+                log_swallowed()
         
         #  儲存原生 100% 超高清原圖快取 (品質 92，供燈箱放大檢視與老爸查核，文字極致清晰)
         global LATEST_HD_SCREEN_BYTES
@@ -3360,7 +3362,7 @@ def capture_screen_multi_view():
                     CURRENT_VISION_CHANGE_SCORE = min(100, int(65 + raw_diff * 2))
             PREV_SCREEN_THUMB = curr_thumb
         except Exception:
-            pass
+            log_swallowed()
 
         # 1. 全螢幕全景總覽圖 (高畫質 Lanczos 縮圖至 1920 寬度，品質 88，兼顧 Gemini 思考速度與全景清晰度)
         buf_full = io.BytesIO()
@@ -3787,7 +3789,7 @@ async def execute_actions(vts, text, input_queue, user_input_ctx: str = "", has_
                     status="success"
                 )
             except Exception:
-                pass
+                log_swallowed()
 
             async def _safe_run_intercepted_tool(coro, cmd_s, name_s, start_t):
                 try:
@@ -3802,14 +3804,14 @@ async def execute_actions(vts, text, input_queue, user_input_ctx: str = "", has_
                     try:
                         web_dash.record_tool_call(name_s, {"command": cmd_s}, res or "執行成功", caller="7L (大腦自主)", status="success", duration_ms=dur)
                     except Exception:
-                        pass
+                        log_swallowed()
                 except Exception as err:
                     log_print(f"❌ [通用指令執行異常]: {cmd_s} ➔ {err}")
                     dur = (time.time() - start_t) * 1000
                     try:
                         web_dash.record_tool_call(name_s, {"command": cmd_s}, None, caller="7L (大腦自主)", status="error", duration_ms=dur, error=str(err))
                     except Exception:
-                        pass
+                        log_swallowed()
             spawn(_safe_run_intercepted_tool(func(match), cmd_name, t_name, t_call_start))
             text = text.replace(match.group(0), "")
 
@@ -3915,7 +3917,7 @@ def listen_once_fast(recognizer):
             if wav_bytes and len(wav_bytes) > 2000:
                 audio_b64 = base64.b64encode(wav_bytes).decode('utf-8')
         except Exception:
-            pass
+            log_swallowed()
 
         # 取得快速文字預覽（保留作為快速指令匹配與終端狀態列顯示）
         try:
@@ -4831,7 +4833,7 @@ async def continuous_live_worker(vts):
                         if exc and not isinstance(exc, asyncio.CancelledError):
                             if first_exc is None: first_exc = exc
                     except asyncio.CancelledError: pass
-                    except Exception: pass  # pending 任務問 exception() 本來就會 InvalidStateError，不記
+                    except Exception: log_swallowed()  # pending 任務問 exception() 本來就會 InvalidStateError，不記
                     
                 if first_exc:
                     raise first_exc
@@ -5811,7 +5813,7 @@ async def print_model_parameters(vts):
         await asyncio.sleep(1.0)
         await vc.fetch_vts_base_model_pos(vts)
     except Exception: 
-        pass
+        log_swallowed()
 
 GLOBAL_VTS_TRACKING_TASK = None
 _VTS_LAST_AUTH_TIME = 0.0
@@ -7252,7 +7254,7 @@ async def _resolve_expression(exp_name: str, speaker: str = "") -> str:
             log_print(f"🎭 [表情去重] {exp_name} 已在臉上，NV 不重複下達。")
             return "already"
     except Exception:
-        pass
+        log_swallowed()
     sess = globals().get("INSTINCT_LIVE_SESSION")
     if sess is not None:
         try:
@@ -7277,7 +7279,7 @@ async def _resolve_expression(exp_name: str, speaker: str = "") -> str:
     try:
         await trigger_vts_expression(exp_name)
     except Exception:
-        pass
+        log_swallowed()
     return "direct"
 
 
@@ -8024,7 +8026,7 @@ async def execute_punish_action(reason: str = "", is_severe: bool = None):
                 ac.stop_current_song()
                 log_print("🛑 [電擊中斷] 演唱中被電擊，當首停止（排隊保留）。")
         except Exception:
-            pass
+            log_swallowed()
 
         target_vts = vc.GLOBAL_VTS
         if target_vts:
@@ -8032,7 +8034,7 @@ async def execute_punish_action(reason: str = "", is_severe: bool = None):
                 # 觸電反應：切換為滿臉通紅（红脸.exp3.json），展現敏感、害羞與酥麻感
                 await set_vts_expression(target_vts, "臉紅")
             except Exception:
-                pass
+                log_swallowed()
         # 啟動 4.5 秒高頻物理觸電微顫抖與縮瞳倒抽氣，隨後接續八字眉委屈
         vc.shock_timer = time.time() + 4.5
         vc.frown_timer = time.time() + 6.0
@@ -8116,7 +8118,7 @@ async def execute_reward_action(reason: str = "", level: int = None):
                 try:
                     await set_vts_expression(target_vts, "臉紅")
                 except Exception:
-                    pass
+                    log_swallowed()
             vc.wink_timer = time.time() + 0.85
             vc.wink_side = "left"
             
@@ -8131,7 +8133,7 @@ async def execute_reward_action(reason: str = "", level: int = None):
                 try:
                     await set_vts_expression(target_vts, "星星眼")
                 except Exception:
-                    pass
+                    log_swallowed()
             vc.wink_timer = time.time() + 0.65
             vc.wink_side = random.choice(["left", "right"])
 
@@ -8146,7 +8148,7 @@ async def execute_reward_action(reason: str = "", level: int = None):
                 try:
                     await set_vts_expression(target_vts, "愛心")
                 except Exception:
-                    pass
+                    log_swallowed()
             vc.wink_timer = time.time() + 0.55
             vc.wink_side = random.choice(["left", "right"])
 
@@ -8689,7 +8691,7 @@ async def main():
         if _m is not None:
             _sys_alias.modules.setdefault("vts_7L_test", _m)
     except Exception:
-        pass
+        log_swallowed()
 
     # ── 🎙️ 聲紋強制綁定 (首次啟動檢查) ──
     import os
@@ -8806,7 +8808,7 @@ async def main():
         try:
             yt_comp.IS_YT_WATCHER_ENABLED = False
         except Exception:
-            pass
+            log_swallowed()
         log_print("📺 [VTuber 隔離] 休眠禁用／螢幕感知關／proactive 關／系統音監聽關／Discord 關／YT 伴看關")
     else:
         #  伴侶模式：看著主人、聽著主人、主動陪伴

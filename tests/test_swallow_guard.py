@@ -104,3 +104,13 @@ def test_no_fire_and_forget_create_task(rel):
     bare = [n.lineno for n in ast.walk(tree) if isinstance(n, ast.Expr) and isinstance(n.value, ast.Call)
             and isinstance(n.value.func, ast.Attribute) and n.value.func.attr in ("create_task", "ensure_future")]
     assert not bare, f"{rel} 這幾行的背景任務沒存起來，改用 spawn()：{bare}"
+
+
+@pytest.mark.parametrize("rel,ceiling", [("vts_7L_test.py", 37), ("services/piano_engine.py", 7)])
+def test_silent_swallows_do_not_grow_back(rel, ceiling):
+    """2026-10-25 健檢：清理類（刪暫存檔、關程序、停音效、後台廣播）以外的 except Exception: pass 都改成 log_swallowed，
+    主程式剩下的多是清理類與開機環境調整。數量只准變少。"""
+    tree = ast.parse(open(os.path.join(ROOT, rel), encoding="utf-8").read())
+    n = sum(1 for h in ast.walk(tree) if isinstance(h, ast.ExceptHandler) and isinstance(h.type, ast.Name)
+            and h.type.id == "Exception" and h.name is None and len(h.body) == 1 and isinstance(h.body[0], ast.Pass))
+    assert n <= ceiling, f"{rel} 的 except Exception: pass 有 {n} 處（上限 {ceiling}），新的請用 log_swallowed()"

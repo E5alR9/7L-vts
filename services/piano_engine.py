@@ -79,7 +79,7 @@ def _remember(content: str):
         from core.memory import append_to_unified_memory
         append_to_unified_memory(speaker="系統", target="所有人", content=content, role="system", source="piano")
     except Exception:
-        pass
+        log_swallowed()
 
 
 def _desktop_sensor():
@@ -462,7 +462,7 @@ class ClassicalPianoSoundEngine:
                 self.midi_out.write_short(0xB0 + ch, 71, 64) # CC 71: Resonance
                 self.midi_out.write_short(0xB0 + ch, 7, cc7_val)
         except Exception:
-            pass
+            log_swallowed()
 
     def set_instrument(self, program_num: int):
         """切換 MIDI 發聲音色 (Program Change 0 ~ 127；樂隊模式請用 set_channel_program 逐軌配器)"""
@@ -473,7 +473,7 @@ class ClassicalPianoSoundEngine:
                 for ch in self.usable_channels:
                     self.midi_out.set_instrument(self.current_instrument, channel=ch)
             except Exception:
-                pass
+                log_swallowed()
 
     def set_volume(self, volume: int):
         """設定鋼琴總音量 (0 ~ 200)"""
@@ -484,7 +484,7 @@ class ClassicalPianoSoundEngine:
                 for ch in self.usable_channels:
                     self.midi_out.write_short(0xB0 + ch, 7, cc7_val)
             except Exception:
-                pass
+                log_swallowed()
 
     def set_channel_program(self, channel: int, program_num: int):
         """🎺 樂隊配器：指定某通道的音色（program_change 直達，不影響其他軌）"""
@@ -497,7 +497,7 @@ class ClassicalPianoSoundEngine:
                     return                      # 打擊樂通道無視 program
                 self.midi_out.set_instrument(program_num, channel=channel)
             except Exception:
-                pass
+                log_swallowed()
 
     def note_on(self, midi_num: int, velocity: int = 105, channel: int = None, program: int = None):
         """channel/program 指定時走樂隊軌（保留原通道直發）；否則走鋼琴輪替池。鼓軌 (ch9) 不受 88 鍵範圍限制。"""
@@ -529,7 +529,7 @@ class ClassicalPianoSoundEngine:
                 self.active_voices_fifo.append((midi_num, ch))
                 return ch
             except Exception:
-                pass
+                log_swallowed()
         return None
 
     def _band_note_on(self, channel: int, midi_num: int, velocity: int = 105, program: int = None):
@@ -548,7 +548,7 @@ class ClassicalPianoSoundEngine:
                     try:
                         self.midi_out.set_instrument(program, channel=channel)
                     except Exception:
-                        pass
+                        log_swallowed()
             scaled_v = int(velocity * (self.volume / 100.0))
             v = max(1, min(127, scaled_v))
             while len(self.active_voices_fifo) >= self.MAX_POLYPHONY:
@@ -586,7 +586,7 @@ class ClassicalPianoSoundEngine:
                     except ValueError:
                         pass
             except Exception:
-                pass
+                log_swallowed()
 
     def set_sustain_pedal(self, is_down: bool):
         """控制延音踏板 (Sustain / Damper Pedal - CC 64)"""
@@ -596,7 +596,7 @@ class ClassicalPianoSoundEngine:
                 for ch in self.usable_channels:
                     self.midi_out.write_short(0xB0 + ch, 64, val)
             except Exception:
-                pass
+                log_swallowed()
 
     def all_notes_off(self):
         if self.midi_out:
@@ -608,7 +608,7 @@ class ClassicalPianoSoundEngine:
                 self.active_note_channels.clear()
                 self.active_voices_fifo.clear()
             except Exception:
-                pass
+                log_swallowed()
 
 SOUND_ENGINE: Optional[ClassicalPianoSoundEngine] = None
 PIANO_SETTINGS_FILE = os.path.join(DATA_DIR, "piano_settings.json")
@@ -622,7 +622,7 @@ def load_persisted_piano_settings():
                 vol = d.get("volume", 100)
                 spd = d.get("speed", 1.0)
         except Exception:
-            pass
+            log_swallowed()
     return vol, spd
 
 def save_persisted_piano_settings(vol, spd):
@@ -630,7 +630,7 @@ def save_persisted_piano_settings(vol, spd):
         with open(PIANO_SETTINGS_FILE, "w", encoding="utf-8") as f:
             json.dump({"volume": int(vol), "speed": float(spd)}, f, ensure_ascii=False, indent=2)
     except Exception:
-        pass
+        log_swallowed()
 
 GLOBAL_PIANO_VOLUME, GLOBAL_PIANO_SPEED = load_persisted_piano_settings()
 PIANO_NOTE_FOCUS_X = 0.0
@@ -727,7 +727,7 @@ def save_persisted_piano_state(is_playing: bool, song_title: str, is_open: bool 
         with open(PIANO_PERSIST_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False)
     except Exception:
-        pass
+        log_swallowed()
 
 def bring_piano_window_to_front():
     """將 7L 的 88 鍵平台鋼琴視窗還原並置頂到最前端（防止被 Roblox 或其他遊戲遮擋或最小化）"""
@@ -742,7 +742,7 @@ def bring_piano_window_to_front():
                 w.activate()
                 return
     except Exception:
-        pass
+        log_swallowed()
     try:
         user32 = ctypes.windll.user32
         browser_exes = {"chrome.exe", "msedge.exe", "firefox.exe", "brave.exe", "opera.exe"}
@@ -766,7 +766,7 @@ def bring_piano_window_to_front():
             user32.SetWindowPos(target_hwnd, -1, 0, 0, 0, 0, 0x0001 | 0x0002)  # HWND_TOPMOST
             user32.SetWindowPos(target_hwnd, -2, 0, 0, 0, 0, 0x0001 | 0x0002)  # HWND_NOTOPMOST
     except Exception:
-        pass
+        log_swallowed()
 
 def get_piano_script_path() -> str:
     """動態解析 88 鍵平台鋼琴啟動腳本真實路徑"""
@@ -793,7 +793,7 @@ def is_piano_window_alive() -> bool:
             if "7l 88" in t or "古典平台鋼琴" in t:
                 return True
     except Exception:
-        pass
+        log_swallowed()
     try:
         browser_exes = {"chrome.exe", "msedge.exe", "firefox.exe", "brave.exe", "opera.exe"}
         sensor = _desktop_sensor()
@@ -806,7 +806,7 @@ def is_piano_window_alive() -> bool:
                 if "7l 88" in w_title.lower() or "古典平台鋼琴" in w_title or "virtual_piano" in p_name or ("python" in p_name and "鋼琴" in w_title):
                     return True
     except Exception:
-        pass
+        log_swallowed()
 
     # 2. 若視窗列表中尚未抓到（例如視窗剛啟動還在載入中），檢查是否有真實存活的進程
     if current_piano_process is not None:
@@ -831,7 +831,7 @@ async def wait_piano_subprocess_ready(timeout: float = 25.0) -> bool:
             if LAST_PIANO_HEARTBEAT_TIME > 0 and (_t.time() - LAST_PIANO_HEARTBEAT_TIME) < 2.0:
                 return True
         except Exception:
-            pass
+            log_swallowed()
         await _aio.sleep(0.5)
     return False
 
@@ -880,7 +880,7 @@ async def wait_piano_sounding(session_id: int, timeout: float = 8.0) -> bool:
             if GLOBAL_PIANO_REALTIME_STATE.get("is_playing", False):
                 return True
         except Exception:
-            pass
+            log_swallowed()
         await _aio.sleep(0.25)
     try:
         return bool(GLOBAL_PIANO_REALTIME_STATE.get("is_playing", False))
@@ -982,7 +982,7 @@ async def auto_restore_piano_state_on_startup():
                         data = json.load(f)
                     song_title = data.get("song_title", "")
                 except Exception:
-                    pass
+                    log_swallowed()
             is_piano_active = True
             current_piano_song_title = song_title
             log_print(f"🎹 [鋼琴狀態同步] 偵測到背景鋼琴視窗存活，同步狀態" + (f": 《{song_title}》" if song_title else ""))
@@ -1048,7 +1048,7 @@ async def set_piano_instrument(instrument: str) -> str:
             if not target_name:
                 target_name = f"MIDI 音色 #{target_id}"
         except Exception:
-            pass
+            log_swallowed()
             
     GLOBAL_PIANO_INSTRUMENT_ID = target_id
     GLOBAL_PIANO_INSTRUMENT_NAME = target_name
@@ -1072,7 +1072,7 @@ async def piano_focus_udp_worker():
     try:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     except Exception:
-        pass
+        log_swallowed()
     sock.setblocking(False)
     try:
         sock.bind(("127.0.0.1", 39281))
@@ -1131,7 +1131,7 @@ async def piano_focus_udp_worker():
                         val = float(raw_str)
                         PIANO_NOTE_FOCUS_X = val
                     except Exception:
-                        pass
+                        log_swallowed()
         except Exception:
             await asyncio.sleep(0.05)
 
@@ -1144,7 +1144,7 @@ def update_piano_focus_notes(midi_list):
         # 鏡像校正：7L 面對鏡頭彈琴時，右手高音區在觀眾視角的螢幕左側 (-)，左手低音區在螢幕右側 (+)
         PIANO_NOTE_FOCUS_X = -offset * 22.0
     except Exception:
-        pass
+        log_swallowed()
 
 def init_piano_synthesizer(volume: int = 100):
     global SOUND_ENGINE
@@ -1346,7 +1346,7 @@ async def play_midi_band(midi_path: str, band_map: dict = None, speed: float = 1
             try:
                 SOUND_ENGINE.set_channel_program(int(ch), int(prog))
             except Exception:
-                pass
+                log_swallowed()
     if title:
         is_piano_active = True
         current_piano_song_title = title
@@ -1354,7 +1354,7 @@ async def play_midi_band(midi_path: str, band_map: dict = None, speed: float = 1
     try:
         from services.piano_engine import SOUND_ENGINE as _SE  # noqa (self-ref safe)
     except Exception:
-        pass
+        log_swallowed()
     # ── 疊層合併：主檔＋layers 多首同時合奏（通道平移避撞，鼓 ch9 永不平移）──
     def _remap(ch, shift):
         if ch == 9:
@@ -1429,13 +1429,13 @@ async def play_midi_band(midi_path: str, band_map: dict = None, speed: float = 1
                 try:
                     SOUND_ENGINE.set_channel_program(ch, prog)
                 except Exception:
-                    pass
+                    log_swallowed()
             elif kind == "cc":
                 _, ch, cc, val = ev
                 try:
                     SOUND_ENGINE.midi_out.write_short(0xB0 + ch, cc, val)
                 except Exception:
-                    pass
+                    log_swallowed()
     except asyncio.CancelledError:
         raise
     except Exception as e:
@@ -1726,7 +1726,7 @@ async def resolve_piano_intent_by_ai(
                         data[_k] = to_tw(data[_k])
                 return data
     except Exception:
-        pass
+        log_swallowed()
 
     active_keys = get_piano_gemini_keys()
     if active_keys:
@@ -1992,10 +1992,10 @@ async def generate_dynamic_piano_chatter(song_title: str, target: str = "dad", r
                 if clean:
                     return clean
         except Exception:
-            pass
+            log_swallowed()
         return ""
     except Exception:
-        pass
+        log_swallowed()
     return ""
 
 async def play_piano_worker(song_title: str, sheet_text: str, bpm: int, mode: str, midi_file: str = None, session_id: int = 0, start_at: float = 0.0):
@@ -2022,7 +2022,7 @@ async def play_piano_worker(song_title: str, sheet_text: str, bpm: int, mode: st
             try:
                 is_speaking = pygame.mixer.music.get_busy() or _speech_pending() or current_ai_state == "TALKING"
             except Exception:
-                pass
+                log_swallowed()
             if not is_speaking and time.time() - speech_wait_start > 0.6:
                 break
             await asyncio.sleep(0.15)
