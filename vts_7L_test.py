@@ -603,7 +603,7 @@ from core.llm_engine import (
     track_key, sort_keys_by_load, key_load,
     cool_key, key_cooling,
     parse_cooldown_seconds, get_seconds_until_pt_midnight, report_gemini_key_error,
-    live_one_shot,
+    live_one_shot, get_pingpong_alternating_index, get_pingpong_ring_indices,
     UNRESTRICTED_SAFETY_SETTINGS
 )
 from core.memory import init_unified_memory, flush_unified_memory, fetch_from_long_term_memory, save_to_long_term_memory, append_to_unified_memory, clear_all_memories, get_recent_100_memory_context, get_viewer_profile, save_viewer_profile, record_bot_message, get_cloud_knowledge, update_cloud_prompt_field, TIKTOK_CHATROOM_MEMORY, STREAMER_MIND_BOARD, DEFAULT_CHANNEL_ID, save_cloud_knowledge, get_unified_memory_context, RECENT_BOT_MESSAGES, evaluate_memory_demand, USER_PROFILE_FILE
@@ -666,30 +666,7 @@ def get_prioritized_gemini_models(user_query: str = "", has_image: bool = False,
         
     return ordered
 
-def get_pingpong_alternating_index(total_keys: int, step: int) -> int:
-    """交替序輪演算法 (頭尾交替向內輪播: 這次 1 -> 下次 29 -> 下次 2 -> 下次 28 -> 下次 3 -> 下次 27 ...)"""
-    if total_keys <= 0:
-        return 0
-    cycle_step = step % total_keys
-    if cycle_step % 2 == 0:
-        idx = cycle_step // 2
-    else:
-        idx = total_keys - 1 - (cycle_step // 2)
-    return max(0, min(total_keys - 1, idx))
 
-def get_pingpong_ring_indices(total_keys: int, start_step: int) -> list:
-    """從當前交替序輪步數開始，產生完整的交替序輪檢查序列 (每個 key 恰好出現一次)"""
-    if total_keys <= 0:
-        return []
-    indices = []
-    for i in range(total_keys):
-        idx = get_pingpong_alternating_index(total_keys, start_step + i)
-        if idx not in indices:
-            indices.append(idx)
-    for i in range(total_keys):
-        if i not in indices:
-            indices.append(i)
-    return indices
 
 def get_available_gemini_channels(limit=1, user_query="", has_image=False, is_proactive=False):
     
@@ -2069,7 +2046,7 @@ except ImportError:
 from google import genai
 
 from realtime_tasks.task_manager import realtime_task_mgr
-from mic_live_plugin import mic_live_analyzer, voiceprint_verifier, os_desktop_sensor  # noqa: F401  os_desktop_sensor 給 piano_engine 經 __main__ 讀
+from mic_live_plugin import mic_live_analyzer, voiceprint_verifier  # noqa: F401
 
 # ────────────────────────────────────────────────────────
 #  1. 環境變數載入與金鑰矩陣分流初始化 (API Keys & Pools)
@@ -2088,7 +2065,6 @@ GROQ_KEYS = [k.strip() for k in re.split(r'[\s,;]+', os.getenv("GROQ_API_KEYS") 
 print(f"✅ 找到 {len(GROQ_KEYS)} 把 Groq 金鑰")
 
 #  Gemini 核心金鑰矩陣（支援多達 31 把 API Key 輪流調度與熔斷管理）
-pe.GEMINI_KEYS = GEMINI_KEYS
 print(f"✅ 找到 {len(GEMINI_KEYS)} 把 Gemini 核心金鑰")
 
 #  專屬獨立金鑰池劃分 (背景/Live通道專屬分工，老爸主腦享有全量金鑰矩陣)：
@@ -2412,7 +2388,8 @@ except Exception:
     system_specs = f"螢幕解析度: {cur_scr_w}x{cur_scr_h} / 高階硬體設備"
 
 USER_NAME = "E5alR9"
-DEFAULT_USER_TITLE = "老爸"
+from core.identity import get_owner_name as _owner_name
+DEFAULT_USER_TITLE = _owner_name()  # 跟 core.prompts、鋼琴同一個來源（env OWNER_NAME，預設老爸）
 
 
 tk_listener.IS_STREAMING = False
@@ -9886,6 +9863,8 @@ async def main():
     if DISCORD_TOKEN and not _IS_VTUBER:
         asyncio.create_task(safe_discord_runner())
 
+    pe.bind_host(update_subtitle=update_subtitle, speech_queue=speech_queue, get_user_profile=get_user_profile,
+                 get_speaking_target=lambda: CURRENT_SPEAKING_TARGET, is_model_locked=is_model_locked)
     pe.register_piano_state_callback(_on_piano_liveness_change)
 
     #  啟動 7L Web 視覺化即時監控與控制後台 (Port 7860 -> http://localhost:7860)

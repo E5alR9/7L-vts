@@ -263,6 +263,35 @@ async def live_one_shot(system_text: str, prompt: str, pool: List[str], image_jp
     return ""
 
 
+
+# ── 輪播選 key（2026-10-25 從主程式搬來：鋼琴模組也要用）──
+def get_pingpong_alternating_index(total_keys: int, step: int) -> int:
+    """交替序輪演算法 (頭尾交替向內輪播: 這次 1 -> 下次 29 -> 下次 2 -> 下次 28 -> 下次 3 -> 下次 27 ...)"""
+    if total_keys <= 0:
+        return 0
+    cycle_step = step % total_keys
+    if cycle_step % 2 == 0:
+        idx = cycle_step // 2
+    else:
+        idx = total_keys - 1 - (cycle_step // 2)
+    return max(0, min(total_keys - 1, idx))
+
+
+def get_pingpong_ring_indices(total_keys: int, start_step: int) -> list:
+    """從當前交替序輪步數開始，產生完整的交替序輪檢查序列 (每個 key 恰好出現一次)"""
+    if total_keys <= 0:
+        return []
+    indices = []
+    for i in range(total_keys):
+        idx = get_pingpong_alternating_index(total_keys, start_step + i)
+        if idx not in indices:
+            indices.append(idx)
+    for i in range(total_keys):
+        if i not in indices:
+            indices.append(i)
+    return indices
+
+
 DEAD_GEMINI_MODELS = set()
 
 # ── REST 金鑰同斥追蹤（2026-10-11：同一把 key 不被多個工具同時打，分散流量）──

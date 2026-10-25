@@ -27,52 +27,77 @@ import services.vts_client as vc
 from services.vts_client import move_vts_spatial, set_vts_expression
 from core.hard_command import display_requester
 
-import __main__
-
-# Dynamic proxies for main module objects
-class MainProxy:
-    def __getattr__(self, name):
-        if hasattr(__main__, name):
-            return getattr(__main__, name)
-        if name in ("HIGH_IQ_GEMINI_MODELS", "STREAMER_MIND_MODELS"):
-            return ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite"]
-        if name in ("DEAD_GEMINI_MODELS", "PROACTIVE_EXCLUDED_MODELS"):
-            return set()
-        if name == "speech_queue":
-            class DummyQueue:
-                async def put(self, *a, **kw): pass
-            return DummyQueue()
-        if name == "get_pingpong_ring_indices":
-            return lambda n, s=0: list(range(n))
-        if name == "get_pingpong_alternating_index":
-            return lambda n, s=0: 0
-        def _dummy_fn(*args, **kwargs):
-            return None
-        return _dummy_fn
-
-main_obj = MainProxy()
 
 from core.utils import log_print, to_tw
+from core.identity import get_owner_name
+from core.llm_engine import (GEMINI_KEYS, HIGH_IQ_GEMINI_MODELS, DEAD_GEMINI_MODELS,
+                             get_pingpong_alternating_index, get_pingpong_ring_indices)
+from realtime_tasks.task_manager import realtime_task_mgr
+
+# —— 主程式交進來的東西（2026-10-25）——
+# 以前用 MainProxy 從 __main__ 動態撈：撈不到（改名、換啟動方式）就默默變成什麼都不做的空函式。
+# 現在主程式啟動時呼叫 bind_host 明確交進來；沒綁（單元測試）字幕、說話就略過。
+_HOST = {"update_subtitle": None, "speech_queue": None, "get_user_profile": None,
+         "get_speaking_target": None, "is_model_locked": None}
+
+
+def bind_host(update_subtitle=None, speech_queue=None, get_user_profile=None,
+              get_speaking_target=None, is_model_locked=None):
+    """主程式啟動時呼叫：字幕、說話佇列、使用者檔案、目前說話對象、模型熔斷查詢（都只有主程式有）。"""
+    _HOST.update(update_subtitle=update_subtitle, speech_queue=speech_queue, get_user_profile=get_user_profile,
+                 get_speaking_target=get_speaking_target, is_model_locked=is_model_locked)
+
+
+async def _show_subtitle(text: str):
+    fn = _HOST["update_subtitle"]
+    if fn:
+        await asyncio.to_thread(fn, text)
+
+
+async def _say(item: dict):
+    q = _HOST["speech_queue"]
+    if q is not None:
+        await q.put(item)
+
+
+def _speech_pending() -> bool:
+    q = _HOST["speech_queue"]
+    return q is not None and not q.empty()
+
+
+async def _user_profile() -> dict:
+    fn = _HOST["get_user_profile"]
+    if not fn:
+        return {}
+    try:
+        return (await fn()) or {}
+    except Exception:
+        return {}
+
+
+def _remember(content: str):
+    """鋼琴事件寫進統一記憶（core.memory 反過來 import 本模組，用到才 import）。"""
+    try:
+        from core.memory import append_to_unified_memory
+        append_to_unified_memory(speaker="系統", target="所有人", content=content, role="system", source="piano")
+    except Exception:
+        pass
+
+
+def _desktop_sensor():
+    """桌面視窗感測器（mic_live_plugin 套件會連帶載入音訊分析，用到才 import）。"""
+    try:
+        from mic_live_plugin.os_desktop_sensor import os_desktop_sensor
+        return os_desktop_sensor
+    except Exception:
+        return None
+
 from services.vts_client import apply_spatial_position
 
-# If there are circular dependency issues, we can import them locally or pass them.
-# The main file provides: DATA_DIR, is_system_overloaded, execute_local_python_code
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 os.makedirs(DATA_DIR, exist_ok=True)
-GEMINI_KEYS = []
 def get_piano_gemini_keys() -> list:
-    global GEMINI_KEYS
-    if GEMINI_KEYS:
-        return GEMINI_KEYS
-    main_keys = getattr(__main__, 'GEMINI_KEYS', None)
-    if main_keys:
-        GEMINI_KEYS = main_keys
-        return GEMINI_KEYS
-    raw = os.getenv("GEMINI_KEYS") or os.getenv("GEMINI_API_KEYS") or os.getenv("GEMINI_API_KEY") or ""
-    parsed = [k.strip() for k in re.split(r'[\s,;]+', raw) if k.strip()]
-    if parsed:
-        GEMINI_KEYS = parsed
-        return GEMINI_KEYS
+    return GEMINI_KEYS
     return []
 CURRENT_SPEAKING_TARGET = "none"
 current_ai_state = "IDLE"
@@ -80,8 +105,9 @@ CURRENT_GEMINI_KEY_STEP = 0
 LAST_PLAY_REQUEST_TIME: Dict[str, float] = {}
 
 def get_current_speaking_target() -> str:
-    """獲取當前說話對象 (優先從主模組獲取，預設為 dad)"""
-    return getattr(__main__, 'CURRENT_SPEAKING_TARGET', CURRENT_SPEAKING_TARGET) or "dad"
+    """當前說話對象（主程式交進來的；沒綁就用本模組自己記的），預設 dad。"""
+    fn = _HOST["get_speaking_target"]
+    return (fn() if fn else CURRENT_SPEAKING_TARGET) or "dad"
 
 def is_system_overloaded():
     return False
@@ -708,8 +734,9 @@ def bring_piano_window_to_front():
         user32 = ctypes.windll.user32
         browser_exes = {"chrome.exe", "msedge.exe", "firefox.exe", "brave.exe", "opera.exe"}
         target_hwnd = None
-        if hasattr(main_obj, 'os_desktop_sensor') and main_obj.os_desktop_sensor:
-            for app in main_obj.os_desktop_sensor.get_visible_windows(max_count=25):
+        sensor = _desktop_sensor()
+        if sensor:
+            for app in sensor.get_visible_windows(max_count=25):
                 p_name = app.get("process_name", "").lower()
                 if p_name in browser_exes:
                     continue
@@ -756,8 +783,9 @@ def is_piano_window_alive() -> bool:
         pass
     try:
         browser_exes = {"chrome.exe", "msedge.exe", "firefox.exe", "brave.exe", "opera.exe"}
-        if hasattr(main_obj, 'os_desktop_sensor') and main_obj.os_desktop_sensor:
-            for app in main_obj.os_desktop_sensor.get_visible_windows(max_count=25):
+        sensor = _desktop_sensor()
+        if sensor:
+            for app in sensor.get_visible_windows(max_count=25):
                 p_name = app.get("process_name", "").lower()
                 if p_name in browser_exes:
                     continue
@@ -1056,8 +1084,7 @@ async def piano_focus_udp_worker():
                             GLOBAL_PIANO_REALTIME_STATE.update(pkg)
                             GLOBAL_PIANO_REALTIME_STATE["is_window_open"] = pkg.get("is_window_open", True)
                             GLOBAL_PIANO_REALTIME_STATE["last_update_time"] = time.time()
-                            if hasattr(main_obj, 'realtime_task_mgr'):
-                                main_obj.realtime_task_mgr.update_piano_state(pkg)
+                            realtime_task_mgr.update_piano_state(pkg)
                             
                             is_playing = pkg.get("is_playing", False)
                             song_title = pkg.get("title", "")
@@ -1255,7 +1282,7 @@ async def open_virtual_piano() -> str:
         log_print(f"❌ [啟動鋼琴視窗異常]: {e}")
         return ""
         
-    await asyncio.to_thread(main_obj.update_subtitle, "🎹 [7L 鋼琴舞台已就緒] 隨時歡迎老爸彈奏或點播名曲～")
+    await _show_subtitle("🎹 [7L 鋼琴舞台已就緒] 隨時歡迎老爸彈奏或點播名曲～")
     return ""
 
 IS_PIANO_AUTO_RADIO_MODE = False
@@ -1467,11 +1494,8 @@ async def stop_virtual_piano() -> str:
         await move_vts_spatial(target_pos="原位", duration=1.5)
     if current_ai_state == "PIANO":
         current_ai_state = "IDLE"
-    await asyncio.to_thread(main_obj.update_subtitle, "")
-    try:
-        main_obj.append_to_unified_memory(speaker="系統", target="所有人", content="鋼琴演奏結束並收起，7L 回到基準原位", role="system", source="piano")
-    except Exception:
-        pass
+    await _show_subtitle("")
+    _remember("鋼琴演奏結束並收起，7L 回到基準原位")
     log_print("✅ [鋼琴舞台] 已成功收起鋼琴，7L 已優雅回到基準原位！")
     return "（系統回報：已成功收起鋼琴並回到基準原位） [EXPRESSION: 預設]"
 
@@ -1692,15 +1716,11 @@ async def resolve_piano_intent_by_ai(
     active_keys = get_piano_gemini_keys()
     if active_keys:
         # 👑 倒序高智商模型梯隊：3.8 ➔ 3.7 ➔ 3.6 ➔ 3.5 ➔ 3.1-pro ➔ 3-flash ➔ 3.5-flash-lite
-        models = getattr(main_obj, 'HIGH_IQ_GEMINI_MODELS', None) or ["gemini-3.6-flash", "gemini-3.8-flash"]
-        dead = getattr(main_obj, 'DEAD_GEMINI_MODELS', None) or set()
-        is_locked_fn = getattr(main_obj, 'is_model_locked', None)
-        ring_fn = getattr(main_obj, 'get_pingpong_ring_indices', None)
-        for m in models:
-            if m in dead or (callable(is_locked_fn) and is_locked_fn(m)):
+        is_locked_fn = _HOST["is_model_locked"]
+        for m in HIGH_IQ_GEMINI_MODELS:
+            if m in DEAD_GEMINI_MODELS or (is_locked_fn and is_locked_fn(m)):
                 continue
-            raw_indices = ring_fn(len(active_keys), CURRENT_GEMINI_KEY_STEP) if callable(ring_fn) else None
-            ring_indices = (raw_indices if isinstance(raw_indices, (list, tuple)) else list(range(len(active_keys))))[:3]
+            ring_indices = get_pingpong_ring_indices(len(active_keys), CURRENT_GEMINI_KEY_STEP)[:3]
             for idx in ring_indices:
                 g_key = active_keys[idx]
                 try:
@@ -1900,8 +1920,8 @@ def clean_song_title_for_speech(raw_title: str) -> str:
 async def generate_dynamic_piano_chatter(song_title: str, target: str = "dad", requester_name: str = "", is_radio: bool = True) -> str:
     """由 AI 大腦即時自主動態生成過場/切歌/彈琴台詞 (支援對象感知，100% 自由意志決定說話或安靜沉醉，零固定罐頭句與數學機率)"""
     try:
-        user_prof = await main_obj.get_user_profile()
-        c_name = user_prof.get("custom_name", main_obj.DEFAULT_USER_TITLE)
+        user_prof = await _user_profile()
+        c_name = user_prof.get("custom_name", get_owner_name())
         song_title = clean_song_title_for_speech(song_title)
 
         # ⚠️ 點歌人不一定是老爸：有誰寫誰，未知走中性，絕不預設老爸
@@ -1977,7 +1997,7 @@ async def play_piano_worker(song_title: str, sheet_text: str, bpm: int, mode: st
                 return
             is_speaking = False
             try:
-                is_speaking = pygame.mixer.music.get_busy() or not main_obj.speech_queue.empty() or current_ai_state == "TALKING"
+                is_speaking = pygame.mixer.music.get_busy() or _speech_pending() or current_ai_state == "TALKING"
             except Exception:
                 pass
             if not is_speaking and time.time() - speech_wait_start > 0.6:
@@ -1996,7 +2016,7 @@ async def play_piano_worker(song_title: str, sheet_text: str, bpm: int, mode: st
             
         # 3. 循環播放當前曲目、待播隊列與無限隨機電台
         while session_id == PIANO_SESSION_ID and is_piano_active:
-            await asyncio.to_thread(main_obj.update_subtitle, f"🎹 [7L 正在演奏鋼琴] 《{song_title}》")
+            await _show_subtitle(f"🎹 [7L 正在演奏鋼琴] 《{song_title}》")
             
             # 4. 自動喚出 88 鍵視覺化瀑布流鋼琴介面並進行古典演奏 (支援多軌同時並發，視窗常駐不重開、無縫切歌)
             if midi_file and ("|" in midi_file or os.path.exists(midi_file)):
@@ -2156,15 +2176,12 @@ async def play_piano_worker(song_title: str, sheet_text: str, bpm: int, mode: st
                 sheet_text = ""
                 current_piano_song_title = song_title
                 current_piano_midi_file = midi_file
-                try:
-                    main_obj.append_to_unified_memory(speaker="系統", target="所有人", content=f"鋼琴上一首演奏完畢，無縫接續為【{req_user}】演奏《{song_title}》", role="system", source="piano")
-                except Exception:
-                    pass
+                _remember(f"鋼琴上一首演奏完畢，無縫接續為【{req_user}】演奏《{song_title}》")
                 log_print(f"🎹 [點歌無縫接續] 當前曲目結束，立即優先為【{req_user}】演奏點播曲目: 《{song_title}》！")
                 ai_chatter = await generate_dynamic_piano_chatter(song_title, target=req_target, requester_name=req_user, is_radio=IS_PIANO_AUTO_RADIO_MODE)
                 if ai_chatter:
                     log_print(f"💬 [鋼琴 AI 自由意志發話 ({req_target})]: {ai_chatter}")
-                    await main_obj.speech_queue.put({"text": ai_chatter, "target": req_target})
+                    await _say({"text": ai_chatter, "target": req_target})
                 else:
                     log_print(f"🎹 [鋼琴 AI 自由意志] 7L 選擇保持專注安靜、無縫沉醉演奏《{song_title}》。")
                 continue
@@ -2205,7 +2222,7 @@ async def play_piano_worker(song_title: str, sheet_text: str, bpm: int, mode: st
                     ai_chatter = await generate_dynamic_piano_chatter(song_title, target=radio_target, requester_name=radio_user, is_radio=True)
                     if ai_chatter:
                         log_print(f"💬 [電台 AI 自由意志發話 ({radio_target})]: {ai_chatter}")
-                        await main_obj.speech_queue.put({"text": ai_chatter, "target": radio_target})
+                        await _say({"text": ai_chatter, "target": radio_target})
                     else:
                         log_print(f"🎹 [電台 AI 自由意志] 7L 選擇保持專注安靜、無縫沉醉演奏《{song_title}》。")
                     continue
@@ -2216,12 +2233,9 @@ async def play_piano_worker(song_title: str, sheet_text: str, bpm: int, mode: st
                 # 只有當老爸說「收起鋼琴 / 別彈了」或調用 stop_virtual_piano() 時才會作為獨立動作收起！
                 finished_song = song_title
                 current_piano_song_title = ""
-                try:
-                    main_obj.append_to_unified_memory(speaker="系統", target="所有人", content=f"鋼琴《{finished_song}》演奏完畢，7L 坐在鋼琴前隨時待命", role="system", source="piano")
-                except Exception:
-                    pass
+                _remember(f"鋼琴《{finished_song}》演奏完畢，7L 坐在鋼琴前隨時待命")
                 log_print(f"🎹 [鋼琴舞台] 《{finished_song}》演奏完畢！7L 與鋼琴視窗保持常駐就緒待命（等待下一首點歌或「收起鋼琴」指令）。")
-                await asyncio.to_thread(main_obj.update_subtitle, f"🎹 [7L 鋼琴就緒] 《{finished_song}》演奏完畢～隨時可點歌或說「收起鋼琴」")
+                await _show_subtitle(f"🎹 [7L 鋼琴就緒] 《{finished_song}》演奏完畢～隨時可點歌或說「收起鋼琴」")
                 
                 # 常駐等待老爸或觀眾點播新曲或下達收起鋼琴指令
                 has_next = False
@@ -2258,7 +2272,7 @@ async def play_piano_worker(song_title: str, sheet_text: str, bpm: int, mode: st
                 await set_vts_expression(vc.GLOBAL_VTS, "_RESET_")
             if current_ai_state == "PIANO":
                 current_ai_state = "IDLE"
-            await asyncio.to_thread(main_obj.update_subtitle, "")
+            await _show_subtitle("")
             log_print(f"🎹 [鋼琴舞台] 鋼琴演奏舞台結束，回到常規姿態！")
 
 import bitmidi_engine
@@ -2273,10 +2287,7 @@ def _start_piano_worker(song_title: str, midi_file: str, custom_sheet: str = "",
     is_piano_active = True
     current_piano_song_title = song_title
     current_piano_midi_file = midi_file
-    try:
-        main_obj.append_to_unified_memory(speaker="系統", target="所有人", content=f"鋼琴開始演奏《{song_title}》", role="system", source="piano")
-    except Exception:
-        pass
+    _remember(f"鋼琴開始演奏《{song_title}》")
 
     if current_piano_task and not current_piano_task.done():
         current_piano_task.cancel()
@@ -2581,10 +2592,7 @@ async def play_virtual_piano(song_name: str = "", custom_sheet: str = "", auto_r
     final_search_query = clean_search_target if is_explicit_yt else (clean_q or "鋼琴名曲")
     current_piano_song_title = final_search_query
     current_piano_midi_file = ""
-    try:
-        main_obj.append_to_unified_memory(speaker="系統", target="所有人", content=f"鋼琴準備線上搜尋演奏《{final_search_query}》", role="system", source="piano")
-    except Exception:
-        pass
+    _remember(f"鋼琴準備線上搜尋演奏《{final_search_query}》")
     
     if current_piano_task and not current_piano_task.done():
         current_piano_task.cancel()
@@ -2622,7 +2630,7 @@ async def play_virtual_piano(song_name: str = "", custom_sheet: str = "", auto_r
             is_piano_active = False
             current_piano_song_title = ""
             current_piano_midi_file = ""
-            await asyncio.to_thread(main_obj.update_subtitle, f"⚠️ [樂譜庫查無結果] 未找到《{song_q}》的五線譜")
+            await _show_subtitle(f"⚠️ [樂譜庫查無結果] 未找到《{song_q}》的五線譜")
 
     current_piano_task = asyncio.create_task(async_fetch_and_play_worker(final_search_query, session_id, custom_sheet or ""))
     return "[EXPRESSION: 星星眼]"
@@ -2761,7 +2769,7 @@ async def mashup_virtual_piano(*songs, song_name1: str = "", song_name2: str = "
         if vc.GLOBAL_VTS:
             asyncio.create_task(set_vts_expression(vc.GLOBAL_VTS, "星星眼"))
             
-    await asyncio.to_thread(main_obj.update_subtitle, f"🎹 [7L 神仙打架合奏] {titles_display}")
+    await _show_subtitle(f"🎹 [7L 神仙打架合奏] {titles_display}")
     
     return "[EXPRESSION: 星星眼]"
 
@@ -2818,7 +2826,7 @@ async def compose_and_play_original_piano(theme_or_title: str = "", mood_or_styl
     try:
         active_keys = get_piano_gemini_keys()
         if active_keys:
-            target_k_idx = (main_obj.get_pingpong_alternating_index(len(active_keys), CURRENT_GEMINI_KEY_STEP) if hasattr(main_obj, 'get_pingpong_alternating_index') and main_obj.get_pingpong_alternating_index else 0)
+            target_k_idx = get_pingpong_alternating_index(len(active_keys), CURRENT_GEMINI_KEY_STEP)
             client = genai.Client(api_key=active_keys[target_k_idx])
             resp = await asyncio.wait_for(
                 client.aio.models.generate_content(
