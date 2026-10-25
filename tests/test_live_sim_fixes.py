@@ -506,15 +506,36 @@ def test_instinct_worker_survives_an_empty_key_pool():
     assert any("沒有可用的 Gemini 金鑰" in m for m in logs)
 
 
-def test_owner_text_carries_companion_notes_to_the_live_brain():
-    """伴看筆記以前只給 REST 備援大腦，Live 主腦看不到，問影片在演什麼只能靠舊記憶亂接（2026-10-25 實機）。"""
-    import types as _t
+def test_companion_notes_reach_the_live_brain_without_a_reply():
+    """伴看筆記以前只附在老爸打字的紙條裡，老爸用講的問影片在演什麼，她看不到筆記只能亂接（2026-10-25 實機）。
+    現在筆記一寫好就悄悄放進主腦對話：send_client_content(turn_complete=False) 不觸發回話（2026-10-26 實測）。"""
+    import asyncio as _a
     main = open(os.path.join(ROOT, "vts_7L_test.py"), encoding="utf-8").read()
-    fn = next(n for n in ast.walk(ast.parse(main)) if isinstance(n, ast.FunctionDef) and n.name == "_owner_text_slip")
-    yt = _t.SimpleNamespace(IS_YT_COMPANION_ACTIVE=True, get_yt_memory_context=lambda: "【影片筆記】男生在大象前講話")
-    ns = {"yt_comp": yt}
-    exec(compile(ast.Module(body=[fn], type_ignores=[]), "f", "exec"), ns)
-    assert ns["_owner_text_slip"]("E5", "這部在演什麼") == "[黑板同步] E5傳來文字訊息：這部在演什麼\n【影片筆記】男生在大象前講話"
-    yt.IS_YT_COMPANION_ACTIVE = False
-    assert ns["_owner_text_slip"]("E5", "早安") == "[黑板同步] E5傳來文字訊息：早安"
-    assert 'f"[黑板同步] {owner}傳來文字訊息：{user_input}")' not in main   # 兩個送紙條的地方都改走它
+    tree = ast.parse(main)
+    fns = [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name in ("_owner_text_slip", "add_brain_context")]
+    q = _a.Queue(maxsize=2)
+    live = {"on": True}
+    ns = {"asyncio": _a, "LIVE_SILENT_CONTEXT_QUEUE": q, "is_live_brain_active": lambda: live["on"]}
+    exec(compile(ast.Module(body=fns, type_ignores=[]), "f", "exec"), ns)
+    assert ns["_owner_text_slip"]("E5", "這部在演什麼") == "[黑板同步] E5傳來文字訊息：這部在演什麼"
+    assert ns["add_brain_context"]("[影片筆記] 男生在大象前講話") is True
+    assert ns["add_brain_context"]("b") is True and ns["add_brain_context"]("c") is False   # 滿了就丟，不報錯
+    live["on"] = False
+    assert ns["add_brain_context"]("d") is False          # 主腦沒連上不送（REST 備援自己讀筆記）
+    assert q.get_nowait() == "[影片筆記] 男生在大象前講話"
+    # 主腦那邊：用 send_client_content、turn_complete=False（送 realtime 文字會讓她開口回話）
+    sender = next(n for n in ast.walk(tree) if isinstance(n, ast.AsyncFunctionDef) and n.name == "send_silent_context_to_live")
+    src = ast.get_source_segment(main, sender)
+    assert "send_client_content(" in src and "turn_complete=False" in src and "send_realtime_input" not in src
+    assert "yt_comp.ON_NOTE_CB = " in main
+    import services.yt_companion_service as yc
+    got = []
+    old_cb, old_title = yc.ON_NOTE_CB, yc.CURRENT_YT_TITLE
+    yc.ON_NOTE_CB, yc.CURRENT_YT_TITLE = (lambda t, n: got.append((t, n))), "大象"
+    try:
+        yc.add_perception_memory("男生在大象前講話（測試）")
+    finally:
+        yc.ON_NOTE_CB, yc.CURRENT_YT_TITLE = old_cb, old_title
+        if yc.YT_PERCEPTION_LOG and yc.YT_PERCEPTION_LOG[-1]["content"] == "男生在大象前講話（測試）":
+            yc.YT_PERCEPTION_LOG.pop()
+    assert got == [("大象", "男生在大象前講話（測試）")]

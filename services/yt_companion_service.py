@@ -60,6 +60,7 @@ IS_YT_COMPANION_ACTIVE = False   # 當前是否鎖定 YouTube 視窗並在感官
 CURRENT_YT_TITLE = ""            # 當前鎖定的 YouTube 影片標題
 LATEST_YT_FRAME_BYTES = None     # 最新一幀裁剪後的 YouTube 截圖 (供 Web 儀表板相框顯示)
 ON_VISION_RECORD_CB = None       # 外部視覺紀錄回呼: cb(text, scene)
+ON_NOTE_CB = None                # 新筆記交給 Live 主腦: cb(影片標題, 筆記)
 
 # 🧠 影片劇情時序感知記憶池（保留最新 15 筆劇情記憶紀錄）
 YT_PERCEPTION_LOG = deque(maxlen=15)
@@ -203,6 +204,11 @@ def add_perception_memory(text: str):
     item = {"time": time_str, "content": clean}
     YT_PERCEPTION_LOG.append(item)
     log_print(f"👁️👂 [YT 眼耳感知沉澱] ({time_str}): {clean}")
+    if ON_NOTE_CB:
+        try:
+            ON_NOTE_CB(CURRENT_YT_TITLE, clean)
+        except Exception:
+            log_swallowed()
 
     # 🌐 同步推播至 Web 儀表板 VISION 視覺時序歷史串流
     if ON_VISION_RECORD_CB:

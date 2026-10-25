@@ -375,14 +375,20 @@ def send_brain_slip(text: str, origin: str = "", said: str = "", name: str = "")
 
 
 def _owner_text_slip(owner: str, user_input: str) -> str:
-    """老爸打字轉給 Live 主腦的紙條。YouTube 伴看中就把影片筆記一起附上：
-    筆記以前只在 REST 備援大腦那條路注入，Live 主腦看不到，問她影片在演什麼只能靠舊記憶亂接（2026-10-25 實機）。"""
-    slip = f"[黑板同步] {owner}傳來文字訊息：{user_input}"
-    if yt_comp.IS_YT_COMPANION_ACTIVE:
-        ctx = yt_comp.get_yt_memory_context()
-        if ctx:
-            slip += "\n" + ctx
-    return slip
+    """老爸打字轉給 Live 主腦的紙條。伴看筆記不再附在這裡：筆記一寫好就經 add_brain_context 放進主腦對話，
+    老爸用講的問影片也看得到（以前只附在打字紙條，講的就看不到）。"""
+    return f"[黑板同步] {owner}傳來文字訊息：{user_input}"
+
+
+def add_brain_context(text: str) -> bool:
+    """給主腦看、不用她回話的背景資料（伴看筆記）。主腦沒連上就不送（REST 備援大腦自己會讀筆記）。"""
+    if not text or not is_live_brain_active():
+        return False
+    try:
+        LIVE_SILENT_CONTEXT_QUEUE.put_nowait(text)
+        return True
+    except asyncio.QueueFull:
+        return False   # 主腦斷線很久、積了 50 筆：舊筆記不重要了
 
 
 def _dispatch_in_background(fn_name: str, fn_args: dict, **kw) -> asyncio.Task:
@@ -2180,6 +2186,9 @@ notification_expire_time = 0.0
 active_timers = set()
 speech_queue = asyncio.Queue()  
 LIVE_API_SYSTEM_PROMPT_QUEUE = asyncio.Queue()
+# 不用她回話的背景資料（YouTube 伴看筆記）：send_client_content(turn_complete=False) 悄悄放進主腦的對話，
+# 不會觸發回話，她講到一半也不會被打斷（2026-10-26 兩個 Live 模型實測）。
+LIVE_SILENT_CONTEXT_QUEUE = asyncio.Queue(maxsize=50)
 # 🛟 斷線救援：已送達紙條的案底（(時間, 全文)，只留最近 30 張）。
 # 佇列只重發「發送失敗」的；「送達後 session 立刻死亡、腦沒處理」的靠重連掃這裡撿回。
 RECENT_SLIPS = deque(maxlen=30)
@@ -4875,11 +4884,29 @@ async def continuous_live_worker(vts):
                         log_print(f"⚠️ [黑板同步錯誤] {e}")
                         raise e
 
+                async def send_silent_context_to_live():
+                    """背景資料悄悄放進主腦對話（不觸發回話）：兩秒內來的幾筆併成一則；送不進去就算了，下一筆還會來。"""
+                    while True:
+                        notes = [await LIVE_SILENT_CONTEXT_QUEUE.get()]
+                        await asyncio.sleep(2.0)
+                        while not LIVE_SILENT_CONTEXT_QUEUE.empty():
+                            notes.append(LIVE_SILENT_CONTEXT_QUEUE.get_nowait())
+                        try:
+                            async with ws_send_lock:
+                                await session.send_client_content(
+                                    turns=[types.Content(role="user", parts=[types.Part(text="\n".join(notes))])],
+                                    turn_complete=False)
+                            log_print(f"🎬 [背景資料] 悄悄放進主腦對話（不用回話）：{notes[-1][:50]}")
+                        except Exception as e:
+                            log_print(f"⚠️ [背景資料] 送不進主腦，略過：{e}")
+
                 send_task = asyncio.create_task(send_mic_audio(), name="live_mic")
                 recv_task = asyncio.create_task(receive_from_live(), name="live_recv")
                 prompt_task = asyncio.create_task(send_system_prompts_to_live(), name="live_prompt")
+                ctx_task = asyncio.create_task(send_silent_context_to_live(), name="live_context")
                 
-                done, pending = await asyncio.wait([send_task, recv_task, prompt_task], return_when=asyncio.FIRST_COMPLETED)
+                done, pending = await asyncio.wait([send_task, recv_task, prompt_task, ctx_task],
+                                                   return_when=asyncio.FIRST_COMPLETED)
                 try:
                     for t in done:
                         try:
@@ -8949,6 +8976,8 @@ async def main():
     
     #  啟動 YouTube 自動伴看與實時多模態視聽理解服務
     yt_comp.ON_VISION_RECORD_CB = record_vision_history_entry
+    yt_comp.ON_NOTE_CB = lambda title, note: add_brain_context(
+        f"[影片筆記：妳正在陪老爸看的《{title or '影片'}》。問到影片就照筆記直接回答，不用叫子智能體查；這則不用回應] {note}")
     yt_comp.init_yt_companion()
 
     print("\n=========================================")
