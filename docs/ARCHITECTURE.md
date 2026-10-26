@@ -45,7 +45,7 @@ flowchart TD
    - 看門狗看主腦「有沒有真的產出」：連兩張紙條各 20 秒沒產出（金鑰額度用完時連線還在、但不生成）就關線、冷卻這把、換下一把，那張紙條交給新連線。
 7. **出去**：
    - 要說的話依序經過 `speech_queue`（`core/speech_queue`：給老爸的先講、觀眾的最後；被打斷只挑掉 Live 自己排的）→ `speech_queue_worker` → `play_voice_complete`。
-   - 超過 30 字的回覆由 `split_for_streaming` 在標點切段，第一段合成好就先念。
+   - `split_for_streaming` 在標點切段，第一段合成好就先念；怎麼切照實測的合成／念的速度挑「最快出聲又不停頓」的切法。
    - 合成交給 `services/tts_router`（本機 GPT-SoVITS 為主，有快取與品質檢查），再由 pygame 播放。嘴型包絡寫進 `core/stage_state`，由 VTS 對嘴；表情時間軸由神態導演（另一條 Live session）排、`services/stage_actions` 執行。
 
 ## 2. 分層
@@ -70,6 +70,7 @@ flowchart TD
 | `usage.py` | 模型用量：每次呼叫記誰叫的、哪個模型、成功沒、限流、時間、token；後台系統監控有表 |
 | `settings.py` | 運行模式開機定一次（在 import 記憶模組之前；後台存的模式開關優先），切模式只經 `apply_mode` |
 | `speech_queue.py` | 有車道的說話佇列 |
+| `barge_in.py` | 她講話時聽老爸插話：聲紋比「像老爸／像她」，連兩次像老爸才停下她、把聲音送給 Live；她的回音不算 |
 | `tool_schema.py` | 給模型看的工具宣告：`INTERACTIONS_TOOLS`／`GENAI_TOOLS`（子智能體）、`LIVE_API_TOOLS`／`REST_BRAIN_TOOLS`（主腦唯一的 `invoke_subagent`，Live 版非阻塞）、`resolve_tool_name`（模型回的工具名對回宣告） |
 | `hard_command.py` | CPU 硬指令、彈加唱拆解、主腦的結構化舞台動作、翻舊點歌檢查、給主腦的紙條文案 |
 | `input_sources.py` | 輸入來源分類、休眠喚醒規則 |
@@ -124,7 +125,7 @@ flowchart TD
 
 - **輸入**：`text_file_listener_worker`、`console_keyboard_input_worker`、TikTok／Twitch／YouTube 監聽；麥克風平常走 Live 主腦的原生音訊串流，Live 斷線超過 8 秒才由 `mic_worker`（舊 STT）收
 - **大腦**：`continuous_live_worker`（Live 主腦）、`rest_slip_worker`（沒有 Live 主腦時接紙條）、`instinct_live_worker`（身體本能反射）、`chat_processor_worker`、`streamer_mind_loop_worker`、`idle_chatter_worker`
-- 操作者輸入關閉時（VTuber 模式強制關）不啟動 Live 主腦、本能腦、`mic_worker`、打字監聽：觀眾留言全由看板 REST 回覆、紙條全由 REST 大腦接（見 REDESIGN P）
+- Live 主腦兩種模式都開；操作者輸入關閉時（VTuber 模式強制關）不送麥克風，也不啟動本能腦、`mic_worker`、打字監聽（見 REDESIGN P）
 - **說話與舞台**：`speech_queue_worker`、`expression_keeper_worker`、`busy_expression_worker`、`autonomous_wander_worker`、`ai_face_tracking_loop`（workers/）、`anti_watermark_worker`、`vts_health_worker`（workers/）
 - **感知**：`screen_capture_worker`、`peripheral_vision_worker`、`system_audio_worker`（workers/）、`mic_volume_worker`（workers/）
 - **記錄**：流水帳雲端備份（每 5 分鐘）、金鑰健康面板 `cma_monitor_worker`（workers/）
@@ -163,4 +164,5 @@ flowchart TD
 - **測試**：乾跑包裝＋情境測試；實機工具收進 `tools/sim/`；**測試不准寫 `data/`**（10/25～26 有個鋼琴測試每跑一次全套就把 7L 的對話記憶蓋掉，已修、已從備份還原）。
 - **拆檔**：6 個背景工作搬到 `workers/`；提示詞收進 `core/promptkit`；運行模式收進 `core/settings`。
 - 主檔 6,689 行。
+- 老爸的決定（REDESIGN 第 8 節）：VTuber 模式也開 Live 主腦；她講話時聽得到老爸插話（聲紋分得出她的回音）；短回覆也切段；點歌只留主腦回覆；畫面變化只讓她知道。主檔 6,720 行。
 
