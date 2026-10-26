@@ -197,3 +197,20 @@ def test_queue_items_carry_who_and_what_separately():
     assert (yt.viewer, yt.content) == ("路人甲", "早啊")
     old = parse_input_item({"text": "【TikTok 直播觀眾 阿呆 留言】：嗨", "source": "tiktok"})
     assert (old.viewer, old.content) == ("", "")          # 沒帶欄位：主程式記成「直播觀眾」、內容用整行
+
+
+def test_make_chat_item_is_the_one_format_for_all_platforms():
+    """三個平台丟進佇列的項目都由 chat_source.make_chat_item 拼（2026-10-26；以前 TikTok 自己拼了九處、三個平台三套）。"""
+    import inspect
+    from core.input_sources import parse_input_item
+    from services.chat_source import make_chat_item
+    import services.tiktok_listener as tl
+    tk = make_chat_item("tiktok", "阿呆", "嗨", platform_uid="uid01")
+    assert tk["text"] == "【TikTok 直播觀眾 阿呆 留言】：嗨" and tk["platform_uid"] == "uid01"
+    item = parse_input_item(tk)
+    assert (item.viewer, item.content, item.source, item.user) == ("阿呆", "嗨", "tiktok", "阿呆")
+    amb = parse_input_item(make_chat_item("tiktok_ambient", text="【TikTok 直播動態】：有人關注"))
+    assert (amb.text, amb.viewer, amb.content, amb.source) == ("【TikTok 直播動態】：有人關注", "", "", "tiktok_ambient")
+    assert tw_item("someuser", "小夏子", "彈一首卡農！")["text"] == "【Twitch 直播觀眾 小夏子 (@someuser)】：彈一首卡農！"
+    assert yt_item("路人甲", "早啊")["text"] == "【YouTube 直播觀眾 路人甲】：早啊"
+    assert "input_queue.put({" not in inspect.getsource(tl)       # TikTok 不再自己拼 dict

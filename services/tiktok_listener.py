@@ -3,6 +3,7 @@ import time
 import asyncio
 import re
 from core.utils import log_print, sys_notify
+from services import chat_source as cs
 import services.piano_engine as pe
 
 try:
@@ -269,15 +270,9 @@ async def tiktok_live_worker(input_queue):
                         web_dash.broadcast_event("tiktok_comment", {"user": user_name, "text": comment_text})
                     except Exception:
                         pass
-                    await input_queue.put({
-                        "text": f"【TikTok 直播觀眾 {user_name} 留言】：{comment_text}",
-                        "viewer": user_name, "content": comment_text,   # 主程式直接用，不從上面那行拆
-                        "audio_base64": None,
-                        "timestamp": time.time(),
-                        "source": "tiktok",
-                        # 平台唯一帳號（觀眾改不到），主程式只信這個認老爸；暱稱可以亂取
-                        "platform_uid": getattr(event.user, "unique_id", "") or "",
-                    })
+                    await input_queue.put(cs.make_chat_item(
+                        "tiktok", user_name, comment_text,
+                        platform_uid=getattr(event.user, "unique_id", "") or ""))   # 平台唯一帳號，認老爸只信這個
 
             @client.on(BarrageEvent)
             async def on_barrage(event: BarrageEvent):
@@ -307,14 +302,9 @@ async def tiktok_live_worker(input_queue):
                         seen_text_cache[fk] = now
                     current_tiktok_status_str = f"[💬 {u_name}: {b_text[:12]}]"
                     log_print(f"💬 [TikTok 飄屏彈幕] {u_name}: {b_text}")
-                    await input_queue.put({
-                        "text": f"【TikTok 直播觀眾 {u_name} 留言】：{b_text}",
-                        "viewer": u_name, "content": b_text,
-                        "audio_base64": None,
-                        "timestamp": time.time(),
-                        "source": "tiktok",
-                        "platform_uid": (getattr(user_name, "unique_id", "") or "") if user_name else "",
-                    })
+                    await input_queue.put(cs.make_chat_item(
+                        "tiktok", u_name, b_text,
+                        platform_uid=(getattr(user_name, "unique_id", "") or "") if user_name else ""))
 
             @client.on(EmoteChatEvent)
             async def on_emote_chat(event: EmoteChatEvent):
@@ -334,14 +324,9 @@ async def tiktok_live_worker(input_queue):
                 e_text = getattr(event, 'comment', '') or "發送了表情"
                 current_tiktok_status_str = f"[💬 {u_name}: {e_text[:12]}]"
                 log_print(f"💬 [TikTok 表情] {u_name}: {e_text}")
-                await input_queue.put({
-                    "text": f"【TikTok 直播觀眾 {u_name} 留言】：{e_text}",
-                    "viewer": u_name, "content": e_text,
-                    "audio_base64": None,
-                    "timestamp": time.time(),
-                    "source": "tiktok",
-                    "platform_uid": (getattr(user_name, "unique_id", "") or "") if user_name else "",
-                })
+                await input_queue.put(cs.make_chat_item(
+                    "tiktok", u_name, e_text,
+                    platform_uid=(getattr(user_name, "unique_id", "") or "") if user_name else ""))
 
             @client.on(JoinEvent)
             async def on_join(event: JoinEvent):
@@ -364,12 +349,8 @@ async def tiktok_live_worker(input_queue):
                     # 🛑 【關注節流】：彈琴時或間隔小於 90 秒時不塞入佇列
                     if not pe.GLOBAL_PIANO_REALTIME_STATE.get("is_playing", False) and (now - last_ambient_notify_time > 90.0):
                         last_ambient_notify_time = now
-                        await input_queue.put({
-                            "text": f"【TikTok 直播動態】：觀眾「{user_name}」點擊關注了直播間！（是否開口感謝關注由妳自由決定）",
-                            "audio_base64": None,
-                            "timestamp": time.time(),
-                            "source": "tiktok_ambient"
-                        })
+                        await input_queue.put(cs.make_chat_item(
+                            "tiktok_ambient", text=f"【TikTok 直播動態】：觀眾「{user_name}」點擊關注了直播間！（是否開口感謝關注由妳自由決定）"))
                 except Exception:
                     pass
 
@@ -388,12 +369,8 @@ async def tiktok_live_worker(input_queue):
                         now = time.time()
                         if not pe.GLOBAL_PIANO_REALTIME_STATE.get("is_playing", False) and (now - last_ambient_notify_time > 180.0):
                             last_ambient_notify_time = now
-                            await input_queue.put({
-                                "text": f"【TikTok 直播動態】：直播間累積點讚達到 {last_like_milestone_notified} 次！（此為背景數據里程碑，可隨性帶過或略過）",
-                                "audio_base64": None,
-                                "timestamp": time.time(),
-                                "source": "tiktok_ambient"
-                            })
+                            await input_queue.put(cs.make_chat_item(
+                                "tiktok_ambient", text=f"【TikTok 直播動態】：直播間累積點讚達到 {last_like_milestone_notified} 次！（此為背景數據里程碑，可隨性帶過或略過）"))
                 except Exception:
                     pass
 
@@ -407,12 +384,8 @@ async def tiktok_live_worker(input_queue):
                     now = time.time()
                     if not pe.GLOBAL_PIANO_REALTIME_STATE.get("is_playing", False) and (now - last_ambient_notify_time > 90.0):
                         last_ambient_notify_time = now
-                        await input_queue.put({
-                            "text": f"【TikTok 直播動態】：觀眾「{user_name}」分享了直播間！（是否感謝由妳自由決定）",
-                            "audio_base64": None,
-                            "timestamp": time.time(),
-                            "source": "tiktok_ambient"
-                        })
+                        await input_queue.put(cs.make_chat_item(
+                            "tiktok_ambient", text=f"【TikTok 直播動態】：觀眾「{user_name}」分享了直播間！（是否感謝由妳自由決定）"))
                 except Exception:
                     pass
 
@@ -423,14 +396,9 @@ async def tiktok_live_worker(input_queue):
                     q_text = getattr(getattr(event, 'question', None), 'text', '') or getattr(event, 'text', '')
                     if q_text:
                         log_print(f"❓ [TikTok 提問箱] {user_name} 提問: {q_text}")
-                        await input_queue.put({
-                            "text": f"【TikTok 官方提問箱】：觀眾「{user_name}」提問：『{q_text}』。（是否回答由妳自由決定）",
-                            # 以前拆這行只拆得出「直播觀眾」，發問的人是誰丟了
-                            "viewer": user_name, "content": f"（官方提問箱）{q_text}",
-                            "audio_base64": None,
-                            "timestamp": time.time(),
-                            "source": "tiktok"
-                        })
+                        await input_queue.put(cs.make_chat_item(
+                            "tiktok", user_name, f"（官方提問箱）{q_text}",
+                            text=f"【TikTok 官方提問箱】：觀眾「{user_name}」提問：『{q_text}』。（是否回答由妳自由決定）"))
                 except Exception:
                     pass
 
@@ -440,13 +408,9 @@ async def tiktok_live_worker(input_queue):
                     user_name = getattr(getattr(event, 'user', None), 'nickname', '') or "觀眾"
                     log_print(f"👑 [TikTok 訂閱] 觀眾 {user_name} 訂閱成為會員！")
                     sys_notify(f"👑 [TikTok 訂閱] {user_name} 訂閱成為會員！")
-                    await input_queue.put({
-                        "text": f"【TikTok 直播動態】：觀眾「{user_name}」付費訂閱成為專屬會員！（是否慶祝/感謝由妳自由決定）",
-                        "viewer": user_name, "content": "付費訂閱成為專屬會員！（是否慶祝/感謝由妳自由決定）",
-                        "audio_base64": None,
-                        "timestamp": time.time(),
-                        "source": "tiktok_gift"
-                    })
+                    await input_queue.put(cs.make_chat_item(
+                        "tiktok_gift", user_name, "付費訂閱成為專屬會員！（是否慶祝/感謝由妳自由決定）",
+                        text=f"【TikTok 直播動態】：觀眾「{user_name}」付費訂閱成為專屬會員！（是否慶祝/感謝由妳自由決定）"))
                 except Exception:
                     pass
 
@@ -469,13 +433,9 @@ async def tiktok_live_worker(input_queue):
                             pass
                         
                         gift_desc = f"連續送出了 {tot_count} 個 {g_name}！" if tot_count > 1 else f"送出了 1 個 {g_name}！"
-                        await input_queue.put({
-                            "text": f"【TikTok 直播觀眾 {u_name} 送禮】：{gift_desc}請向他熱情道謝並給予即時互動！",
-                            "viewer": u_name, "content": f"{gift_desc}請向他熱情道謝並給予即時互動！",
-                            "audio_base64": None,
-                            "timestamp": time.time(),
-                            "source": "tiktok_gift"
-                        })
+                        await input_queue.put(cs.make_chat_item(
+                            "tiktok_gift", u_name, f"{gift_desc}請向他熱情道謝並給予即時互動！",
+                            text=f"【TikTok 直播觀眾 {u_name} 送禮】：{gift_desc}請向他熱情道謝並給予即時互動！"))
                 except asyncio.CancelledError:
                     pass
                 except Exception as ex:

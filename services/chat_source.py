@@ -5,8 +5,7 @@
 概念移植自 LiveCore（chat-source.ts / chat-runtime.ts），純 Python、零新依賴：
 
 1. parse_chat_source_url()  — 任意貼上網址 → 標準描述子（provider/mode/channel/video_id）
-2. make_chat_item()         — 統一訊息格式（message_id / actor / avatar / sent_at），
-                             text 欄位與舊軌道2格式完全相容（【Twitch/YouTube 直播觀眾 …】：）
+2. make_chat_item()         — TikTok／Twitch／YouTube 丟進 input_queue 的統一格式（viewer／content／platform_uid）
 3. DedupTracker             — 訊息 ID 去重（上限 256，LiveCore 同值），防重連/重 poll 重複餵話
 4. backoff_delay()          — 指數退避 5→10→20→40→60s 上限（取代固定 5 秒硬重連）
 5. Worker 註冊表            — register/bind/start/stop/status，給 Web 控制台開關＋重啟用。
@@ -121,30 +120,28 @@ def parse_chat_source_url(url):
         return out
 
 
-def make_chat_item(provider, channel="", message_id="", user="", display="",
-                   message="", avatar="", actor_id="", actor_login=""):
-    """統一訊息格式。text 與舊軌道2格式完全相容（主程式正則照抓），其餘欄位給控制台/日誌用。"""
-    who = display or user
-    if provider == "twitch":
-        who_txt = f"{display} (@{user})" if display and user and display.lower() != user.lower() else (display or user)
-        text = f"【Twitch 直播觀眾 {who_txt}】：{message}"
-    else:
-        text = f"【YouTube 直播觀眾 {who}】：{message}"
+PLATFORM_LABEL = {"tiktok": "TikTok", "twitch": "Twitch", "youtube": "YouTube"}
+
+
+def make_chat_item(source, viewer="", content="", *, platform_uid="", text="", user="", message_id=""):
+    """直播間輸入丟進 input_queue 的統一格式（TikTok／Twitch／YouTube 三個監聽器共用；以前各自拼 dict，TikTok 拼了九處）。
+    主程式只讀 viewer／content／platform_uid／source（core/input_sources.parse_input_item）；
+    text 給日誌和後台看，沒給就照「【平台 直播觀眾 名字】：內容」拼。
+    platform_uid 是平台唯一帳號（觀眾改不到），認老爸只信這個，顯示名稱可以亂取。"""
+    if not text:
+        label = PLATFORM_LABEL.get(source.split("_")[0], source)
+        tail = " 留言" if source == "tiktok" else ""
+        text = f"【{label} 直播觀眾 {viewer}{tail}】：{content}"
     return {
         "text": text,
+        "viewer": viewer or "",
+        "content": content or "",
+        "platform_uid": platform_uid or "",
+        "user": user or viewer or "",
+        "message_id": message_id or "",
         "audio_base64": None,
         "timestamp": time.time(),
-        "source": provider,
-        "channel": channel,
-        "message_id": message_id or "",
-        "user": user,
-        "display": display,
-        "avatar": avatar or "",
-        "actor_id": actor_id or "",
-        "actor_login": actor_login or "",
-        # 平台唯一帳號：主程式認老爸只信這個（顯示名稱觀眾可以亂取）
-        "platform_uid": actor_id or (user if provider == "twitch" else ""),
-        "sent_at": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime()),
+        "source": source,
     }
 
 

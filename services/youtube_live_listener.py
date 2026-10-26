@@ -19,6 +19,7 @@ import time
 import httpx
 
 from core.utils import log_print
+from services import chat_source as cs
 
 _API = "https://www.youtube.com/youtubei/v1/live_chat/get_live_chat?prettyPrint=false"
 _UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -197,21 +198,10 @@ def parse_live_chat_response(data):
     return messages, cont, wait
 
 
-def build_queue_item(user: str, message: str, message_id: str = "", avatar: str = "", channel_id: str = "") -> dict:
-    """與 TikTok/Twitch 相容的格式（text 給日誌、後台看；沒有 (@id)，主程式用暱稱當 id）。
-    主程式直接用 viewer／content；message_id/avatar/user 給控制台顯示用。"""
-    return {
-        "text": f"【YouTube 直播觀眾 {user}】：{message}",
-        "viewer": user,
-        "content": message,
-        "platform_uid": channel_id or "",   # YouTube 頻道 ID（唯一）；顯示名稱可以亂取，認老爸只信這個
-        "audio_base64": None,
-        "timestamp": time.time(),
-        "source": "youtube",
-        "message_id": message_id or "",
-        "user": user,
-        "avatar": avatar or "",
-    }
+def build_queue_item(user: str, message: str, message_id: str = "", channel_id: str = "") -> dict:
+    """YouTube 留言 → 佇列項目（格式在 chat_source.make_chat_item）。沒有 (@id)，名字就是暱稱；
+    認老爸只信頻道 ID（唯一），暱稱可以亂取。"""
+    return cs.make_chat_item("youtube", user, message, platform_uid=channel_id or "", user=user, message_id=message_id)
 
 
 async def youtube_live_worker(input_queue):
@@ -221,7 +211,6 @@ async def youtube_live_worker(input_queue):
     頻道模式：每 60s 查 {channel}/live 的 canonical + isLiveContent；
               在播 → 輪詢聊天室；不在播 → 記錄狀態待命。
     """
-    from services import chat_source as cs
     vid = normalize_video_id(os.getenv("YOUTUBE_LIVE_ID") or "")
     channel = normalize_channel(os.getenv("YOUTUBE_CHANNEL") or "")
     if not vid and not channel:
@@ -295,8 +284,7 @@ async def youtube_live_worker(input_queue):
                             continue                # 重 poll 的舊留言，直接丟
                         await input_queue.put(build_queue_item(
                             m["user"], m["message"],
-                            message_id=m.get("id", ""), avatar=m.get("avatar", ""),
-                            channel_id=m.get("channel_id", "")))
+                            message_id=m.get("id", ""), channel_id=m.get("channel_id", "")))
                         try:
                             import services.web_dashboard as wd
                             wd.broadcast_event("youtube_comment", {

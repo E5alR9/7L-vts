@@ -242,8 +242,8 @@ def test_stale_speech_is_skipped_once_singing():
 def test_gift_events_keep_the_giver_name():
     """送禮、訂閱、提問箱的人是誰：TikTok 監聽器直接帶 viewer，主程式不再從「觀眾「X」」這種內文撈名字。"""
     src = open(os.path.join(ROOT, "services", "tiktok_listener.py"), encoding="utf-8").read()
-    for item in ('"viewer": u_name, "content": f"{gift_desc}', '"viewer": user_name, "content": "付費訂閱',
-                 '"viewer": user_name, "content": f"（官方提問箱）{q_text}"'):
+    for item in ('"tiktok_gift", u_name, f"{gift_desc}', '"tiktok_gift", user_name, "付費訂閱',
+                 '"tiktok", user_name, f"（官方提問箱）{q_text}"'):   # 項目由 chat_source.make_chat_item 拼（2026-10-26）
         assert item in src, item
     assert "aud_u = item.viewer or" in MAIN and "_m_name = re.search(" not in MAIN
 

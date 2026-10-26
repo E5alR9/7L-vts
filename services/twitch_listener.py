@@ -14,6 +14,7 @@ import re
 import time
 
 from core.utils import log_print
+from services import chat_source as cs
 
 _IRWS = "wss://irc-ws.chat.twitch.tv:443"
 _TAG_RE = re.compile(r"^@(?P<tags>[^\s]+)\s+")
@@ -63,26 +64,14 @@ def parse_channels(raw: str) -> list:
 
 
 def build_queue_item(user: str, display: str, message: str, message_id: str = "") -> dict:
-    """組成與 TikTok 相容的格式：【Twitch 直播觀眾 顯示名 (@id)】：內容（給日誌、後台看）。
-    主程式直接用 viewer／content，不再從 text 拆。"""
+    """Twitch 留言 → 佇列項目（格式在 chat_source.make_chat_item）。顯示名跟登入名不同時叫「顯示名 (@登入名)」；
+    認老爸只信登入名（唯一）。"""
     who = f"{display} (@{user})" if display and display.lower() != user.lower() else user
-    return {
-        "text": f"【Twitch 直播觀眾 {who}】：{message}",
-        "viewer": who,
-        "content": message,
-        "platform_uid": user or "",   # Twitch 登入名（唯一），認老爸只信這個
-        "audio_base64": None,
-        "timestamp": time.time(),
-        "source": "twitch",
-        "message_id": message_id or "",
-        "user": user,
-        "display": display,
-    }
+    return cs.make_chat_item("twitch", who, message, platform_uid=user or "", user=user, message_id=message_id)
 
 
 async def twitch_live_worker(input_queue):
     """背景協程：連 Twitch IRC、轉發留言（去重＋指數退避重連＋狀態回報）"""
-    from services import chat_source as cs
     channels = parse_channels(os.getenv("TWITCH_CHANNELS") or "")
     if not channels:
         log_print("ℹ️ [Twitch] 未設定 TWITCH_CHANNELS，聊天室監聽未啟動")
