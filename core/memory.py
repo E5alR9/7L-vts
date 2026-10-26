@@ -531,6 +531,30 @@ def flush_unified_memory() -> None:
     _save_unified_memory_to_disk(cloud=False)
 
 
+# ── 哪些話要進向量記憶庫（回話前會查：services/rag_memory_service.related_memories_block）──
+_RAG_DAD_SOURCES = frozenset({"text", "voice", "mic", "text_file", "console", "web_console", "owner_interject", "tiktok_dad"})
+_RAG_TAG_RE = re.compile(r"\[[A-Z_]+(?:[:：][^\]]*)?\]")   # [EXPRESSION: 正常]、[WINK]、[SILENCE]、[LOOK: LEFT]、[VIEWER_UPDATE:…]
+
+
+def rag_memory_text(speaker: str, target: str, content: str, role: str, source: str, t_str: str) -> Optional[str]:
+    """要不要存進向量庫、存成什麼樣；不存回 None。
+    存：老爸的話（打字、麥克風、主持插話、直播間的老爸帳號）和她的回覆（拔掉表情標籤；只剩 [SILENCE] 的不存）。
+    不存：觀眾留言（看板那邊另有觀眾檔）、系統事件（鋼琴）、心想。
+    以前只存老爸 text／voice 兩種來源，後台打字、麥克風的話和她的回覆從來沒進過向量庫（2026-10-26）。"""
+    if role == "user" and source in _RAG_DAD_SOURCES:
+        body = content.strip()
+    elif role == "assistant":
+        body = re.sub(r"\s{2,}", " ", _RAG_TAG_RE.sub("", content)).strip(" \t，。！？~～")
+        if len(body) < 4:
+            return None
+    else:
+        return None
+    if not body:
+        return None
+    to = get_owner_name() if target == "dad" else target
+    return f"[{t_str}] {speaker}對{to}說: {body}"
+
+
 def append_to_unified_memory(speaker: str, target: str, content: str, role: str = "user", source: str = "text"):
     """🌟 全集中全景記憶中樞雙軌寫入常式：
     - 💬 真實對話（老爸說話、觀眾彈幕、7L 回應、系統事件）：寫入 UNIFIED_DIALOGUE_MEMORY（保留最近數百句，上限 500 句）
@@ -589,10 +613,10 @@ def append_to_unified_memory(speaker: str, target: str, content: str, role: str 
     # 磁碟寫入節流（每隔 2 秒；窗口內的後續寫入會在窗口結束時補存）
     _request_unified_save(now_t)
 
-    # RAG: 若為老爸對話或 AI 回應，加入向量記憶庫
-    if role in ["user", "ai"] and source in ["text", "voice"]:
+    # 向量記憶庫（老爸的話和她的回覆；規則在 rag_memory_text）
+    rag_text = rag_memory_text(speaker, target, clean_c, role, source, t_str)
+    if rag_text:
         try:
-            rag_text = f"[{t_str}] {speaker}對{target}說: {clean_c}"
             loop = asyncio.get_running_loop()
             loop.create_task(rag_service.add_rag_memory(rag_text, source=role))
         except RuntimeError:

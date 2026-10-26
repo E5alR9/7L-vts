@@ -20,12 +20,18 @@ def _memory_files_in_tmp(tmp_path_factory):
     每跑一次全套測試就把 data/ 裡 7L 的對話記憶蓋成一兩句（10/25 下午加了那個測試以後一直這樣）。"""
     import core.db as db
     import core.memory as mem
+    import services.rag_memory_service as rag_service
+
+    async def _no_rag(*a, **k):
+        return None   # 2026-10-26 起她的回覆也會進向量庫：測試裡有事件迴圈時不能真的寫 data/rag/
+
     tmp = str(tmp_path_factory.mktemp("data"))
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(mem, "DATA_DIR", tmp)
         for name in _MEMORY_FILES:
             mp.setattr(mem, name, os.path.join(tmp, os.path.basename(getattr(mem, name))))
         mp.setattr(db, "db", None)
+        mp.setattr(rag_service, "add_rag_memory", _no_rag)
         yield tmp
 
 
