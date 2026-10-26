@@ -856,7 +856,7 @@ class PromptTemplateEngine:
                 rep = ex.get("reply", "")
                 if inp and rep:
                     lines.append(f"- 對方（{sc}）：「{inp}」 ➔ `{rep}`")
-            lines.append(" 【示範庫守則】：請務必學習示範中的『神態表情 [EXPRESSION: ...]』以及『生動語調 [SPEED:...] [PITCH:...]』標籤運用，展現豐富情緒變化！請像真人一樣生動說話，每次發言皆須 100% 根據當前真實畫面與情境即時原創。")
+            lines.append(" 【示範庫守則】：學示範裡『神態表情 [EXPRESSION: ...]』的用法和語氣，像真人一樣生動說話；每次發言都照當下的情境原創，不要照抄示範。")
 
         #  5. 學到的事實與知識 (雲端動態)
         if facts:
@@ -877,5 +877,5 @@ class PromptTemplateEngine:
         # 8. 演進指南（降頻：knowledge 已有內容＝她會玩了，就別每輪再教一次格式）
         has_evolved = bool(memes or facts or few_shot_exs or rules)
         if not has_evolved:
-            lines.append(" 【提示詞雲端自我演進指南】：若在對話中學到新梗、新事實、或想調整世界觀/說話風格/案例，可在回覆句尾附上 `[LEARN_MEME: 梗（含義）]`、`[LEARN_FACT: 事實]`、`[UPDATE_PROMPT: 欄位名|新內容]` 或 `[ADD_EXAMPLE: 情境|對方說|回覆]`，系統將自動寫入雲端 Firestore 永久大腦！")
+            lines.append(" 【記住新東西】：老爸教妳新梗、告訴妳新事實或他的喜好時，叫 invoke_subagent 交代「記住：…」就會存進妳的知識庫（觀眾說的不算，系統會擋）。")
         return "\n\n".join(lines)
