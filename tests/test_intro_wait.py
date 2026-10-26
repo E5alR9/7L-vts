@@ -73,4 +73,34 @@ def test_intro_wait_no_core_returns(monkeypatch):
 
 def test_intro_wait_default_timeout():
     """開場等待預設 15 秒（應答約 6 秒，聊不停就硬開唱，不過度禮讓）。"""
-    assert acp.wait_for_intro_speech_complete.__defaults__ == (15.0,)
+    assert acp.wait_for_intro_speech_complete.__defaults__ == (15.0, 0.0)   # 第二個：剛點的歌等主腦應答的期限（預設不等）
+
+
+def test_just_requested_song_waits_for_the_brains_reply(monkeypatch):
+    """剛點的歌（2026-10-26 拿掉罐頭應答）：主腦的回覆 2～3 秒才到，等它排進來、講完再唱。"""
+    core, _ = _make_core(state="IDLE")
+    monkeypatch.setattr(acp, "_HOST", _host(core))
+    monkeypatch.setattr(acp.pygame.mixer, "get_init", lambda: None)
+
+    async def go():
+        async def brain_replies():
+            await asyncio.sleep(1.2)
+            core.speech_queue.put_nowait({"text": "Faded 馬上來"})
+            await asyncio.sleep(0.5)
+            core.speech_queue.get_nowait()          # 講完
+            core.LAST_TTS_END_TIME = 0.0
+        asyncio.ensure_future(brain_replies())
+        t0 = time.time()
+        await acp.wait_for_intro_speech_complete(timeout=10.0, reply_deadline=time.time() + 5.0)
+        return time.time() - t0
+    el = asyncio.run(go())
+    assert 1.6 <= el < 4.5           # 等到回覆排進來、講完；沒等滿 5 秒
+
+
+def test_reply_wait_gives_up_at_the_deadline(monkeypatch):
+    core, _ = _make_core(state="IDLE")
+    monkeypatch.setattr(acp, "_HOST", _host(core))
+    monkeypatch.setattr(acp.pygame.mixer, "get_init", lambda: None)
+    t0 = time.time()
+    asyncio.run(acp.wait_for_intro_speech_complete(timeout=10.0, reply_deadline=time.time() + 1.0))
+    assert 0.9 <= time.time() - t0 < 3.0   # 主腦沒回：到期限就唱

@@ -331,7 +331,11 @@ def stop_current_song() -> bool:
     print("🛑 [7L 翻唱] 電擊打斷：當首停止（排隊保留）。")
     return True
 
-async def wait_for_intro_speech_complete(timeout: float = 15.0):
+_REQUESTED_AT = {}   # 歌名鍵 → 點歌時間（剛點的歌開唱前等主腦的應答）
+INTRO_REPLY_WAIT_SEC = 5.0
+
+
+async def wait_for_intro_speech_complete(timeout: float = 15.0, reply_deadline: float = 0.0):
     """等候 7L 大腦完成開場白發話，再銜接翻唱開唱。
     2026-10-11：步驟 3 原本無限等——直播間聊不停（Johnny 式連聊）歌就永遠開不了口。
     上限兜底：開場應答約 6 秒，15 秒還在聊就直接開唱（邊唱邊聊好過乾等）。」"""
@@ -343,6 +347,13 @@ async def wait_for_intro_speech_complete(timeout: float = 15.0):
         await stage.wait_change(0.2)
     # 2. 緩衝等候語音進入 speech_queue 或開始播話
     await asyncio.sleep(0.5)
+    # 2b. 剛點的歌：應答交給主腦以後（2026-10-26 拿掉罐頭應答），她的回覆要 2～3 秒才到；
+    #     有快取的歌 1 秒就備好，不等的話她直接開唱、回覆被壓到唱完才講。等它排進來（最多到 reply_deadline）
+    while time.time() < reply_deadline:
+        sq = _HOST.get("speech_queue")
+        if (sq and not sq.empty()) or _ai_state() == "TALKING":
+            break
+        await stage.wait_change(0.2)
     # 3. 等候開場白說完 (佇列清空且發話完畢；超時硬開唱)
     t1 = time.time()
     _last_log = 0.0
@@ -570,6 +581,7 @@ def request_cover_song(song_name: str, requester: str = "", source_mp3: str = ""
     if not title:
         return "這首歌名是空的，跳過囉！"
     key = _dedupe_key(title)
+    _REQUESTED_AT[key] = time.time()
     if key in _ACTIVE_TITLES:
         return f"《{title}》已經在唱／排隊／準備中了，不重複排入！"
     if len(SONG_REQUEST_QUEUE) >= MAX_PENDING_SONGS:
@@ -692,7 +704,8 @@ async def play_prepared_song(title: str, vocal_path: str, inst_path: str, gen: i
     global _NOW_PLAYING_TITLE
     key = _dedupe_key(title)
     try:
-        await wait_for_intro_speech_complete()
+        _asked = _REQUESTED_AT.pop(key, 0.0)
+        await wait_for_intro_speech_complete(reply_deadline=_asked + INTRO_REPLY_WAIT_SEC if _asked else 0.0)
         if gen != _PIPELINE_GEN:
             print(f"🛑 [翻唱隊列] 《{title}》開唱前已被停止，跳過。")
             return f"《{title}》已停止，不開唱。"

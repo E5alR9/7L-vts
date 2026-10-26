@@ -36,7 +36,7 @@ def test_replay_runs_the_inputs_through_the_dispatcher(tmp_path):
     out = asyncio.run(replay.replay(replay.load_inputs(_db(tmp_path)), settle=1.2))
     song, viewer, ask, again = (r for _, r in out)
     assert song["tools"] == [("pe.play_virtual_piano", {"song_name": "小星星"})]
-    assert any("彈小星星" in s for s in song["slips"]) and song["speech"]          # 罐頭應答講掉了
+    assert any("彈小星星" in s for s in song["slips"]) and song["speech"] == []    # 應答交給主腦，沒有罐頭應答
     assert any("小明" in s for s in viewer["slips"])                                # 看板轉給主腦
     assert ask["slips"] == ["[黑板同步] 老爸傳來文字訊息：7L 妳在嗎"]
     assert again["slips"] == [] and again["deduped"] == 1                          # 10 秒內同一張：去重

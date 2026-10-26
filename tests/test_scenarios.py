@@ -12,8 +12,8 @@ def run(coro):
 
 
 def test_dad_types_a_song_live_brain_up():
-    """老爸打字「彈小星星」，Live 在線：CPU 硬指令直接派給鋼琴（點播的是老爸）、罐頭應答排進說話佇列、
-    紙條照老爸身分給 Live 主腦。"""
+    """老爸打字「彈小星星」，Live 在線：CPU 硬指令直接派給鋼琴（點播的是老爸）、紙條照老爸身分給 Live 主腦。
+    應答交給主腦（2026-10-26 老爸決定拿掉罐頭應答，以前會答應兩次）。"""
     async def go():
         async with DryRun(live=True) as d:
             await d.dad("彈小星星")
@@ -21,7 +21,7 @@ def test_dad_types_a_song_live_brain_up():
             return d
     d = run(go())
     assert d.tools == [("pe.play_virtual_piano", {"song_name": "小星星"}, "dad", "老爸")]
-    assert any("小星星" in x["text"] for x in d.speech)                       # 罐頭應答
+    assert d.speech == []                                                     # 沒有罐頭應答，等主腦回
     dad_slips = [s for s in d.slips if s[1] == "dad"]
     assert dad_slips == [("[黑板同步] 老爸傳來文字訊息：彈小星星", "dad", "彈小星星", "")]
     assert any(m["content"] == "彈小星星" and m["role"] == "user" for m in d.memory)

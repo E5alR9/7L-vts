@@ -1047,38 +1047,9 @@ async def _doze_one_liner(hint: str) -> str:
     return line
 
 
-# ── 點歌強制應答（2026-10-10：CPU 直接執行時主腦常靜默，補一句保證出聲）──
-# 固定輪替（2026-10-11：Groq 現寫會編造「換衣服」這種幻覺，應答只求出聲+正確，不要文采）。
-# target 原樣透傳（dad 私訊照播，觀眾照播）。
-_SONG_ACK_IDX = 0
-_SONG_ACK_LINES = [
-    "好喔，《{song}》交給我，背景準備中，好了就唱給你聽！",
-    "收到，《{song}》！先去準備伴奏，馬上開唱～",
-    "《{song}》是吧，沒問題！先排進去，唱完手上這首就輪到它！",
-    "交給我，《{song}》正在找譜準備，稍等一下下！",
-    "《{song}》收到！背景開工中，準備好立刻開唱！",
-]
-# 彈琴用自己的一組：共用唱歌那組會說「好了就唱給你聽」（2026-10-24 實機）
-_PIANO_ACK_LINES = [
-    "好喔，《{song}》交給我，這就彈給你聽！",
-    "收到，《{song}》！琴譜翻好就開彈～",
-    "《{song}》是吧，沒問題，馬上彈！",
-]
-
-
-async def _song_ack(song: str, target: str = "dad", piano: bool = False):
-    global _SONG_ACK_IDX
-    song = (song or "這首").strip() or "這首"
-    lines = _PIANO_ACK_LINES if piano else _SONG_ACK_LINES
-    text = lines[_SONG_ACK_IDX % len(lines)].format(song=song)
-    _SONG_ACK_IDX += 1
-    try:
-        speech_queue.put_nowait({"text": text, "expression": "星星眼", "action": "",
-                                 "target": target, "priority": 90, "skip_if_singing": True})
-    except Exception:
-        log_swallowed()
-
-
+# ── 點歌的應答交給主腦（老爸 2026-10-26 決定）──
+# 以前 CPU 直接執行時補一句罐頭應答（主腦常靜默，保證出聲），主腦接著又答一次，變成「答應兩次」。
+# 現在主腦不回話會被看門狗撿回、換金鑰，罐頭應答拿掉；只留自創曲缺檔那句（主腦不知道檔案沒到）。
 async def _song_ack_missing_original(song: str, target: str = "dad"):
     """自創曲缺檔應答（2026-10-11）：檔沒到，別說排程了，直接請老爸丟檔。"""
     song = (song or "這首自創曲").strip() or "這首自創曲"
@@ -5736,14 +5707,10 @@ async def run_stage_commands(cmds: list, target: str = "dad", requester_name: st
             else:
                 _dispatch_in_background(_tool, _args, caller_target=target, caller_user=requester_name)
             _slip = build_slip_text(_tool, _args, requester_name)
-            if _slip and is_live_brain_active() and not from_brain:
+            if _slip and is_live_brain_active() and not from_brain and target != "audience":
                 send_brain_slip(_slip)
                 log_print(f"📥 [黑板同步] 透過紙條傳送給 Live 大腦: {_slip[:60]}...")
         _titles = "＋".join([a.get("song_name", "") for _, a in _mixed])
-        _same = len({a.get("song_name", "") for _, a in _mixed}) == 1
-        _ack_song = f"{_mixed[0][1].get('song_name', '')}（邊彈邊唱）" if _same else f"{_titles}（混用）"
-        if not from_brain:
-            spawn(_song_ack(_ack_song, target))
         return True, "mixed_play_sing", {"desc": _titles}
 
     fn_name, fn_args = cmds[0]
@@ -5773,17 +5740,14 @@ async def run_stage_commands(cmds: list, target: str = "dad", requester_name: st
     if fn_name == "pe.stop_virtual_piano" and not from_brain:
         _d_args = dict(fn_args or {}, force=True)   # 老爸親口說的：不受「剛拿出 3.5 秒」防護擋
     _dispatch_in_background(fn_name, _d_args, caller_target=target, caller_user=requester_name)
-    # 點歌強制應答：主腦常靜默，補一句 TTS 保證出聲（target 透傳，播出规则照舊）
-    if fn_name in ("auto_sing_song", "sing_song", "pe.play_virtual_piano", "play_virtual_piano") and not from_brain:
-        if _o_need_file:
-            spawn(_song_ack_missing_original((fn_args or {}).get("song_name", ""), target))
-        else:
-            spawn(_song_ack((fn_args or {}).get("song_name", ""), target,
-                            piano=fn_name in ("pe.play_virtual_piano", "play_virtual_piano")))
+    # 應答交給主腦（紙條請她口頭答應）；自創曲缺檔她不知道，這句照講
+    if _o_need_file and not from_brain:
+        spawn(_song_ack_missing_original((fn_args or {}).get("song_name", ""), target))
     # ⚠️ 紙條必須寫明「唱歌的是 7L 本人」，否則主腦會把點歌的人當成演唱者
     # （經加鎖紙條佇列投遞，避免跟麥克風音訊流搶通道）
+    # 觀眾點的不另遞：看板兩秒後會把那則留言轉給主腦，兩張紙條她會分兩輪各答一次（2026-10-26 實機）
     slip_text = build_slip_text(fn_name, fn_args, requester_name)
-    if slip_text and is_live_brain_active() and not from_brain:
+    if slip_text and is_live_brain_active() and not from_brain and target != "audience":
         send_brain_slip(slip_text)
         log_print(f"📥 [黑板同步] 透過紙條傳送給 Live 大腦: {slip_text[:60]}...")
     return True, fn_name, fn_args

@@ -42,7 +42,7 @@ _TREE = ast.parse(MAIN_SRC)
 # 從主程式原樣載入的函式（這一串的真實行為）
 MAIN_FUNCS = (
     "chat_processor_worker", "process_chat_message", "add_to_streamer_mind_board", "is_piano_song_request",
-    "background_tool_executor", "run_stage_commands", "_hard_cmd_seen_recently", "_song_ack", "_dispatch_in_background",
+    "background_tool_executor", "run_stage_commands", "_hard_cmd_seen_recently", "_dispatch_in_background",
     "send_brain_slip", "_unpack_slip", "_owner_text_slip", "_slip_is_dupe", "_record_slip",
     "_note_brain_origin", "_brain_requester", "_her_words_before", "_brain_replaying_old_request",
     "is_live_brain_active", "live_brain_down_for", "use_rest_brain",
@@ -55,7 +55,7 @@ MAIN_FUNCS = (
 # 從主程式原樣載入的常數
 MAIN_CONSTS = (
     "AUDIENCE_STAGE_DECLINE", "UNASKED_STAGE_DECLINE", "_SUBAGENT_VISION_TASK_RE", "_SUBAGENT_MIRROR_TASK_RE",
-    "_SUBAGENT_TOTAL_TIMEOUT", "_SONG_ACK_LINES", "_PIANO_ACK_LINES", "_HARD_CMD_DEDUPE_SEC",
+    "_SUBAGENT_TOTAL_TIMEOUT", "_HARD_CMD_DEDUPE_SEC",
     "_SLIP_DEDUPE_SEC", "LIVE_FALLBACK_AFTER_SEC", "VISION_REPORT_QUIET_SEC",
     "_BARE_PING_NAMES", "_PING_COOLDOWN_SEC", "_PING_QUIET_SEC", "_DESKTOP_TOOL_HINTS",
 )
@@ -176,7 +176,7 @@ class DryRun:
             "LIVE_SESSION_ACTIVE": self.live, "_LIVE_DOWN_SINCE": time.time() - (0 if self.live else 3600),
             "_BRAIN_INPUT_ORIGIN": {"who": "dad", "ts": 0.0, "said": "", "human": False, "name": ""},
             "eventlog": eventlog, "usage": usage, "_LIVE_SLIP_RETRY": collections.deque(),
-            "_VISION_STATE": {"report_ts": 0.0, "mirror_ts": 0.0}, "_PING_LAST_TS": {}, "_SONG_ACK_IDX": 0,
+            "_VISION_STATE": {"report_ts": 0.0, "mirror_ts": 0.0}, "_PING_LAST_TS": {},
             "_DESKTOP_DOWN_UNTIL": float("inf"),   # 桌機代答關掉
             "STREAMER_MIND_BOARD": [], "STREAMER_MIND_MODELS": ["m"], "REST_BRAIN_MODELS": ["m"],
             "REST_BRAIN_TOOLS": ["invoke_subagent"],

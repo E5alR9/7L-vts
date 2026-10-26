@@ -123,7 +123,7 @@ def _run_executor(text, target):
           "parse_hard_command": parse_hard_command, "build_slip_text": build_slip_text,
           "PIANO_CONTROL_TOOLS": PIANO_CONTROL_TOOLS, "STAGE_CONTROL_TOOLS": STAGE_CONTROL_TOOLS,
           "split_original_request": split_original_request, "is_stage_control": is_stage_control,
-          "execute_tool_dispatch": execute_tool_dispatch, "_song_ack": _song_ack, "spawn": __import__("core.utils", fromlist=["spawn"]).spawn,
+          "execute_tool_dispatch": execute_tool_dispatch, "_song_ack_missing_original": _song_ack, "spawn": __import__("core.utils", fromlist=["spawn"]).spawn,
           "is_live_brain_active": lambda: False, "LIVE_API_SYSTEM_PROMPT_QUEUE": collections.deque(),
           "eventlog": eventlog, "_HARD_CMD_DEDUPE_SEC": 20.0}
     for name in ("_hard_cmd_seen_recently", "_dispatch_in_background", "run_stage_commands", "background_tool_executor"):
@@ -159,12 +159,11 @@ def test_pause_resume_pause_is_not_blocked_by_dedupe():
         "pe.pause_virtual_piano", "pe.resume_virtual_piano", "pe.pause_virtual_piano"]
 
 
-def test_piano_ack_does_not_say_sing():
-    lines = next(ast.literal_eval(n.value) for n in TREE.body
-                 if isinstance(n, ast.Assign) and getattr(n.targets[0], "id", "") == "_PIANO_ACK_LINES")
-    assert lines and not any("唱" in l for l in lines)
-    src = ast.get_source_segment(MAIN, _fn("run_stage_commands"))   # 2026-10-25 執行段拆出來共用
-    assert "piano=fn_name in (" in src
+def test_no_canned_song_ack_brain_answers():
+    """點歌只留主腦回覆（老爸 2026-10-26 決定）：罐頭應答拿掉，只留自創曲缺檔那句。"""
+    assert "_SONG_ACK_LINES" not in MAIN and "_PIANO_ACK_LINES" not in MAIN
+    src = ast.get_source_segment(MAIN, _fn("run_stage_commands"))
+    assert "_song_ack_missing_original(" in src and "_song_ack(" not in src
 
 
 def test_replay_after_stop_is_not_killed_by_stale_heartbeat(monkeypatch):

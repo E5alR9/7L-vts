@@ -235,8 +235,7 @@ def test_expression_aliases_and_action_only_tags():
     assert "if not action_hit:" in src
 
 
-def test_stale_song_ack_is_skipped_once_singing():
-    assert '"skip_if_singing": True' in _src("_song_ack")
+def test_stale_speech_is_skipped_once_singing():
     assert 'item.get("skip_if_singing") and is_singing()' in _src("speech_queue_worker")
 
 
