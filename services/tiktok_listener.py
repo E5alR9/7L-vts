@@ -1,11 +1,8 @@
 import os
-import sys
 import time
 import asyncio
-import traceback
-import collections
 import re
-from core.utils import log_print, sys_notify, get_current_time_string
+from core.utils import log_print, sys_notify
 import services.piano_engine as pe
 
 try:
@@ -56,9 +53,9 @@ async def tiktok_live_worker(input_queue):
         import TikTokLive.client.ws.ws_connect as ws_connect
         import TikTokLive.client.ws.ws_client as ws_client
         from TikTokLive.events import (
-            ConnectEvent, CommentEvent, GiftEvent, LikeEvent, FollowEvent, 
-            ShareEvent, DisconnectEvent, LiveEndEvent, EmoteChatEvent, BarrageEvent,
-            JoinEvent, QuestionNewEvent, SubNotifyEvent, EnvelopeEvent, RoomUserSeqEvent
+            ConnectEvent, CommentEvent, GiftEvent, LikeEvent, FollowEvent, ShareEvent,
+            DisconnectEvent, LiveEndEvent, EmoteChatEvent, BarrageEvent, JoinEvent,
+            QuestionNewEvent, SubNotifyEvent, RoomUserSeqEvent,
         )
         from TikTokLive.client.errors import SignatureRateLimitError
 

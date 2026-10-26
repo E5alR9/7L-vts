@@ -16,7 +16,7 @@ r"""
     （transliterate_kana_to_zh，例：バカ → 巴卡）。
 
  介面：
-   await get_tts_audio_bytes(text)  ->  WAV/MP3 bytes（與原 get_xiaoyi_audio_bytes 相容）
+   await get_tts_audio_bytes(text)  ->  WAV/MP3 bytes
    get_active_engine()              ->  目前生效的引擎名稱（供儀表板/日誌）
 PROVIDER: LOCAL-cosyvoice/xiaoyi＋CLOUD-edge/elevenlabs/cloud_gptsovits（見 docs/AI_SOURCES.md）
 """
@@ -764,7 +764,3 @@ async def get_tts_audio_bytes(text: str) -> bytes:
             continue
     return b""
 
-
-# 向後相容：舊程式碼呼叫 get_xiaoyi_audio_bytes 也能運作
-async def get_xiaoyi_audio_bytes(text: str) -> bytes:
-    return await get_tts_audio_bytes(text)

@@ -103,11 +103,6 @@ GROQ_KEYS: List[str] = _load_keys()
 MODEL_LADDER: List[str] = _load_ladder()
 
 
-def groq_only() -> bool:
-    """Groq-only 降級模式（GROQ_ONLY=1）：Gemini 全滅時純 Groq 撐直播，不打 Gemini。
-    惰性讀取，控制台熱切換即生效（restart=False）。"""
-    return (os.getenv("GROQ_ONLY", "0") or "0").strip().lower() in ("1", "true", "yes")
-
 _clients: List[Any] = []
 _client_error: Optional[str] = None
 # 冷卻表：key -> 何時解除
@@ -499,81 +494,6 @@ async def groq_chat(
 
 
 # ── 自動工具多輪：模型呼叫工具 -> 執行 -> 回填結果再問一次 ─────────────────────
-async def groq_chat_auto(
-    messages: List[Dict[str, str]],
-    *,
-    tools: Optional[List[Any]] = None,
-    tool_executor=None,
-    max_rounds: int = 3,
-    timeout: float = 4.0,
-    temperature: float = 0.75,
-    max_tokens: int = 500,
-    models: Optional[List[str]] = None,
-) -> Optional[GroqResponse]:
-    """
-    自動完成 Function Calling 迴圈。
-
-    tool_executor: async fn(fn_name, fn_args) -> str（通常是 execute_tool_dispatch 的包裝）
-                   若為 None，則模型一呼叫工具就直接回傳（交給呼叫端決定）。
-    回傳：text = 各輪口語的串接；function_calls = 最後一輪的工具呼叫。
-    """
-    import json as _json
-
-    msgs: List[Dict[str, Any]] = list(messages)
-    text_parts: List[str] = []
-    last_fcs: List[_FunctionCall] = []
-    last_resp: Optional[GroqResponse] = None
-
-    for _round in range(max(1, max_rounds)):
-        resp = await groq_chat(
-            msgs, tools=tools, timeout=timeout,
-            temperature=temperature, max_tokens=max_tokens, models=models,
-        )
-        if resp is None:
-            break
-        last_resp = resp
-
-        if resp.text:
-            text_parts.append(resp.text)
-
-        if not resp.function_calls:
-            break
-        if tool_executor is None:
-            break  # 沒有執行器：原樣交回呼叫端
-
-        last_fcs = resp.function_calls
-        # 1) 追加 assistant 訊息（帶 wire 名稱與 tool_call id）
-        msgs.append({
-            "role": "assistant",
-            "content": resp.text or "",
-            "tool_calls": [
-                {
-                    "id": fc.call_id or f"call_{i}",
-                    "type": "function",
-                    "function": {"name": fc.wire_name, "arguments": _json.dumps(fc.args, ensure_ascii=False)},
-                }
-                for i, fc in enumerate(resp.function_calls)
-            ],
-        })
-        # 2) 逐個執行工具並回填 tool 結果
-        for fc in resp.function_calls:
-            try:
-                result = await tool_executor(fc.name, fc.args)
-            except Exception as e:
-                result = f"工具執行錯誤: {e}"
-            msgs.append({
-                "role": "tool",
-                "tool_call_id": fc.call_id or "",
-                "content": str(result)[:4000] if result is not None else "",
-            })
-
-    if last_resp is None:
-        return None
-
-    combined = "\n".join(t for t in text_parts if t and t.strip()).strip()
-    if not combined and not last_fcs:
-        return None
-    return GroqResponse(text=combined or None, function_calls=last_fcs, raw=last_resp.raw, model=last_resp.model)
 
 
 # ── Google GenAI 內容 -> OpenAI 訊息（純文字） ───────────────────────────────
@@ -619,7 +539,3 @@ def _note_failure(model: str, key: str, err: str):
         _model_cooldown[model] = now + 600.0
 
 
-# ── 同步便捷包裝（給非 async 場景用）─────────────────────────────────────────
-def chat_sync(*args, **kwargs) -> Optional[GroqResponse]:
-    """同步包裝：僅供測試腳本使用（會自行建立事件迴圈）"""
-    return asyncio.new_event_loop().run_until_complete(groq_chat(*args, **kwargs))

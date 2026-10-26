@@ -6,11 +6,9 @@
 - 支援任意執行緒呼叫 (自動關聯 Windows Input Desktop)
 """
 
-import os
-import sys
 import ctypes
 from ctypes import wintypes
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Any
 import psutil
 
 # 忽略的系統內部或無實質內容的隱形視窗

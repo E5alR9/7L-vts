@@ -81,7 +81,7 @@ def download_youtube_audio(song_query: str, output_wav: str) -> bool:
             "--max-filesize", "50M"
         ]
         try:
-            res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)  # 不指定會用 cp950 解 yt-dlp 的 UTF-8 輸出，讀取執行緒直接炸
+            subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)  # 不指定會用 cp950 解 yt-dlp 的 UTF-8 輸出，讀取執行緒直接炸
             for f in os.listdir(CACHE_DIR):
                 if f.startswith("temp_dl_") and f.endswith(".wav"):
                     src = os.path.join(CACHE_DIR, f)

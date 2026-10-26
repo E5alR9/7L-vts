@@ -10,13 +10,11 @@
 不翻 sys.modules["__main__"]）。用到的名稱全列在 CORE_ATTRS，tests/test_dashboard_bridge.py
 會核對主程式真的都有定義——主程式改名或刪變數，測試先紅。
 """
-import asyncio
-import os
 import re
 import time
 
 import core.stage_state as stage
-from core.utils import log_print, get_silence_ticks, get_uptime_ticks, format_ticks_to_human, spawn
+from core.utils import log_print, get_silence_ticks, get_uptime_ticks, format_ticks_to_human
 
 _TAG_RE = re.compile(r"\[[A-Z_]+(?:[:：][^\]]*)?\]")   # 回給後台顯示前拿掉 [EXPRESSION: …] 這類標籤
 

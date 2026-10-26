@@ -4,10 +4,7 @@ import time
 import asyncio
 import random
 import math
-import base64
 import subprocess
-import urllib.parse
-import aiohttp
 import numpy as np
 import pygame
 import core.stage_state as stage
@@ -91,7 +88,6 @@ def _desktop_sensor():
     except Exception:
         return None
 
-from services.vts_client import apply_spatial_position
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 os.makedirs(DATA_DIR, exist_ok=True)
@@ -121,12 +117,6 @@ def get_current_speaking_target() -> str:
     """當前說話對象（主程式交進來的；沒綁就用本模組自己記的），預設 dad。"""
     fn = _HOST["get_speaking_target"]
     return (fn() if fn else CURRENT_SPEAKING_TARGET) or "dad"
-
-def is_system_overloaded():
-    return False
-
-async def execute_local_python_code(*args, **kwargs):
-    pass
 
 
 # ────────────────────────────────────────────────────────
@@ -1350,10 +1340,6 @@ async def play_midi_band(midi_path: str, band_map: dict = None, speed: float = 1
         is_piano_active = True
         current_piano_song_title = title
         current_piano_midi_file = midi_path
-    try:
-        from services.piano_engine import SOUND_ENGINE as _SE  # noqa (self-ref safe)
-    except Exception:
-        log_swallowed()
     # ── 疊層合併：主檔＋layers 多首同時合奏（通道平移避撞，鼓 ch9 永不平移）──
     def _remap(ch, shift):
         if ch == 9:

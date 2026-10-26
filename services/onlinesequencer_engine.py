@@ -16,7 +16,7 @@ OnlineSequencer.net MIDI 搜尋與下載引擎
 - 標題無法從靜態 HTML 取得時，以搜尋詞作為檔名
 """
 
-import os, re, time, json, subprocess, urllib.parse, sys, base64
+import os, re, time, json, subprocess, urllib.parse, sys
 import requests
 from core.env_config import load_project_env
 

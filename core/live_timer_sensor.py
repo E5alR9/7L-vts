@@ -1,8 +1,7 @@
-import asyncio
 import time
 import re
 from typing import Dict, Any, List, Optional, Tuple
-from core.utils import log_print, get_current_time_string, get_uptime_ticks, format_ticks_to_human
+from core.utils import log_print, get_uptime_ticks, format_ticks_to_human
 
 CN_NUM = {
     '零': 0, '一': 1, '二': 2, '兩': 2, '三': 3, '四': 4,

@@ -1,17 +1,11 @@
 import re
-import random
-import sys
 import os
 import json
 import difflib
 from typing import Tuple
 
 # Project imports
-from core.utils import log_print, get_current_time_string, get_unified_time_prompt, get_silence_ticks, get_uptime_ticks, format_ticks_to_human
 from core.lang import has_kana
-import services.piano_engine as pe
-from services.piano_engine import get_piano_realtime_prompt
-from mic_live_plugin import os_desktop_sensor
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
 

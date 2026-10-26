@@ -7,7 +7,6 @@ import os
 import sys
 import time
 import traceback
-import numpy as np
 import soundfile as sf
 import torch
 import librosa
@@ -34,7 +33,7 @@ try:
         sys.modules["tools.cuda_graph"] = _cg_mod
         if "tools" in sys.modules:
             setattr(sys.modules["tools"], "cuda_graph", _cg_mod)
-except Exception as _e:
+except Exception:
     pass
 
 from infer.module.models import SynthesizerTrnMs768NSFsid

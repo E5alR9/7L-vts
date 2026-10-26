@@ -16,7 +16,6 @@
 """
 
 import os
-from typing import Optional
 
 # 原作者家目錄（僅作為最後 fallback，讓原機器行為不變）
 _LEGACY_USER = r"C:\Users\qiwai"
@@ -30,7 +29,6 @@ def _resolve(env_name: str, *candidates: str) -> str:
     if val:
         return os.path.expandvars(os.path.expanduser(val))
 
-    home = os.path.expanduser("~")
     existing = [c for c in candidates if c and os.path.exists(c)]
     if existing:
         return existing[0]

@@ -15,7 +15,6 @@ PROVIDER: LOCAL（demucs htdemucs_6s＋librosa；見 docs/AI_SOURCES.md）。
 import os
 import subprocess
 import sys
-import time
 
 import numpy as np
 

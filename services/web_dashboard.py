@@ -3,7 +3,6 @@ import base64
 import json
 import os
 import time
-import re
 from typing import Set, Dict, Any, Optional
 from aiohttp import web
 

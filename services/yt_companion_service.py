@@ -15,8 +15,6 @@
      自動調用這份影片記憶，用她自己的聲音自然回答主人！
 """
 
-import os
-import sys
 import time
 import asyncio
 import io
@@ -25,7 +23,7 @@ import warnings
 from collections import deque
 from datetime import datetime
 import numpy as np
-from PIL import Image, ImageGrab
+from PIL import ImageGrab
 
 # 徹底過濾底層音訊警告
 warnings.filterwarnings("ignore")

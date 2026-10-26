@@ -135,7 +135,6 @@ _dotenv.load_dotenv = _load_dotenv_then_override
 _dotenv.load_dotenv(os.path.join(ROOT, ".env"), override=True)   # 跟主程式一樣先讀 .env，金鑰模組才不會空著初始化
 if _SIM_OVERRIDES:
     print(f"🧪 [測試包裝] 覆寫 {_SIM_OVERRIDES}", flush=True)
-import services.piano_engine as _pe_dbg
 
 # 老爸不讓測試看他的螢幕（2026-10-26）：所有截圖入口在主程式啟動前換成「不截圖」。
 # 主程式、後台都從 services.screen_capture 拿畫面（用到才 import，所以換模組屬性就生效）；YT 伴看用 PIL.ImageGrab。

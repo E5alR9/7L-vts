@@ -10,7 +10,6 @@ import os
 import re
 import json
 import base64
-import time
 import asyncio
 from typing import Dict, Any, Optional, List
 import core.websocket_patch  # 🔧 自動修復 Live API additional_headers 相容性

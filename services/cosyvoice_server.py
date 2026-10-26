@@ -21,7 +21,6 @@ import io
 import json
 import os
 import sys
-import threading
 import time
 import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer

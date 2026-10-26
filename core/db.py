@@ -3,10 +3,7 @@ import json
 import time
 import asyncio
 import aiohttp
-import copy
 from typing import Any, Optional
-from datetime import datetime
-from zoneinfo import ZoneInfo
 from core.utils import log_print
 
 QUOTA_EXCEEDED = False

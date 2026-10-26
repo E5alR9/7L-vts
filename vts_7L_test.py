@@ -63,7 +63,7 @@ except ImportError:
 from google.genai import types
 from services.twitch_listener import twitch_live_worker
 from services.youtube_live_listener import youtube_live_worker
-from services.auto_cover_pipeline import produce_and_sing_cover, stop_singing, request_cover_song, is_song_active
+from services.auto_cover_pipeline import stop_singing, request_cover_song, is_song_active
 import services.auto_cover_pipeline as auto_cover
 import services.web_dashboard as web_dash
 from PIL import BmpImagePlugin  # noqa: F401  註冊 BMP 外掛（打包環境不會自動載入）
@@ -83,9 +83,7 @@ import json
 import base64
 import pyautogui
 import speech_recognition as sr
-import math
 import random
-import wave
 import numpy as np
 import soundcard as sc
 import psutil
@@ -97,7 +95,7 @@ from collections import deque
 import shutil
 import platform
 import warnings
-from datetime import datetime, timedelta
+from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import ctypes
@@ -172,9 +170,8 @@ if sys.platform == "win32":
         pass
 
 from core.utils import (
-    log_print, log_swallowed, sys_notify, get_current_time_string,
-    record_interaction_tick, get_silence_ticks,
-    speech_allowed, operator_input_enabled, to_tw, spawn
+    log_print, log_swallowed, get_current_time_string, record_interaction_tick, get_silence_ticks,
+    speech_allowed, operator_input_enabled, to_tw, spawn,
 )
 from core.identity import is_owner_account, claims_owner_identity
 import core.stage_state as stage
@@ -182,9 +179,13 @@ from core import usage, promptkit
 from core import eventlog
 from core.speech_queue import SpeechQueue
 from core.barge_in import BargeInDetector
-from core.hard_command import asks_to_remember_model_position, parse_hard_command, build_slip_text, display_requester, parse_slip_for_song, strip_blob_noise, sanitize_search_query, rescue_claim, split_original_request, PIANO_CONTROL_TOOLS, STAGE_CONTROL_TOOLS, is_stage_control, structured_stage_command, PLAY_TOOLS, stage_request_unasked
+from core.hard_command import (
+    asks_to_remember_model_position, parse_hard_command, build_slip_text, display_requester,
+    parse_slip_for_song, strip_blob_noise, sanitize_search_query, rescue_claim,
+    split_original_request, PIANO_CONTROL_TOOLS, is_stage_control, structured_stage_command,
+    PLAY_TOOLS, stage_request_unasked,
+)
 from core.subagent_router import resolve_subagent_chain
-from core.db import *
 from core.live_timer_sensor import live_timer_hub
 import services.piano_engine as pe
 from services.web_search import TAVILY_KEYS, tavily_client, search_google, summarize_search_to_speech
@@ -194,26 +195,21 @@ from services.stage_actions import (parse_action_timeline, execute_action_timeli
                                    execute_speech_visual_actions, expression_keeper_worker)
 import services.yt_companion_service as yt_comp
 from core.llm_engine import (
-    GEMINI_KEYS,
-    GEMINI_MODELS, IMAGE_GEN_MODELS, LIVE_MODEL, LIVE_MAIN_MODELS,
-    AUDIO_MODEL,
-    KEYS_AUDIENCE_LIVE,
-    KEYS_VISION,
-    STREAMER_MIND_MODELS, REST_BRAIN_MODELS,
-    HIGH_IQ_GEMINI_MODELS,
-    GROQ_CLIENTS,
-    get_dynamic_live_key_candidates,
-    track_key, sort_keys_by_load,
-    key_cooling,
-    report_gemini_key_error,
-    live_one_shot,
-    KEYS_MIC_LIVE, KEYS_PROACTIVE, KEYS_DAD_MAIN,
-    API_LOCKS, save_api_locks, is_locked,
-    UNRESTRICTED_SAFETY_SETTINGS
+    GEMINI_KEYS, GEMINI_MODELS, IMAGE_GEN_MODELS, LIVE_MODEL, LIVE_MAIN_MODELS, KEYS_AUDIENCE_LIVE,
+    KEYS_VISION, STREAMER_MIND_MODELS, REST_BRAIN_MODELS, HIGH_IQ_GEMINI_MODELS, GROQ_CLIENTS,
+    get_dynamic_live_key_candidates, track_key, sort_keys_by_load, key_cooling,
+    report_gemini_key_error, live_one_shot, KEYS_MIC_LIVE, KEYS_PROACTIVE, KEYS_DAD_MAIN,
+    UNRESTRICTED_SAFETY_SETTINGS,
 )
 from core.input_sources import (parse_input_item, classify, sleep_wake_decision, live_speech_wakes, is_operator,
                                 VIEWER_SOURCES, WAKE_WORDS)
-from core.memory import init_unified_memory, flush_unified_memory, fetch_from_long_term_memory, save_to_long_term_memory, append_to_unified_memory, clear_all_memories, get_recent_100_memory_context, get_viewer_profile, save_viewer_profile, record_bot_message, get_cloud_knowledge, update_cloud_prompt_field, STREAMER_MIND_BOARD, DEFAULT_CHANNEL_ID, save_cloud_knowledge, get_unified_memory_context, RECENT_BOT_MESSAGES, USER_PROFILE_FILE
+from core.memory import (
+    init_unified_memory, flush_unified_memory, fetch_from_long_term_memory,
+    save_to_long_term_memory, append_to_unified_memory, clear_all_memories,
+    get_recent_100_memory_context, get_viewer_profile, save_viewer_profile, record_bot_message,
+    get_cloud_knowledge, update_cloud_prompt_field, STREAMER_MIND_BOARD, DEFAULT_CHANNEL_ID,
+    get_unified_memory_context, RECENT_BOT_MESSAGES, USER_PROFILE_FILE,
+)
 
 
 
@@ -2991,11 +2987,6 @@ async def build_brain_system_prompt(owner: str, char_name: str) -> str:
     from core.identity import get_mode
     return promptkit.brain_system(owner, char_name, await get_cloud_knowledge(), vc.EXPRESSION_MENU_TEXT, mode=get_mode())
 
-
-def load_prompt(filename: str, **kwargs) -> str:
-    """讀 prompts/*.md 並代入變數（core/promptkit.py）。"""
-    return promptkit.load_prompt(filename, **kwargs)
-
 async def instinct_live_worker():
     """身體本能守護進程：常駐接收音訊，平行輸出動作與表情 (權限低於主腦意識)"""
     global INSTINCT_LIVE_SESSION
@@ -5547,7 +5538,7 @@ async def nv_interpret_task(task_ins: str, target: str = "dad", requester_name: 
         chain = resolve_subagent_chain()
         if not chain:
             return "miss", ""
-        system_instruction_text = load_prompt("7L_subagent.md")
+        system_instruction_text = promptkit.subagent_system()
         # —— 第一棒：工具判定（按鏈順序）——
         fn_name, fn_args = None, {}
         for _brain in chain:

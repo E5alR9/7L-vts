@@ -14,7 +14,6 @@
     pcm = bank.render_note(bank_no, program, midi, velocity, duration, sr=44100)
     bank.render_track(events, sr)            # [(sec, midi, vel, dur)] → mono float32
 """
-import os
 import struct
 
 import numpy as np

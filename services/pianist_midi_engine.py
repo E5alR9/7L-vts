@@ -14,10 +14,8 @@ import os
 import sys
 import re
 import subprocess
-import urllib.parse
 import json
-import requests
-from typing import Optional, Tuple
+from typing import Optional
 from core.env_config import load_project_env
 
 try:

@@ -1,5 +1,6 @@
 """2026-10-24 子智能體審查修正的回歸測試：
 非阻塞回報的排程（中間回應＋最後結果）、深思答案解析、NV 換模型與 404 停用、深思順序 Gemini 先、轉述保留事實、整段限時。"""
+from types import SimpleNamespace
 import ast
 import asyncio
 import os
@@ -160,7 +161,7 @@ def test_audience_turn_cannot_stop_the_stage_through_the_subagent():
         return "pe.stop_virtual_piano", {}
     from core.utils import spawn
     ns = _load("nv_interpret_task", "_dispatch_in_background", spawn=spawn, asyncio=asyncio, resolve_subagent_chain=lambda: ["gemini"],
-               load_prompt=lambda n: "", execute_tool_dispatch=dispatch, is_stage_control=is_stage_control,
+               promptkit=SimpleNamespace(subagent_system=lambda: ""), execute_tool_dispatch=dispatch, is_stage_control=is_stage_control,
                build_slip_text=build_slip_text, _gemini_tool_pass=tool_pass,
                AUDIENCE_STAGE_DECLINE=_const("AUDIENCE_STAGE_DECLINE"))
 
@@ -212,7 +213,7 @@ def _interpret(chain, calls, tool=(None, None), gemini_think=("advice", "[答案
             return result
         return f
 
-    ns = _load("nv_interpret_task", asyncio=asyncio, resolve_subagent_chain=lambda: chain, load_prompt=lambda n: "",
+    ns = _load("nv_interpret_task", asyncio=asyncio, resolve_subagent_chain=lambda: chain, promptkit=SimpleNamespace(subagent_system=lambda: ""),
                _gemini_tool_pass=mk("gemini_tool", tool), _nv_tool_pass=mk("nv_tool", tool),
                _gemini_think_pass=mk("gemini_think", gemini_think), _nv_think_pass=mk("nv_think", nv_think))
     return asyncio.run(ns["nv_interpret_task"]("想一個老媽生日的驚喜點子"))
@@ -236,7 +237,7 @@ def test_search_result_is_a_report_to_be_spoken():
 
     rule = _const("_SUBAGENT_RELAY_RULE")
     ns = _load("nv_interpret_task", "_subagent_report_text", asyncio=asyncio, resolve_subagent_chain=lambda: ["gemini"],
-               load_prompt=lambda n: "", execute_tool_dispatch=dispatch, summarize_search_to_speech=summarize,
+               promptkit=SimpleNamespace(subagent_system=lambda: ""), execute_tool_dispatch=dispatch, summarize_search_to_speech=summarize,
                _SUBAGENT_RELAY_RULE=rule)
 
     async def tool_pass(*a, **k):
