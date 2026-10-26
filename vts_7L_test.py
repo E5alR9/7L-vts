@@ -1391,6 +1391,8 @@ async def get_user_profile():
 # ────────────────────────────────────────────────────────
 #  6. 本機沙盒、AI 畫圖、麥克風開關、回音判斷
 # ────────────────────────────────────────────────────────
+# 讓她在本機跑 Python 程式碼：直播場景等於「遠端可執行任意本機碼」（後台 /api/tools/execute 也走這裡），預設關
+ALLOW_LOCAL_PYTHON_CODE = False
 PLAYGROUND_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "7L_Playground")
 os.makedirs(PLAYGROUND_DIR, exist_ok=True)
 
@@ -1430,10 +1432,8 @@ def _run_subprocess_code(file_path: str, timeout: int = 3) -> str:
 
 async def execute_local_python_code(code_string: str) -> str:
     """在 7L 專屬的本機遊樂場 (7L_Playground) 儲存並執行 Python 程式碼"""
-    #  安全預設：關閉（直播場景等於「遠端可執行任意本機碼」，且 Web 控制台的
-    #    /api/tools/execute 也走這裡）。要恢復需顯式設環境變數 ALLOW_LOCAL_PYTHON_CODE=1。
-    if os.getenv("ALLOW_LOCAL_PYTHON_CODE", "0").strip().lower() not in ("1", "true", "yes"):
-        print("🛑 [安全攔截] execute_local_python_code 已停用（需 ALLOW_LOCAL_PYTHON_CODE=1 才開放）")
+    if not ALLOW_LOCAL_PYTHON_CODE:   # 開關在本段開頭
+        log_print("🛑 [安全攔截] execute_local_python_code 已停用（要開就把 ALLOW_LOCAL_PYTHON_CODE 改成 True）")
         return ("安全限制：本機代碼執行功能目前已停用。"
                 "請改用現有工具達成需求（search_google / 鋼琴 / generate_ai_image / set_timer 等）。")
     print("\n💻 [Tool 調用] 7L 正在本機沙盒 (7L_Playground) 執行 Python 程式碼...")
@@ -2529,6 +2529,14 @@ import workers.mic_volume as mic_volume  # 麥克風音量表（搬出主檔）
 mic_volume.bind(sys.modules[__name__])
 from workers.mic_volume import mic_volume_worker
 
+# 舊 STT（Live 斷線時的麥克風備援）的門檻
+MIC_PHRASE_TIME_LIMIT = 30.0      # 單次發話上限（秒），長句或中途思考不被截斷
+MIC_MIN_RMS_THRESHOLD = 250.0     # 錄到的聲音比這小就當底噪丟掉
+MIC_ENERGY_THRESHOLD = 500        # 自動校準後的能量門檻下限（以前 .env 設 500）
+MIC_PAUSE_THRESHOLD = 2.5         # 停頓多久算講完（秒）
+MIC_NON_SPEAKING_DURATION = 0.8
+
+
 def listen_once_fast(recognizer, wait_sec=None):
     """wait_sec：等多久沒人開口就先回空的（呼叫端好回頭看 Live 回來了沒）；None 一直等。"""
     global is_user_listening, listen_start_time, current_mic_action_str
@@ -2540,8 +2548,7 @@ def listen_once_fast(recognizer, wait_sec=None):
         with sr.Microphone() as source:
             is_user_listening = True
             listen_start_time = time.time()
-            #  純 VAD 語音活動偵測：單次發話上限提高至 30 秒（支援環境變數 MIC_PHRASE_TIME_LIMIT），避免長句或中途思考被強制截斷
-            phrase_limit = float(os.getenv("MIC_PHRASE_TIME_LIMIT", "30.0"))
+            phrase_limit = MIC_PHRASE_TIME_LIMIT
             audio = recognizer.listen(source, timeout=wait_sec, phrase_time_limit=phrase_limit)
             
         is_user_listening = False
@@ -2554,7 +2561,7 @@ def listen_once_fast(recognizer, wait_sec=None):
                 pcm_arr = np.frombuffer(raw_pcm, dtype=np.int16)
                 if len(pcm_arr) > 0:
                     pcm_rms = float(np.sqrt(np.mean(np.square(pcm_arr.astype(np.float32)))))
-                    min_rms = float(os.getenv("MIC_MIN_RMS_THRESHOLD", "250"))
+                    min_rms = MIC_MIN_RMS_THRESHOLD
                     if pcm_rms < min_rms:
                         # 音量低於閥值，判定為環境微弱雜訊或按鍵/呼吸聲，直接捨棄避免誤觸發
                         return ("", None)
@@ -3746,7 +3753,7 @@ async def mic_worker(recognizer, input_queue):
             calibrated = True
             #  麥克風音量閥值初始化：避免安靜環境下自動將 energy_threshold 調得過低
             try:
-                min_energy = int(os.getenv("MIC_ENERGY_THRESHOLD", "600"))
+                min_energy = MIC_ENERGY_THRESHOLD
                 def _calibrate():
                     with sr.Microphone() as source:
                         recognizer.adjust_for_ambient_noise(source, duration=0.5)
@@ -5435,7 +5442,7 @@ async def nv_interpret_task(task_ins: str, target: str = "dad", requester_name: 
     """A 架構子智能體（副腦兩棒制，用腦可配）：
     第一棒「工具判定」（temp 0 + tools）：是硬指令就派發；
     第二棒「深度思考」（temp 0.8、無 tools）：第一棒沒叫工具時，讓副腦真正當大腦想一次。
-    用腦順序看環境變數 SUBAGENT_BRAIN（熱切換免重啟，預設 auto；見 core/subagent_router.py）：
+    用腦順序看 core/subagent_router.SUBAGENT_BRAIN（預設 auto）：
       auto   = 兩棒都是 Gemini 先、NV 備援（NV 推理模型深度思考要 60 秒，即時對話等不起）
       nv     = 全走 NV（舊行為，不碰 Gemini 一滴）
       gemini = 全走 Gemini（不碰 NV 一滴，NV 額度全留）
@@ -5798,6 +5805,7 @@ def _likely_needs_tools(text: str) -> bool:
     return any(k in t for k in _DESKTOP_TOOL_HINTS)
 
 
+DESKTOP_FIRST = True   # 老爸打字閒聊先給免費的桌面版 Gemini 答（CPU 沒命中、沒工具味時）；False＝一律交給主腦
 _DESKTOP_DOWN_SEC = 300.0
 _DESKTOP_DOWN_UNTIL = 0.0
 
@@ -5871,12 +5879,12 @@ async def process_chat_message(vts, input_queue, user_input: str, user_audio_b64
             spawn(background_tool_executor(user_input, target="dad", requester_name=owner))
             #  2026-10-11 桌機代答：CPU 沒命中＋沒工具味 → 免費桌面版回話，省 Live 生成。
             #  工具味/未知/CPU 命中一律走老路（寧可多燒，不靜默丟功能）；桌面掛了也走老路。
-            #  開關：DESKTOP_FIRST=0 關（預設開）。mic/觀眾軌不動。
+            #  開關：DESKTOP_FIRST（模組常數，預設開）。mic/觀眾軌不動。
             try:
                 _cpu_tool, _ = parse_hard_command(user_input)
             except Exception:
                 _cpu_tool = None
-            _desk_on = os.getenv("DESKTOP_FIRST", "1").strip() != "0" and time.time() >= _DESKTOP_DOWN_UNTIL
+            _desk_on = time.time() >= _DESKTOP_DOWN_UNTIL and DESKTOP_FIRST
             if _desk_on and not _cpu_tool and not _likely_needs_tools(user_input):
                 spawn(_desktop_dad_reply(vts, input_queue, user_input, owner))
                 log_print("📱 [桌機代答] 純閒聊走免費桌面版（省 Live 生成）。")
@@ -6557,11 +6565,10 @@ async def main():
         spawn(vts_health_worker(vts))
 
     recognizer = sr.Recognizer()
-    #  語音結束停頓判定：由原 1.2 秒延長至 2.5 秒，避免稍微停頓思考就被切斷（可透過 .env 中的 MIC_PAUSE_THRESHOLD 自由調整）
-    recognizer.pause_threshold = float(os.getenv("MIC_PAUSE_THRESHOLD", "2.5"))
+    recognizer.pause_threshold = MIC_PAUSE_THRESHOLD   # 門檻都在 listen_once_fast 上面
     recognizer.energy_threshold = 300
     recognizer.dynamic_energy_threshold = True
-    recognizer.non_speaking_duration = float(os.getenv("MIC_NON_SPEAKING_DURATION", "0.8"))
+    recognizer.non_speaking_duration = MIC_NON_SPEAKING_DURATION
 
     global input_queue
     input_queue = asyncio.Queue()

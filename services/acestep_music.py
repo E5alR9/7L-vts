@@ -26,12 +26,15 @@ OUT_DIR = os.path.join(ROOT_DIR,
 os.makedirs(OUT_DIR, exist_ok=True)
 
 
+ACESTEP_TIMEOUT = 600.0   # 生一首歌最多等幾秒
+
+
 def _cfg():
     return {
         "enabled": (os.getenv("ACESTEP_ENABLED", "0") or "0").strip().lower() in ("1", "true", "yes"),
         "url": (os.getenv("ACESTEP_URL") or "http://127.0.0.1:7865").rstrip("/"),
         "gen_path": (os.getenv("ACESTEP_GEN_PATH") or "/api/v1/generate").strip() or "/api/v1/generate",
-        "timeout": float(os.getenv("ACESTEP_TIMEOUT") or "600"),
+        "timeout": ACESTEP_TIMEOUT,
     }
 
 

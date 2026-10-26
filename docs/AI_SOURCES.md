@@ -11,7 +11,7 @@
 | 背景純文字（定時提醒／搜尋提煉／鋼琴過場碎念） | GROQ | 同上梯隊（一律 `groq_chat`） | 同上 | 同上 | **2026-10-09 起全程零 Gemini**；失敗走本地離線摘要器／固定備援句／安靜不說話 |
 | 主腦深度推理 | GEMINI | 3.8-flash → 3.7 → 3.6 → 3.5 → 3-flash-preview → lite 系（`core/llm_engine.py`，pro-preview 已因 0 配額踢除） | `GEMINI_API_KEYS`×35，分池（觀眾／心流／視覺／主腦） | 旗艦 RPD 20／天／key；lite RPM 15／RPD 500 | 高頻一律 lite |
 | Live 全雙工（觀眾回覆／心流串流） | GEMINI-LIVE | **gemini-3.8-live**（舊 3.1-preview 已遷移，表上消失） | 同上（動態跨池備援） | RPM／RPD Unlimited，TPM 65K | 7x24 成立 |
-| Live 子智能體（工具判定＋深度思考） | GEMINI＋NVIDIA | 兩棒都 Gemini 先、NV 備援（`SUBAGENT_BRAIN`=auto 預設；可切 nv／gemini，`core/subagent_router.py`）；NV 模型 Nemotron-3-Ultra-550B（`_NV_SUBAGENT_MODEL`），回 404 停用 10 分鐘 | `NV_API_KEYS`×3／GEMINI keys | NV 推理模型深思要 60 秒，只當備援；舊的 Super-120B 已 404 | 2026-10-24 |
+| Live 子智能體（工具判定＋深度思考） | GEMINI＋NVIDIA | 兩棒都 Gemini 先、NV 備援（`core/subagent_router.SUBAGENT_BRAIN`=auto 預設；可改 nv／gemini）；NV 模型 Nemotron-3-Ultra-550B（`_NV_SUBAGENT_MODEL`），回 404 停用 10 分鐘 | `NV_API_KEYS`×3／GEMINI keys | NV 推理模型深思要 60 秒，只當備援；舊的 Super-120B 已 404 | 2026-10-24 |
 | 視覺看圖（餘光／截圖／抽幀） | GEMINI-VISION | 3.1-flash-lite → 3.6-flash（`get_lightweight_gemini_vision`） | KEYS_VISION（keys 12:18） | lite RPD 500 | 黑屏檢測防幻覺 |
 | 生圖 | GEMINI-IMAGE | Nano Banana 系（2.5-image → 3.1-image → pro-image） | 同上 | ⚠️ 全系 0／0／0，現降級中 | 有配額前不可用 |
 | 本地第四條腿（規劃） | GEMMA | Ollama gemma3:4b（視覺＋128K）／3n E4B（影音圖文， transformers 路） | 無 key，本地 GPU | 無 | 伴侶隱私模式＋視覺初篩 |
@@ -25,17 +25,16 @@
 | TTS 主力 | LOCAL＋CLOUD | `TTS_ENGINE` 預設 cloud_gptsovits，備援 `TTS_FALLBACK` 預設曉伊 GPT-SoVITS；cosyvoice／edge／elevenlabs 選配（`services/tts_router.py` 引擎鏈） | `TTS_ENGINE`／`TTS_FALLBACK`／`COSYVOICE_URL` | 無 | 120 秒自動升級回鏈首 |
 | TTS 備援 | CLOUD | edge-tts（微軟）／elevenlabs（月 10K 字元守衛） | `ELEVENLABS_API_KEY` | RPD 10（Gemini TTS 系同） | Gemini 3.8-flash-tts 系可追加進鏈 |
 | mic 快覽 | GOOGLE-WEB-SPEECH | `recognize_google(zh-TW)`（`listen_once_fast`） | 無 | 非官方 | 深層理解走 Gemini Live audio_b64 |
-| 系統音／轉錄備援 | LOCAL-faster-whisper | `services/stt.py`（`STT_BACKEND=auto`，small／CPU int8） | 無 | 無 | Google 失敗自動退本地 |
-| 本地第四條腿 | LOCAL-Ollama | `services/gemma_local.py`（gemma3:4b 文字視覺） | `GEMMA_ENABLED`（預設 0） | 無 | 伴侶隱私＋視覺初篩；無服務不炸 |
+| 系統音／轉錄備援 | LOCAL-faster-whisper | `services/stt.py`（`STT_BACKEND = "auto"`，small／CPU int8） | 無 | 無 | Google 失敗自動退本地 |
 
 ## 記憶／檢索／搜尋
 
 | 用途 | PROVIDER | 後端 | 備註 |
 |---|---|---|---|
 | RAG 向量庫 | LOCAL | chromadb（`data/rag/chroma`，collection 按模式切開：`knowledge_companion`／`knowledge_vtuber`，重建不相容舊） | `scripts/ingest_rag.py --reset` 重建 |
-| 文字嵌入 | LOCAL-fastembed／GEMINI-備援 | bge-small-zh-v1.5（130MB 離線）／`gemini-embedding-001`（`RAG_EMBED_BACKEND` 可切） | 圖影音幀走 `embedding-2-preview`（100 RPM／1K RPD） |
+| 文字嵌入 | LOCAL-fastembed／GEMINI-備援 | bge-small-zh-v1.5（130MB 離線）／`gemini-embedding-001`（`services/embedder.EMBED_BACKEND` 可切） | 圖影音幀走 `embedding-2-preview`（100 RPM／1K RPD） |
 | 上下文組裝（規劃） | LOCAL | 對標 groq-router：fold 摘要＋recent-2＋向量 top-k（0.15＋60％門檻、上限 4 段、時間序）＋ITPM 收斂器 | 解 Groq 7K ITPM |
-| 點播看全片 | LOCAL＋GEMINI-VISION＋GROQ | `services/video_watch.py`（captions→音軌轉錄→抽幀看圖→Groq 摘要→記憶＋看板，source=`video_watch`） | 單片上限 `VIDEO_WATCH_MAX_MIN`（預設 30 分） |
+| 點播看全片 | LOCAL＋GEMINI-VISION＋GROQ | `services/video_watch.py`（captions→音軌轉錄→抽幀看圖→Groq 摘要→記憶＋看板，source=`video_watch`） | 單片上限 `VIDEO_WATCH_MAX_MIN`（模組常數，30 分） |
 | 聯網搜尋 | TAVILY／LOCAL-SCRAPE | `tavily`×10 key（⚠️ 額度已爆）／`search_google` 無 API 爬蟲 | Tavily 爆時自動退爬蟲 |
 | 每日日記濃縮 | GROQ | 只剩舊 `7L.py` 機器人有（主程式那份從沒被呼叫，2026-10-25 刪除） | 2026-10-25 |
 | 點歌意圖 JSON 解析 | GROQ-primary | `pe.resolve_piano_intent_by_ai` 走 `groq_chat`（temp 0.1）；Gemini 高 IQ 梯隊僅 Groq 全滅時兜底 | 2026-10-09 |

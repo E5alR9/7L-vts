@@ -2,10 +2,10 @@
 """
 🎙️ STT 轉錄器 (PROVIDER: GOOGLE-WEB-SPEECH 為主／LOCAL faster-whisper 為備；見 docs/AI_SOURCES.md)
 
-    STT_BACKEND=auto    預設：Google 免費端點先，失敗退本地 faster-whisper
-    STT_BACKEND=google  只用 Google（舊行為）
-    STT_BACKEND=faster  只用本地（離線、零額度、中文用 small 模型兼顧品質）
-    STT_FWHISPER_MODEL=tiny|base|small|medium（預設 small；CPU int8）
+    STT_BACKEND = auto    預設：Google 免費端點先，失敗退本地 faster-whisper
+                  google  只用 Google（舊行為）
+                  faster  只用本地（離線、零額度、中文用 small 模型兼顧品質）
+    STT_FWHISPER_MODEL = tiny|base|small|medium（預設 small；CPU int8）
 """
 import io
 import os
@@ -17,10 +17,12 @@ logging.getLogger("faster_whisper").setLevel(logging.WARNING)
 
 _fw_model = None
 _fw_model_name = ""
+STT_BACKEND = "auto"
+STT_FWHISPER_MODEL = "small"
 
 
 def backend() -> str:
-    return (os.getenv("STT_BACKEND") or "auto").strip().lower()
+    return STT_BACKEND
 
 
 def _transcribe_google(wav_bytes: bytes) -> str:
@@ -34,7 +36,7 @@ def _transcribe_google(wav_bytes: bytes) -> str:
 
 def _get_fw_model():
     global _fw_model, _fw_model_name
-    name = (os.getenv("STT_FWHISPER_MODEL") or "small").strip().lower()
+    name = STT_FWHISPER_MODEL
     if _fw_model is not None and _fw_model_name == name:
         return _fw_model
     from faster_whisper import WhisperModel

@@ -62,14 +62,6 @@ SETTINGS_SPECS: List[Dict[str, Any]] = [
     {"key": "OPERATOR_SPEECH", "label": "對操作者也發聲", "type": "bool", "restart": False, "default": "0"},
     {"key": "GROQ_REQUESTS_PER_MINUTE", "label": "Groq 每分鐘上限（0=不限）", "type": "int",
      "restart": False, "default": "20"},
-    {"key": "GROQ_ONLY", "label": "Groq-only 降級（Gemini 全滅時保直播）", "type": "bool",
-     "restart": False, "default": "0"},
-    {"key": "GEMMA_ENABLED", "label": "Gemma 本地腿（需本機 Ollama）", "type": "bool",
-     "restart": True, "default": "0"},
-    {"key": "GEMMA_HOST", "label": "Ollama 位址", "type": "str", "restart": True,
-     "default": "http://127.0.0.1:11434"},
-    {"key": "GEMMA_TEXT_MODEL", "label": "Gemma 文字／視覺模型", "type": "str", "restart": True,
-     "default": "gemma3:4b"},
     {"key": "ACESTEP_ENABLED", "label": "ACE-Step AI 作曲（需另裝服務）", "type": "bool",
      "restart": True, "default": "0"},
     {"key": "ACESTEP_URL", "label": "ACE-Step 服務位址", "type": "str", "restart": True,
@@ -85,7 +77,6 @@ SETTINGS_SPECS: List[Dict[str, Any]] = [
     {"key": "DISCORD_TOKEN_7L", "label": "Discord Token", "type": "str", "restart": True, "secret": True},
     {"key": "SIGN_API_KEY", "label": "TikTok 簽章金鑰", "type": "str", "restart": True, "secret": True},
     {"key": "TAVILY_KEYS", "label": "Tavily 搜尋金鑰", "type": "str", "restart": True, "secret": True},
-    {"key": "MONGO_URI", "label": "MongoDB 連線字串", "type": "str", "restart": True, "secret": True},
     {"key": "FIREBASE_CRED_JSON", "label": "Firebase 服務帳號 JSON（需同時開 FIREBASE_ENABLED）", "type": "str", "restart": True, "secret": True},
 ]
 

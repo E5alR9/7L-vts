@@ -37,7 +37,7 @@ GEMINI_MODELS = [                                 # REST 主梯隊：前鋒輕�
 # 3.6-flash 3/3 有叫、聊天不亂叫；3.5-flash-lite 0/3（嘴上說「我去查」卻沒叫）。輕量版只當最後備援
 REST_BRAIN_MODELS = ["gemini-3.6-flash", "gemini-3.8-flash", "gemini-3.5-flash-lite"]
 IMAGE_GEN_MODELS = ["gemini-3.1-flash-lite-image", "gemini-3.1-flash-image", "gemini-3-pro-image"]   # 生圖（Nano Banana）
-EMBED_MODEL = "gemini-embedding-001"              # RAG 向量的 Gemini 備援（.env 的 RAG_GEMINI_EMBED_MODEL 可蓋過）
+EMBED_MODEL = "gemini-embedding-001"              # RAG 向量的 Gemini 備援
 
 # 🛡️ 解除全域安全審查限制：將所有危害類別門檻設為 BLOCK_NONE，確保不被惡意熔斷或過度審查
 UNRESTRICTED_SAFETY_SETTINGS = [

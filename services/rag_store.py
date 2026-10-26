@@ -148,17 +148,9 @@ def rag_prompt_block(query: str, k: int = 3, min_score: float = None, budget_cha
     對標 groq-router 管線（api/chat.js retrieveRelevant＋ITPM 收斂器）：
     門檻 0.15＋最高分 60%（s > 0.15 and s >= best*0.6）→ 貪心塞 budget（上限 4 段）
     → 按時間序排回來（模型好讀）。budget 預設 3500 字，保 Groq 7K ITPM 內。
-    可用環境變數 RAG_MIN_SCORE / RAG_BUDGET_CHARS 覆寫。
     """
     if min_score is None:
-        try:
-            min_score = float(os.getenv("RAG_MIN_SCORE") or "0.15")
-        except Exception:
-            min_score = 0.15
-    try:
-        budget_chars = int(os.getenv("RAG_BUDGET_CHARS") or str(budget_chars))
-    except Exception:
-        pass
+        min_score = 0.15
     hits = search(query, k=max(k * 2, 8))
     if not hits:
         return ""

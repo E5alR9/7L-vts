@@ -333,10 +333,10 @@ async def _synth_xiaoyi(text: str) -> bytes:
 #   3) 模型先走最快的 flash（TTFB ~0.37s），失敗自動改試 multilingual_v2（品質最穩）
 ELEVEN_KEY = (os.getenv("ELEVENLABS_API_KEY") or "").strip()
 ELEVEN_VOICE = (os.getenv("ELEVEN_VOICE_ID") or "").strip() or "EXAVITQu4vr4xnSDxMaL"   # Sarah
-ELEVEN_MODEL = (os.getenv("ELEVEN_MODEL") or "").strip() or "eleven_flash_v2_5"
-ELEVEN_MODEL_QUALITY = (os.getenv("ELEVEN_MODEL_QUALITY") or "").strip() or "eleven_multilingual_v2"
-ELEVEN_OUT_FMT = os.getenv("ELEVEN_OUTPUT_FORMAT") or "mp3_44100_128"
-ELEVEN_LIMIT_FALLBACK = int(os.getenv("ELEVEN_MONTHLY_LIMIT") or "10000")
+ELEVEN_MODEL = "eleven_flash_v2_5"
+ELEVEN_MODEL_QUALITY = "eleven_multilingual_v2"
+ELEVEN_OUT_FMT = "mp3_44100_128"
+ELEVEN_LIMIT_FALLBACK = 10000   # 月字數上限
 
 _quota = {"at": 0.0, "used": 0, "limit": ELEVEN_LIMIT_FALLBACK, "local": 0, "logged": False}
 
@@ -422,7 +422,11 @@ async def _synth_elevenlabs(text: str) -> bytes:
 # 啟動約 25~60 秒；單句合成 RTF 約 1.4。
 # 服務沒開或逾時 → 拋錯讓引擎鏈降級 edge/xiaoyi（不中斷直播）。
 COSYVOICE_URL = (os.getenv("COSYVOICE_URL") or "http://127.0.0.1:9881").rstrip("/")
-COSYVOICE_TIMEOUT = float(os.getenv("COSYVOICE_TIMEOUT") or "60")
+COSYVOICE_TIMEOUT = 60.0
+# 雲端 GPT-SoVITS 的參考音訊與文字（空的＝用服務端預設）
+SOVITS_REF_AUDIO = ""
+SOVITS_PROMPT_TEXT = ""
+SOVITS_PROMPT_LANG = "zh"
 
 
 async def _synth_cosyvoice(text: str) -> bytes:
@@ -457,9 +461,7 @@ async def _synth_cloud_gptsovits(text: str) -> bytes:
     req_lang = sovits_text_lang(text)
     
     # 這些是你原本給 GPT-SoVITS 的參考音訊與文字，需根據你的模型微調
-    ref_audio = os.getenv("TTS_SOVITS_REF_AUDIO") or ""
-    prompt_text = os.getenv("TTS_SOVITS_PROMPT_TEXT") or ""
-    prompt_lang = os.getenv("TTS_SOVITS_PROMPT_LANG") or "zh"
+    ref_audio, prompt_text, prompt_lang = SOVITS_REF_AUDIO, SOVITS_PROMPT_TEXT, SOVITS_PROMPT_LANG
     
     import httpx
     async with httpx.AsyncClient(timeout=45.0) as cli:
@@ -622,9 +624,9 @@ TTS_CACHE_VERSION = "v5"  # v1 混入過中段靜音毒檔＋錯標格式，2026
 # v5（2026-10-25）：含英文的中文句以前走 auto，中文段常被當日文念，舊檔裡有念錯的；
 # v3（2026-10-25）：參考音換成停頓壓短版，舊檔裡也有「念一兩字就停」的尾巴靜音檔漏網；v4：top_p 0.8→1.0（失敗的根本原因），語氣跟著變
 TTS_CACHE_DIR = os.getenv("TTS_CACHE_DIR") or os.path.join(BASE_DIR, "data", "tts_cache")
-TTS_CACHE_MAX_FILES = int(os.getenv("TTS_CACHE_MAX_FILES") or "500")
-TTS_CACHE_MAX_BYTES = int(os.getenv("TTS_CACHE_MAX_BYTES") or str(300 * 1024 * 1024))
-TTS_CACHE_DISABLE = os.getenv("TTS_CACHE_DISABLE") == "1"
+TTS_CACHE_MAX_FILES = 500
+TTS_CACHE_MAX_BYTES = 300 * 1024 * 1024
+TTS_CACHE_DISABLE = False
 
 
 def _tts_cache_key(text: str, engine: str) -> str:

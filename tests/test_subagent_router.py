@@ -17,12 +17,10 @@ def test_dirty_inputs_fall_back_to_auto():
     assert resolve_subagent_chain("nonsense") == ["gemini", "nv"]
 
 
-def test_none_reads_env(monkeypatch):
-    monkeypatch.setenv("SUBAGENT_BRAIN", "nv")
+def test_none_uses_module_setting(monkeypatch):
+    import core.subagent_router as sr
+    assert sr.SUBAGENT_BRAIN == "auto" and resolve_subagent_chain(None) == ["gemini", "nv"]
+    monkeypatch.setattr(sr, "SUBAGENT_BRAIN", "nv")
     assert resolve_subagent_chain(None) == ["nv"]
-    monkeypatch.setenv("SUBAGENT_BRAIN", "gemini")
-    assert resolve_subagent_chain(None) == ["gemini"]
-    monkeypatch.setenv("SUBAGENT_BRAIN", "bogus")
-    assert resolve_subagent_chain(None) == ["gemini", "nv"]
-    monkeypatch.delenv("SUBAGENT_BRAIN", raising=False)
+    monkeypatch.setattr(sr, "SUBAGENT_BRAIN", "bogus")
     assert resolve_subagent_chain(None) == ["gemini", "nv"]

@@ -143,7 +143,6 @@ flowchart TD
 - `chat_source` 的 `start_chat_worker`／`stop_chat_worker`（後台開關監聽器）沒接到任何按鈕。
 - `audio_to_piano_midi`（舊的音訊轉 MIDI）和 `audio_to_score`（新的扒譜）兩套並存。
 - `core/memory` import `services` 的 RAG 模組、`core/barge_in` import `mic_live_plugin`，違反「core 不 import services」。
-- 還有約 18 個不是金鑰的環境變數開關（`DESKTOP_FIRST`、`SUBAGENT_BRAIN`、`MIC_*`、`VIDEO_WATCH_*`、`RVC_HALF`、`XIAOYI_*`、TTS 調參…），跟「.env 只放金鑰」的規定不符，要不要收成模組常數待老爸決定。
 - 主檔幾十處 `print`／`asyncio.create_task`／`except Exception: pass` 沒走 `log_print`／`spawn`／`log_swallowed`（翻唱模組 77 處 print）。
 
 ## 6. 整理紀錄

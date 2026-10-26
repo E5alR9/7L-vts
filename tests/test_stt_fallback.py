@@ -77,7 +77,7 @@ def _run_mic_worker(downs):
     ns = _load("mic_worker", live_brain_down_for=down_for, LIVE_FALLBACK_AFTER_SEC=8.0, IS_MIC_ENABLED=True,
                listen_once_fast=listen_once_fast, sr=pytypes.SimpleNamespace(Microphone=_Mic), os=os,
                asyncio=pytypes.SimpleNamespace(sleep=_no_sleep, to_thread=_to_thread),
-               log_print=lambda m, *a, **k: logs.append(m), current_mic_action_str="")
+               log_print=lambda m, *a, **k: logs.append(m), current_mic_action_str="", MIC_ENERGY_THRESHOLD=500)
     try:
         asyncio.run(ns["mic_worker"](rec, None))
     except _Done:
@@ -114,7 +114,8 @@ def test_listen_once_fast_gives_up_after_the_wait_when_nobody_speaks():
             waits.append(timeout)
             raise TimeoutError("沒人開口")   # speech_recognition 的 WaitTimeoutError
 
-    ns = _load("listen_once_fast", sr=pytypes.SimpleNamespace(Microphone=_Mic), os=os, time=_Clock(0.0))
+    ns = _load("listen_once_fast", sr=pytypes.SimpleNamespace(Microphone=_Mic), os=os, time=_Clock(0.0),
+               MIC_PHRASE_TIME_LIMIT=30.0, MIC_MIN_RMS_THRESHOLD=250.0)
     assert ns["listen_once_fast"](_Rec(), wait_sec=3.0) == ("", None)
     assert waits == [3.0]
     assert ns["is_user_listening"] is False

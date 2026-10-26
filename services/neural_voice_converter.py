@@ -41,8 +41,8 @@ from infer.module.models import SynthesizerTrnMs768NSFsid
 from infer.hubert import load_hubert_model
 from infer.vc.pipeline import Pipeline
 
-# 精度開關（2026-10-11：fp16 換 fp32 拉滿，慢幾秒無所謂；RVC_HALF=1 可切回半精度）。
-_USE_HALF = os.getenv("RVC_HALF", "0") == "1"
+# 精度開關（2026-10-11：fp16 換 fp32 拉滿，慢幾秒無所謂；改 True 切回半精度）。
+_USE_HALF = False
 
 class RVCConfig:
     def __init__(self, device="cuda:0", is_half=False):

@@ -36,9 +36,10 @@ import threading
 from contextlib import contextmanager
 
 # SoVITS 切分策略（2026-10-11：cut5 把短句切成 N 小片，某一片會整片靜音且等長，
-# 時長守衛看不出來；直播都 ≤60 字，整段一坨最穩；XIAOYI_SPLIT 環境變數可調回）。
+# 時長守衛看不出來；直播都 ≤60 字，整段一坨最穩）。
 # 2026-10-25 起長句由 _split_for_tts 在句末標點切段、每段自己檢查重抽；模型內部仍是 cut0。
-XIAOYI_SPLIT_METHOD = os.getenv("XIAOYI_SPLIT", "cut0")
+XIAOYI_SPLIT_METHOD = "cut0"
+XIAOYI_HALF = False   # 精度（2026-10-11：同 RVC，fp32 拉滿；改 True 切回半精度。代價：idle VRAM +1~2GB、每句慢幾秒）
 
 class _WebLogStream:
     """攔截終端輸出並轉發至 Web Dashboard 後台，避免在主終端洗畫面，並即時解析生成進度"""
@@ -389,9 +390,7 @@ def init_gpt_sovits():
             from TTS_infer_pack.TTS import TTS, TTS_Config
             config = TTS_Config("GPT_SoVITS/configs/tts_infer.yaml")
             config.device = "cuda"
-            # 精度開關（2026-10-11：同 RVC，fp32 拉滿；XIAOYI_HALF=1 切回半精度。
-            # 代價：idle VRAM +1~2GB、每句慢幾秒——已和老爸確認收下。）
-            config.is_half = os.getenv("XIAOYI_HALF", "0") == "1"
+            config.is_half = XIAOYI_HALF
             config.t2s_weights_path = os.path.join(GPT_SOVITS_DIR, "GPT_weights_v2", "xiaoyi_finetune-e4.ckpt")
             config.vits_weights_path = os.path.join(FINETUNE_DATA_DIR, "opt", "xiaoyi_finetune", "xiaoyi_sovits_inference.pth")
             config.cnhubert_base_path = "pretrained_models/chinese-hubert-base"

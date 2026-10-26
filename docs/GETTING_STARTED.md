@@ -61,7 +61,7 @@ V7.bat            # CosyVoice → 主程式 → 看門狗（一鍵）
 
 | 現象 | 查什麼 |
 |---|---|
-| Gemini Live 集體 Timeout | 網路→googleapis 通不通；key 有效性；急用開 `GROQ_ONLY=1` 降級撐直播 |
+| Gemini Live 集體 Timeout | 網路→googleapis 通不通；key 有效性 |
 | Tavily 額度爆 | 等重置或加 key；已自動退 Google 爬蟲 |
 | onnxruntime CUDA 報錯 | 缺 cuDNN／CUDA 12，自動退 CPU（慢，不致命） |
 | 聊天室沒動靜 | `.env` 頻道空（看開機 log 兩行 ℹ️） |

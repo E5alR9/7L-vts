@@ -10,7 +10,7 @@ PROVIDER: LOCAL（yt-dlp＋faster-whisper＋opencv）＋GEMINI-VISION（抽幀�
   3. 抽幀（每 N 秒一幀，Gemini 視覺看圖；長片降採樣）
   4. Groq 分段摘要 → 筆記寫入統一記憶＋心智看板（source="video_watch"）→ 7L 播報
 
-全程非同步，不擋直播。單片上限 VIDEO_WATCH_MAX_MIN（預設 30 分鐘）。
+全程非同步，不擋直播。單片上限 VIDEO_WATCH_MAX_MIN 分鐘（模組常數）。
 """
 import asyncio
 import os
@@ -69,18 +69,16 @@ def normalize_video_url(raw: str) -> str:
     return ""
 
 
+VIDEO_WATCH_MAX_MIN = 30     # 單片最多看幾分鐘
+VIDEO_WATCH_FRAME_SEC = 20   # 幾秒抽一張畫面
+
+
 def max_minutes() -> int:
-    try:
-        return max(1, int(os.getenv("VIDEO_WATCH_MAX_MIN") or "30"))
-    except Exception:
-        return 30
+    return max(1, VIDEO_WATCH_MAX_MIN)
 
 
 def frame_interval() -> int:
-    try:
-        return max(5, int(os.getenv("VIDEO_WATCH_FRAME_SEC") or "20"))
-    except Exception:
-        return 20
+    return max(5, VIDEO_WATCH_FRAME_SEC)
 
 
 async def request_watch(url: str, requester: str = "觀眾") -> dict:

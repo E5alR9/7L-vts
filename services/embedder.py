@@ -13,7 +13,7 @@ r"""
 
 注意：查詢端與文件端必須使用同一個 embedder，維度才能對得上；
       rag_store 會把目前使用的 model 名稱寫進 collection metadata。
-PROVIDER: LOCAL-fastembed為主／GEMINI為備援（RAG_EMBED_BACKEND 可切；見 docs/AI_SOURCES.md）
+PROVIDER: LOCAL-fastembed為主／GEMINI為備援（EMBED_BACKEND 可切；見 docs/AI_SOURCES.md）
 """
 
 import os
@@ -24,7 +24,8 @@ DEFAULT_LOCAL_MODEL = "BAAI/bge-small-zh-v1.5"   # 中英混合、檔案小、�
 from core.llm_engine import EMBED_MODEL as _DEFAULT_GEMINI_EMBED
 from core.paths import ROOT_DIR
 
-GEMINI_EMBED_MODEL = os.getenv("RAG_GEMINI_EMBED_MODEL") or _DEFAULT_GEMINI_EMBED
+GEMINI_EMBED_MODEL = _DEFAULT_GEMINI_EMBED
+EMBED_BACKEND = "local"   # "gemini" 強制走 API
 
 _lock = threading.Lock()
 _local_model = None
@@ -34,8 +35,8 @@ _dim_cache: Optional[int] = None
 
 
 def use_local() -> bool:
-    """是否走本地嵌入（環境變數 RAG_EMBED_BACKEND=gemini 可強制走 API）"""
-    return (os.getenv("RAG_EMBED_BACKEND") or "local").strip().lower() != "gemini"
+    """是否走本地嵌入（EMBED_BACKEND 改 "gemini" 可強制走 API）"""
+    return EMBED_BACKEND != "gemini"
 
 
 def _get_local_model():
@@ -44,7 +45,7 @@ def _get_local_model():
         return _local_model
     if _local_failed:
         return None
-    name = os.getenv("RAG_EMBED_MODEL") or DEFAULT_LOCAL_MODEL
+    name = DEFAULT_LOCAL_MODEL
     try:
         from fastembed import TextEmbedding
         # 快取放專案 models/ 底下：fastembed 預設放系統暫存資料夾，Windows 磁碟清理會清掉，

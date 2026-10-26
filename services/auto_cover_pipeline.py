@@ -516,7 +516,7 @@ def _ensure_orchestrator():
         _ORCH_TASK = loop.create_task(_sing_orchestrator())
 
 
-ORIGINAL_WATCH_SEC = int(os.getenv("ORIGINAL_WATCH_SEC", "20") or "20")
+ORIGINAL_WATCH_SEC = 20   # 自創曲資料夾多久掃一次（秒）；0 停用
 _ORIG_PREPARING = set()  # 感測器正在背景準備的 orig_ safe 名（防重複開工）
 
 
@@ -558,7 +558,7 @@ async def scan_originals_once():
 
 
 async def originals_watch_worker():
-    """originals/ 感測常駐（20s 一輪，ORIGINAL_WATCH_SEC 調；0 停用）。
+    """originals/ 感測常駐（ORIGINAL_WATCH_SEC 秒一輪；0 停用）。
     檔存在本身就是人工節點——只準備不排隊，唱一定要明說「唱X」，跟翻唱同一個口令。"""
     if ORIGINAL_WATCH_SEC <= 0:
         return
