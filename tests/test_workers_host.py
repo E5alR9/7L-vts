@@ -15,14 +15,24 @@ WORKERS = sorted(os.path.basename(p)[:-3] for p in glob.glob(os.path.join(ROOT, 
 
 
 def _main_top_level_names():
+    """主程式模組層級的名稱（頂層 if／try／with 區塊裡定義的也算，函式裡的不算）。"""
     names = set()
-    for n in ast.walk(ast.parse(MAIN_SRC)):
-        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and n.col_offset == 0:
-            names.add(n.name)
-        elif isinstance(n, (ast.Import, ast.ImportFrom)) and n.col_offset == 0:
-            names.update((a.asname or a.name).split(".")[0] for a in n.names)
-        elif isinstance(n, ast.Assign) and n.col_offset == 0:
-            names.update(t.id for t in n.targets if isinstance(t, ast.Name))
+
+    def visit(stmts):
+        for n in stmts:
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                names.add(n.name)
+            elif isinstance(n, (ast.Import, ast.ImportFrom)):
+                names.update((a.asname or a.name).split(".")[0] for a in n.names)
+            elif isinstance(n, (ast.Assign, ast.AnnAssign)):
+                for t in (n.targets if isinstance(n, ast.Assign) else [n.target]):
+                    names.update(x.id for x in ast.walk(t) if isinstance(x, ast.Name))
+            for field in ("body", "orelse", "finalbody", "handlers"):
+                if not isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                    sub = getattr(n, field, None)
+                    if isinstance(sub, list):
+                        visit(sub)
+    visit(ast.parse(MAIN_SRC).body)
     return names
 
 

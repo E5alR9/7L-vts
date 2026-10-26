@@ -2578,100 +2578,9 @@ async def set_timer(seconds: int, message: str, target_queue: Optional[asyncio.Q
     except Exception:
         pass
 
-async def live_timer_sensor_worker(vts, input_queue):
-    """ API Live 持續時間感測哨兵協程：
-    - 以 1 秒 (1 Tick) 精度全時感測倒數時間與老爸當前狀態
-    - 時間到達時自動喚醒主力多模態大腦 (Gemini 3.8 / 3.1 Flash) 生成專屬生動提醒並主動開口發言
-    """
-    log_print("⏱️ [API Live 時間感測哨兵] 協程已就緒，開始全時任務與倒數感測...")
-    while True:
-        try:
-            await asyncio.sleep(1.0)
-            now = time.time()
-            
-            # 遍歷所有進行中的定時感測任務
-            for tid, task in list(live_timer_hub.timers.items()):
-                if task.get("status") != "sensing":
-                    continue
-                    
-                rem = task["target_time"] - now
-                if rem <= 0:
-                    task["status"] = "triggered"
-                    task_msg = task.get("message", "提醒時間到了")
-                    # ⚠️ 定時人不一定是老爸：記錄誰寫誰，未知就中性，絕不預設老爸
-                    caller = task.get("caller_user") or ""
-                    log_print(f"⏰ [API Live 定時感測到期] 任務 {tid}（{task_msg}）到期！正在呼叫主力大腦生成自然提醒口語...")
-                    
-                    del live_timer_hub.timers[tid]
-                    
-                    # 取得當前環境多模態上下文
-                    curr_fg_title = ""
-                    curr_fg_app = ""
-                    try:
-                        from mic_live_plugin.os_desktop_sensor import os_desktop_sensor
-                        fg_info = os_desktop_sensor.get_foreground_window()
-                        curr_fg_title = fg_info.get("window_title", "").strip()
-                        curr_fg_app = fg_info.get("app_label", "").strip()
-                    except Exception:
-                        log_swallowed()
-                        
-                    fg_hint = f"（老爸當前正在使用視窗：{curr_fg_title} - {curr_fg_app}）" if curr_fg_title else ""
-                    music_hint = f"（電腦音樂：{LATEST_SYSTEM_MUSIC_INFO}）" if LATEST_SYSTEM_MUSIC_INFO else ""
-                    
-                    reminder_messages = [
-                        {"role": "system", "content": PromptTemplateEngine.HARD_TECHNICAL_RULES},
-                        {"role": "user", "content": f"""時間：{get_current_time_string()}
-【 API Live 定時感測到期提醒】：
-{caller or '你'}剛才交代的時間提醒到了！
-- 預定提醒事項：『{task_msg}』
-- 當前現場環境：{fg_hint} {music_hint}
-
-請妳依循妳的人設性格，主動開口提醒{caller or '你'}時間到了！（直接給出一兩句自然生動的發言，可附帶 [EXPRESSION: 瞇眼/笑/WINK] 表情與 [SPEED:...] 語調標籤，請務必發出聲音提醒！）"""}
-                    ]
-                    
-                    try:
-                        #  背景純文字（定時提醒口語）走 Groq，不佔 Gemini 額度；失敗直接走下方固定備援句
-                        from core.groq_router import groq_chat
-                        g_resp = await groq_chat(reminder_messages, temperature=0.85, max_tokens=220, timeout=6.0)
-                        raw_reply = (g_resp.text if g_resp and g_resp.text else "").strip()
-                        if not raw_reply:
-                            raise RuntimeError("Groq 無回應，改用固定備援提醒句")
-                        spoken = await execute_actions(vts, raw_reply, input_queue, caller_target="dad", caller_user=caller)
-                        clean_spoken = spoken.strip(" *'\"-.,!?。，！？\n\r") if spoken else ""
-                        
-                        if not clean_spoken:
-                            if caller:
-                                clean_spoken = f"{caller}～剛才說好的「{task_msg}」時間到了喔！快起來休息一下～"
-                            else:
-                                clean_spoken = f"你～剛才說好的「{task_msg}」時間到了喔！"
-                            
-                        await asyncio.to_thread(update_subtitle, clean_spoken)
-                        record_bot_message(clean_spoken)
-                        log_print(f"💬 7L (定時感測主動提醒): {clean_spoken}")
-                        await speech_queue.put({"text": clean_spoken, "target": "dad", "raw_text": raw_reply})
-                        touch_interaction()
-                        
-                        append_to_unified_memory(speaker="7L", target=caller, content=clean_spoken, role="assistant", source="tts")
-                        try:
-                            web_dash.broadcast_event("timer_triggered", {
-                                "task_id": tid,
-                                "message": task_msg,
-                                "spoken": clean_spoken
-                            })
-                        except Exception:
-                            log_swallowed()
-                    except Exception as err:
-                        log_print(f"❌ [定時感測喚醒模型發言異常]: {err}")
-                        if caller:
-                            fallback_msg = f"{caller}！時間到囉～剛才說好的「{task_msg}」要記得喔！"
-                        else:
-                            fallback_msg = f"時間到囉～剛才說好的「{task_msg}」要記得喔！"
-                        await asyncio.to_thread(update_subtitle, fallback_msg)
-                        await speech_queue.put({"text": fallback_msg, "target": "dad"})
-                        touch_interaction()
-        except Exception as e:
-            log_print(f"⚠️ [API Live 時間感測協程異常]: {e}")
-            await asyncio.sleep(1.0)
+import workers.timer_sensor as timer_sensor  # 計時感測（搬出主檔）
+timer_sensor.bind(sys.modules[__name__])
+from workers.timer_sensor import live_timer_sensor_worker
 
 
 def _save_model_position() -> None:
@@ -2725,48 +2634,9 @@ async def execute_actions(vts, text, input_queue, execute_visuals: bool = False,
 is_user_listening = False
 listen_start_time = 0.0
 
-async def mic_volume_worker():
-    global current_mic_volume_str, CURRENT_MIC_VOL_PERCENT
-    
-    stream = None
-    if HAS_PYAUDIO:
-        try:
-            import pyaudio
-            p = pyaudio.PyAudio()
-            stream = p.open(format=pyaudio.paInt16, channels=1, rate=16000, input=True, frames_per_buffer=1024)
-        except Exception:
-            log_swallowed() 
-
-    while True:
-        if not IS_MIC_ENABLED:
-            current_mic_volume_str = "[ 麥克風已關閉]"
-            CURRENT_MIC_VOL_PERCENT = 0
-            await asyncio.sleep(0.3)
-            continue
-
-        # 🎙️ 全雙工真·不鎖麥：已有專屬聲紋辨識 (WeSpeaker/Voiceprint)，發話中依然保持全時收音監測與音量跳動
-        if stream:
-            try:
-                frames_avail = stream.get_read_available()
-                if frames_avail > 0:
-                    data = stream.read(frames_avail, exception_on_overflow=False)
-                    audio_data = np.frombuffer(data, dtype=np.int16)
-                    if len(audio_data) > 0:
-                        rms = np.sqrt(np.mean(np.square(audio_data.astype(np.float32))))
-                        vol_percent = min(100, int((rms / 2500) * 100))
-                        CURRENT_MIC_VOL_PERCENT = vol_percent
-                        bars = vol_percent // 10
-                        bar_str = "█" * bars + "_" * (10 - bars)
-                        current_mic_volume_str = f"[ 收音: {vol_percent:02d}% |{bar_str}|]"
-                await asyncio.sleep(0.05) 
-            except Exception:
-                current_mic_volume_str = "[ 麥克風全時就緒]"
-                CURRENT_MIC_VOL_PERCENT = 0
-                await asyncio.sleep(0.5)
-        else:
-            current_mic_volume_str = "[ 麥克風全時就緒]"
-            CURRENT_MIC_VOL_PERCENT = 0
-            await asyncio.sleep(0.5)
+import workers.mic_volume as mic_volume  # 麥克風音量表（搬出主檔）
+mic_volume.bind(sys.modules[__name__])
+from workers.mic_volume import mic_volume_worker
 
 def listen_once_fast(recognizer, wait_sec=None):
     """wait_sec：等多久沒人開口就先回空的（呼叫端好回頭看 Live 回來了沒）；None 一直等。"""
@@ -4339,73 +4209,10 @@ async def print_model_parameters(vts):
         log_swallowed()
 
 GLOBAL_VTS_TRACKING_TASK = None
-_VTS_LAST_AUTH_TIME = 0.0
-_VTS_LAST_RECONNECT_TIME = 0.0
-_VTS_IS_RECONNECTING = False  # 防止重連競態
 
-_VTS_PING_MSG = {
-    "apiName": "VTubeStudioPublicAPI", "apiVersion": "1.0",
-    "requestID": "HealthPing", "messageType": "APIStateRequest", "data": {}
-}
-
-async def _vts_real_ping(vts):
-    """真實 WebSocket ping：送 APIStateRequest 並等待回應。
-    回傳 None = 連線已死；回傳 True/False = 連線活著，且本 session 是否已通過認證
-    （APIStateRequest 不需認證也會回應，所以光「有回應」不代表 token 有效）"""
-    try:
-        async with vc.vts_lock:
-            resp = await asyncio.wait_for(vts.request(_VTS_PING_MSG), timeout=1.5)
-        if not isinstance(resp, dict) or resp.get("messageType") != "APIStateResponse":
-            return None
-        return bool(resp.get("data", {}).get("currentSessionAuthenticated", False))
-    except Exception:
-        return None
-
-async def vts_health_worker(vts):
-    global GLOBAL_VTS_TRACKING_TASK, _VTS_LAST_AUTH_TIME, _VTS_LAST_RECONNECT_TIME, _VTS_IS_RECONNECTING
-    while True:
-        await asyncio.sleep(5.0)  # 5 秒心跳（比原本 3 秒寬鬆，減少 ping 佔用）
-        if _VTS_IS_RECONNECTING:
-            continue
-        try:
-            now = time.time()
-            #  真實 ping 測試：不靠 is_connected() 假狀態，直接送 APIStateRequest
-            authed = await _vts_real_ping(vts)
-            if not authed:
-                #  斷線，或連著但沒認證（token 失效 / request() 自動重連後沒重新認證）：10 秒冷卻
-                if now - _VTS_LAST_RECONNECT_TIME >= 10.0:
-                    _VTS_IS_RECONNECTING = True
-                    try:
-                        if authed is None:
-                            log_print("🔌 [VTS 心跳] 偵測到連線中斷，正在重新連線...")
-                            async with vc.vts_lock:
-                                await vts.connect(retries=2)
-                        else:
-                            log_print("🔑 [VTS 心跳] 連線正常但未通過認證，正在重新認證...")
-                        # 認證不持鎖：申請新 token 可能要等使用者在 VTS 按允許（最長 30 秒），
-                        # 持鎖會卡住表情/追蹤等其他協程；request() 靠 requestID 配對，可並行
-                        await vts.request_authenticate()
-                        _VTS_LAST_RECONNECT_TIME = time.time()
-                        if vts.is_authenticated:
-                            _VTS_LAST_AUTH_TIME = time.time()
-                            log_print("✅ [系統通知] VTube Studio 重新連線與授權成功！身體控制權已恢復！")
-                            spawn(vc.sync_expression_state(vts))
-                        else:
-                            log_print("⚠️ [VTS 心跳] 認證未成功，稍後自動重試")
-                    except Exception as reconn_err:
-                        _VTS_LAST_RECONNECT_TIME = time.time()
-                        log_print(f"⚠️ [VTS 重連失敗]: {reconn_err}")
-                    finally:
-                        _VTS_IS_RECONNECTING = False
-            else:
-                # 連線正常：重置時間戳，確保下次真正斷線能立刻重連
-                _VTS_LAST_AUTH_TIME = now
-
-            #  守護追蹤主協程：若協程因任何異常退出，即刻自動重啟
-            if GLOBAL_VTS_TRACKING_TASK is None or GLOBAL_VTS_TRACKING_TASK.done():
-                GLOBAL_VTS_TRACKING_TASK = asyncio.create_task(ai_face_tracking_loop(vts))
-        except Exception:
-            _VTS_IS_RECONNECTING = False
+import workers.vts_health as vts_health  # VTS 健康檢查（搬出主檔）
+vts_health.bind(sys.modules[__name__])
+from workers.vts_health import vts_health_worker
 
 def _background_busy() -> bool:
     """有背景活在跑嗎（RVC 準備／鋼琴預載／子代理思考中）。演出/睡眠不算，另處排除。"""
