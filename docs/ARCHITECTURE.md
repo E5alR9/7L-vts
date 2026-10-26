@@ -42,6 +42,7 @@ flowchart TD
 6. **給主腦的資料**：
    - 要她回話的走 `send_brain_slip`，是唯一出口，送出那一刻記下是誰觸發的。紙條有兩個收件人：Live 主腦在線時是 `send_system_prompts_to_live`；沒有 Live 主腦時是 `rest_slip_worker`，交給 REST 大腦（系統提示詞跟 Live 同一份 `build_brain_system_prompt`，另帶最近對話和鋼琴狀態；可以呼叫同一個 `invoke_subagent`，子智能體本體是共用的 `_run_subagent_task`）。
    - 不用她回話的背景資料（YouTube 伴看筆記）走 `add_brain_context`，用 `send_client_content(turn_complete=False)` 放進對話，不觸發回話，也不會打斷她。
+   - **回話前查舊記憶**（2026-10-26）：老爸的紙條、觀眾的紙條、看板 REST 提示詞送出前都先拿那句話查向量記憶庫（`services/rag_memory_service.related_memories_block`），有就接在紙條後面「[相關的舊記憶…]」。挑法照實機量的分數：很像（餘弦 ≥ 0.70）直接收、普通像（≥ 0.55）要跟這句話有共同實詞才收、一小時內講的不算、跟這句一模一樣的不算、「早安」「數到三」這種沒內容的話不查；最多 3 筆、1.5 秒內查不到就算了。麥克風講的話是原生音訊直接進 Live，來不及在回話前附，轉寫一到就查、有就走 `add_brain_context` 補給她。向量庫每句老爸的話都在存（`core/memory.append_to_unified_memory` → `add_rag_memory`），以前從來沒人查。
    - 看門狗看主腦「有沒有真的產出」：連兩張紙條各 20 秒沒產出（金鑰額度用完時連線還在、但不生成）就關線、冷卻這把、換下一把，那張紙條交給新連線。
 7. **出去**：
    - 要說的話依序經過 `speech_queue`（`core/speech_queue`：給老爸的先講、觀眾的最後；被打斷只挑掉 Live 自己排的）→ `speech_queue_worker` → `play_voice_complete`。
@@ -89,7 +90,7 @@ flowchart TD
 | 舞台 | `vts_client.py`（VTube Studio 連線、表情、走位）、`stage_actions.py`（表情時間軸、表情守護）、`audio_analysis.py`（嘴型包絡、回音比對） |
 | 輸入 | `tiktok_listener.py`、`twitch_listener.py`、`youtube_live_listener.py`（三個平台丟進佇列的項目都由 `chat_source.make_chat_item` 拼）、`chat_source.py`、`stt.py` |
 | 看與找 | `screen_capture.py`、`web_search.py`（Tavily 多金鑰＋DuckDuckGo＋Groq 摘要）、`video_watch.py`、`yt_companion_service.py`、`desktop_helper.py` |
-| 後台與記憶 | `web_dashboard.py`（網頁後台）、`dashboard_bridge.py`（後台 ↔ 主程式）、`rag_store.py`／`rag_memory_service.py`／`embedder.py` |
+| 後台與記憶 | `web_dashboard.py`（網頁後台）、`dashboard_bridge.py`（後台 ↔ 主程式）、`rag_store.py`／`rag_memory_service.py`（存每句對話、回話前查相關舊記憶）／`embedder.py` |
 
 ### workers/
 
@@ -139,7 +140,6 @@ flowchart TD
 - 主程式還有幾個大函式跟全域狀態綁得很緊：`continuous_live_worker`（約 400 行）、`play_voice_complete`（約 290 行）、`execute_tool_dispatch`（約 220 行）、`streamer_mind_loop_worker`、`chat_processor_worker`（各約 180 行）。後面兩個是乾跑包裝和情境測試直接從主檔抽出來跑的核心流程，要搬到 workers/ 得先讓乾跑支援 `host` 模組（REDESIGN I 的下一步）。
 - `services/piano_engine.py` 將近 3,000 行，點曲意圖、排隊、電台、作曲、合奏都在一起。
 - `ClassicalPianoSoundEngine`（鋼琴音源）在 `services/piano_engine.py` 和鋼琴視窗 `test_virtual_piano.py` 各一份，已經分岔（83 行不同）；視窗是獨立程序，合併前要先決定音源歸誰。
-- RAG 記憶只寫不讀：`rag_memory_service.add_rag_memory` 每句對話都存，`search_rag_memory` 沒有呼叫端。
 - `chat_source` 的 `start_chat_worker`／`stop_chat_worker`（後台開關監聽器）沒接到任何按鈕。
 - `audio_to_piano_midi`（舊的音訊轉 MIDI）和 `audio_to_score`（新的扒譜）兩套並存。
 

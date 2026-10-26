@@ -187,7 +187,8 @@ def _dad_message(source, text, audio=None):
                    add_to_streamer_mind_board=lambda **k: board.append(k), background_tool_executor=background_tool_executor,
                    spawn=spawn, send_brain_slip=lambda s, **k: slips.append((s, k)),
                    asyncio=asyncio, IS_MIC_ENABLED=True, Optional=__import__("typing").Optional,
-                   asks_to_remember_model_position=lambda t: False)
+                   asks_to_remember_model_position=lambda t: False,
+                   _related_memories_block=lambda q: asyncio.sleep(0, result=""))
         await ns["process_chat_message"](None, None, text, audio, source=source)
         await asyncio.sleep(0)
     asyncio.run(go())
