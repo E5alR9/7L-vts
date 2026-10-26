@@ -27,9 +27,12 @@ def test_detect_chords_synthetic(tmp_path):
 
 
 def test_write_score_roundtrip(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+    """存到暫存資料夾、不進真的曲庫（以前 chdir 沒用：路徑是照模組位置算的，.mid 落在真的 midi_sheets/、
+    還順手把鋼琴的曲庫索引清成空的）。"""
+    import services.piano_engine as pe
+    monkeypatch.setattr(pe, "save_midi_catalog_entry", lambda *a: None)
     f = ats.write_score_midi("t_trans", [(60, 0.0, 0.5, 90), (64, 0.5, 0.5, 90)],
-                             [(0.0, "C"), (4.0, "G")])
+                             [(0.0, "C"), (4.0, "G")], out_dir=str(tmp_path))
     assert f and f.endswith(".mid")
     import mido
     import os
@@ -37,4 +40,3 @@ def test_write_score_roundtrip(tmp_path, monkeypatch):
     assert len(mid.tracks) == 3
     chs = {m.channel for t in mid.tracks for m in t if m.type == "note_on"}
     assert chs == {0, 1, 9}
-    os.remove(f)  # 測試產物不留曲庫

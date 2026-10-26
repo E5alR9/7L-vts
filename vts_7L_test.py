@@ -6734,6 +6734,7 @@ async def main():
     if DISCORD_TOKEN and not _IS_VTUBER:
         spawn(safe_discord_runner())
 
+    pe.init_midi_library()   # 曲庫整理和索引存檔（以前在 import 鋼琴模組時就做）
     pe.bind_host(update_subtitle=update_subtitle, speech_queue=speech_queue, get_user_profile=get_user_profile,
                  get_speaking_target=lambda: CURRENT_SPEAKING_TARGET)
     pe.register_piano_state_callback(_on_piano_liveness_change)

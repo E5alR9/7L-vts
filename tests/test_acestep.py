@@ -14,9 +14,8 @@ def test_build_request():
     assert r3["duration"] == 10
 
 
-def test_disabled_skips():
-    import os
-    os.environ["ACESTEP_ENABLED"] = "0"
+def test_disabled_skips(monkeypatch):
+    monkeypatch.setenv("ACESTEP_ENABLED", "0")
     r = asyncio.run(generate_song("test"))
     assert r["ok"] is False
     s = status()

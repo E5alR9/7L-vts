@@ -26,6 +26,7 @@ import time
 import numpy as np
 
 from core.utils import log_print
+from core.paths import ROOT_DIR
 
 WORK_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "score_in")
 os.makedirs(WORK_DIR, exist_ok=True)
@@ -203,8 +204,9 @@ def detect_chords(audio_path: str, seg_sec: float = 4.0) -> list:
         return []
 
 
-def write_score_midi(title: str, melody: list, chords: list) -> str:
-    """三軌出譜（旋律 ch0／和弦根音貝斯 ch1／簡配鼓 ch9）→ 進曲庫。回傳路徑或空。"""
+def write_score_midi(title: str, melody: list, chords: list, out_dir: str = "") -> str:
+    """三軌出譜（旋律 ch0／和弦根音貝斯 ch1／簡配鼓 ch9）→ 進曲庫。回傳路徑或空。
+    out_dir 沒給就存到專案的 midi_sheets/。"""
     import mido
     safe = "".join(c for c in (title or "transcribed") if c not in '\\/:*?"<>|').strip() or "transcribed"
     mid = mido.MidiFile(type=1, ticks_per_beat=480)
@@ -252,8 +254,7 @@ def write_score_midi(title: str, melody: list, chords: list) -> str:
             msg.time = max(0, tick - last)
             last = tick
             tr.append(msg)
-    out = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                       "midi_sheets", f"{safe}.mid")
+    out = os.path.join(out_dir or os.path.join(ROOT_DIR, "midi_sheets"), f"{safe}.mid")
     try:
         mid.save(out)
         try:

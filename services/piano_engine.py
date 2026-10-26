@@ -29,6 +29,7 @@ from core.hard_command import display_requester
 
 from core.utils import log_print, to_tw, log_swallowed, spawn
 from core.identity import get_owner_name
+from core.paths import ROOT_DIR
 from core.llm_engine import (GEMINI_KEYS, HIGH_IQ_GEMINI_MODELS, DEAD_GEMINI_MODELS, is_model_locked,
                              get_pingpong_alternating_index, get_pingpong_ring_indices)
 
@@ -1500,7 +1501,7 @@ async def stop_virtual_piano(force: bool = False) -> str:
 
 import mido
 
-MIDI_SHEETS_DIR = "midi_sheets"
+MIDI_SHEETS_DIR = os.path.join(ROOT_DIR, "midi_sheets")   # 以前是相對當下工作目錄的 "midi_sheets"
 os.makedirs(MIDI_SHEETS_DIR, exist_ok=True)
 MIDI_CATALOG_FILE = os.path.join(MIDI_SHEETS_DIR, "midi_catalog.json")
 
@@ -1523,13 +1524,12 @@ def auto_clean_non_midi_files(folder_path: str = MIDI_SHEETS_DIR):
     except Exception as e:
         log_print(f"⚠️ [曲庫自動清理異常]: {e}")
 
-auto_clean_non_midi_files()
 
-def sync_and_update_midi_catalog() -> Dict[str, str]:
+def sync_and_update_midi_catalog(persist: bool = True) -> Dict[str, str]:
     """雙向自動同步更新 midi_catalog.json：
     1. 自動新增：掃描 midi_sheets 資料夾內的所有 .mid 檔案，自動為新曲目建立映射索引。
     2. 自動清理：若 catalog 中指向的 .mid 檔案已被手動刪除，自動自 JSON 中移除無效死鏈。
-    3. 自動持久化存檔。
+    3. 自動持久化存檔（persist=False 只算不寫：import 時用）。
     """
     catalog = {}
     if os.path.exists(MIDI_CATALOG_FILE):
@@ -1560,7 +1560,7 @@ def sync_and_update_midi_catalog() -> Dict[str, str]:
         if norm_name and norm_name not in cleaned_catalog:
             cleaned_catalog[norm_name] = real_fname
 
-    if cleaned_catalog != catalog or not os.path.exists(MIDI_CATALOG_FILE):
+    if persist and (cleaned_catalog != catalog or not os.path.exists(MIDI_CATALOG_FILE)):
         try:
             with open(MIDI_CATALOG_FILE, "w", encoding="utf-8") as f:
                 json.dump(cleaned_catalog, f, ensure_ascii=False, indent=2)
@@ -1588,7 +1588,17 @@ def save_midi_catalog_entry(alias_name: str, file_path: str):
         log_print(f"⚠️ [MIDI 曲庫] 儲存 {MIDI_CATALOG_FILE} 失敗: {e}")
     AUTHENTIC_MIDI_MAP = sync_and_update_midi_catalog()
 
-AUTHENTIC_MIDI_MAP = sync_and_update_midi_catalog()
+# import 時只讀不寫（2026-10-27）：以前一 import 就刪 midi_sheets/ 裡的非 MIDI 檔、改寫 midi_catalog.json，
+# 每跑一次測試都動到這個進版控的檔。整理和存檔留給主程式開機時的 init_midi_library()。
+AUTHENTIC_MIDI_MAP = sync_and_update_midi_catalog(persist=False)
+
+
+def init_midi_library() -> int:
+    """主程式開機呼叫一次：清掉 midi_sheets/ 裡不是 MIDI 的檔、同步並存回曲庫索引。回傳索引筆數。"""
+    global AUTHENTIC_MIDI_MAP
+    auto_clean_non_midi_files()
+    AUTHENTIC_MIDI_MAP = sync_and_update_midi_catalog()
+    return len(AUTHENTIC_MIDI_MAP)
 
 MIDI_AI_MATCH_CACHE: Dict[str, str] = {}
 

@@ -36,6 +36,17 @@ def _memory_files_in_tmp(tmp_path_factory):
 
 
 @pytest.fixture(autouse=True)
+def _cover_cache_in_tmp(tmp_path_factory, monkeypatch):
+    """翻唱快取（songs_library/cover_cache）在測試裡指到暫存資料夾（另開一個，不佔測試自己的 tmp_path）。
+    2026-10-27 健檢：三個翻唱測試直接寫進真的快取，其中一個還整個 rmtree 掉實機 Demucs 分離好的 stems。"""
+    import sys
+    acp = sys.modules.get("services.auto_cover_pipeline")
+    if acp is not None:
+        monkeypatch.setattr(acp, "CACHE_DIR", str(tmp_path_factory.mktemp("cover_cache")))
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _eventlog_in_memory():
     """流水帳（core.eventlog）在測試裡記在記憶體，不寫到 data/。"""
     from core import eventlog
