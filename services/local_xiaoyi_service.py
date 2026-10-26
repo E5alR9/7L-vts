@@ -189,7 +189,9 @@ def capture_tts_output():
         sys.stderr = old_err
 
 _tts_pipeline = None
-_thread_lock = threading.Lock()
+# 可重入：synthesize_xiaoyi_bytes 拿著鎖時，模型還沒載好會再呼叫 init_gpt_sovits（它也要拿這把鎖）。
+# 以前是一般 Lock，那一刻就永遠鎖死，之後每次合成都多卡一條背景執行緒，卡滿後連後台首頁都打不開（2026-10-27 長測抓到）
+_thread_lock = threading.RLock()
 _REF_ZH = None   # 實際用的中文參考音（停頓壓短版，見 _tight_ref）
 _REF_JA = None   # 日文同理：實測失敗率 4/12 → 1/12
 

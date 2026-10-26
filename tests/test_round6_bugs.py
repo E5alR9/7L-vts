@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
-"""2026-10-27 健檢找到的 bug：計時器中文數字、拒絕被當答應、搜尋備援、喚醒等級、看板平台標籤、電擊摸頭的紙條。"""
+"""2026-10-27 健檢找到的 bug：計時器中文數字、拒絕被當答應、搜尋備援、喚醒等級、看板平台標籤、電擊摸頭的紙條、曉伊自己鎖死。"""
 import asyncio
 import ast
 import os
+import sys
+import threading
 
 from conftest import ROOT
 from core.live_timer_sensor import LiveTimerSensorHub, cn_number
@@ -100,3 +102,16 @@ def test_related_memories_has_one_overall_timeout(monkeypatch):
     monkeypatch.setattr(rag, "latest_viewer_lines", lambda v, q="": [])
     # 三次查詢各 0.04 秒，總時限 0.06 秒：整段超時、回空字串
     assert asyncio.run(rag.related_memories_block("我之前講過的貓咪小故事", viewers=["小明"], timeout=0.06)) == ""
+
+
+def test_xiaoyi_does_not_deadlock_when_model_not_loaded(monkeypatch):
+    """模型還沒載好就合成：要回空 bytes 讓 tts_router 換下一個引擎，不能卡死在自己的鎖上。"""
+    from services import local_xiaoyi_service as lx
+    monkeypatch.setattr(lx, "_tts_pipeline", None)
+    monkeypatch.setitem(sys.modules, "TTS_infer_pack.TTS", None)   # 載入模型馬上失敗，不真的吃顯卡
+    out = []
+    t = threading.Thread(target=lambda: out.append(lx.synthesize_xiaoyi_bytes("哈囉")), daemon=True)
+    t.start()
+    t.join(10)
+    assert not t.is_alive(), "synthesize_xiaoyi_bytes 鎖死了"
+    assert out == [b""]
