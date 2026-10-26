@@ -12,7 +12,8 @@ import faiss
 from transformers import HubertModel
 
 #  統一路徑解析（不再寫死原作者電腦）
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # 專案根目錄（本檔在 scripts/ 下）
+sys.path.insert(0, BASE_DIR)
 from core.paths import GPT_SOVITS_DIR, REF_VOICE_ZH, legacy_or_home
 
 # 確保輸出編碼正確
@@ -24,7 +25,6 @@ except Exception:
     pass
 
 # 模型與資料集放在專案內（可隨資料夾一起搬移），不再寫死使用者家目錄
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 WAVS_DIR = os.path.join(BASE_DIR, "dataset", "xiaoyi_7L", "wavs")
 INDEX_DIR = os.path.join(BASE_DIR, "models", "rvc", "indices")
 WEIGHTS_DIR = os.path.join(BASE_DIR, "models", "rvc", "weights")

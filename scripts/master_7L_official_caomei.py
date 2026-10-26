@@ -4,8 +4,10 @@ import subprocess
 import time
 import shutil
 
-sys.path.append(os.path.join(os.path.dirname(__file__), "services", "rvc"))
-os.environ["rmvpe_root"] = os.path.abspath("models/rvc")
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # 專案根目錄（本檔在 scripts/ 下）
+sys.path.insert(0, ROOT)
+sys.path.append(os.path.join(ROOT, "services", "rvc"))
+os.environ["rmvpe_root"] = os.path.join(ROOT, "models", "rvc")
 
 from services.neural_voice_converter import convert_vocal_to_xiaoyi
 from services.auto_cover_pipeline import mix_cover_and_export

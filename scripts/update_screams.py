@@ -3,11 +3,12 @@ import sys
 import asyncio
 import glob
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # 專案根目錄（本檔在 scripts/ 下）
+sys.path.insert(0, ROOT)
 import services.tts_router as tts_router
 
 async def generate_screams():
-    sounds_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "sounds_7L_clean")
+    sounds_dir = os.path.join(ROOT, "data", "sounds_7L_clean")
     shocks_light_dir = os.path.join(sounds_dir, "shocks_light")
     shocks_heavy_dir = os.path.join(sounds_dir, "shocks_heavy")
     

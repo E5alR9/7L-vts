@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """列出 .env 各金鑰的長度與前綴（不印出金鑰本體）。
-路徑：以本檔所在目錄為準（不再硬編碼別人的使用者目錄）。"""
+路徑：專案根目錄的 .env（本檔在 scripts/ 下）。"""
 import os
 
-ENV_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+ENV_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
 
 with open(ENV_PATH, "r", encoding="utf-8") as f:
     for line in f:

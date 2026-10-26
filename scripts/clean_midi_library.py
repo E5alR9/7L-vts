@@ -11,7 +11,7 @@ load_dotenv()
 from google import genai
 from google.genai import types
 
-MIDI_DIR = os.path.join(os.getcwd(), "midi_sheets")
+MIDI_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "midi_sheets")   # 專案根目錄的 midi_sheets/（本檔在 scripts/ 下）
 REMOVED_DIR = os.path.join(MIDI_DIR, "removed_non_songs")
 CATALOG_FILE = os.path.join(MIDI_DIR, "midi_catalog.json")
 

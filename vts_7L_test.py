@@ -6082,7 +6082,7 @@ async def execute_punish_action(reason: str = "", is_severe: bool = None):
             "timestamp": time.time()
         })
 
-        #  準備 7L 專屬觸電尖叫音訊檔 (優先使用 gen_screams.py 調配之專屬純淨音效，絕不死板)
+        #  準備 7L 專屬觸電尖叫音訊檔 (優先使用 scripts/gen_screams.py 調配之專屬純淨音效，絕不死板)
         sounds_dir = os.path.join(DATA_DIR, "sounds_7L_clean")
         if is_severe_punish:
             default_heavy = os.path.join(sounds_dir, "shock_heavy_pure.mp3")

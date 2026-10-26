@@ -13,7 +13,7 @@ if hasattr(sys.stdout, "reconfigure"):
     except Exception:
         pass
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # 專案根目錄（本檔在 scripts/ 下）
 DATA_DIR = os.path.join(BASE_DIR, "data", "sounds_7L_clean")
 
 def set_scream_mode(mode: str = "local_tts"):
