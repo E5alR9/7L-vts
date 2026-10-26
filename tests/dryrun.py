@@ -88,10 +88,15 @@ class FakeBrain:
 
 class DryRun:
     def __init__(self, live: bool = True, brain: FakeBrain = None, subagent=("miss", ""), sentry=None,
-                 owner_uids=("dad_uid",)):
+                 owner_uids=("dad_uid",), live_sender: bool = False, speaker: bool = False):
         """live：Live 主腦在線（紙條留在佇列給它，測試看 slips）；False＝斷線很久（紙條由 REST 大腦接）。
-        subagent：子智能體解讀的結果 (kind, text)。sentry：看板哨兵的決定（預設要回）。"""
+        subagent：子智能體解讀的結果 (kind, text)。sentry：看板哨兵的決定（預設要回）。
+        live_sender：有個假的 Live 收紙條端，照真的一樣去重、記進流水帳，送出的放 sent_slips（重播用）。
+        speaker：有個假的嘴巴把說話佇列的話一句句「講掉」放進 spoken（看板要等她講完才處理留言；重播用）。"""
         self.live = live
+        self.live_sender = live_sender
+        self.speaker = speaker
+        self.sent_slips, self.spoken = [], []
         self.brain = brain or FakeBrain()
         self.subagent = subagent
         self.sentry = sentry or {"should_speak": True, "target": "", "focus": "回應", "raw": "[SPEAK]"}
@@ -213,7 +218,31 @@ class DryRun:
                      self.ns["streamer_mind_loop_worker"](None, self.input_queue),
                      self.ns["rest_slip_worker"](None, self.input_queue)):
             self._workers.append(asyncio.ensure_future(coro))
+        if self.live and self.live_sender:
+            self._workers.append(asyncio.ensure_future(self._live_sender()))
+        if self.speaker:
+            self._workers.append(asyncio.ensure_future(self._speaker()))
         return self
+
+    async def _speaker(self):
+        q = self.ns["speech_queue"]
+        while True:
+            item = await q.get()
+            self.spoken.append(item)
+            await asyncio.sleep(0.05)
+            q.task_done()
+
+    async def _live_sender(self):
+        """假的 Live 收紙條端：做 send_system_prompts_to_live 送出前後那幾件事（去重、記帳），不真的送。"""
+        ns = self.ns
+        while True:
+            prompt, origin, said, name = ns["_unpack_slip"](await ns["LIVE_API_SYSTEM_PROMPT_QUEUE"].get())
+            if ns["_slip_is_dupe"](prompt, time.time()):
+                self.logs.append("📄 [紙條去重] 10 秒內相同紙條已送過，跳過")
+                continue
+            ns["_note_brain_origin"](origin, said, name)
+            ns["_record_slip"](prompt, origin, name, "live")
+            self.sent_slips.append((prompt, origin, said, name))
 
     async def __aexit__(self, *exc):
         for t in self._workers + list(self._tasks):
