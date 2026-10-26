@@ -7,7 +7,9 @@
   以前主程式一份、鋼琴模組又自己留一份（開琴設 PIANO、收琴設 IDLE，跟主程式那份不相通），
   鋼琴開彈前「等她說完開場白」看的是自己那份，永遠看不到 TALKING，從來沒等過。
 - 「她在講話嗎」以前在麥克風、臉部追蹤、看板各寫一套條件，現在是 voice_out／talking。
+- 等她講完、等看板來留言：以前每 0.2～1 秒醒來看一次，現在用 wait_change 等到舞台有變（或時間到）。
 """
+import asyncio
 import time
 
 from core.utils import log_swallowed
@@ -31,6 +33,7 @@ def stop_playback() -> None:
     IS_MP3_PLAYING = False
     clear_mouth()
     CURRENT_SPEECH_START_TIME = 0.0
+    notify_change()
 
 
 def start_playback(envelope=None, start_time=None) -> None:
@@ -41,6 +44,7 @@ def start_playback(envelope=None, start_time=None) -> None:
         CURRENT_MOUTH_ENVELOPE = envelope
         CURRENT_SMOOTH_MOUTH = 0.0
     CURRENT_SPEECH_START_TIME = time.time() if start_time is None else start_time
+    notify_change()
 
 
 # ── AI 狀態 ─────────────────────────────────────────────────────────────
@@ -75,7 +79,43 @@ def set_ai_state(new: str, reason: str = "", only_from=None) -> bool:
             fn(old, new, reason)
         except Exception:
             log_swallowed()
+    notify_change()
     return True
+
+
+# ── 等舞台有變 ───────────────────────────────────────────────────────────
+_WAITERS = set()   # (event loop, future)
+
+
+def _wake(fut) -> None:
+    if not fut.done():
+        fut.set_result(True)
+
+
+def notify_change() -> None:
+    """舞台有變（換狀態、開始／停止播放、開始／停止唱歌、看板來新留言）：叫醒在 wait_change 等的人。
+    從別的執行緒呼叫也可以。"""
+    for loop, fut in list(_WAITERS):
+        try:
+            loop.call_soon_threadsafe(_wake, fut)
+        except RuntimeError:
+            _WAITERS.discard((loop, fut))   # 那個 event loop 已經關了
+
+
+async def wait_change(timeout: float) -> bool:
+    """等到舞台有變，最多 timeout 秒；回 True＝有變。取代「while 條件: sleep(0.5)」的輪詢，
+    條件還是呼叫端自己判斷（叫醒不代表條件成立，時間到也照樣回頭看一次）。"""
+    loop = asyncio.get_running_loop()
+    fut = loop.create_future()
+    item = (loop, fut)
+    _WAITERS.add(item)
+    try:
+        done, _ = await asyncio.wait({fut}, timeout=timeout)
+        return bool(done)
+    finally:
+        _WAITERS.discard(item)
+        if not fut.done():
+            fut.cancel()
 
 
 def register_singing_probe(fn) -> None:

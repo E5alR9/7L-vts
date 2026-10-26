@@ -265,6 +265,7 @@ def stop_singing():
     """立即中斷當前 7L 翻唱演奏並恢復狀態"""
     global IS_SINGING_ACTIVE, _PIPELINE_GEN
     IS_SINGING_ACTIVE = False
+    stage.notify_change()
     # 停止＝整個不唱了：待播＋備好全部清空，世代遞增讓遲到的背景準備自動丟棄
     _PIPELINE_GEN += 1
     n_q = len(SONG_REQUEST_QUEUE)
@@ -301,6 +302,7 @@ def stop_current_song() -> bool:
     except Exception:
         pass
     IS_SINGING_ACTIVE = False
+    stage.notify_change()
     _stopped_title = _NOW_PLAYING_TITLE
     _NOW_PLAYING_TITLE = ""
     #  2026-10-11：電擊打斷要順手拆掉這首的混用會合，不然下次重點同首會撿到
@@ -327,7 +329,7 @@ async def wait_for_intro_speech_complete(timeout: float = 15.0):
     # 1. 若大腦還在深度思考中 (THINKING)，先等候大腦產出台詞 (最多等 8 秒)
     t0 = time.time()
     while _ai_state() == "THINKING" and time.time() - t0 < 8.0:
-        await asyncio.sleep(0.2)
+        await stage.wait_change(0.2)
     # 2. 緩衝等候語音進入 speech_queue 或開始播話
     await asyncio.sleep(0.5)
     # 3. 等候開場白說完 (佇列清空且發話完畢；超時硬開唱)
@@ -350,7 +352,7 @@ async def wait_for_intro_speech_complete(timeout: float = 15.0):
             if el - _last_log >= 10.0:
                 _last_log = el
                 print(f"⏳ [等開場白] 背景聊天中…{el:.0f}s（{timeout:.0f}s 後不等了直接唱）。")
-            await asyncio.sleep(0.3)
+            await stage.wait_change(0.3)
         else:
             break
 
@@ -904,6 +906,7 @@ async def play_cover_audio(vocal_path: str, song_name: str, inst_path: str = Non
     global IS_SINGING_ACTIVE
     try:
         IS_SINGING_ACTIVE = True
+        stage.notify_change()
         stage.IS_MP3_PLAYING = True
         _core_set_ai_state("SINGING", f"準備開唱《{song_name}》")
 
@@ -990,6 +993,7 @@ async def play_cover_audio(vocal_path: str, song_name: str, inst_path: str = Non
         print(f"❌ [播放異常]: {e}")
     finally:
         IS_SINGING_ACTIVE = False
+        stage.notify_change()
         try:
             pygame.mixer.Channel(6).stop()
             pygame.mixer.Channel(7).stop()

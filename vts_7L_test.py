@@ -1205,9 +1205,8 @@ async def _mixed_piano_run(piano_title: str, sing_title: str, target: str, reque
 
 async def _wait_speech_done(timeout_sec: float = 30.0):
     """等語音佇列播完（佇列空＋無播放中任務）；超時放行，避免卡死。"""
-    for _ in range(int(timeout_sec * 2)):
-    
-    
+    deadline = time.time() + timeout_sec
+    while time.time() < deadline:
         task = globals().get("CURRENT_PLAYING_VOICE_TASK")
         playing = bool(task and not task.done())
         try:
@@ -1216,7 +1215,7 @@ async def _wait_speech_done(timeout_sec: float = 30.0):
             empty = True
         if empty and not playing:
             return
-        await asyncio.sleep(0.5)
+        await stage.wait_change(0.5)   # 她開始／講完、狀態一變就回頭看，不用等滿 0.5 秒
 
 
 async def set_sleep_mode(enable: bool):
@@ -5184,7 +5183,7 @@ async def speech_queue_worker(vts, input_queue):
                 if is_vocal_upcoming(est_duration):
                     log_print(f"🎤 [語音佇列] 檢測到即將有歌聲，TTS 發言 (預估需 {est_duration:.1f} 秒) 已暫停並排入等候區...")
                     while is_singing() and is_vocal_upcoming(est_duration):
-                        await asyncio.sleep(0.5)
+                        await stage.wait_change(0.5)   # 唱完就馬上回頭看
                     if is_singing():
                         log_print(f"🎵 [語音佇列] 遇到夠長的伴奏空白區 ({est_duration:.1f}s+)，抓緊時機插話！")
                     else:
@@ -5415,6 +5414,8 @@ def add_to_streamer_mind_board(user_display: str, unique_id: str, content: str, 
     except Exception:
         pass
         
+    if not handled:
+        stage.notify_change()   # 叫醒看板巡邏（streamer_mind_loop_worker），不用等它下一秒
     unread_count = sum(1 for m in STREAMER_MIND_BOARD if m["status"] == "unread")
     log_print(f"📥 [記憶腦袋 寫入] {user_display}: {content} (🧠 看板累積未讀: {unread_count} 筆)")
     
@@ -5731,7 +5732,10 @@ async def streamer_mind_loop_worker(vts, input_queue):
     
     while True:
         try:
-            await asyncio.sleep(1.0)
+            # 看板來新留言、她講完／唱完都會叫醒（stage.notify_change），最多等 1 秒照舊巡一次。
+            # 叫醒後等 0.3 秒再讀：留言常一次來好幾則，併成一批問哨兵（以前每秒巡一次也有這個效果）
+            if await stage.wait_change(1.0):
+                await asyncio.sleep(0.3)
             if IS_SLEEPING:
                 await asyncio.sleep(2.0)
                 continue

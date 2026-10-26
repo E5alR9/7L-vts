@@ -124,3 +124,28 @@ def test_broadcast_without_history_keeps_replay(monkeypatch):
     assert web_dash.RECENT_EVENTS == []
     web_dash.broadcast_event("chat_sent", {"text": "hi"})
     assert [e["type"] for e in web_dash.RECENT_EVENTS] == ["chat_sent"]
+
+
+def test_wait_change_wakes_on_a_change_and_times_out_otherwise(st):
+    """等她講完、等看板留言：以前每 0.2～1 秒醒來看一次，現在舞台一變就叫醒（2026-10-26）。"""
+    import asyncio
+    import time
+
+    async def go():
+        t0 = time.time()
+        assert await st.wait_change(0.2) is False and time.time() - t0 >= 0.19   # 沒變：等滿
+        waiter = asyncio.ensure_future(st.wait_change(5.0))
+        await asyncio.sleep(0.05)
+        st.set_ai_state("TALKING")                                              # 換狀態就叫醒
+        assert await waiter is True
+        waiter = asyncio.ensure_future(st.wait_change(5.0))
+        await asyncio.sleep(0.05)
+        st.stop_playback()                                                      # 停播也叫醒
+        assert await waiter is True
+        waiter = asyncio.ensure_future(st.wait_change(5.0))
+        await asyncio.sleep(0.05)
+        import threading
+        threading.Thread(target=st.notify_change).start()                       # 別的執行緒通知也行
+        assert await waiter is True
+        assert not st._WAITERS                                                  # 等完都清掉
+    asyncio.run(go())
