@@ -34,7 +34,7 @@ import threading
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, simpledialog
 from typing import Dict, List, Optional, Tuple
-import bitmidi_engine
+from services import bitmidi_engine
 import numpy as np
 
 try:

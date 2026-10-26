@@ -18,14 +18,14 @@ OnlineSequencer.net MIDI 搜尋與下載引擎
 
 import os, re, time, json, subprocess, urllib.parse, sys, base64
 import requests
-from dotenv import load_dotenv
+from core.env_config import load_project_env
 
 try:
     sys.stdout.reconfigure(encoding='utf-8')
 except Exception:
     pass
 
-load_dotenv(r"c:\Users\qiwai\.env")
+load_project_env()   # 讀專案根目錄的 .env（以前寫死原作者的路徑）
 try:
     from tavily import TavilyClient
 except ImportError:

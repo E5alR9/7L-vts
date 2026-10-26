@@ -18,18 +18,16 @@ import urllib.parse
 import json
 import requests
 from typing import Optional, Tuple
-from dotenv import load_dotenv
+from core.env_config import load_project_env
 
 try:
     sys.stdout.reconfigure(encoding='utf-8')
 except Exception:
     pass
 
-load_dotenv(r"c:\Users\qiwai\.env")
+load_project_env()   # 讀專案根目錄的 .env（以前寫死原作者的路徑）
 
-import bitmidi_engine
-import onlinesequencer_engine
-import cloud_mp3_to_midi
+from services import bitmidi_engine, onlinesequencer_engine, cloud_mp3_to_midi
 
 def sanitize_filename(name: str) -> str:
     clean = re.sub(r'[\\/*?:"<>|]', '_', name).strip()

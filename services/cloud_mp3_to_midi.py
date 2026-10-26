@@ -11,7 +11,9 @@ import os
 import sys
 import time
 import re
-import audio_to_piano_midi
+from services import audio_to_piano_midi
+
+MIDI_SHEETS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "midi_sheets")
 
 try:
     sys.stdout.reconfigure(encoding='utf-8')
@@ -26,7 +28,7 @@ def convert_youtube_via_cloud_mp3_to_midi(video_url: str, output_midi_path: str)
         print(f"⚠️ [YouTube 轉錄異常]: {e}")
         return False
 
-def download_yt_and_convert_to_midi(video_url: str, output_dir: str = r"c:\Users\qiwai\midi_sheets", filename_hint: str = "") -> str:
+def download_yt_and_convert_to_midi(video_url: str, output_dir: str = MIDI_SHEETS_DIR, filename_hint: str = "") -> str:
     """下載 YouTube 並調用 AI 轉錄為 88 鍵 MIDI，回傳 MIDI 檔案路徑"""
     os.makedirs(output_dir, exist_ok=True)
     if not filename_hint:
@@ -42,6 +44,5 @@ def download_yt_and_convert_to_midi(video_url: str, output_dir: str = r"c:\Users
 
 if __name__ == "__main__":
     test_link = "https://www.youtube.com/watch?v=7Ug1aw95-wQ"
-    out_m = r"c:\Users\qiwai\midi_sheets\test_huahai_verify.mid"
     res = download_yt_and_convert_to_midi(test_link, filename_hint="周杰倫_花海_鋼琴版")
     print("Downloaded MIDI path:", res)

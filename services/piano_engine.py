@@ -26,6 +26,7 @@ from google import genai
 from google.genai import types
 import services.vts_client as vc
 from services.vts_client import move_vts_spatial, set_vts_expression
+from services import bitmidi_engine, onlinesequencer_engine, pianist_midi_engine   # 抓譜：BitMidi／OnlineSequencer／YouTube 轉錄
 from core.hard_command import display_requester
 
 
@@ -2296,9 +2297,6 @@ async def play_piano_worker(song_title: str, sheet_text: str, bpm: int, mode: st
             await _show_subtitle("")
             log_print(f"🎹 [鋼琴舞台] 鋼琴演奏舞台結束，回到常規姿態！")
 
-import bitmidi_engine
-import onlinesequencer_engine
-import pianist_midi_engine
 
 def _take_stage(title: str, midi_file: str = "", note: str = "") -> int:
     """開新場次的唯一入口：舊場次作廢、舊演奏協程取消、記下台上曲目、登記「有人開彈了」。
