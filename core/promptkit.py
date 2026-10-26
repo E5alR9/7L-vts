@@ -33,8 +33,13 @@ def load_prompt(filename: str, **kwargs) -> str:
         return ""
 
 
-def brain_system(owner: str, char_name: str, cloud_knowledge: dict, expression_menu: str) -> str:
-    """主腦的系統提示詞：人設、限制、說話規則、雲端知識、技術硬規則。Live 主腦和 REST 大腦共用。"""
+VTUBER_MODE_NOTE = """【VTuber 直播模式】現在是對直播間觀眾的直播。{owner}不在電腦前、聽不到妳也不會跟妳對話（只有標著【主持】的插話是他）。
+妳的話直接播給觀眾聽：跟觀眾互動、用觀眾的名字叫他們，不要對著{owner}講話。"""
+
+
+def brain_system(owner: str, char_name: str, cloud_knowledge: dict, expression_menu: str, mode: str = "companion") -> str:
+    """主腦的系統提示詞：人設、限制、說話規則、雲端知識、技術硬規則。Live 主腦和 REST 大腦共用。
+    mode="vtuber" 時最後加一段直播模式說明（2026-10-26 起 VTuber 模式也開 Live 主腦）。"""
     cloud_kn_prompt = PromptTemplateEngine.format_cloud_knowledge_prompt(cloud_knowledge, current_custom_name=owner)
     p_persona = load_prompt("7L_persona.md", char_name=char_name, owner=owner)
     p_constraints = load_prompt("7L_constraints.md", char_name=char_name, owner=owner)
@@ -48,7 +53,7 @@ def brain_system(owner: str, char_name: str, cloud_knowledge: dict, expression_m
 
 {cloud_kn_prompt}
 {PromptTemplateEngine.HARD_TECHNICAL_RULES}
-"""
+""" + ("\n" + VTUBER_MODE_NOTE.format(owner=owner) + "\n" if mode == "vtuber" else "")
 
 
 def subagent_system() -> str:

@@ -17,6 +17,8 @@ MENU_NAMES = "、".join(n for _ctx, names in vc.EXPRESSION_MENU for n in names)
 
 ROLES = {
     "brain": lambda: promptkit.brain_system("老爸", "7L", DEFAULT_CLOUD_KNOWLEDGE, vc.EXPRESSION_MENU_TEXT),
+    "brain_vtuber": lambda: promptkit.brain_system("老爸", "7L", DEFAULT_CLOUD_KNOWLEDGE, vc.EXPRESSION_MENU_TEXT,
+                                                   mode="vtuber"),
     "board_sentry": lambda: promptkit.BOARD_SENTRY_SYSTEM,
     "screen_sentry": lambda: promptkit.SCREEN_SENTRY_SYSTEM + "\n---\n" + promptkit.screen_sentry_user("老爸在寫程式"),
     "director": lambda: promptkit.director_system(MENU_NAMES),

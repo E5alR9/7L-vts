@@ -147,3 +147,17 @@ def test_dad_cuts_in_while_she_is_answering_viewers():
     assert [x["text"] for x in d.speech] == ["老爸等一下喔"]
     assert any("2 則觀眾回話不講了" in l for l in d.logs) and d.problems == []
 
+
+
+def test_viewer_song_request_gets_one_slip_with_the_viewers_identity():
+    """觀眾點歌（2026-10-26）：CPU 直接排歌、遞一張標觀眾身分的紙條；看板那則標已處理，不再轉第二張。
+    以前兩張紙條她分兩輪各答一次；只留看板那張時主腦不知道歌已在排，回觀眾「這要問老爸」。"""
+    async def go():
+        async with DryRun(live=True) as d:
+            await d.viewer("小美", "7L 唱晴天")
+            await d.settle(1.5)
+            return d
+    d = run(go())
+    assert d.tools == [("auto_sing_song", {"song_name": "晴天"}, "audience", "小美")]
+    assert len(d.slips) == 1 and d.slips[0][1:] == ("audience", "7L 唱晴天", "小美")
+    assert "晴天" in d.slips[0][0] and d.problems == []

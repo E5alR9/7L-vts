@@ -43,7 +43,7 @@ _TREE = ast.parse(MAIN_SRC)
 MAIN_FUNCS = (
     "chat_processor_worker", "process_chat_message", "add_to_streamer_mind_board", "is_piano_song_request",
     "background_tool_executor", "run_stage_commands", "_hard_cmd_seen_recently", "_dispatch_in_background",
-    "send_brain_slip", "_unpack_slip", "_owner_text_slip", "_slip_is_dupe", "_record_slip",
+    "send_brain_slip", "_send_stage_slip", "_unpack_slip", "_owner_text_slip", "_slip_is_dupe", "_record_slip",
     "_note_brain_origin", "_brain_requester", "_her_words_before", "_brain_replaying_old_request",
     "is_live_brain_active", "live_brain_down_for", "use_rest_brain",
     "rest_slip_worker", "_rest_answer_slip", "_rest_speak", "_run_subagent_task",

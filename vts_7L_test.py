@@ -249,6 +249,15 @@ def _note_brain_origin(who: str, said: str = "", name: str = "") -> None:
     _BRAIN_INPUT_ORIGIN.update(who=who, ts=time.time(), said=said or "", human=True, name=name or "")
 
 
+def _live_reply_target() -> str:
+    """Live 主腦這段話對誰講：這輪是觀眾觸發的就對觀眾（公開播出）；VTuber 模式沒有私話對象，一律對觀眾。
+    以前一律標「老爸」：VTuber 模式老爸發聲是關的，主腦的話全被當私話不播；伴侶模式老爸插話時也丟不掉排隊中的觀眾回話。"""
+    from core.identity import is_vtuber
+    if is_vtuber() or _BRAIN_INPUT_ORIGIN.get("who") == "audience":
+        return "audience"
+    return "dad"
+
+
 def _brain_requester() -> str:
     """主腦這輪替誰做事：老爸講的就是老爸，觀眾留言有名字就寫名字；系統通知觸發或不知道是誰就留空（中性稱呼）。
     以前一律留空，老爸用麥克風點歌，鋼琴隊列和她的應答都寫「點播的人」。"""
@@ -2971,13 +2980,13 @@ def live_brain_down_for() -> float:
 
 
 def use_rest_brain() -> bool:
-    """該由 REST 大腦接手講話了嗎：Live 主腦斷線超過 LIVE_FALLBACK_AFTER_SEC。
-    VTuber 模式不開 Live 主腦，所以一直是。"""
+    """該由 REST 大腦接手講話了嗎：Live 主腦斷線超過 LIVE_FALLBACK_AFTER_SEC（兩種模式都一樣，2026-10-26 起 VTuber 模式也開 Live 主腦）。"""
     return live_brain_down_for() >= LIVE_FALLBACK_AFTER_SEC
 
 async def build_brain_system_prompt(owner: str, char_name: str) -> str:
     """主腦的系統提示詞（core/promptkit.brain_system）。Live 主腦和 REST 大腦共用。"""
-    return promptkit.brain_system(owner, char_name, await get_cloud_knowledge(), vc.EXPRESSION_MENU_TEXT)
+    from core.identity import get_mode
+    return promptkit.brain_system(owner, char_name, await get_cloud_knowledge(), vc.EXPRESSION_MENU_TEXT, mode=get_mode())
 
 
 def load_prompt(filename: str, **kwargs) -> str:
@@ -3460,8 +3469,9 @@ async def continuous_live_worker(vts):
                         while True:
                             data = await asyncio.to_thread(_read_mic_chunk)
                             
-                            # 若手動關閉麥克風，或 7L 正在講話 (避免麥克風回音觸發 Live API 的 VAD 打斷)
-                            if not IS_MIC_ENABLED or (CURRENT_PLAYING_VOICE_TASK and not CURRENT_PLAYING_VOICE_TASK.done()):
+                            # 若手動關閉麥克風、VTuber 模式（不聽電腦前的人），或 7L 正在講話 (避免麥克風回音觸發 Live API 的 VAD 打斷)
+                            if (not IS_MIC_ENABLED or not operator_input_enabled()
+                                    or (CURRENT_PLAYING_VOICE_TASK and not CURRENT_PLAYING_VOICE_TASK.done())):
                                 data = b'\x00' * len(data)
                                 
                             import numpy as np
@@ -3607,8 +3617,8 @@ async def continuous_live_worker(vts):
                                             sentence = chunk_buffer.strip()
                                             clean_sentence = await execute_actions(vts, sentence, input_queue, caller_target="dad", caller_user=owner)
                                             if clean_sentence.strip() and not is_singing_active():
-                                                await speech_queue.put({"text": clean_sentence.strip(), "target": "dad", "raw_text": sentence,
-                                                                         "from_live": True})
+                                                await speech_queue.put({"text": clean_sentence.strip(), "target": _live_reply_target(),
+                                                                         "raw_text": sentence, "from_live": True})
                                             chunk_buffer = ""
                                     
                                         if turn_buffer.strip():
@@ -3616,7 +3626,8 @@ async def continuous_live_worker(vts):
                                             LAST_BRAIN_TURN_TS = time.time()
                                             usage.note(live_m, True, role="主腦")
                                             from core.memory import append_to_unified_memory
-                                            append_to_unified_memory(speaker="7L", target="dad", content=_brain_text_for_memory(turn_buffer),
+                                            append_to_unified_memory(speaker="7L", target="dad" if _live_reply_target() == "dad" else "直播間",
+                                                                     content=_brain_text_for_memory(turn_buffer),
                                                                      role="assistant", source="live_api")
                                             log_print(f"📝 [黑板紀錄] 7L Live 大腦: {turn_buffer.strip()}")
                                             turn_buffer = ""
@@ -5681,6 +5692,16 @@ async def background_tool_executor(user_text: str, target: str = "dad", requeste
         return False, "", {}
 
 
+def _send_stage_slip(slip_text: str, target: str, said: str, requester_name: str) -> None:
+    """舞台指令執行了，遞紙條請主腦口頭答應。觀眾點的標觀眾身分（她回給那位觀眾、公開講），
+    呼叫端會把那則留言在看板標成已處理：以前看板兩秒後又轉一張，她分兩輪各答一次；
+    拿掉這張又不行——主腦不知道歌已經在排，回觀眾「這要問老爸」（2026-10-26 實機）。"""
+    if target == "audience":
+        send_brain_slip(slip_text, origin="audience", said=said, name=requester_name)
+    else:
+        send_brain_slip(slip_text)
+
+
 async def run_stage_commands(cmds: list, target: str = "dad", requester_name: str = "", from_brain: bool = False,
                              said: str = ""):
     """執行解析好的舞台指令 [(工具, 參數)]：兩個＝彈加唱（混用），一個＝單句。
@@ -5707,8 +5728,8 @@ async def run_stage_commands(cmds: list, target: str = "dad", requester_name: st
             else:
                 _dispatch_in_background(_tool, _args, caller_target=target, caller_user=requester_name)
             _slip = build_slip_text(_tool, _args, requester_name)
-            if _slip and is_live_brain_active() and not from_brain and target != "audience":
-                send_brain_slip(_slip)
+            if _slip and is_live_brain_active() and not from_brain:
+                _send_stage_slip(_slip, target, said, requester_name)
                 log_print(f"📥 [黑板同步] 透過紙條傳送給 Live 大腦: {_slip[:60]}...")
         _titles = "＋".join([a.get("song_name", "") for _, a in _mixed])
         return True, "mixed_play_sing", {"desc": _titles}
@@ -5745,10 +5766,9 @@ async def run_stage_commands(cmds: list, target: str = "dad", requester_name: st
         spawn(_song_ack_missing_original((fn_args or {}).get("song_name", ""), target))
     # ⚠️ 紙條必須寫明「唱歌的是 7L 本人」，否則主腦會把點歌的人當成演唱者
     # （經加鎖紙條佇列投遞，避免跟麥克風音訊流搶通道）
-    # 觀眾點的不另遞：看板兩秒後會把那則留言轉給主腦，兩張紙條她會分兩輪各答一次（2026-10-26 實機）
     slip_text = build_slip_text(fn_name, fn_args, requester_name)
-    if slip_text and is_live_brain_active() and not from_brain and target != "audience":
-        send_brain_slip(slip_text)
+    if slip_text and is_live_brain_active() and not from_brain:
+        _send_stage_slip(slip_text, target, said, requester_name)
         log_print(f"📥 [黑板同步] 透過紙條傳送給 Live 大腦: {slip_text[:60]}...")
     return True, fn_name, fn_args
 
@@ -6229,9 +6249,15 @@ async def chat_processor_worker(vts, input_queue):
                     )
                 else:
                     # 進行 CPU 極速指令攔截 (觀眾專屬，不啟用 AI 備案避免消耗 API)
-                    spawn(background_tool_executor(aud_c, target="audience", requester_name=id_display))
-                    # 寫入 7L 滾動記憶腦袋，由 streamer_mind_loop_worker 自主排程讀取與發話
-                    add_to_streamer_mind_board(id_display, v_unique_id, aud_c, source)
+                    try:
+                        _hit, _tool, _ = await background_tool_executor(aud_c, target="audience", requester_name=id_display)
+                    except Exception:
+                        log_swallowed()
+                        _hit, _tool = False, ""
+                    # 寫入 7L 滾動記憶腦袋，由 streamer_mind_loop_worker 自主排程讀取與發話；
+                    # 點歌已經執行、紙條也遞給 Live 主腦了，這則就不用看板哨兵再轉一次
+                    add_to_streamer_mind_board(id_display, v_unique_id, aud_c, source,
+                                               handled=bool(_hit) and _tool != "audience_denied" and is_live_brain_active())
 
             # -------------------------------------------------------------
             #  擁有者公開插話（owner_interject）：走觀眾軌道公開播出，不私聊、走觀眾工具牆
@@ -6553,8 +6579,10 @@ async def main():
     _IS_VTUBER = (_RUN_MODE == "vtuber")
     log_print(f"🎭 [運行模式] MODE={_RUN_MODE}（companion=1對1伴侶 / vtuber=只對觀眾7x24；照{SETTINGS.source}）")
     #  操作者輸入預設停用（OPERATOR_INPUT=1 才開；vtuber 模式強制關）：直播輸入只收聊天室觀眾留言
+    # Live 主腦兩種模式都開（2026-10-26 老爸決定）：VTuber 模式不送麥克風、只吃紙條，觀眾留言跟伴侶模式一樣由它回；
+    # 以前它放在「老爸輸入」區塊裡，VTuber 模式整場沒有 Live 主腦，觀眾全靠 REST 大腦
+    spawn(continuous_live_worker(vts))
     if operator_input_enabled():
-        spawn(continuous_live_worker(vts))
         spawn(mic_worker(recognizer, input_queue))   # Live 斷線時才收音
         spawn(instinct_live_worker())
         spawn(text_file_listener_worker(input_queue))

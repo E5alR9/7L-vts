@@ -116,8 +116,25 @@ class H(BaseHTTPRequestHandler):
 
 
 threading.Thread(target=ThreadingHTTPServer(("127.0.0.1", 7870), H).serve_forever, daemon=True).start()
-from dotenv import load_dotenv as _ld
-_ld(os.path.join(ROOT, ".env"), override=True)   # 跟主程式一樣先讀 .env，金鑰模組才不會空著初始化
+import dotenv as _dotenv
+
+# 只在測試時用的覆寫（不寫進 .env）：SIM_MODE=vtuber 用 VTuber 模式開；SIM_NO_CLOUD=1 不連 Firestore（不碰雲端備份）。
+# 主程式一開頭會用 override=True 重讀 .env，所以包住 load_dotenv：每次讀完都再套一次。
+_SIM_OVERRIDES = {k: v for k, v in (("MODE", os.environ.get("SIM_MODE", "")),
+                                    ("FIREBASE_ENABLED", "0" if os.environ.get("SIM_NO_CLOUD") == "1" else "")) if v}
+_orig_load_dotenv = _dotenv.load_dotenv
+
+
+def _load_dotenv_then_override(*a, **k):
+    r = _orig_load_dotenv(*a, **k)
+    os.environ.update(_SIM_OVERRIDES)
+    return r
+
+
+_dotenv.load_dotenv = _load_dotenv_then_override
+_dotenv.load_dotenv(os.path.join(ROOT, ".env"), override=True)   # 跟主程式一樣先讀 .env，金鑰模組才不會空著初始化
+if _SIM_OVERRIDES:
+    print(f"🧪 [測試包裝] 覆寫 {_SIM_OVERRIDES}", flush=True)
 import services.piano_engine as _pe_dbg
 
 # 老爸不讓測試看他的螢幕（2026-10-26）：所有截圖入口在主程式啟動前換成「不截圖」。
