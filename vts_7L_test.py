@@ -5,25 +5,24 @@
 #  整體架構、資料流、各模組分工見 docs/ARCHITECTURE.md（AI 供應商與配額見 docs/AI_SOURCES.md）。
 #  功能本體在 services/、共用底層在 core/；這支檔案只做串接：
 #
-#  找東西請用函式名稱搜（檔案內的「# 1.」「# 12.」段落編號是舊的，已跟內容對不上）：
-#    工具派發            execute_tool_dispatch（工具宣告在 core/tool_schema.py）
-#    REST 備援大腦       fetch_ai_response、get_prioritized_gemini_models、get_available_gemini_channels
-#    觀眾 Live 回覆      call_gemini_live_audience_reply
-#    彈唱會合（鋼琴側）  _mixed_piano_run
-#    說話播放            play_voice_complete、interrupt_current_speech、update_subtitle、神態導演 _director_*
-#    視覺                capture_screen_multi_view、get_lightweight_gemini_vision、check_screen_change_via_live_api
-#    回覆裡的動作標籤    execute_actions
-#    Live 主腦           continuous_live_worker（工具 invoke_subagent）、instinct_live_worker（身體本能）
-#    背景工作            mic_worker、peripheral_vision_worker、system_audio_worker、speech_queue_worker、
-#                        autonomous_wander_worker、busy_expression_worker、vts_health_worker …
-#    看板與哨兵          add_to_streamer_mind_board、judge_should_speak、streamer_mind_loop_worker
-#    子智能體            _handle_invoke_subagent、nv_interpret_task、_gemini_tool_pass、_nv_tool_pass、
-#                        background_tool_executor（CPU 硬指令）、run_stage_commands（舞台動作共用執行）
-#    給主腦的資料        send_brain_slip（要她回話）、add_brain_context（不用回話的背景資料）
-#    老爸對話            process_chat_message
-#    對話分派器          chat_processor_worker（來源分類在 core/input_sources.py）
-#    狀態面板、Discord   cma_monitor_worker、show_cma_panel、safe_discord_runner
-#    進入點              main、_status_bar_loop、shutdown_7l（唯一關機出口）
+#  段落（也可以直接搜函式名）：
+#    1. 主腦紙條、工具派發、看圖           send_brain_slip、add_brain_context、execute_tool_dispatch、describe_images
+#    2. 環境變數與金鑰                      金鑰池、模型名稱在 core/llm_engine
+#    3. 路徑與麥克風錄音快取                save_local_audio_clip
+#    4. 全域狀態、睡眠、彈唱會合、紙條去重  set_sleep_mode、_mixed_piano_run、_record_slip、_slip_is_dupe
+#    5. 雲端記憶連線與老爸的個人檔案        get_user_profile（Firestore 客戶端在 core/db）
+#    6. 本機沙盒、AI 畫圖、麥克風、回音      execute_local_python_code、generate_ai_image、control_microphone、is_7l_voice_echo
+#    7. 說話                                play_voice_complete、interrupt_current_speech、update_subtitle、神態導演 _director_*
+#    8. 視覺感知                            capture_screen_multi_view、get_lightweight_gemini_vision、check_screen_change_via_live_api
+#    9. 計時器、她話裡的動作標記            set_timer、execute_actions
+#   10. 背景工作                            10.1 listen_once_fast、shutdown_7l（唯一關機出口）
+#                                           10.2 continuous_live_worker（Live 主腦）、_run_subagent_task、rest_slip_worker、_slip_watchdog
+#                                           10.3 mic_worker、text_file_listener_worker、peripheral_vision_worker …
+#                                           10.4 busy_expression_worker、autonomous_wander_worker、speech_queue_worker
+#   11. 看板與對話                          11.1 add_to_streamer_mind_board、judge_should_speak、streamer_mind_loop_worker、idle_chatter_worker
+#                                           11.2 nv_interpret_task、_gemini_tool_pass、_nv_tool_pass
+#                                           11.3 run_stage_commands、background_tool_executor、process_chat_message、chat_processor_worker
+#   12. Discord、預熱、狀態列、進入點        show_cma_panel、safe_discord_runner、_status_bar_loop、main
 # ==============================================================================
 
 
@@ -220,6 +219,9 @@ from core.memory import (
 
 
 
+# ────────────────────────────────────────────────────────
+#  1. 主腦紙條、工具派發、看圖
+# ────────────────────────────────────────────────────────
 #  觀眾側（caller_target="audience"）避免呼叫的破壞性工具：防直播間彈幕 prompt injection
 _AUDIENCE_DENIED_TOOLS = frozenset({
     "clear_all_memories", "update_cloud_knowledge", "set_sleep_mode",
@@ -749,11 +751,9 @@ from google import genai
 from mic_live_plugin import mic_live_analyzer, voiceprint_verifier  # noqa: F401
 
 # ────────────────────────────────────────────────────────
-#  1. 環境變數載入與金鑰矩陣分流初始化 (API Keys & Pools)
+#  2. 環境變數與金鑰
 # ────────────────────────────────────────────────────────
-#  功能目的：
-#    從 .env 檔載入所有第三方服務金鑰（Groq、Gemini 核心金鑰矩陣、Tavily 網路搜尋、Firebase、Discord），
-#    並將 Gemini 金鑰池智慧劃分為多個專用通道，確保即時背景感知與老爸主腦互不干擾。
+#  讀 .env、印出各家金鑰數量；金鑰池怎麼分工、模型叫什麼名字都定義在 core/llm_engine。
 
 load_dotenv(override=True)
 os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"  # 關閉 Hugging Face 符號連結警告
@@ -804,13 +804,12 @@ except ImportError:
 
 
 # ────────────────────────────────────────────────────────
-#  2. 模型清單與大腦池定義 (GEMINI_MODELS 7-Tier Matrix)
+#  3. 路徑與麥克風錄音快取
 # ────────────────────────────────────────────────────────
 
 
 # GEMINI_MODELS、生圖、Live 模型名稱都在 core/llm_engine.py 的「模型名稱唯一出處」
 
-#  高智商任務專屬倒序模型梯隊 (由 3.8 旗艦深度思考領銜，專攻找歌判斷、找譜語意、代碼、哲學與高難度推理)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 os.makedirs(DATA_DIR, exist_ok=True)
@@ -872,12 +871,10 @@ def save_local_audio_clip(audio_base64: str) -> Optional[str]:
 
 
 # ────────────────────────────────────────────────────────
-#  4. 全域狀態變數、硬體偵測與通知設定 (Global State & Specs)
+#  4. 全域狀態、睡眠、彈唱會合、紙條去重
 # ────────────────────────────────────────────────────────
-#  功能目的：
-#    - 自動偵測主機實體螢幕解析度 (DPI 感知)、CPU、GPU 與記憶體硬體規格。
-#    - 維護 7L 的即時運行狀態（思考中、發話中、彈琴中、麥克風監聽）。
-#    - 定義多執行緒佇列（語音輸出隊列、彈幕看板隊列、VTS 參數隊列）。
+#  螢幕解析度與硬體規格；AI 狀態變化的掛鉤（狀態本體在 core/stage_state）；睡眠模式；
+#  彈加唱的會合 _mixed_piano_run；紙條記帳與去重（流水帳在 core/eventlog）。
 
 def get_screen_resolution():
     """動態檢測 Windows 實體螢幕解析度 (支援 DPI 感知與多螢幕)"""
@@ -1364,12 +1361,9 @@ def is_system_overloaded():
     return False
 
 # ────────────────────────────────────────────────────────
-#  5. Firebase Firestore 雲端永久記憶與觀眾個人檔案系統 (0 DLL 純 Python 異步 REST 客戶端)
+#  5. 雲端記憶連線與老爸的個人檔案
 # ────────────────────────────────────────────────────────
-#  功能目的：
-#    - 提供 0 C/DLL 依賴的純 Python 異步 Firestore REST 客戶端，避免 Windows AppLocker 阻擋 gRPC 二進位檔。
-#    - 儲存老爸與 7L 的深度私聊記憶（`channel_history`）、核心人格標籤（`channel_meta`）。
-#    - 儲存 TikTok 直播觀眾個人檔案（稱呼、關係、印象、最後見面時間），自動雙向同步至本地 JSON 快取。
+#  Firestore 客戶端在 core/db、記憶本體在 core/memory；預設拔除（FIREBASE_ENABLED=1 才連），只當備份。
 
 db = None
 # PROVIDER: FIRESTORE（預設拔除：FIREBASE_ENABLED=1 才連；全呼叫點另有本地 JSON 備援）
@@ -1411,14 +1405,10 @@ async def get_user_profile():
 
 
 
-# ────────────────────────────────────────────────────────
-#  6. Live2D / VTube Studio 表情與姿態控制 & 雙軌空間走位系統 (Spatial Movement)
-# ────────────────────────────────────────────────────────
 
-# ──  7L 即時時事與熱搜情報中樞 (Trending News Engine) ────────────────────────
 
 # ────────────────────────────────────────────────────────
-#  7. 7L 本機遊樂場沙盒 (7L_Playground)
+#  6. 本機沙盒、AI 畫圖、麥克風開關、回音判斷
 # ────────────────────────────────────────────────────────
 PLAYGROUND_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "7L_Playground")
 os.makedirs(PLAYGROUND_DIR, exist_ok=True)
@@ -1737,15 +1727,9 @@ def is_computer_audio_echo(stt_text: str) -> bool:
     return False
 
 # ────────────────────────────────────────────────────────
-#  10. 語音合成、音訊分析與字幕工具
-# ────────────────────────────────────────────────────────
-# ────────────────────────────────────────────────────────
-#  預編譯高頻正則表達式與統一文字淨化引擎 (TextCleanEngine)
+#  7. 說話：合成與播放、字幕、打斷
 # ────────────────────────────────────────────────────────
 
-# ────────────────────────────────────────────────────────
-#  核心 Prompt 範本工廠與動態指令建造器 (PromptTemplateEngine)
-# ────────────────────────────────────────────────────────
 
 def _remove_temp_mp3():
     try:
@@ -1814,7 +1798,7 @@ async def interrupt_current_speech(clear_queue: bool = True, reason: str = "7L �
         log_print(f"⚠️ [中斷語音異常]: {e}")
 
 # ────────────────────────────────────────────────────────
-#  12.5 Live API 即時神態導演與句中動態表情時間軸排程引擎
+#  7.1 Live API 神態導演：句中表情時間軸
 # ────────────────────────────────────────────────────────
 
 
@@ -2335,7 +2319,7 @@ async def play_instant_sound_clip(audio_path: str, subtitle: str = ""):
 
 
 # ────────────────────────────────────────────────────────
-#  11. 視覺感知、畫面截圖與輕量眼角餘光
+#  8. 視覺感知、畫面截圖與眼角餘光
 # ────────────────────────────────────────────────────────
 has_printed_vision_error = False
 
@@ -2539,18 +2523,9 @@ async def check_screen_change_via_live_api(img_bytes: bytes, current_context: st
 
 
 
-# ────────────────────────────────────────────────────────
-#  12. 旗艦多模態大腦推理核心 (fetch_ai_response)
-# ────────────────────────────────────────────────────────
-#  功能目的：
-#    - 7L 與老爸私下對話、深度探索與工具執行的全模態旗艦推理核心。
-#    - 支援文字、5 視角全螢幕畫面影像（Base64 JPEG）、原生音訊（WAV）。
-#    - 採用智能任務分流（3.1 Flash Lite ➔ 3.5 Flash Lite ➔ 3 Flash ➔ 3.1 Pro ➔ 3.5 ➔ 3.6 ➔ 3.7）。
-#    - 雙軌搶答競速與自動降級（Failover），並在成功後立即調用工具或執行 Live2D 動作。
-
 
 # ────────────────────────────────────────────────────────
-#  13. 使用者指令、電腦控制與計時器動作
+#  9. 計時器、她話裡的動作標記
 # ────────────────────────────────────────────────────────
 async def set_timer(seconds: int, message: str, target_queue: Optional[asyncio.Queue] = None, caller_user: str = ""):
     """設定定時感測提醒 (已全面升級至 API Live 定時感測中樞)"""
@@ -2610,10 +2585,12 @@ async def execute_actions(vts, text, input_queue, execute_visuals: bool = False,
     return TextCleanEngine.clean_speech_text(text)
 
 # ────────────────────────────────────────────────────────
-#  14. 專屬背景工作協程群 (Workers)
+#  10. 背景工作（另外六個搬到 workers/）
 # ────────────────────────────────────────────────────────
 
-# ---  語音與收音協程 ---
+# ────────────────────────────────────────────────────────
+#  10.1 麥克風辨識（舊 STT）、關機
+# ────────────────────────────────────────────────────────
 is_user_listening = False
 listen_start_time = 0.0
 
@@ -2757,6 +2734,9 @@ def check_immediate_shutdown(text: str) -> bool:
 
 _TOOL_TAG_RE = re.compile(r'\[TOOL:[^\]]*\]')
 
+# ────────────────────────────────────────────────────────
+#  10.2 Live 主腦、子智能體、REST 大腦、看門狗
+# ────────────────────────────────────────────────────────
 def _clean_result_for_brain(text: str) -> str:
     """副腦回報清洗（2026-10-10：結果/fallback 裡的 [TOOL:*] 若被主腦 echo，
     會重新觸發搜網/視覺副腦造成迴圈。注入前先拔掉。）"""
@@ -3802,6 +3782,9 @@ async def continuous_live_worker(vts):
                 log_print(f"🔄 [Live 同鑰重連] 第 {clean_fail_count}/3 次（目標不變: G{current_k_idx}, {live_models[current_m_idx]}）。")
             await asyncio.sleep(_wait)
 
+# ────────────────────────────────────────────────────────
+#  10.3 輸入與感知：麥克風備援、打字、檔案、截圖、餘光、防水印
+# ────────────────────────────────────────────────────────
 async def mic_worker(recognizer, input_queue):
     """舊 STT 收音（Google 語音辨識＋聲紋＋回音過濾）：只在 Live 主腦斷線超過 LIVE_FALLBACK_AFTER_SEC 秒時收，
     Live 在線時麥克風由 Live 原生音訊聽，這裡不碰麥克風。2026-10-07 起一度沒啟動，Live 斷線時老爸講話沒人聽。"""
@@ -4177,6 +4160,9 @@ async def anti_watermark_worker(vts, interval: float = WATERMARK_REASSERT_SEC):
 
 # ────────────────────────────────────────────────────────
 
+# ────────────────────────────────────────────────────────
+#  10.4 表情、閒逛、說話佇列
+# ────────────────────────────────────────────────────────
 async def print_model_parameters(vts):
     try:
         await asyncio.sleep(1.0)
@@ -4504,7 +4490,7 @@ async def speech_queue_worker(vts, input_queue):
                 log_swallowed()
 
 # ────────────────────────────────────────────────────────
-#  15. 對話處理與自主發話大腦核心
+#  11. 看板與對話
 # ────────────────────────────────────────────────────────
 
 
@@ -4580,20 +4566,10 @@ def is_piano_song_request(user_input: str) -> bool:
     # 其餘無「彈」且不明顯是歌名者，一律回傳 False！
     return False
 
+
 # ────────────────────────────────────────────────────────
-#  15. 全集中全景時序記憶中樞與對話派發系統 (Unified Mind-Stream Architecture)
+#  11.1 看板與哨兵、閒聊
 # ────────────────────────────────────────────────────────
-#  核心設計：
-#    - `UNIFIED_LIVE_MEMORY`: 全局唯一統一記憶時間線（deque maxlen=300 + 本地 unified_memory.json 持久化）。
-#      老爸對話、直播觀眾彈幕、7L 自身發言、鋼琴演奏等全事件 100% 匯流同一時間線。
-#    - 所有 Gemini 呼叫點（老爸旗艦主腦、主播記憶看板、Live 專屬雙軌、自主發話、Live 哨兵）
-#      無論輪詢切換到哪個 API Key 或模型，100% 讀取同一份完整全景時序劇本，徹底消滅思想斷裂！
-
-
-
-
-
-
 # 這些來源的使用者名稱與內容是觀眾（或外部網站）提供的，進看板前要中和
 def add_to_streamer_mind_board(user_display: str, unique_id: str, content: str, source: str = "tiktok",
                                handled: bool = False):
@@ -5219,6 +5195,9 @@ async def streamer_mind_loop_worker(vts, input_queue):
 current_dad_task = None
 CURRENT_PROCESSING_USER_INPUT = ""
 
+# ────────────────────────────────────────────────────────
+#  11.2 子智能體解讀（NV／Gemini 的工具判定與思考）
+# ────────────────────────────────────────────────────────
 def _extract_think_reply(text: str):
     """把副腦思考輸出拆成 (思考過程, 最終結論)。
     認 [THINK]...[/THINK] + [REPLY]...[/REPLY]；沒標籤就整段當結論（向後相容）。
@@ -5606,6 +5585,9 @@ async def nv_interpret_task(task_ins: str, target: str = "dad", requester_name: 
         return "miss", ""
 
 
+# ────────────────────────────────────────────────────────
+#  11.3 舞台指令、對話處理、懲罰與獎勵
+# ────────────────────────────────────────────────────────
 async def _rescue_missed_song_requests():
     """斷線重連後，把最近送達、但沒人認領的點歌撿回來（只救點歌）。
 
@@ -6382,11 +6364,9 @@ async def chat_processor_worker(vts, input_queue):
 
 
 # ────────────────────────────────────────────────────────
-#  16. CMA 狀態監控檔案輸出與 Discord 機器人指令 (Console Monitor Area & Bot)
+#  12. Discord 指令、模型預熱、終端狀態列、main()
 # ────────────────────────────────────────────────────────
-#  功能目的：
-#    - `cma_monitor_worker`: 每秒輪詢 API_LOCKS，將全量 Gemini 通道健康狀態寫入 `data/cma_status.txt` 與 `data/cma_status.json`。
-#    - 提供 Discord 遠端監控機器人指令（如 `*vapis`, `*vapi`），讓老爸隨時隨地透過手機 Discord 掌握 7L 運作狀態。
+#  金鑰健康面板本體在 workers/cma_panel；Discord 讓老爸用手機看狀態、開關麥克風。
 
 import workers.cma_panel as cma_panel  # 金鑰健康面板（搬出主檔）
 cma_panel.bind(sys.modules[__name__])
