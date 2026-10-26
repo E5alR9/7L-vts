@@ -77,7 +77,7 @@ flowchart TD
 | `input_sources.py` | 輸入來源分類、休眠喚醒規則 |
 | `groq_router.py` | Groq 文字快線（多金鑰、梯隊降級、OpenAI 格式工具轉換） |
 | `identity.py`／`lang.py`／`stage_state.py`／`utils.py` | 擁有者與模式、中日文判斷、舞台狀態（AI 狀態、在講／在唱、還有話在排、`wait_change` 等事件）與嘴型、`log_print`／`log_swallowed`／`spawn`（背景任務留參考、出錯必記） |
-| `db.py`／`env_config.py`／`paths.py`／`live_timer_sensor.py`／`subagent_router.py`／`websocket_patch.py` | Firestore REST、後台可改的 .env 白名單與 `load_project_env`（讀金鑰的模組自己先讀 .env）、路徑（`ROOT_DIR`、`DATA_DIR`：data/ 在哪只在這裡算一次）、計時器、子智能體用腦路由、Live 連線相容補丁 |
+| `db.py`／`env_config.py`／`paths.py`／`live_timer_sensor.py`／`subagent_router.py`／`websocket_patch.py` | Firestore REST、後台可改的 .env 白名單與 `load_project_env`（讀金鑰的模組自己先讀 .env）、路徑（`ROOT_DIR`、`DATA_DIR`、`ffmpeg_exe()`：專案根目錄、data/、ffmpeg 在哪只在這裡算）、計時器、子智能體用腦路由、Live 連線相容補丁 |
 
 ### services/
 
@@ -142,6 +142,9 @@ flowchart TD
 - `ClassicalPianoSoundEngine`（鋼琴音源）在 `services/piano_engine.py` 和鋼琴視窗 `test_virtual_piano.py` 各一份，已經分岔（83 行不同）；視窗是獨立程序，合併前要先決定音源歸誰。
 - `chat_source` 的 `start_chat_worker`／`stop_chat_worker`（後台開關監聽器）沒接到任何按鈕。
 - `audio_to_piano_midi`（舊的音訊轉 MIDI）和 `audio_to_score`（新的扒譜）兩套並存。
+- `core/memory` import `services` 的 RAG 模組、`core/barge_in` import `mic_live_plugin`，違反「core 不 import services」。
+- 還有約 18 個不是金鑰的環境變數開關（`DESKTOP_FIRST`、`SUBAGENT_BRAIN`、`MIC_*`、`VIDEO_WATCH_*`、`RVC_HALF`、`XIAOYI_*`、TTS 調參…），跟「.env 只放金鑰」的規定不符，要不要收成模組常數待老爸決定。
+- 主檔幾十處 `print`／`asyncio.create_task`／`except Exception: pass` 沒走 `log_print`／`spawn`／`log_swallowed`（翻唱模組 77 處 print）。
 
 ## 6. 整理紀錄
 
@@ -177,3 +180,9 @@ flowchart TD
 - **刪**：63 個沒用到的 import（`core` 不再 import `services.piano_engine`；主檔的 `from core.db import *` 一個名字都沒用到）、piano_engine 的兩個空 stub、tts_router 的舊名別名、主檔的 `load_prompt` 包裝、groq_router 三個沒人叫的函式。
 - **收攏**：`DATA_DIR` 只在 `core/paths` 算一次；三個直播平台的佇列項目只有 `chat_source.make_chat_item` 一個出處（TikTok 原本自己拼了九處）。
 - **主檔段落**：標題重排成 1～12 連號、對得上內容，檔頭目錄改成段落對照表。主檔 6,751 行。
+
+**2026-10-27 第六輪（分區細讀）**：12 區各一位讀者細讀找出 270 條（死碼 65、慣例不一 44、重複 43、bug 33、過時註解 25、環境變數開關 18…），抽 20 條給驗證者全部確認；照批次改，每批過完整測試，最後實機冒煙 6/6。鋼琴、後台、文件、背景工作與工具、橫切面 5 區因用量限制還沒讀。
+- **測試不寫真資料**：翻唱快取在測試裡指到暫存資料夾（以前有個測試會 rmtree 掉實機 Demucs 的 stems）；鋼琴模組 import 時只讀曲庫，刪檔和寫 `midi_catalog.json` 改由主程式開機的 `init_midi_library()` 做。
+- **bug**：計時器「十五分鐘」變 1 分鐘；她提議彈琴、老爸說「不要」被當成答應；Tavily 全失敗時 DuckDuckGo 備援走不到；搜網副腦的 Tavily 參數放反；睡著時畫面中度變化叫不醒她；看板把 Twitch／YouTube 觀眾標成 TikTok；電擊、摸頭被當成老爸打字（記錯人、VTuber 模式整則丟掉）；狀態列通知從沒顯示；TikTok 讚數永遠 0；YouTube 重連後狀態卡在 connecting；舊記憶救援只救回第一句；知識庫雲端備份失敗被當成存檔失敗；熟客記憶誤收觀眾檔片段。
+- **刪**：約 800 行沒人用的程式（麥克風 Live 分析器整個模組、開機查硬體、永遠回 False 的電腦音訊回音判斷…）。
+- **收攏**：19 個模組自己算專案根目錄 → `core.paths.ROOT_DIR`；ffmpeg 找法 5 份 → `core.paths.ffmpeg_exe()`。主檔 6,670 行。
