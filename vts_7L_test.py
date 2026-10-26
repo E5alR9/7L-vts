@@ -1307,6 +1307,7 @@ CURRENT_SPEAKING_TARGET = "none"
 current_system_notification = ""
 notification_expire_time = 0.0
 speech_queue = SpeechQueue()   # 老爸的話先講；可以挑掉某些話（core/speech_queue.py）
+stage.register_speech_pending_probe(lambda: not speech_queue.empty())
 LIVE_API_SYSTEM_PROMPT_QUEUE = asyncio.Queue()
 # 不用她回話的背景資料（YouTube 伴看筆記）：send_client_content(turn_complete=False) 悄悄放進主腦的對話，
 # 不會觸發回話，她講到一半也不會被打斷（2026-10-26 兩個 Live 模型實測）。

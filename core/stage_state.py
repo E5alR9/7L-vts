@@ -51,6 +51,7 @@ def start_playback(envelope=None, start_time=None) -> None:
 AI_STATE = "IDLE"
 _STATE_LISTENERS = []   # 狀態改變時通知（主程式登記：記日誌、廣播給後台）
 _SINGING_PROBE = None   # 翻唱管線登記：現在有沒有在唱
+_SPEECH_PENDING_PROBE = None   # 主程式登記：說話佇列裡還有沒有話在排
 
 
 def ai_state() -> str:
@@ -121,6 +122,20 @@ async def wait_change(timeout: float) -> bool:
 def register_singing_probe(fn) -> None:
     global _SINGING_PROBE
     _SINGING_PROBE = fn
+
+
+def register_speech_pending_probe(fn) -> None:
+    global _SPEECH_PENDING_PROBE
+    _SPEECH_PENDING_PROBE = fn
+
+
+def speech_pending() -> bool:
+    """說話佇列裡還有話在排（還沒輪到講）。"""
+    try:
+        return bool(_SPEECH_PENDING_PROBE is not None and _SPEECH_PENDING_PROBE())
+    except Exception:
+        log_swallowed()
+        return False
 
 
 def singing() -> bool:

@@ -109,6 +109,17 @@ def _convert_local_to_raw(src_mp3: str, output_wav: str) -> bool:
     return False
 
 
+async def _let_her_finish_talking(max_wait: float = 20.0) -> float:
+    """人聲分離前先等她把要講的話講完（正在講的、還在排隊的；最多 max_wait 秒），回等了幾秒。
+    分離和語音合成在同一張顯卡上搶：2026-10-26 實測分離中合成一句要 24～84 秒，點新歌的應答要一分鐘以上才出聲。
+    前一首在唱的時候準備下一首不用等（唱歌時要講的話本來就排著等空檔）。"""
+    t0 = time.time()
+    while (not stage.singing() and (stage.ai_state() == "TALKING" or stage.speech_pending())
+           and time.time() - t0 < max_wait):
+        await stage.wait_change(0.5)
+    return time.time() - t0
+
+
 def separate_stems_gpu(input_wav: str, song_name: str, tag: str = "") -> tuple[str, str]:
     """
     使用 Demucs / UVR 進行人聲與伴奏分離
@@ -870,6 +881,9 @@ async def prepare_cover_song(song_name: str, source_mp3: str = "", origin: str =
         except Exception: pass
 
         # 步驟 2: 分離伴奏與人聲（幾分鐘級，掛心跳以免看起來空轉）
+        _waited = await _let_her_finish_talking()
+        if _waited >= 0.5:
+            print(f"⏳ [人聲分離] 先等她講完應答（{_waited:.1f} 秒）再開始分離，免得跟語音合成搶顯卡")
         _tag = "orig_" if (origin or "") == "original" else ""
         vocal_wav, inst_wav = await _run_with_heartbeat(
             lambda: asyncio.to_thread(separate_stems_gpu, raw_wav, song_name, _tag),
