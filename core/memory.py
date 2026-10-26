@@ -533,16 +533,32 @@ def flush_unified_memory() -> None:
 
 # ── 哪些話要進向量記憶庫（回話前會查：services/rag_memory_service.related_memories_block）──
 _RAG_DAD_SOURCES = frozenset({"text", "voice", "mic", "text_file", "console", "web_console", "owner_interject", "tiktok_dad"})
+_RAG_VIEWER_SOURCES = frozenset({"tiktok", "tiktok_gift", "twitch", "youtube"})
 _RAG_TAG_RE = re.compile(r"\[[A-Z_]+(?:[:：][^\]]*)?\]")   # [EXPRESSION: 正常]、[WINK]、[SILENCE]、[LOOK: LEFT]、[VIEWER_UPDATE:…]
+_VIEWER_NAME_RE = re.compile(r"「(.+?)」")                 # 記憶裡觀眾的 speaker 長「TikTok 觀眾「小明」」
 
 
-def rag_memory_text(speaker: str, target: str, content: str, role: str, source: str, t_str: str) -> Optional[str]:
-    """要不要存進向量庫、存成什麼樣；不存回 None。
-    存：老爸的話（打字、麥克風、主持插話、直播間的老爸帳號）和她的回覆（拔掉表情標籤；只剩 [SILENCE] 的不存）。
-    不存：觀眾留言（看板那邊另有觀眾檔）、系統事件（鋼琴）、心想。
-    以前只存老爸 text／voice 兩種來源，後台打字、麥克風的話和她的回覆從來沒進過向量庫（2026-10-26）。"""
+def is_known_viewer(name: str) -> bool:
+    """熟客：本機觀眾檔（viewer_profiles_local_<模式>.json）裡有這個人。"""
+    return bool(name) and name in _load_viewer_profiles()
+
+
+def rag_memory_entry(speaker: str, target: str, content: str, role: str, source: str, t_str: str) -> Optional[tuple]:
+    """要不要存進向量庫、存成什麼樣：回 (文字, metadata)，不存回 None。
+    存：老爸的話（打字、麥克風、主持插話、直播間的老爸帳號）、她的回覆（拔掉表情標籤；只剩 [SILENCE] 的不存）、
+    熟客（有觀眾檔的觀眾）的留言（metadata 帶觀眾名，紙條附記憶時可以只查他說過的）。
+    不存：路人留言、系統事件（鋼琴）、心想。
+    以前只存老爸 text／voice 兩種來源，後台打字、麥克風的話、她的回覆、觀眾的話都沒進過向量庫（2026-10-26）。"""
+    viewer = ""
     if role == "user" and source in _RAG_DAD_SOURCES:
         body = content.strip()
+    elif role == "user" and source in _RAG_VIEWER_SOURCES:
+        m = _VIEWER_NAME_RE.search(speaker or "")
+        viewer = (m.group(1) if m else (speaker or "")).strip()
+        if not is_known_viewer(viewer):
+            return None
+        body = content.strip()
+        speaker = viewer
     elif role == "assistant":
         body = re.sub(r"\s{2,}", " ", _RAG_TAG_RE.sub("", content)).strip(" \t，。！？~～")
         if len(body) < 4:
@@ -552,7 +568,10 @@ def rag_memory_text(speaker: str, target: str, content: str, role: str, source: 
     if not body:
         return None
     to = get_owner_name() if target == "dad" else target
-    return f"[{t_str}] {speaker}對{to}說: {body}"
+    meta = {"source": role}
+    if viewer:
+        meta["viewer"] = viewer
+    return f"[{t_str}] {speaker}對{to}說: {body}", meta
 
 
 def append_to_unified_memory(speaker: str, target: str, content: str, role: str = "user", source: str = "text"):
@@ -613,12 +632,12 @@ def append_to_unified_memory(speaker: str, target: str, content: str, role: str 
     # 磁碟寫入節流（每隔 2 秒；窗口內的後續寫入會在窗口結束時補存）
     _request_unified_save(now_t)
 
-    # 向量記憶庫（老爸的話和她的回覆；規則在 rag_memory_text）
-    rag_text = rag_memory_text(speaker, target, clean_c, role, source, t_str)
-    if rag_text:
+    # 向量記憶庫（老爸的話、她的回覆、熟客的留言；規則在 rag_memory_entry）
+    rag_entry = rag_memory_entry(speaker, target, clean_c, role, source, t_str)
+    if rag_entry:
         try:
             loop = asyncio.get_running_loop()
-            loop.create_task(rag_service.add_rag_memory(rag_text, source=role))
+            loop.create_task(rag_service.add_rag_memory(rag_entry[0], source=role, viewer=rag_entry[1].get("viewer", "")))
         except RuntimeError:
             pass
 

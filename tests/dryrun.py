@@ -91,23 +91,24 @@ class FakeBrain:
 class DryRun:
     def __init__(self, live: bool = True, brain: FakeBrain = None, subagent=("miss", ""), sentry=None,
                  owner_uids=("dad_uid",), live_sender: bool = False, speaker: bool = False,
-                 related_memories: str = ""):
+                 related_memories: str = "", known_viewers=()):
         """live：Live 主腦在線（紙條留在佇列給它，測試看 slips）；False＝斷線很久（紙條由 REST 大腦接）。
         subagent：子智能體解讀的結果 (kind, text)。sentry：看板哨兵的決定（預設要回）。
         live_sender：有個假的 Live 收紙條端，照真的一樣去重、記進流水帳，送出的放 sent_slips（重播用）。
         speaker：有個假的嘴巴把說話佇列的話一句句「講掉」放進 spoken（看板要等她講完才處理留言；重播用）。
-        related_memories：假的「相關舊記憶」段（回話前查向量庫的結果）；空字串＝查不到。"""
+        related_memories：假的「相關舊記憶」段（回話前查向量庫的結果）；空字串＝查不到。known_viewers：有觀眾檔的熟客。"""
         self.live = live
         self.live_sender = live_sender
         self.speaker = speaker
         self.related_memories = related_memories
+        self.known_viewers = set(known_viewers)
         self.sent_slips, self.spoken = [], []
         self.brain = brain or FakeBrain()
         self.subagent = subagent
         self.sentry = sentry or {"should_speak": True, "target": "", "focus": "回應", "raw": "[SPEAK]"}
         self.owner_uids = set(owner_uids)
         self.tools, self.memory, self.logs, self.errors, self.acks = [], [], [], [], []
-        self.subagent_tasks, self.saved_position, self.vision, self.related_queries = [], [], [], []
+        self.subagent_tasks, self.saved_position, self.vision, self.related_queries, self.related_viewers = [], [], [], [], []
         self._tasks, self._workers = set(), []
         self.ns = self._build()
 
@@ -142,8 +143,9 @@ class DryRun:
         async def sentry(memory_context, board_desc):
             return dict(d.sentry)
 
-        async def related_block(query):
+        async def related_block(query, viewers=()):
             d.related_queries.append(query)
+            d.related_viewers.append(list(viewers))
             return ("\n" + d.related_memories) if d.related_memories else ""
 
         async def anoop(*a, **k):
@@ -209,7 +211,7 @@ class DryRun:
             "web_dash": pytypes.SimpleNamespace(broadcast_event=lambda *a, **k: None),
             "live_timer_hub": pytypes.SimpleNamespace(detect_timer_intent=lambda t: None),
             "_desktop_dad_reply": anoop, "_save_model_position": lambda: d.saved_position.append(1),
-            "_related_memories_block": related_block,
+            "_related_memories_block": related_block, "is_known_viewer": lambda n: n in d.known_viewers,
             "set_timer": anoop, "interrupt_current_speech": anoop, "execute_speech_visual_actions": anoop,
             "is_singing_active": lambda: False, "save_local_audio_clip": lambda *a: "",
             "live_vision_tool_task": lambda: d._record_vision("vision"),

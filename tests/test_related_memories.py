@@ -132,8 +132,59 @@ def test_rest_board_prompt_and_live_speech_also_look_up_memories():
     tree = ast.parse(MAIN)
     fn = next(x for x in ast.walk(tree) if isinstance(x, ast.AsyncFunctionDef) and x.name == "_streamer_mind_prompt")
     src = ast.get_source_segment(MAIN, fn)
-    assert "related = await _related_memories_block(board_context)" in src and "{related}" in src
+    assert "related = await _related_memories_block(board_context, viewers=" in src and "{related}" in src
     flush = next(x for x in ast.walk(tree) if isinstance(x, ast.FunctionDef) and x.name == "_flush_user_speech")
     assert "spawn(_related_context_for_speech(user_spoken))" in ast.get_source_segment(MAIN, flush)
     ctx = next(x for x in ast.walk(tree) if isinstance(x, ast.AsyncFunctionDef) and x.name == "_related_context_for_speech")
     assert "add_brain_context(" in ast.get_source_segment(MAIN, ctx)
+
+
+def _vhit(viewer, text, score, age_sec):
+    h = _hit(text, score, age_sec)
+    h["text"] = f"[12:41:00] {viewer}對7L說: {text}"
+    h["metadata"]["viewer"] = viewer
+    return h
+
+
+def test_regular_viewers_own_lines_are_searched_with_a_lower_bar(monkeypatch):
+    """熟客的留言另外只在他自己說過的話裡找：一個實字就查、不用共同實字；找不到就給最近說過的兩句。"""
+    calls = []
+
+    async def search(q, top_k=3, where=None):
+        calls.append(where)
+        if where == {"viewer": "小明"}:
+            return [_vhit("小明", "7L 以後叫我明哥好不好，我是妳的頭號粉絲喔", 0.58, 6 * 3600),
+                    _vhit("小明", "7L 晚安", 0.52, 6 * 3600)]
+        return []
+
+    monkeypatch.setattr(rag, "search_rag_memory", search)
+    monkeypatch.setattr(rag.rag_store, "get_where", lambda where, limit=50: [])
+    block = asyncio.run(rag.related_memories_block("7L 妳還記得我是妳的什麼粉絲嗎", viewers=["小明"]))
+    assert "小明對7L說: 7L 以後叫我明哥好不好，我是妳的頭號粉絲喔" in block
+    assert "7L 晚安" not in block                  # 招呼這種沒內容的記憶照樣不給
+    assert calls == [{"viewer": "小明"}]          # 這句實字不到 3 個：一般的查法不查，只查小明自己的
+
+    # 找不到相關的：給他最近說過的兩句（一小時內的不算、跟這句一樣的不算）
+    async def nothing(q, top_k=3, where=None):
+        return []
+    rows = [_vhit("小明", "7L 晚安", 0, 2 * 3600), _vhit("小明", "7L 主播有彈過匈牙利狂想曲嗎", 0, 3 * 3600),
+            _vhit("小明", "7L 以後叫我明哥", 0, 9 * 3600), _vhit("小明", "剛剛才說的", 0, 60)]
+    monkeypatch.setattr(rag, "search_rag_memory", nothing)
+    monkeypatch.setattr(rag.rag_store, "get_where", lambda where, limit=50: rows if where == {"viewer": "小明"} else [])
+    block = asyncio.run(rag.related_memories_block("7L 晚安", viewers=["小明"]))
+    assert "匈牙利狂想曲" in block and "以後叫我明哥" in block
+    assert "剛剛才說的" not in block and "7L 晚安" not in block           # 一小時內的、跟這句一樣的招呼不算
+    assert block.count("小明對7L說") == 2
+    assert asyncio.run(rag.related_memories_block("7L 晚安", viewers=[])) == ""
+
+
+def test_board_slip_asks_for_the_regulars_in_the_batch():
+    async def go():
+        async with DryRun(live=True, related_memories=MEM, known_viewers=("小明",)) as d:
+            await d.viewer("小明", "7L 妳還記得我嗎")
+            await d.settle(1.5)
+            await d.viewer("路人甲", "7L 晚安")
+            await d.settle(1.5)
+            return d
+    d = asyncio.run(go())
+    assert d.related_viewers == [["小明"], []] and d.problems == []

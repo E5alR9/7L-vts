@@ -208,7 +208,7 @@ from core.memory import (
     save_to_long_term_memory, append_to_unified_memory, clear_all_memories,
     get_recent_100_memory_context, get_viewer_profile, save_viewer_profile, record_bot_message,
     get_cloud_knowledge, update_cloud_prompt_field, STREAMER_MIND_BOARD, DEFAULT_CHANNEL_ID,
-    get_unified_memory_context, RECENT_BOT_MESSAGES, USER_PROFILE_FILE,
+    get_unified_memory_context, RECENT_BOT_MESSAGES, USER_PROFILE_FILE, is_known_viewer,
 )
 
 
@@ -333,11 +333,12 @@ def add_brain_context(text: str) -> bool:
         return False   # 主腦斷線很久、積了 50 筆：舊筆記不重要了
 
 
-async def _related_memories_block(query: str) -> str:
+async def _related_memories_block(query: str, viewers=()) -> str:
     """回話前查一次舊對話（services/rag_memory_service.related_memories_block）：有就接在紙條後面給主腦看。
+    viewers：這批留言裡的熟客，另外只在他們自己說過的話裡找。
     查不到、RAG 沒起來、超過 1.5 秒都回空字串，不擋回話。以前 RAG 記憶每句都存、從來沒人查（2026-10-26）。"""
     try:
-        block = await rag_service.related_memories_block(query)
+        block = await rag_service.related_memories_block(query, viewers=viewers)
     except Exception:
         log_swallowed()
         return ""
@@ -4976,7 +4977,7 @@ async def _streamer_mind_prompt(board_context: str, users_involved: list, has_da
     else:
         role_strict_block = "【直播間】老爸在打遊戲，觀眾在看直播。先分清楚誰在對誰說話。"
 
-    related = await _related_memories_block(board_context)   # 回話前先查舊對話（2026-10-26）
+    related = await _related_memories_block(board_context, viewers=[u for u in users_involved if is_known_viewer(u)])   # 回話前先查舊對話（2026-10-26）
     sys_instruction = f"""妳是 7L。
 時間：{get_current_time_string()}
 
@@ -5134,7 +5135,8 @@ async def streamer_mind_loop_worker(vts, input_queue):
                         log_swallowed()   # 觀眾檔讀不到不能擋住紙條
                         _profiles = ""
                     _related = await _related_memories_block("\n".join(str(m.get("content", "")) for m in batch_to_process
-                                                                      if m.get("source") != "video_watch"))
+                                                                      if m.get("source") != "video_watch"),
+                                                             viewers=[u for u in users_involved if is_known_viewer(u)])
                     slip_text = (f"[系統提示：背景潛意識哨兵偵測到直播間最新動態！目標：{log_target}，事件焦點：{log_focus}。剛才收到的觀眾留言：\n{board_context}\n"
                                  + (f"觀眾檔案：\n{_profiles}\n{VIEWER_UPDATE_HINT}\n" if _profiles else "")
                                  + (_related.strip("\n") + "\n" if _related else "")

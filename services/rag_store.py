@@ -85,8 +85,8 @@ def upsert_documents(ids: List[str], texts: List[str], metas: Optional[List[dict
         return len(ids)
 
 
-def search(query: str, k: int = 4) -> List[Dict]:
-    """向量相似度檢索，回傳依相關度排序的片段。"""
+def search(query: str, k: int = 4, where: Optional[Dict] = None) -> List[Dict]:
+    """向量相似度檢索，回傳依相關度排序的片段。where：只在 metadata 符合的片段裡找（例如 {"viewer": "小明"}）。"""
     if not query or not query.strip():
         return []
     from services.embedder import embed_one
@@ -96,10 +96,12 @@ def search(query: str, k: int = 4) -> List[Dict]:
             if col.count() == 0:
                 return []
             vec = embed_one(query)
+            kw = {"where": where} if where else {}
             res = col.query(
                 query_embeddings=[vec],
                 n_results=max(1, min(k, 10)),
                 include=["documents", "metadatas", "distances"],
+                **kw,
             )
     except Exception as e:
         try:
@@ -119,6 +121,24 @@ def search(query: str, k: int = 4) -> List[Dict]:
         score = 1.0 - float(dist)
         out.append({"text": doc, "score": round(score, 4), "metadata": meta or {}})
     return out
+
+
+def get_where(where: Dict, limit: int = 50) -> List[Dict]:
+    """不比相似度，直接拿 metadata 符合的片段（例如某個熟客說過的全部）；沒有就空的。"""
+    try:
+        with _lock:
+            col = _get_collection()
+            if col.count() == 0:
+                return []
+            res = col.get(where=where, limit=max(1, limit), include=["documents", "metadatas"])
+    except Exception as e:
+        try:
+            print(f"[RAG] 讀取失敗：{str(e)[:120]}")
+        except Exception:
+            pass
+        return []
+    return [{"text": d, "score": 0.0, "metadata": m or {}}
+            for d, m in zip(res.get("documents") or [], res.get("metadatas") or []) if d]
 
 
 def search_multi(queries: List[str], k: int = 4) -> List[Dict]:

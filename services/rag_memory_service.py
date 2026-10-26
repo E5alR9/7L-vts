@@ -19,9 +19,10 @@ def init_rag(api_key: str):
     _initialized = True
     print("🧠 [RAG 記憶中樞] 已準備完畢 (本地 ChromaDB + 雲端 Firestore 同步)")
 
-async def add_rag_memory(content: str, source: str = "dialogue"):
+async def add_rag_memory(content: str, source: str = "dialogue", viewer: str = ""):
     """
-    新增一筆 RAG 記憶，會自動計算向量，存入本地 ChromaDB 並同步至雲端 Firestore
+    新增一筆 RAG 記憶，會自動計算向量，存入本地 ChromaDB 並同步至雲端 Firestore。
+    viewer：熟客的留言帶觀眾名，之後可以只查他說過的。
     """
     if not content or not content.strip():
         return
@@ -34,6 +35,8 @@ async def add_rag_memory(content: str, source: str = "dialogue"):
         "source": source,
         "timestamp": timestamp
     }
+    if viewer:
+        metadata["viewer"] = viewer
     
     # 1. Update Local ChromaDB Store
     # We use asyncio.to_thread because upsert_documents is synchronous
@@ -64,12 +67,12 @@ async def add_rag_memory(content: str, source: str = "dialogue"):
         except Exception as e:
             print(f"⚠️ [RAG 雲端同步失敗]: {e}")
 
-async def search_rag_memory(query: str, top_k: int = 3) -> list:
+async def search_rag_memory(query: str, top_k: int = 3, where: dict = None) -> list:
     """
-    搜尋最相關的歷史記憶 (使用本地 ChromaDB)
+    搜尋最相關的歷史記憶 (使用本地 ChromaDB)；where 只在 metadata 符合的裡面找（{"viewer": 名字}）
     """
     def _do_search():
-        return rag_store.search(query, k=top_k)
+        return rag_store.search(query, k=top_k, where=where)
         
     try:
         results = await asyncio.to_thread(_do_search)
@@ -132,10 +135,12 @@ def _parse_ts(iso):
 
 
 def pick_related(hits, query: str, now=None, k=RELATED_MAX, min_score=RELATED_MIN_SCORE,
-                 strong_score=RELATED_STRONG_SCORE, skip_recent_sec=RELATED_SKIP_RECENT_SEC):
-    """純函數：檢索結果 → 值得附給主腦的幾筆（規則見檔頭）。最後照時間排（好讀）。"""
+                 strong_score=RELATED_STRONG_SCORE, skip_recent_sec=RELATED_SKIP_RECENT_SEC,
+                 min_query_content=MIN_CONTENT, need_overlap=True):
+    """純函數：檢索結果 → 值得附給主腦的幾筆（規則見檔頭）。最後照時間排（好讀）。
+    只查某個熟客說過的（hits 已經是他的）時，放寬：一個實字就查、不用共同實字（本來就是他的話）。"""
     qg = content_chars(query)
-    if len(qg) < MIN_CONTENT:
+    if len(qg) < min_query_content:
         return []   # 「早安」「幫我數到三」：沒東西可查
     now = time.time() if now is None else now
     qn = _norm(query)
@@ -152,7 +157,7 @@ def pick_related(hits, query: str, now=None, k=RELATED_MAX, min_score=RELATED_MI
         if not key or key in seen or key == qn[:80] or score >= 0.95:
             continue   # 空的、重複的、跟這句一模一樣的
         hg = content_chars(text)
-        if len(hg) < MIN_CONTENT or (score < strong_score and not (qg & hg)):
+        if len(hg) < MIN_CONTENT or (need_overlap and score < strong_score and not (qg & hg)):
             continue   # 記憶本身沒內容（「他自己彈的」）、或只是表面像
         seen.add(key)
         out.append({"text": text, "ts": ts, "score": score})
@@ -173,20 +178,64 @@ def format_related(picked) -> str:
     return "[相關的舊記憶（向量比對找的，可能不相關，自己判斷要不要提）：\n" + "\n".join(lines) + "]"
 
 
-async def related_memories_block(query: str, k: int = RELATED_MAX, timeout: float = 1.5) -> str:
+VIEWER_MIN_SCORE = 0.50     # 只在熟客自己的話裡找：本來就是他說的，門檻放低
+VIEWER_LATEST = 2           # 找不到相關的，就給他最近說過的兩句
+
+
+def latest_viewer_lines(viewer: str, query: str = "", now=None, n=VIEWER_LATEST, skip_recent_sec=RELATED_SKIP_RECENT_SEC):
+    """熟客最近說過的幾句（一小時內的、跟這句一樣的、招呼這種沒內容的、重複的都不算），新的在前。"""
+    now = time.time() if now is None else now
+    qn = _norm(query)[:80]
+    rows = []
+    for h in rag_store.get_where({"viewer": viewer}, limit=200):
+        ts = _parse_ts((h.get("metadata") or {}).get("timestamp"))
+        if ts and now - ts < skip_recent_sec:
+            continue
+        rows.append({"text": (h.get("text") or "").strip(), "ts": ts or 0.0, "score": 0.0})
+    rows.sort(key=lambda x: -x["ts"])
+    out, seen = [], set()
+    for r in rows:
+        key = _norm(r["text"])[:80]
+        if not key or key in seen or key == qn or len(content_chars(r["text"])) < MIN_CONTENT:
+            continue
+        seen.add(key)
+        out.append(r)
+        if len(out) >= n:
+            break
+    return out
+
+
+async def related_memories_block(query: str, k: int = RELATED_MAX, timeout: float = 1.5, viewers=()) -> str:
     """回話前查一次：search → pick → format。查不到、超時、RAG 沒起來都回空字串，絕不擋住回話。
+    viewers：這批留言裡的熟客，另外只在他們自己說過的話裡找（找不到相關的就給最近說過的兩句）。
     向量模型預載過的話一次約 5～10 毫秒（第一次要載模型，1 秒多，所以設時限）。"""
-    if not query or len(content_chars(query)) < MIN_CONTENT:
-        return ""
+    query = (query or "").strip()[:300]
+    picked = []
     try:
-        hits = await asyncio.wait_for(search_rag_memory(query.strip()[:300], top_k=max(k * 3, 8)), timeout)
+        if query and len(content_chars(query)) >= MIN_CONTENT:
+            hits = await asyncio.wait_for(search_rag_memory(query, top_k=max(k * 3, 8)), timeout)
+            picked += pick_related(hits, query, k=k)
+        for v in list(viewers or [])[:2]:
+            mine = []
+            if query and content_chars(query):
+                vh = await asyncio.wait_for(search_rag_memory(query, top_k=6, where={"viewer": v}), timeout)
+                mine = pick_related(vh, query, k=VIEWER_LATEST, min_score=VIEWER_MIN_SCORE,
+                                    min_query_content=1, need_overlap=False)
+            if not mine:
+                mine = await asyncio.wait_for(asyncio.to_thread(latest_viewer_lines, v, query), timeout)
+            picked += mine
     except asyncio.TimeoutError:
         print("⚠️ [RAG 檢索] 超過時限，這次不附舊記憶")
-        return ""
     except Exception as e:
         print(f"⚠️ [RAG 檢索失敗]: {e}")
-        return ""
-    return format_related(pick_related(hits, query, k=k))
+    seen, uniq = set(), []
+    for p in picked:
+        key = _norm(p["text"])[:80]
+        if key and key not in seen:
+            seen.add(key)
+            uniq.append(p)
+    uniq.sort(key=lambda x: x["ts"] or 0)
+    return format_related(uniq[:k + VIEWER_LATEST * 2])
 
 
 def clear_rag_memory():

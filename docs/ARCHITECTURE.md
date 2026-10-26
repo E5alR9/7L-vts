@@ -42,7 +42,7 @@ flowchart TD
 6. **給主腦的資料**：
    - 要她回話的走 `send_brain_slip`，是唯一出口，送出那一刻記下是誰觸發的。紙條有兩個收件人：Live 主腦在線時是 `send_system_prompts_to_live`；沒有 Live 主腦時是 `rest_slip_worker`，交給 REST 大腦（系統提示詞跟 Live 同一份 `build_brain_system_prompt`，另帶最近對話和鋼琴狀態；可以呼叫同一個 `invoke_subagent`，子智能體本體是共用的 `_run_subagent_task`）。
    - 不用她回話的背景資料（YouTube 伴看筆記）走 `add_brain_context`，用 `send_client_content(turn_complete=False)` 放進對話，不觸發回話，也不會打斷她。
-   - **回話前查舊記憶**（2026-10-26）：老爸的紙條、觀眾的紙條、看板 REST 提示詞送出前都先拿那句話查向量記憶庫（`services/rag_memory_service.related_memories_block`），有就接在紙條後面「[相關的舊記憶…]」。挑法照實機量的分數：很像（餘弦 ≥ 0.70）直接收、普通像（≥ 0.55）要跟這句話有共同實詞才收、一小時內講的不算、跟這句一模一樣的不算、「早安」「數到三」這種沒內容的話不查；最多 3 筆、1.5 秒內查不到就算了。麥克風講的話是原生音訊直接進 Live，來不及在回話前附，轉寫一到就查、有就走 `add_brain_context` 補給她。進向量庫的是老爸的話（打字、麥克風、主持插話）和她的回覆（拔掉表情標籤；觀眾留言、系統事件、心想不存；規則在 `core/memory.rag_memory_text`），以前只存老爸打字的、她的回覆沒存，而且從來沒人查；舊的對話記憶用 `scripts/backfill_rag_memory.py` 補進去。
+   - **回話前查舊記憶**（2026-10-26）：老爸的紙條、觀眾的紙條、看板 REST 提示詞送出前都先拿那句話查向量記憶庫（`services/rag_memory_service.related_memories_block`），有就接在紙條後面「[相關的舊記憶…]」。挑法照實機量的分數：很像（餘弦 ≥ 0.70）直接收、普通像（≥ 0.55）要跟這句話有共同實詞才收、一小時內講的不算、跟這句一模一樣的不算、「早安」「數到三」這種沒內容的話不查；最多 3 筆、1.5 秒內查不到就算了。麥克風講的話是原生音訊直接進 Live，來不及在回話前附，轉寫一到就查、有就走 `add_brain_context` 補給她。進向量庫的是老爸的話（打字、麥克風、主持插話）、她的回覆（拔掉表情標籤）和熟客（本機觀眾檔裡有的人）的留言（metadata 帶觀眾名；路人留言、系統事件、心想不存；規則在 `core/memory.rag_memory_entry`），以前只存老爸打字的，而且從來沒人查；舊的對話記憶用 `scripts/backfill_rag_memory.py` 補進去。觀眾那批紙條裡有熟客時，另外只在他自己說過的話裡找（門檻放低到 0.50、一個實字就查），找不到相關的就附他最近說過的兩句。
    - 看門狗看主腦「有沒有真的產出」：連兩張紙條各 20 秒沒產出（金鑰額度用完時連線還在、但不生成）就關線、冷卻這把、換下一把，那張紙條交給新連線。
 7. **出去**：
    - 要說的話依序經過 `speech_queue`（`core/speech_queue`：給老爸的先講、觀眾的最後；被打斷只挑掉 Live 自己排的）→ `speech_queue_worker` → `play_voice_complete`。
