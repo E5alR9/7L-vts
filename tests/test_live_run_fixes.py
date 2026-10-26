@@ -125,7 +125,7 @@ def _run_executor(text, target):
           "split_original_request": split_original_request, "is_stage_control": is_stage_control,
           "execute_tool_dispatch": execute_tool_dispatch, "_song_ack_missing_original": _song_ack, "spawn": __import__("core.utils", fromlist=["spawn"]).spawn,
           "is_live_brain_active": lambda: False, "LIVE_API_SYSTEM_PROMPT_QUEUE": collections.deque(),
-          "eventlog": eventlog, "_HARD_CMD_DEDUPE_SEC": 20.0}
+          "eventlog": eventlog, "_HARD_CMD_DEDUPE_SEC": 20.0, "_supersede_board_requests": lambda kind: 0}
     for name in ("_hard_cmd_seen_recently", "_dispatch_in_background", "run_stage_commands", "background_tool_executor"):
         exec(compile(ast.Module(body=[_fn(name)], type_ignores=[]), name, "exec"), ns)
 

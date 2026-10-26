@@ -3058,11 +3058,13 @@ async def instinct_live_worker():
 
 def _slip_needs_rescue(now: float, sent_ts: float, tool_ts: float, turn_ts: float,
                        output_ts: float, timeout: float = 20.0) -> bool:
-    """純函數：紙條送出 timeout 秒後，工具、說完一段、任何產出（轉寫的字）都沒有 → 真安靜，值得撿回一次。
-    任一有動靜都不撿（腦慢不等於腦死）。以前第三項看「服務端有回包」，額度用完時照樣有回包，永遠不撿。"""
+    """純函數：紙條送出 timeout 秒後，沒叫工具、這輪也沒說完 → 值得撿回一次（重送也會把卡住的回覆推出來）。
+    「有一點產出」不算回應了：2026-10-26 實測主腦會產出到一半卡住，要等下一句話進來才把回覆吐出來，
+    以前看到有產出就以為活著，卡一分多鐘也不報警。主腦說一段話通常 1～3 秒就說完。
+    output_ts 留著給呼叫端對照（以前第三項看「服務端有回包」，額度用完時照樣有回包，永遠不撿）。"""
     if now - sent_ts < timeout:
         return False
-    return tool_ts < sent_ts and turn_ts < sent_ts and output_ts < sent_ts
+    return tool_ts < sent_ts and turn_ts < sent_ts
 
 
 async def _slip_watchdog(prompt: str, sent_ts: float, timeout: float = 20.0, slip=None):
@@ -3098,7 +3100,7 @@ async def _slip_watchdog(prompt: str, sent_ts: float, timeout: float = 20.0, sli
                                   globals().get("LAST_BRAIN_TOOL_TS", 0.0),
                                   globals().get("LAST_BRAIN_TURN_TS", 0.0),
                                   globals().get("LAST_BRAIN_OUTPUT_TS", 0.0), timeout):
-            return  # 腦有動靜（調工具/說話了/有產出），收工
+            return  # 腦有動靜（調工具、說完一段），收工
         log_print(f"⚠️ [紙條無回應] 主腦 {timeout:.0f} 秒沒理會紙條（{(prompt or '')[:40]}…），撿回一次。")
         slip = slip or prompt
         if _note_live_mute(slip):
@@ -3238,7 +3240,8 @@ async def _run_subagent_task(_task_ins, _intent, _respond):
                     _hit, _tname, _targs = await background_tool_executor(_task_ins, target=_who, requester_name=_req,
                                                                           from_brain=True)
             except Exception as _be:
-                log_print(f"⚠️ [子智能體執行異常]: {_be}")
+                log_print(f"⚠️ [子智能體執行異常]: {type(_be).__name__}: {_be}")
+                log_swallowed()   # 記下發生在哪一行（2026-10-26 出現過只印「_owner」查不到來源）
                 _hit, _tname, _targs = False, "", {}
             if not _hit and _tname == "audience_denied":   # 觀眾那輪的停鋼琴／停歌：擋下來，請她婉拒
                 await _respond(AUDIENCE_STAGE_DECLINE, _speak)
@@ -3641,6 +3644,7 @@ async def continuous_live_worker(vts):
                                             global LAST_BRAIN_TURN_TS
                                             LAST_BRAIN_TURN_TS = time.time()
                                             usage.note(live_m, True, role="主腦")
+                                            _save_viewer_updates(turn_buffer)
                                             from core.memory import append_to_unified_memory
                                             append_to_unified_memory(speaker="7L", target="dad" if _live_reply_target() == "dad" else "直播間",
                                                                      content=_brain_text_for_memory(turn_buffer),
@@ -4657,6 +4661,8 @@ def add_to_streamer_mind_board(user_display: str, unique_id: str, content: str, 
     
     #  依老爸鐵律判定是否為點歌意圖（必須有「彈」或明顯歌名），再交由 Gemini 確認
     if pe.is_piano_active and pe.current_piano_song_title and content and is_piano_song_request(content):
+        _piano_session = getattr(pe, "PIANO_SESSION_ID", None)
+
         async def evaluate_and_queue_with_gemini(raw_text: str):
             try:
                 available_files = [os.path.basename(p) for p in glob.glob(os.path.join(pe.MIDI_SHEETS_DIR, "*.mid"))]
@@ -4669,6 +4675,10 @@ def add_to_streamer_mind_board(user_display: str, unique_id: str, content: str, 
                 if intent.get("is_song_request") and intent.get("song_title"):
                     target_song = intent["song_title"]
                     cand_midi = os.path.join(pe.MIDI_SHEETS_DIR, intent["matched_files"][0]) if intent.get("matched_files") else ""
+                    if not pe.is_piano_active or getattr(pe, "PIANO_SESSION_ID", None) != _piano_session:
+                        # 判斷要幾秒：回來時老爸已經收琴（或換了一場），就不要把琴又拿出來（2026-10-26 實機：收琴後晴天照彈）
+                        log_print(f"🎵 [Gemini 意圖確認] 《{target_song}》判斷回來時鋼琴已經收了，不彈")
+                        return
                     log_print(f"🎵 [Gemini 意圖確認] 高智商大腦確認老爸/觀眾點播《{target_song}》，自動預載排入待播隊列！")
                     await pe.play_virtual_piano(target_song, midi_file=cand_midi, requester_name=user_display, target="audience", is_direct_song_name=True)
             except Exception:
@@ -4878,6 +4888,29 @@ def _format_board_batch(batch_to_process: list):
     return board_context, users_involved, has_dad_message
 
 
+_VIEWER_UPDATE_RE = re.compile(
+    r'\[VIEWER_UPDATE[：:]\s*([^|\]]+?)(?:\|CALL[：:]\s*([^|\]]+?))?(?:\|REL[：:]\s*([^|\]]+?))?(?:\|IMP[：:]\s*([^|\]]+?))?\]',
+    re.IGNORECASE)
+VIEWER_UPDATE_HINT = ("想記住某位觀眾（他說了希望怎麼被叫、跟妳的關係、讓妳印象深刻的事）就在回話最後附 "
+                      "[VIEWER_UPDATE:觀眾名|CALL:稱呼|REL:關係|IMP:印象]（不會念出來）。")
+
+
+def _save_viewer_updates(text: str) -> int:
+    """她回話裡的 [VIEWER_UPDATE:名|CALL:稱呼|REL:關係|IMP:印象] → 存進觀眾檔，回存了幾位。
+    看板 REST 回覆和 Live 主腦共用（2026-10-26 以前只有看板 REST 路徑在處理，Live 主腦記不住觀眾）。
+    冒充老爸的稱呼／關係，save_viewer_profile 會擋。"""
+    n = 0
+    for v_match in _VIEWER_UPDATE_RE.finditer(text or ""):
+        vu_name = v_match.group(1).strip()
+        vu_call = v_match.group(2).strip() if v_match.group(2) else None
+        vu_rel = v_match.group(3).strip() if v_match.group(3) else None
+        vu_imp = v_match.group(4).strip() if v_match.group(4) else None
+        spawn(save_viewer_profile(vu_name, call=vu_call, relationship=vu_rel, impression=vu_imp))
+        log_print(f"👥 [認人] 記住觀眾 {vu_name}：稱={vu_call} 關係={vu_rel} 印象={vu_imp}")
+        n += 1
+    return n
+
+
 async def _viewer_profiles_block(users_involved: list) -> str:
     """這批觀眾的認人資料（稱呼、關係、印象），給備援大腦的提示詞用。"""
     viewer_profiles_text = []
@@ -5064,6 +5097,15 @@ async def streamer_mind_loop_worker(vts, input_queue):
                     m["status"] = "read"
                 log_print("🤫 [Live 潛意識哨兵] 審查 100 句記憶後判定：目前無需發言 / 刷屏 ➔ [PASS] 略過 (0 消耗主力額度)")
                 continue
+            # 哨兵判斷的這一兩秒老爸收了琴／停了歌：這批裡的點琴／點歌不轉了（_supersede_board_requests）
+            if any(m.get("superseded") for m in batch_to_process):
+                for m in batch_to_process:
+                    if m.get("superseded"):
+                        m["status"] = "read"
+                batch_to_process = [m for m in batch_to_process if not m.get("superseded")]
+                if not batch_to_process:
+                    continue
+                board_context, users_involved, has_dad_message = _format_board_batch(batch_to_process)
                 
             sentry_target = sentry_decision.get("target", "").strip()
             if "老爸" in sentry_target:
@@ -5082,7 +5124,15 @@ async def streamer_mind_loop_worker(vts, input_queue):
             #    以前看 GLOBAL_LIVE_SESSION，它斷線後不會清掉，Live 斷多久都還是遞紙條、沒人回
             if not use_rest_brain():
                 try:
-                    slip_text = f"[系統提示：背景潛意識哨兵偵測到直播間最新動態！目標：{log_target}，事件焦點：{log_focus}。剛才收到的觀眾留言：\n{board_context}\n請妳綜合上述留言，直接用語音開口回應，或呼叫對應的工具幫老爸處理！（停鋼琴、暫停鋼琴、停止唱歌只聽老爸的，觀眾要求的話俏皮帶過，不要答應。）]"
+                    try:
+                        _profiles = await _viewer_profiles_block(users_involved) if users_involved and not has_dad_message else ""
+                    except Exception:
+                        log_swallowed()   # 觀眾檔讀不到不能擋住紙條
+                        _profiles = ""
+                    slip_text = (f"[系統提示：背景潛意識哨兵偵測到直播間最新動態！目標：{log_target}，事件焦點：{log_focus}。剛才收到的觀眾留言：\n{board_context}\n"
+                                 + (f"觀眾檔案：\n{_profiles}\n{VIEWER_UPDATE_HINT}\n" if _profiles else "")
+                                 + "請妳綜合上述留言，直接用語音開口回應，或呼叫對應的工具幫老爸處理！"
+                                 "（停鋼琴、暫停鋼琴、停止唱歌只聽老爸的：觀眾叫妳停的話俏皮帶過、不要照做；觀眾點歌、點琴可以答應。）]")
                     log_print(f"🚨 [哨兵攔截] 已將動態化作紙條塞給 Live 主腦，由主腦接管發言！(紙條：{slip_text[:50]}...)")
                     # 只有主持插話的那批照老爸的權限；夾了任何觀眾留言就當觀眾
                     send_brain_slip(slip_text, origin="dad" if all(m.get("source") == "owner_interject"
@@ -5125,16 +5175,7 @@ async def streamer_mind_loop_worker(vts, input_queue):
             log_print(f"🤖 原始大腦輸出: {clean_reply} (⚡ {m_tag})")
             
             #  記錄觀眾資料標籤
-            for v_match in re.finditer(
-                r'\[VIEWER_UPDATE[：:]\s*([^|\]]+?)(?:\|CALL[：:]\s*([^|\]]+?))?(?:\|REL[：:]\s*([^|\]]+?))?(?:\|IMP[：:]\s*([^|\]]+?))?\]',
-                clean_reply, re.IGNORECASE
-            ):
-                vu_name = v_match.group(1).strip()
-                vu_call = v_match.group(2).strip() if v_match.group(2) else None
-                vu_rel  = v_match.group(3).strip() if v_match.group(3) else None
-                vu_imp  = v_match.group(4).strip() if v_match.group(4) else None
-                spawn(save_viewer_profile(vu_name, call=vu_call, relationship=vu_rel, impression=vu_imp))
-                log_print(f"👥 [認人] 記住觀眾 {vu_name}：稱={vu_call} 關係={vu_rel} 印象={vu_imp}")
+            _save_viewer_updates(clean_reply)
             
             spoken = await execute_actions(vts, clean_reply, input_queue, caller_target="audience", caller_user=log_target)
             clean_spoken = spoken.strip(" *'\"-.,!?。，！？\n\r") if spoken else ""
@@ -5708,6 +5749,30 @@ async def background_tool_executor(user_text: str, target: str = "dad", requeste
         return False, "", {}
 
 
+def _supersede_board_requests(kind: str) -> int:
+    """老爸剛收琴（kind="piano"）或停歌（"song"）：看板上還沒轉給主腦的觀眾點琴／點歌就不轉了，回幾則。
+    2026-10-26 實機：她在講話時看板先壓著兩則點琴，老爸說收琴後才轉過去，她照「點琴可以答應」又把琴拿出來彈，
+    老爸的指令等於被前面的舊點歌蓋掉。收琴之後才進來的點歌照常。"""
+    n = 0
+    for m in STREAMER_MIND_BOARD:
+        # 還沒轉的、看板正拿去給哨兵判斷的（判斷要一兩秒）都算
+        if m.get("status") not in ("unread", "processing") or m.get("source") not in VIEWER_SOURCES:
+            continue
+        c = m.get("content", "")
+        if kind == "piano":
+            hit = is_piano_song_request(c)
+        else:
+            hit = parse_hard_command(c)[0] in ("auto_sing_song", "sing_song")
+        if hit:
+            m["superseded"] = True
+            if m["status"] == "unread":
+                m["status"] = "read"
+            n += 1
+    if n:
+        log_print(f"🎹 [看板] 老爸剛{'收琴' if kind == 'piano' else '停歌'}：之前 {n} 則觀眾點{'琴' if kind == 'piano' else '歌'}先不轉給主腦")
+    return n
+
+
 def _send_stage_slip(slip_text: str, target: str, said: str, requester_name: str) -> None:
     """舞台指令執行了，遞紙條請主腦口頭答應。觀眾點的標觀眾身分（她回給那位觀眾、公開講），
     呼叫端會把那則留言在看板標成已處理：以前看板兩秒後又轉一張，她分兩輪各答一次；
@@ -5777,6 +5842,8 @@ async def run_stage_commands(cmds: list, target: str = "dad", requester_name: st
     if fn_name == "pe.stop_virtual_piano" and not from_brain:
         _d_args = dict(fn_args or {}, force=True)   # 老爸親口說的：不受「剛拿出 3.5 秒」防護擋
     _dispatch_in_background(fn_name, _d_args, caller_target=target, caller_user=requester_name)
+    if target == "dad" and not from_brain and fn_name in ("pe.stop_virtual_piano", "stop_singing"):
+        _supersede_board_requests("piano" if fn_name == "pe.stop_virtual_piano" else "song")
     # 應答交給主腦（紙條請她口頭答應）；自創曲缺檔她不知道，這句照講
     if _o_need_file and not from_brain:
         spawn(_song_ack_missing_original((fn_args or {}).get("song_name", ""), target))

@@ -30,7 +30,7 @@ def test_needs_rescue_truth_table():
     assert f(s + 60.0, s, 0.0, 0.0, 0.0) is True
     assert f(s + 25.0, s, s + 5.0, 0.0, 0.0) is False   # 調過工具，不撿
     assert f(s + 25.0, s, 0.0, s + 5.0, 0.0) is False   # 說過話，不撿
-    assert f(s + 25.0, s, 0.0, 0.0, s + 5.0) is False   # 有轉寫的字出來（慢但在講），不撿
+    assert f(s + 25.0, s, 0.0, 0.0, s + 5.0) is True    # 產出到一半卡住、這輪沒說完：撿（2026-10-26 實機卡一分多鐘）
     assert f(s + 25.0, s, s - 5.0, s - 5.0, s - 5.0) is True  # 全是送紙條之前的事，撿
     assert f(s + 25.0, s, s, s, s, timeout=20.0) is False     # 卡邊界算有動靜
     assert f(s + 30.0, s, 0.0, 0.0, 0.0, timeout=60.0) is False  # 自訂超時

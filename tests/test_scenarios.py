@@ -4,6 +4,7 @@
 以前這些都只能開實機、等兩三分鐘、用 /call 戳。"""
 import asyncio
 
+import core.stage_state as stage
 from dryrun import DryRun, FakeBrain
 
 
@@ -161,3 +162,58 @@ def test_viewer_song_request_gets_one_slip_with_the_viewers_identity():
     assert d.tools == [("auto_sing_song", {"song_name": "晴天"}, "audience", "小美")]
     assert len(d.slips) == 1 and d.slips[0][1:] == ("audience", "7L 唱晴天", "小美")
     assert "晴天" in d.slips[0][0] and d.problems == []
+
+
+def test_viewer_slip_allows_song_requests_and_carries_profiles():
+    """看板轉給 Live 的紙條（2026-10-26）：只有「叫她停琴停歌」要婉拒，點歌可以答應
+    （以前「觀眾要求的話俏皮帶過，不要答應」連點歌都拒絕，她回觀眾「這要問老爸」）；附觀眾檔和記人的方法。"""
+    async def go():
+        async with DryRun(live=True) as d:
+            await d.viewer("小美", "7L 今天想聽妳聊聊天")
+            await d.settle(1.5)
+            return d
+    d = run(go())
+    slip = d.slips[0][0]
+    assert "觀眾點歌、點琴可以答應" in slip and "觀眾叫妳停的話俏皮帶過" in slip
+    assert "觀眾檔案" in slip and "VIEWER_UPDATE" in slip
+
+
+def test_dad_putting_the_piano_away_drops_older_unread_piano_requests():
+    """老爸收琴前看板還壓著的觀眾點琴（她在講話時看板不轉）：收琴後不再轉給主腦，不然她又把琴拿出來（2026-10-26 實機）。"""
+    async def go():
+        async with DryRun(live=True) as d:
+            d.ns["STREAMER_MIND_BOARD"].extend([
+                {"status": "unread", "source": "tiktok", "user": "小美", "content": "下一首可以彈晴天給我聽嗎", "time": 0},
+                {"status": "unread", "source": "tiktok", "user": "阿呆", "content": "7L 今天好可愛", "time": 0}])
+            d.ns["CURRENT_SPEAKING_TARGET"] = "dad"
+            stage.AI_STATE = "TALKING"          # 她在講話：看板先壓著（實機就是這樣壓住的）
+            await d.dad("收起鋼琴")
+            await d.settle(0.5)
+            return d
+    d = run(go())
+    board = d.ns["STREAMER_MIND_BOARD"]
+    assert [m["status"] for m in board[:2]] == ["read", "unread"]      # 點琴的不轉、聊天的照轉
+    assert any("之前 1 則觀眾點琴先不轉給主腦" in l for l in d.logs)
+
+
+def test_piano_request_already_with_the_sentry_is_dropped_when_dad_puts_the_piano_away():
+    """看板已經拿去給哨兵判斷的點琴（判斷要一兩秒）：這中間老爸收琴，判斷完也不轉給主腦（2026-10-26 實機稻香又被彈起來）。"""
+    import asyncio as _a
+
+    async def go():
+        dad_said = {}
+
+        async def slow_sentry(memory_context, board_desc):
+            await _a.sleep(0.6)                        # 哨兵判斷中老爸收琴
+            return {"should_speak": True, "target": "阿呆", "focus": "點琴"}
+        async with DryRun(live=True) as d:
+            d.ns["judge_should_speak"] = slow_sentry
+            await d.viewer("阿呆", "等一下可以彈稻香嗎")
+            await d.settle(0.3)
+            await d.dad("收起鋼琴")
+            await d.settle(1.5)
+            dad_said["slips"] = d.slips
+            return d
+    d = run(go())
+    assert not any("稻香" in s[0] and s[1] == "audience" for s in d.slips)
+    assert any("觀眾點琴先不轉給主腦" in l for l in d.logs)

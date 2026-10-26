@@ -29,6 +29,7 @@ from zoneinfo import ZoneInfo
 from google.genai import types
 
 import core.hard_command as hc
+from core.identity import claims_owner_identity
 from core import eventlog, usage
 import core.input_sources as ins
 import core.stage_state as stage
@@ -43,14 +44,14 @@ _TREE = ast.parse(MAIN_SRC)
 MAIN_FUNCS = (
     "chat_processor_worker", "process_chat_message", "add_to_streamer_mind_board", "is_piano_song_request",
     "background_tool_executor", "run_stage_commands", "_hard_cmd_seen_recently", "_dispatch_in_background",
-    "send_brain_slip", "_send_stage_slip", "_unpack_slip", "_owner_text_slip", "_slip_is_dupe", "_record_slip",
+    "send_brain_slip", "_send_stage_slip", "_supersede_board_requests", "_unpack_slip", "_owner_text_slip", "_slip_is_dupe", "_record_slip",
     "_note_brain_origin", "_brain_requester", "_her_words_before", "_brain_replaying_old_request",
     "is_live_brain_active", "live_brain_down_for", "use_rest_brain",
     "rest_slip_worker", "_rest_answer_slip", "_rest_speak", "_run_subagent_task",
     "execute_actions", "normalize_silence_token", "_brain_text_for_memory", "_start_marker_tools",
     "_vision_report_recent", "_start_mirror", "_likely_needs_tools",
     "streamer_mind_loop_worker", "_format_board_batch", "_ping_short_circuit", "_is_bare_ping",
-    "_split_fossil_batch",
+    "_split_fossil_batch", "_viewer_profiles_block", "_save_viewer_updates",
 )
 # 從主程式原樣載入的常數
 MAIN_CONSTS = (
@@ -58,6 +59,7 @@ MAIN_CONSTS = (
     "_SUBAGENT_TOTAL_TIMEOUT", "_HARD_CMD_DEDUPE_SEC",
     "_SLIP_DEDUPE_SEC", "LIVE_FALLBACK_AFTER_SEC", "VISION_REPORT_QUIET_SEC",
     "_BARE_PING_NAMES", "_PING_COOLDOWN_SEC", "_PING_QUIET_SEC", "_DESKTOP_TOOL_HINTS",
+    "_VIEWER_UPDATE_RE", "VIEWER_UPDATE_HINT",
 )
 
 
@@ -152,6 +154,9 @@ class DryRun:
         def memory(**k):
             d.memory.append(k)
 
+        async def viewer_profile(name):
+            return {"tiktok_name": name, "call": None, "relationship": None, "impression": None}
+
         pe = pytypes.SimpleNamespace(
             is_piano_active=False, current_piano_song_title="", current_piano_midi_file="",
             GLOBAL_PIANO_REALTIME_STATE={}, MIDI_SHEETS_DIR=os.path.join(ROOT, "midi_sheets"),
@@ -189,10 +194,10 @@ class DryRun:
             "judge_should_speak": sentry, "get_recent_100_memory_context": lambda: "",
             "_streamer_mind_prompt": streamer_prompt, "append_to_unified_memory": memory,
             "fetch_from_long_term_memory": fetch_hist, "save_to_long_term_memory": anoop,
-            "save_viewer_profile": anoop, "record_bot_message": lambda *a: None, "update_subtitle": lambda *a: None,
+            "save_viewer_profile": anoop, "get_viewer_profile": viewer_profile, "record_bot_message": lambda *a: None, "update_subtitle": lambda *a: None,
             "check_immediate_shutdown": lambda t: False, "execute_punish_action": anoop,
             "execute_reward_action": anoop, "set_sleep_mode": anoop, "operator_input_enabled": lambda: True,
-            "is_owner_account": lambda uid: uid in d.owner_uids, "touch_interaction": lambda: None,
+            "is_owner_account": lambda uid: uid in d.owner_uids, "claims_owner_identity": claims_owner_identity, "touch_interaction": lambda: None,
             "tk_listener": pytypes.SimpleNamespace(current_tiktok_status_str=""),
             "web_dash": pytypes.SimpleNamespace(broadcast_event=lambda *a, **k: None),
             "live_timer_hub": pytypes.SimpleNamespace(detect_timer_intent=lambda t: None),
