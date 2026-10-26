@@ -5,7 +5,7 @@ sys.path.insert(0, os.path.expanduser("~"))
 sys.path.insert(0, os.path.join(os.path.expanduser("~"), "GPT-SoVITS"))
 sys.path.insert(0, os.path.join(os.path.expanduser("~"), "GPT-SoVITS", "GPT_SoVITS"))
 
-import local_xiaoyi_service
+from services import local_xiaoyi_service
 
 HOT_REP_PATH = os.path.join(os.path.expanduser("~"), "GPT-SoVITS", "GPT_SoVITS", "text", "engdict-hot.rep")
 

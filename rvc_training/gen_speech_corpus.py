@@ -140,7 +140,7 @@ def copy_existing() -> float:
 
 
 def synth_new() -> float:
-    import local_xiaoyi_service as lxs
+    from services import local_xiaoyi_service as lxs
 
     pipe = lxs.init_gpt_sovits()
     if pipe is None:

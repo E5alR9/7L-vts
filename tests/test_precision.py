@@ -18,6 +18,6 @@ def test_rvc_full_precision_default():
 
 
 def test_xiaoyi_full_precision_default():
-    src = _src("local_xiaoyi_service.py")
+    src = _src("services/local_xiaoyi_service.py")
     assert 'os.getenv("XIAOYI_HALF", "0")' in src
     assert "config.is_half = True" not in src

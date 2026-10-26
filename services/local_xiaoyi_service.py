@@ -23,7 +23,7 @@ if hasattr(sys, '__stdout__') and hasattr(sys.__stdout__, 'reconfigure'):
         pass
 
 #  路徑改為「環境變數優先、退回使用者家目錄」，不再寫死原作者電腦
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # 專案根目錄（單獨跑本檔時 import core 用）
 from core.paths import GPT_SOVITS_DIR, FINETUNE_DATA_DIR, REF_VOICE_ZH, REF_VOICE_JA
 from core.lang import KANA_RE, HAN_RE, is_japanese_sentence
 

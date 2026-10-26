@@ -4,7 +4,7 @@ import os, sys, subprocess
 # 加入主工作目錄
 sys.path.insert(0, os.path.expanduser("~"))
 
-import local_xiaoyi_service
+from services import local_xiaoyi_service
 
 def test_synthesis():
     test_text = "Ciallo～(∠・ω<)⌒★ 老爸好！今天也是充滿元氣的一天呢！"

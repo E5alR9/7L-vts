@@ -6358,7 +6358,7 @@ def _prewarm_embedder():
 # ⚠️ init_gpt_sovits() 內部會暫時 os.chdir(GPT-SoVITS)，此期間其他程式碼請使用絕對路徑
 def _prewarm_xiaoyi():
     try:
-        import local_xiaoyi_service
+        from services import local_xiaoyi_service
         _pipe = local_xiaoyi_service.init_gpt_sovits()
         if _pipe:
             log_print("🟢 [GPT-SoVITS 預熱完成] 7L 本地顯卡語音引擎已就緒！")

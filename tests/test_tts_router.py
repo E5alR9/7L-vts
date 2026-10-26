@@ -418,7 +418,7 @@ def test_silent_middle_falls_back(tmp_path, monkeypatch):
 
 def test_xiaoyi_split_method_single_piece():
     """直播短句整段一坨（cut5 碎片會整片靜音）。"""
-    import local_xiaoyi_service as _xs
+    from services import local_xiaoyi_service as _xs
     assert _xs.XIAOYI_SPLIT_METHOD == "cut0"
 
 

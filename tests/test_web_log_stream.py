@@ -6,7 +6,7 @@ import io
 import threading
 
 from conftest import ROOT  # noqa: F401
-import local_xiaoyi_service as xs
+from services import local_xiaoyi_service as xs
 import services.web_dashboard as web_dash
 
 

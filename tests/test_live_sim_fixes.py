@@ -68,7 +68,7 @@ def test_tts_cache_version_bumped_for_new_reference():
 
 @pytest.mark.skipif(not shutil.which("ffmpeg"), reason="需要 ffmpeg")
 def test_tight_reference_shortens_pauses(tmp_path, monkeypatch):
-    import local_xiaoyi_service as lx
+    from services import local_xiaoyi_service as lx
     src = tmp_path / "ref.wav"
     src.write_bytes(_wav([(0.8, True), (1.5, False), (0.8, True), (1.5, False), (0.8, True)]))
     out = lx._tight_ref(str(src))
@@ -305,7 +305,7 @@ def test_screen_requests_sent_to_subagent_are_not_answered_by_guessing():
 
 
 def test_long_sentences_are_split_at_sentence_ends():
-    import local_xiaoyi_service as lx
+    from services import local_xiaoyi_service as lx
     t = "路人甲你問得好。關於今天要玩什麼遊戲，這就要問老爸喔。老爸，你有什麼好玩的計劃嗎？"
     segs = lx._split_for_tts(t, 22)
     assert "".join(segs) == t and len(segs) == 3 and all(len(s) <= 22 for s in segs)
@@ -315,7 +315,7 @@ def test_long_sentences_are_split_at_sentence_ends():
 
 def test_segment_check_rejects_unfinished_audio():
     import numpy as np
-    import local_xiaoyi_service as lx
+    from services import local_xiaoyi_service as lx
     sr = 32000
     tone = (np.sign(np.sin(np.arange(int(sr * 2.0)) * 0.05)) * 8000).astype(np.int16)
     assert lx._segment_ok(tone, sr, 9)                                        # 9 字、2 秒：正常
@@ -327,23 +327,23 @@ def test_segment_check_rejects_unfinished_audio():
 
 def test_sampling_top_p_is_not_nucleus_truncated():
     """top_p<1 時停頓處只剩靜音可選，念一半就停的根本原因（2026-10-25 對照實驗）。"""
-    import local_xiaoyi_service as lx
+    from services import local_xiaoyi_service as lx
     assert lx._TOP_P == 1.0
-    src = open(os.path.join(ROOT, "local_xiaoyi_service.py"), encoding="utf-8").read()
+    src = open(os.path.join(ROOT, "services/local_xiaoyi_service.py"), encoding="utf-8").read()
     assert "top_p = 0.8" not in src and "top_p = 0.75" not in src
     assert src.count("top_p = _TOP_P") == 2          # 中文、日文兩條都改
 
 
 def test_generation_cap_follows_segment_length():
-    import local_xiaoyi_service as lx
+    from services import local_xiaoyi_service as lx
     assert lx._segment_max_sec(3) == 8                 # 短句至少 8 秒
     assert lx._segment_max_sec(22) == 14               # 22 字：約 4.8 秒的 3 倍
-    src = open(os.path.join(ROOT, "local_xiaoyi_service.py"), encoding="utf-8").read()
+    src = open(os.path.join(ROOT, "services/local_xiaoyi_service.py"), encoding="utf-8").read()
     assert "_tts_pipeline.configs.max_sec = _orig_max_sec" in src   # 用完一定還原
 
 
 def test_comma_only_long_sentence_is_split_too():
-    import local_xiaoyi_service as lx
+    from services import local_xiaoyi_service as lx
     t = "一邊玩Minecraft，一邊跑程式，旁邊還開着鋼琴影片跟自動點擊器，這是要多工初理到極限嗎？"
     segs = lx._split_for_tts(t, 22)
     assert "".join(segs) == t and all(len(s) <= 22 for s in segs) and len(segs) >= 2
@@ -352,7 +352,7 @@ def test_comma_only_long_sentence_is_split_too():
 def test_whole_sentence_first_then_segments_as_fallback(monkeypatch):
     """先整句（快、自然）；整句不合格才切段重來。短句不切段，整句重抽。"""
     import numpy as np
-    import local_xiaoyi_service as lx
+    from services import local_xiaoyi_service as lx
     sr = 32000
     good = (np.sign(np.sin(np.arange(sr * 3) * 0.05)) * 8000).astype(np.int16)
     stuck = np.concatenate([good[: int(sr * 0.4)], np.zeros(sr * 20, np.int16)])
@@ -383,7 +383,7 @@ def test_whole_sentence_first_then_segments_as_fallback(monkeypatch):
 
 def test_mixed_zh_ja_boundary_repair():
     """中日交界的漢字歸屬（2026-10-25 實測 split-lang 分錯：夜→中文、老爸→日文）。"""
-    import local_xiaoyi_service as lx
+    from services import local_xiaoyi_service as lx
 
     def seg(*pairs):
         return [{"lang": l, "text": t} for l, t in pairs]
@@ -409,7 +409,7 @@ def test_mixed_zh_ja_boundary_repair():
 
 
 def test_lang_repair_is_installed_on_pipeline_init():
-    src = open(os.path.join(ROOT, "local_xiaoyi_service.py"), encoding="utf-8").read()
+    src = open(os.path.join(ROOT, "services/local_xiaoyi_service.py"), encoding="utf-8").read()
     assert "_tts_pipeline = TTS(config)\n            _install_lang_repair()" in src
     assert "segs if (default_lang or not _LANG_REPAIR_ON) else _repair_lang_segments(" in src
     assert "zh_main=not is_japanese_sentence(text)" in src
@@ -418,7 +418,7 @@ def test_lang_repair_is_installed_on_pipeline_init():
 def test_chinese_segments_are_not_read_as_japanese():
     """split-lang 只看漢字分不出中日：純中文段被判成日文、用日文發音念（2026-10-25 老爸回報；實測
     「感覺很有節奏感喔」「沒問題。」都被切成 ja）。中文為主的句子裡，沒假名的段一律算中文。"""
-    import local_xiaoyi_service as lx
+    from services import local_xiaoyi_service as lx
 
     def run(zh_main, *pairs):
         segs = [{"lang": l, "text": t} for l, t in pairs]
@@ -436,7 +436,7 @@ def test_chinese_segments_are_not_read_as_japanese():
 def test_chinese_with_english_uses_zh_mode_not_auto(monkeypatch):
     """有英文字母（連還沒換成「小七」的 7L 也算）舊碼就改 auto，auto 會把中文當日文念。實際送進 GPT-SoVITS 的模式為準。"""
     import numpy as np
-    import local_xiaoyi_service as lx
+    from services import local_xiaoyi_service as lx
     sr, modes = 32000, []
     good = (np.sign(np.sin(np.arange(sr * 3) * 0.05)) * 8000).astype(np.int16)
 
@@ -462,7 +462,7 @@ def test_tuning_knobs_are_constants_not_env():
     names = ["XIAOYI_TIGHT_REF", "XIAOYI_TOP_P", "XIAOYI_SEGMENT_CHARS", "XIAOYI_LANG_REPAIR", "NV_SUBAGENT_MODEL",
              "TTS_QUALITY_RETRIES", "FASTEMBED_CACHE_DIR", "OWNER_ACCOUNT_IDS", "CONSOLE_QUICKEDIT",
              "VISION_TIME_BUDGET_SEC", "VTS_PORT"]
-    files = ["vts_7L_test.py", "local_xiaoyi_service.py", "services/tts_router.py", "services/embedder.py",
+    files = ["vts_7L_test.py", "services/local_xiaoyi_service.py", "services/tts_router.py", "services/embedder.py",
              "services/vts_client.py", "core/identity.py", "core/env_config.py"]
     for f in files:
         src = open(os.path.join(ROOT, f), encoding="utf-8").read()

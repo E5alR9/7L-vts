@@ -42,7 +42,7 @@ async def generate_screams():
     ]
     
     print("🚀 正在載入本地 GPT-SoVITS 曉伊神經語音引擎...")
-    import local_xiaoyi_service as local_xiaoyi
+    from services import local_xiaoyi_service as local_xiaoyi
     local_xiaoyi.init_gpt_sovits()
     
     print("🚀 開始使用最新 7L (Xiaoyi) 引擎生成 [微電] 叫聲...")

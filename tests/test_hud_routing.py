@@ -20,7 +20,7 @@ def test_sing_pipeline_never_drives_tts_hud():
 
 
 def test_tts_synth_stays_on_tts_hud():
-    src = _src("local_xiaoyi_service.py")
+    src = _src("services/local_xiaoyi_service.py")
     assert '"tts_progress"' in src
     assert '"rvc_progress"' not in src
 

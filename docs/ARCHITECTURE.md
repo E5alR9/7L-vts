@@ -86,7 +86,7 @@ flowchart TD
 | 鋼琴 | `piano_engine.py`（點曲、意圖判斷、排隊、彈唱同步）；視窗本體是獨立程序 `test_virtual_piano.py`；`midi_editor.py`、`soundfont.py` |
 | 抓譜 | `pianist_midi_engine.py`（依序試 OnlineSequencer、BitMidi、YouTube 轉錄）、`onlinesequencer_engine.py`、`bitmidi_engine.py`、`cloud_mp3_to_midi.py`→`audio_to_piano_midi.py`（舊的音訊轉 MIDI；新的扒譜在 `audio_to_score.py`）。10-26 前散在根目錄 |
 | 翻唱與音樂 | `auto_cover_pipeline.py`（yt-dlp → Roformer 分離 → RVC → 雙軌播放；隊列與彈唱會合）、`roformer_sep.py`、`rvc_pitch.py`、`neural_voice_converter.py`、`audio_to_score.py`（扒譜、伴奏轉鋼琴譜）、`stem_pack.py`、`acestep_music.py` |
-| 說話 | `tts_router.py`（引擎鏈、快取、品質檢查）＋根目錄 `local_xiaoyi_service.py`（本機 GPT-SoVITS）、`cosyvoice_server.py`（獨立 venv） |
+| 說話 | `tts_router.py`（引擎鏈、快取、品質檢查）＋`local_xiaoyi_service.py`（本機 GPT-SoVITS；10-27 前在根目錄）、`cosyvoice_server.py`（獨立 venv） |
 | 舞台 | `vts_client.py`（VTube Studio 連線、表情、走位）、`stage_actions.py`（表情時間軸、表情守護）、`audio_analysis.py`（嘴型包絡、回音比對） |
 | 輸入 | `tiktok_listener.py`、`twitch_listener.py`、`youtube_live_listener.py`（三個平台丟進佇列的項目都由 `chat_source.make_chat_item` 拼）、`chat_source.py`、`stt.py` |
 | 看與找 | `screen_capture.py`、`web_search.py`（Tavily 多金鑰＋DuckDuckGo＋Groq 摘要）、`video_watch.py`、`yt_companion_service.py`、`desktop_helper.py` |

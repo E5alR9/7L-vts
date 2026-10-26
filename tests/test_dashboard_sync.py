@@ -19,7 +19,7 @@ def test_speech_text_and_subtitle_wait_for_the_first_audio():
 
 
 def _stream(monkeypatch, sent):
-    import local_xiaoyi_service as lx
+    from services import local_xiaoyi_service as lx
     import services.web_dashboard as wd
     monkeypatch.setattr(wd, "broadcast_event", lambda t, d, **k: sent.append((t, d)))
     s = lx._WebLogStream()
@@ -42,7 +42,7 @@ def test_progress_bars_do_not_flood_the_dashboard(monkeypatch):
 
 def test_missing_owner_does_not_raise(monkeypatch):
     """2026-10-26 子智能體執行時冒出只寫「_owner」的錯誤：屬性讀不到就經 __getattr__ 丟出。"""
-    import local_xiaoyi_service as lx
+    from services import local_xiaoyi_service as lx
     s = object.__new__(lx._WebLogStream)          # 還沒初始化完的那一下
     s.__dict__.update(_pending="")
     s.write("hello\n")

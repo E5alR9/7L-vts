@@ -322,7 +322,7 @@ async def _synth_xiaoyi(text: str) -> bytes:
     svc_path = os.getenv("GPT_SOVITS_DIR") or os.path.join(os.path.expanduser("~"), "GPT-SoVITS")
     if not os.path.isdir(svc_path):
         raise RuntimeError(f"GPT-SoVITS 不存在: {svc_path}")
-    import local_xiaoyi_service
+    from services import local_xiaoyi_service
     return await local_xiaoyi_service.get_xiaoyi_audio_bytes(text)
 
 

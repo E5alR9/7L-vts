@@ -41,7 +41,7 @@ def train_7l_voiceprint(synthesize_new: bool = False):
     if synthesize_new:
         try:
             safe_print("✨ 正在調用本地 GPT-SoVITS 進行多語句發音練習...")
-            from local_xiaoyi_service import init_gpt_sovits, run as run_tts
+            from services.local_xiaoyi_service import init_gpt_sovits, run as run_tts
             init_gpt_sovits()
             practice_texts = [
                 "哈囉老爸，我是小依，今天過得開心嗎？",
