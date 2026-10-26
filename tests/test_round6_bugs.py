@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
-"""2026-10-27 健檢找到的 bug：計時器中文數字、拒絕被當答應、搜尋備援、喚醒等級、看板平台標籤、電擊摸頭的紙條、曉伊自己鎖死。"""
+"""2026-10-27 健檢找到的 bug：計時器中文數字、拒絕被當答應、搜尋備援、喚醒等級、看板平台標籤、電擊摸頭的紙條、曉伊自己鎖死、
+曉伊攔輸出換掉全域 sys.stdout 害狀態列 print 崩潰（直播 0xC0000005 的真兇）。"""
 import asyncio
 import ast
 import os
@@ -115,3 +116,35 @@ def test_xiaoyi_does_not_deadlock_when_model_not_loaded(monkeypatch):
     t.join(10)
     assert not t.is_alive(), "synthesize_xiaoyi_bytes 鎖死了"
     assert out == [b""]
+
+
+def test_tts_capture_never_swaps_stdout_back(monkeypatch):
+    """攔曉伊輸出時全域 sys.stdout 只換一次、之後不再換回：換回會讓別的執行緒正在 print 的暫時物件被釋放 → 整個 python 崩潰。"""
+    import io
+    from services import local_xiaoyi_service as lx
+    real = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", real)
+    monkeypatch.setattr(sys, "stderr", real)
+    with lx.capture_tts_output():
+        router = sys.stdout
+        print("推理中 這行進後台、不進終端")
+    assert sys.stdout is router and isinstance(router, lx._ThreadRoutedStream)
+    with lx.capture_tts_output():
+        assert sys.stdout is router   # 第二次也是同一個，沒有再換
+    assert "推理中" not in real.getvalue()
+
+    # 別的執行緒在攔輸出的時候，主執行緒照常印到真終端
+    inside, done = threading.Event(), threading.Event()
+
+    def tts():
+        with lx.capture_tts_output():
+            inside.set()
+            done.wait(5)
+    t = threading.Thread(target=tts)
+    t.start()
+    inside.wait(5)
+    print("狀態列")
+    done.set()
+    t.join(5)
+    assert "狀態列" in real.getvalue()
+    assert lx._CAPTURES == {}

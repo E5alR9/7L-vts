@@ -167,17 +167,54 @@ class _WebLogStream:
                     pass
             self._dispatch_progress(line)
 
+class _ThreadRoutedStream:
+    """裝上 sys.stdout／sys.stderr 之後就不再拔掉：登記在 _CAPTURES 的執行緒寫到它的 _WebLogStream，其他照常寫真終端。
+
+    2026-10-27 直播崩潰（0xC0000005，一晚 14 次）的真兇：以前 capture_tts_output 每段合成都把全域 sys.stdout
+    換掉再換回。Python 3.12 的 print 拿 sys.stdout 不加參照，主執行緒狀態列 print 寫終端時會放開 GIL，
+    曉伊執行緒這時換回原本的 stdout，暫時物件就被釋放，print 回來用到已釋放的記憶體，整個 python 崩掉。
+    輸出導到檔案時寫入太快碰不到，只有開真終端（V7.bat）才會崩；在真終端用小腳本 20 秒內就能重現。"""
+
+    def __init__(self, real):
+        self._real = real
+
+    def _target(self):
+        return _CAPTURES.get(threading.get_ident()) or self._real
+
+    def write(self, s):
+        return self._target().write(s)
+
+    def flush(self):
+        return self._target().flush()
+
+    def __getattr__(self, name):
+        # encoding、buffer、isatty、fileno… 都交給真終端
+        return getattr(self._real, name)
+
+
+_CAPTURES = {}   # 執行緒 id → 這條執行緒正在用的 _WebLogStream
+_ROUTER_LOCK = threading.Lock()
+
+
+def _install_routers():
+    with _ROUTER_LOCK:
+        if not isinstance(sys.stdout, _ThreadRoutedStream):
+            sys.stdout = _ThreadRoutedStream(sys.stdout)
+        if not isinstance(sys.stderr, _ThreadRoutedStream):
+            sys.stderr = _ThreadRoutedStream(sys.stderr)
+
+
 @contextmanager
 def capture_tts_output():
-    """將區塊內的 print/tqdm 導向 Web 後台，不印在控制台。
-    2026-10-11：只認進入時的線程，別線程（RVC 背景任務）原樣放行真終端。"""
-    old_out = sys.stdout
-    old_err = sys.stderr
+    """將區塊內這條執行緒的 print/tqdm 導向 Web 後台，不印在控制台；別的執行緒（狀態列、RVC 背景任務）照常印。
+    全域 sys.stdout 只在第一次換成分流物件，之後不再換（換回會讓別的執行緒的 print 用到已釋放的物件，見 _ThreadRoutedStream）。"""
+    _install_routers()
+    tid = threading.get_ident()
     redir = _WebLogStream()
-    redir._owner = threading.get_ident()
-    redir._real_out = old_out
-    sys.stdout = redir
-    sys.stderr = redir
+    redir._owner = tid
+    redir._real_out = getattr(sys.stdout, "_real", None) or sys.__stdout__
+    prev = _CAPTURES.get(tid)
+    _CAPTURES[tid] = redir
     try:
         yield
     finally:
@@ -185,8 +222,10 @@ def capture_tts_output():
             redir.flush()
         except Exception:
             pass
-        sys.stdout = old_out
-        sys.stderr = old_err
+        if prev is None:
+            _CAPTURES.pop(tid, None)
+        else:
+            _CAPTURES[tid] = prev
 
 _tts_pipeline = None
 # 可重入：synthesize_xiaoyi_bytes 拿著鎖時，模型還沒載好會再呼叫 init_gpt_sovits（它也要拿這把鎖）。
