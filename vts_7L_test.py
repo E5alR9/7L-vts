@@ -181,6 +181,7 @@ import core.stage_state as stage
 from core import usage, promptkit
 from core import eventlog
 from core.speech_queue import SpeechQueue
+from core.barge_in import BargeInDetector
 from core.hard_command import asks_to_remember_model_position, parse_hard_command, build_slip_text, display_requester, parse_slip_for_song, strip_blob_noise, sanitize_search_query, rescue_claim, split_original_request, PIANO_CONTROL_TOOLS, STAGE_CONTROL_TOOLS, is_stage_control, structured_stage_command, PLAY_TOOLS, stage_request_unasked
 from core.subagent_router import resolve_subagent_chain
 from core.db import *
@@ -3465,14 +3466,29 @@ async def continuous_live_worker(vts):
                 
                 async def send_mic_audio():
                     global current_mic_action_str, LATEST_REALWORLD_SPEECH_TIME
+                    barge = BargeInDetector()
                     try:
                         while True:
                             data = await asyncio.to_thread(_read_mic_chunk)
-                            
-                            # 若手動關閉麥克風、VTuber 模式（不聽電腦前的人），或 7L 正在講話 (避免麥克風回音觸發 Live API 的 VAD 打斷)
-                            if (not IS_MIC_ENABLED or not operator_input_enabled()
-                                    or (CURRENT_PLAYING_VOICE_TASK and not CURRENT_PLAYING_VOICE_TASK.done())):
+
+                            # 手動關閉麥克風、VTuber 模式（不聽電腦前的人）：送靜音
+                            if not IS_MIC_ENABLED or not operator_input_enabled():
                                 data = b'\x00' * len(data)
+                                barge.reset()
+                            elif CURRENT_PLAYING_VOICE_TASK and not CURRENT_PLAYING_VOICE_TASK.done():
+                                # 她在講：先不送（喇叭回音會觸發 Live 的語音偵測、她自己打斷自己）。
+                                # 聲紋聽出是老爸插話才停下她、把剛才那段一起送過去（core/barge_in.py）；她自己的回音照樣送靜音
+                                barge.feed(data)
+                                if await barge.check():
+                                    _d, _h = barge.last_scores
+                                    log_print(f"🎙️ [老爸插話] 她講話時聽到老爸（像老爸 {_d:.2f}／像她 {_h:.2f}），停下來聽")
+                                    data = barge.buffered()
+                                    barge.reset()
+                                    spawn(interrupt_current_speech(clear_queue=False, reason="老爸插話"))
+                                else:
+                                    data = b'\x00' * len(data)
+                            else:
+                                barge.reset()
                                 
                             import numpy as np
                             data_np = np.frombuffer(data, dtype=np.int16)
