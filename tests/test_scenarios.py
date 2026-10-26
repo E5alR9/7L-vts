@@ -129,3 +129,21 @@ def test_system_slip_without_live_is_spoken_publicly():
     d = run(go())
     assert [(x["text"], x["target"], x["private"]) for x in d.speech] == [("謝謝大家聽我唱晴天～", "audience", False)]
     assert d.problems == []
+
+
+def test_dad_cuts_in_while_she_is_answering_viewers():
+    """她正在回觀眾時老爸打字：排隊中的觀眾回話丟掉，給老爸的話照講。"""
+    async def go():
+        async with DryRun(live=True) as d:
+            d.ns["CURRENT_SPEAKING_TARGET"] = "audience"
+            q = d.ns["speech_queue"]
+            q.put_nowait({"text": "小明晚安～", "target": "audience"})
+            q.put_nowait({"text": "老爸等一下喔", "target": "dad"})
+            q.put_nowait({"text": "阿呆你好", "target": "audience"})
+            await d.dad("7L 先停一下，聽我說")
+            await d.settle(0.5)
+            return d
+    d = run(go())
+    assert [x["text"] for x in d.speech] == ["老爸等一下喔"]
+    assert any("2 則觀眾回話不講了" in l for l in d.logs) and d.problems == []
+

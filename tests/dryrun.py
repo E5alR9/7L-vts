@@ -31,6 +31,7 @@ from google.genai import types
 import core.hard_command as hc
 import core.input_sources as ins
 import core.stage_state as stage
+from core.speech_queue import SpeechQueue
 from core.prompts import TextCleanEngine, neutralize_viewer_text
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -173,7 +174,7 @@ class DryRun:
             "_DESKTOP_DOWN_UNTIL": float("inf"),   # 桌機代答關掉
             "STREAMER_MIND_BOARD": [], "STREAMER_MIND_MODELS": ["m"], "REST_BRAIN_MODELS": ["m"],
             "REST_BRAIN_TOOLS": ["invoke_subagent"],
-            "speech_queue": asyncio.Queue(), "LIVE_API_SYSTEM_PROMPT_QUEUE": asyncio.Queue(),
+            "speech_queue": SpeechQueue(), "LIVE_API_SYSTEM_PROMPT_QUEUE": asyncio.Queue(),
             # 假零件
             "log_print": lambda m, *a, **k: d.logs.append(str(m)), "log_swallowed": log_swallowed, "spawn": spawn,
             "pe": pe, "execute_tool_dispatch": execute_tool_dispatch, "_mixed_piano_run": mixed_piano_run,

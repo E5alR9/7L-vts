@@ -174,6 +174,7 @@ from core.utils import (
 )
 from core.identity import is_owner_account, claims_owner_identity
 import core.stage_state as stage
+from core.speech_queue import SpeechQueue
 from core.hard_command import asks_to_remember_model_position, parse_hard_command, build_slip_text, display_requester, parse_slip_for_song, strip_blob_noise, sanitize_search_query, rescue_claim, split_original_request, PIANO_CONTROL_TOOLS, STAGE_CONTROL_TOOLS, is_stage_control, structured_stage_command, PLAY_TOOLS, stage_request_unasked
 from core.subagent_router import resolve_subagent_chain
 from core.db import *
@@ -1291,7 +1292,7 @@ CURRENT_SPEAKING_TARGET = "none"
 
 current_system_notification = ""
 notification_expire_time = 0.0
-speech_queue = asyncio.Queue()  
+speech_queue = SpeechQueue()   # 老爸的話先講；可以挑掉某些話（core/speech_queue.py）
 LIVE_API_SYSTEM_PROMPT_QUEUE = asyncio.Queue()
 # 不用她回話的背景資料（YouTube 伴看筆記）：send_client_content(turn_complete=False) 悄悄放進主腦的對話，
 # 不會觸發回話，她講到一半也不會被打斷（2026-10-26 兩個 Live 模型實測）。
@@ -1805,14 +1806,7 @@ async def interrupt_current_speech(clear_queue: bool = True, reason: str = "7L �
     try:
         # 1. 清空舊的排隊語音
         if clear_queue:
-            cleared_cnt = 0
-            while not speech_queue.empty():
-                try:
-                    speech_queue.get_nowait()
-                    speech_queue.task_done()
-                    cleared_cnt += 1
-                except Exception:
-                    break
+            cleared_cnt = speech_queue.clear()
             if cleared_cnt > 0:
                 log_print(f"🧹 [排隊清空] 已清理 {cleared_cnt} 條舊的排隊語音，讓位給最新發言！")
 
@@ -3729,18 +3723,15 @@ async def continuous_live_worker(vts):
 
                                 if c:
                                     if getattr(c, 'interrupted', False):
-                                        log_print("🛑 [Live 大腦] 偵測到新對話/環境指令打斷，清空舊語音佇列！")
+                                        log_print("🛑 [Live 大腦] 偵測到新對話/環境指令打斷，清掉她還沒講的那段！")
                                         if CURRENT_PLAYING_VOICE_TASK and not CURRENT_PLAYING_VOICE_TASK.done():
                                             CURRENT_PLAYING_VOICE_TASK.cancel()
-                                        
-                                        if not speech_queue.empty():
+                                        # 只清 Live 主腦自己排的話：罐頭應答、鋼琴台詞、系統提醒以前也一起被清掉
+                                        if speech_queue.drop_where(lambda it: isinstance(it, dict) and it.get("from_live")):
                                             from core.memory import UNIFIED_DIALOGUE_MEMORY
                                             if UNIFIED_DIALOGUE_MEMORY and UNIFIED_DIALOGUE_MEMORY[-1].get("source") == "live_api" and UNIFIED_DIALOGUE_MEMORY[-1].get("speaker") == "7L":
                                                 removed = UNIFIED_DIALOGUE_MEMORY.pop()
                                                 log_print(f"🗑️ [Live 記憶修正] 移除未播報完畢的殘留記憶: {removed.get('content')}")
-                                            
-                                        while not speech_queue.empty():
-                                            speech_queue.get_nowait()
                                         turn_buffer = ""
                                         chunk_buffer = ""
                                     
@@ -3777,7 +3768,8 @@ async def continuous_live_worker(vts):
                                             sentence = chunk_buffer.strip()
                                             clean_sentence = await execute_actions(vts, sentence, input_queue, caller_target="dad", caller_user=owner)
                                             if clean_sentence.strip() and not is_singing_active():
-                                                await speech_queue.put({"text": clean_sentence.strip(), "target": "dad", "raw_text": sentence})
+                                                await speech_queue.put({"text": clean_sentence.strip(), "target": "dad", "raw_text": sentence,
+                                                                         "from_live": True})
                                             chunk_buffer = ""
                                     
                                         if turn_buffer.strip():
@@ -6940,20 +6932,11 @@ async def chat_processor_worker(vts, input_queue):
                     continue
                 log_print(f"📥 [老爸主腦通道] 收到輸入 ({source}): {user_input}")
                 
-                #  若 7L 目前正在回應觀眾，老爸開口/輸入時優先傾聽老爸，清空佇列中後續排隊的觀眾發話（不腰斬當前正在說的話）！
+                #  老爸開口時她正在回觀眾：排隊中的觀眾回話丟掉，先聽老爸（正在講的那句不腰斬）
                 if CURRENT_SPEAKING_TARGET == "audience":
-                    #  同步清空佇列中所有待播的觀眾發話，防止中斷後又接連跳出舊的觀眾音訊！
-                    temp_dad_items = []
-                    while not speech_queue.empty():
-                        try:
-                            it = speech_queue.get_nowait()
-                            if isinstance(it, dict) and it.get("target") == "dad":
-                                temp_dad_items.append(it)
-                            speech_queue.task_done()
-                        except Exception:
-                            break
-                    for d_it in temp_dad_items:
-                        await speech_queue.put(d_it)
+                    _n = speech_queue.drop_where(lambda it: isinstance(it, dict) and it.get("target") == "audience")
+                    if _n:
+                        log_print(f"🔇 [說話佇列] 老爸開口了，排隊中的 {_n} 則觀眾回話不講了")
                 
                 #  取消老爸進行中的舊思考任務 (若有舊輸入正在思考，自動暫存為被中斷的上下文)
                 interrupted_msg = ""
