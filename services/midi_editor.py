@@ -13,8 +13,9 @@ import os
 import mido
 
 from core.utils import log_print
+from core.paths import ROOT_DIR
 
-SHEETS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "midi_sheets")
+SHEETS_DIR = os.path.join(ROOT_DIR, "midi_sheets")
 os.makedirs(SHEETS_DIR, exist_ok=True)
 
 

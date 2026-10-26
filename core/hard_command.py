@@ -18,6 +18,7 @@
 import os
 import re
 from typing import Dict, Optional, Tuple
+from core.paths import ROOT_DIR
 
 _TRAIL_JUNK = re.compile(r'[?？!！。，,、；;：:\s~～…]+$')
 # 句尾語氣詞（可安全剝除：真實歌名幾乎不會以這些字結尾）
@@ -274,7 +275,7 @@ def parse_mixed_command(text: Optional[str]) -> list:
 
 # —— 自創曲音軌庫（Lyria 桌面版手動生成，存檔視窗直存這裡）——
 ORIGINALS_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "songs_library", "originals")
+    ROOT_DIR, "songs_library", "originals")
 _ORIG_PREFIX_RE = re.compile(r'^(自創曲|原創)\s*[:：、，,]?\s*(.+)$', re.DOTALL)
 
 

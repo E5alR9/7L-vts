@@ -12,8 +12,9 @@ import sys
 import time
 import re
 from services import audio_to_piano_midi
+from core.paths import ROOT_DIR
 
-MIDI_SHEETS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "midi_sheets")
+MIDI_SHEETS_DIR = os.path.join(ROOT_DIR, "midi_sheets")
 
 try:
     sys.stdout.reconfigure(encoding='utf-8')

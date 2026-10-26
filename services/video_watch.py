@@ -21,8 +21,9 @@ import time
 from urllib.parse import urlparse, parse_qs
 
 from core.utils import log_print
+from core.paths import ROOT_DIR
 
-WATCH_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "watch")
+WATCH_DIR = os.path.join(ROOT_DIR, "data", "watch")
 os.makedirs(WATCH_DIR, exist_ok=True)
 
 WATCH_QUEUE: asyncio.Queue = None

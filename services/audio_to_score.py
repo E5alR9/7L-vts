@@ -28,7 +28,7 @@ import numpy as np
 from core.utils import log_print
 from core.paths import ROOT_DIR
 
-WORK_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "score_in")
+WORK_DIR = os.path.join(ROOT_DIR, "data", "score_in")
 os.makedirs(WORK_DIR, exist_ok=True)
 
 NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]

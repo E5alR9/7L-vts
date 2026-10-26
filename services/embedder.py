@@ -22,6 +22,7 @@ from typing import List, Optional
 
 DEFAULT_LOCAL_MODEL = "BAAI/bge-small-zh-v1.5"   # 中英混合、檔案小、夠用
 from core.llm_engine import EMBED_MODEL as _DEFAULT_GEMINI_EMBED
+from core.paths import ROOT_DIR
 
 GEMINI_EMBED_MODEL = os.getenv("RAG_GEMINI_EMBED_MODEL") or _DEFAULT_GEMINI_EMBED
 
@@ -48,7 +49,7 @@ def _get_local_model():
         from fastembed import TextEmbedding
         # 快取放專案 models/ 底下：fastembed 預設放系統暫存資料夾，Windows 磁碟清理會清掉，
         # 下次第一次查詢就得在對話當下重新下載 ~95MB（2026-10-24 實機：卡 18 秒）
-        cache_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "models", "fastembed")
+        cache_dir = os.path.join(ROOT_DIR, "models", "fastembed")
         _local_model = TextEmbedding(model_name=name, cache_dir=cache_dir)
         _local_model_name = name
         return _local_model

@@ -19,8 +19,9 @@ import sys
 import numpy as np
 
 from core.utils import log_print
+from core.paths import ROOT_DIR
 
-PACK_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "stem_pack")
+PACK_DIR = os.path.join(ROOT_DIR, "data", "stem_pack")
 os.makedirs(PACK_DIR, exist_ok=True)
 
 STEMS_6 = ["vocals", "drums", "bass", "guitar", "piano", "other"]

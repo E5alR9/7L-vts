@@ -10,13 +10,14 @@ import traceback
 import soundfile as sf
 import torch
 import librosa
+from core.paths import ROOT_DIR
 
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 if hasattr(sys.stderr, 'reconfigure'):
     sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+BASE_DIR = ROOT_DIR
 RVC_ROOT = os.path.join(BASE_DIR, "services", "rvc")
 if RVC_ROOT in sys.path:
     sys.path.remove(RVC_ROOT)

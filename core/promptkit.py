@@ -11,8 +11,9 @@ import os
 
 from core.prompts import PromptTemplateEngine
 from core.utils import log_print
+from core.paths import ROOT_DIR
 
-PROMPTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "prompts")
+PROMPTS_DIR = os.path.join(ROOT_DIR, "prompts")
 
 
 def load_prompt(filename: str, **kwargs) -> str:

@@ -18,9 +18,10 @@ import shutil
 import threading
 import time
 from core.utils import log_swallowed
+from core.paths import ROOT_DIR
 
 MODEL_FILENAME = "model_bs_roformer_ep_317_sdr_12.9755.ckpt"
-_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_REPO_ROOT = ROOT_DIR
 MODEL_DIR = os.path.join(_REPO_ROOT, "models", "roformer")
 
 _PCT_RE = re.compile(r"(\d{1,3})\s*%")

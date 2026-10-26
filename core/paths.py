@@ -60,3 +60,9 @@ def ref_voices() -> list:
     """回傳實際存在的參考音檔清單（不存在的直接過濾，避免下游讀檔崩潰）"""
     return [p for p in (REF_VOICE_ZH, REF_VOICE_ZH_ALT, REF_VOICE_JA) if p and os.path.exists(p)]
 
+
+def ffmpeg_exe() -> str:
+    """ffmpeg 執行檔：環境變數 FFMPEG_EXE > PATH 上的 ffmpeg > C:\\ffmpeg\\bin > 裸 "ffmpeg"（以前五個模組各寫一份、順序還不一樣）。"""
+    import shutil
+    fixed = r"C:\ffmpeg\bin\ffmpeg.exe"
+    return os.getenv("FFMPEG_EXE") or shutil.which("ffmpeg") or (fixed if os.path.exists(fixed) else "ffmpeg")

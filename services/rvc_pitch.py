@@ -173,8 +173,8 @@ def shift_octave_file(in_path: str, out_path: str, semitones: float) -> bool:
         #    window=long＋smoothing=on 專治 sustained 人聲，transients 保持 crisp 護子音）
         try:
             import subprocess
-            ffmpeg = os.getenv("FFMPEG_EXE") or (
-                r"C:\ffmpeg\bin\ffmpeg.exe" if os.path.exists(r"C:\ffmpeg\bin\ffmpeg.exe") else "ffmpeg")
+            from core.paths import ffmpeg_exe
+            ffmpeg = ffmpeg_exe()
             cmd = [ffmpeg, "-y", "-v", "error", "-i", work_in,
                    "-af", f"rubberband=pitch={ratio}:formant=preserved:window=long:smoothing=on",
                    out_path]

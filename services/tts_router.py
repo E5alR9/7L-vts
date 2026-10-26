@@ -30,8 +30,9 @@ import time
 from core.lang import KANA_RE, HAN_RE, has_kana, is_japanese_sentence
 from core.utils import log_swallowed
 from typing import Optional
+from core.paths import ROOT_DIR
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+BASE_DIR = ROOT_DIR
 
 # ── 設定 ─────────────────────────────────────────────────────────────────────
 ENGINE_ORDER = [e.strip().lower() for e in (os.getenv("TTS_ENGINE") or "cloud_gptsovits").split(",") if e.strip()]
@@ -512,10 +513,8 @@ def file_extension(engine: str) -> str:
 
 
 def _ffmpeg_exe() -> str:
-    import shutil
-    return (os.getenv("FFMPEG_EXE")
-            or shutil.which("ffmpeg")
-            or r"C:\ffmpeg\bin\ffmpeg.exe")
+    from core.paths import ffmpeg_exe
+    return ffmpeg_exe()
 
 
 # 連續靜音超過幾秒判缺段（自娛自樂事故：18 秒音訊裡 14 秒數位靜音，時長反而超標）。

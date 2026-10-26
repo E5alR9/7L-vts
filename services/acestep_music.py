@@ -19,8 +19,9 @@ import time
 import httpx
 
 from core.utils import log_print
+from core.paths import ROOT_DIR
 
-OUT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+OUT_DIR = os.path.join(ROOT_DIR,
                        os.getenv("ACESTEP_OUT_DIR") or "songs_ai")
 os.makedirs(OUT_DIR, exist_ok=True)
 

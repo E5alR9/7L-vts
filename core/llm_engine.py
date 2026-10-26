@@ -13,6 +13,7 @@ from google.genai import types
 import core.websocket_patch  # 🔧 修復 Live API additional_headers 相容性
 from core.utils import log_print, sys_notify
 from core.env_config import load_project_env
+from core.paths import ROOT_DIR
 
 load_project_env()   # 下面就要讀金鑰：不管誰先 import 本模組，都先把 .env 讀進來
 
@@ -283,7 +284,7 @@ def get_pingpong_ring_indices(total_keys: int, start_step: int) -> list:
 # ── 通道／模型熔斷鎖（2026-10-25 從主程式搬來）──
 # 某金鑰或模型回傳 429／503／資源耗盡時對該通道加鎖冷卻，鎖定狀態存到 data/api_locks_cache.json，
 # 重開也記得（每日配額鎖到 PT 午夜）。target_id 例如 "G3_3.6-flash"；整個模型熔斷用 "MODEL_<短名>"。
-API_LOCKS_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "api_locks_cache.json")
+API_LOCKS_FILE = os.path.join(ROOT_DIR, "data", "api_locks_cache.json")
 API_LOCKS: Dict[str, float] = {}
 
 

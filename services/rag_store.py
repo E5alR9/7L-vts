@@ -18,8 +18,9 @@ import os
 import re
 import threading
 from typing import Dict, List, Optional
+from core.paths import ROOT_DIR
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+BASE_DIR = ROOT_DIR
 PERSIST_DIR = os.path.join(BASE_DIR, "data", "rag", "chroma")
 
 

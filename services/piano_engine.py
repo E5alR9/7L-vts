@@ -761,7 +761,7 @@ def bring_piano_window_to_front():
 
 def get_piano_script_path() -> str:
     """動態解析 88 鍵平台鋼琴啟動腳本真實路徑"""
-    root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    root_dir = ROOT_DIR
     candidates = [
         os.path.join(root_dir, "test_virtual_piano.py"),
         os.path.join(root_dir, "tests_and_benchmarks", "test_virtual_piano.py"),

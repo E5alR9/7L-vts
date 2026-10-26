@@ -21,19 +21,20 @@ from collections import deque
 
 import core.stage_state as stage
 from core.utils import log_swallowed, spawn
+from core.paths import ROOT_DIR, ffmpeg_exe
 
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 if hasattr(sys.stderr, 'reconfigure'):
     sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+BASE_DIR = ROOT_DIR
 SONGS_DIR = os.path.join(BASE_DIR, "songs_library")
 CACHE_DIR = os.path.join(SONGS_DIR, "cover_cache")
 os.makedirs(SONGS_DIR, exist_ok=True)
 os.makedirs(CACHE_DIR, exist_ok=True)
 
-FFMPEG_EXE = os.getenv("FFMPEG_EXE") or (r"C:\ffmpeg\bin\ffmpeg.exe" if os.path.exists(r"C:\ffmpeg\bin\ffmpeg.exe") else "ffmpeg")
+FFMPEG_EXE = ffmpeg_exe()
 YT_DLP_EXE = shutil.which("yt-dlp") or "yt-dlp"
 
 def get_safe_filename(name: str) -> str:

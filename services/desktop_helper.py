@@ -18,8 +18,9 @@ import os
 import re
 import sys
 import threading
+from core.paths import ROOT_DIR
 
-REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+REPO_ROOT = ROOT_DIR
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 

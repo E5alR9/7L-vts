@@ -9,6 +9,7 @@ from aiohttp import web
 from datetime import datetime
 import logging
 from core.utils import record_interaction_tick, spawn
+from core.paths import ROOT_DIR
 
 # 🔇 關閉 aiohttp.access 日誌，避免輪詢視覺畫面或狀態時在終端洗版
 logging.getLogger("aiohttp.access").setLevel(logging.WARNING)
@@ -678,7 +679,7 @@ async def get_full_telemetry(include_full_memory: bool = False) -> Dict[str, Any
                 _m = (os.getenv("MODE") or "vtuber").strip().lower()
                 if _m not in ("companion", "vtuber"):
                     _m = "vtuber"
-                mem_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", f"unified_memory_{_m}.json")
+                mem_path = os.path.join(ROOT_DIR, "data", f"unified_memory_{_m}.json")
                 if os.path.exists(mem_path):
                     with open(mem_path, "r", encoding="utf-8") as f:
                         recent_memory = json.load(f)
@@ -720,7 +721,7 @@ async def api_get_memory(request):
             pass
     if not recent_memory:
         try:
-            mem_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "unified_memory.json")
+            mem_path = os.path.join(ROOT_DIR, "data", "unified_memory.json")
             if os.path.exists(mem_path):
                 with open(mem_path, "r", encoding="utf-8") as f:
                     recent_memory = json.load(f)
@@ -1334,7 +1335,7 @@ async def api_last_vision_image(request):
 
     if not img_bytes or is_solid_black:
         # 從 data/last_vision_frame.jpg 載入真實感知畫面快取
-        frame_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "last_vision_frame.jpg")
+        frame_path = os.path.join(ROOT_DIR, "data", "last_vision_frame.jpg")
         if os.path.exists(frame_path):
             try:
                 with open(frame_path, "rb") as f:
@@ -1431,7 +1432,7 @@ async def start_web_dashboard(
     app = web.Application()
     
     # 靜態資源目錄 (web/)
-    web_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "web")
+    web_dir = os.path.join(ROOT_DIR, "web")
     os.makedirs(web_dir, exist_ok=True)
     
     # 路由設置
