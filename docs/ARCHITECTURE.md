@@ -1,6 +1,6 @@
 # ARCHITECTURE — 7L 整體架構
 
-> 2026-10-25 整理，10-26 更新（第三輪：REST 大腦、舊 STT 備援；第四輪：REDESIGN A～I 與小項）。想知道「某件事在哪裡處理」先看這頁；AI 供應商與配額看 [AI_SOURCES.md](AI_SOURCES.md)，開播步驟看 [GETTING_STARTED.md](GETTING_STARTED.md)。
+> 2026-10-25 整理，10-26 更新（第三輪：REST 大腦、舊 STT 備援；第四輪：REDESIGN A～I 與小項；第五輪：散落的檔案與重複碼）。想知道「某件事在哪裡處理」先看這頁；AI 供應商與配額看 [AI_SOURCES.md](AI_SOURCES.md)，開播步驟看 [GETTING_STARTED.md](GETTING_STARTED.md)。
 
 ## 1. 一則輸入的旅程
 
@@ -76,17 +76,18 @@ flowchart TD
 | `input_sources.py` | 輸入來源分類、休眠喚醒規則 |
 | `groq_router.py` | Groq 文字快線（多金鑰、梯隊降級、OpenAI 格式工具轉換） |
 | `identity.py`／`lang.py`／`stage_state.py`／`utils.py` | 擁有者與模式、中日文判斷、舞台狀態（AI 狀態、在講／在唱、還有話在排、`wait_change` 等事件）與嘴型、`log_print`／`log_swallowed`／`spawn`（背景任務留參考、出錯必記） |
-| `db.py`／`env_config.py`／`paths.py`／`live_timer_sensor.py`／`subagent_router.py`／`websocket_patch.py` | Firestore REST、後台可改的 .env 白名單與 `load_project_env`（讀金鑰的模組自己先讀 .env）、路徑、計時器、子智能體用腦路由、Live 連線相容補丁 |
+| `db.py`／`env_config.py`／`paths.py`／`live_timer_sensor.py`／`subagent_router.py`／`websocket_patch.py` | Firestore REST、後台可改的 .env 白名單與 `load_project_env`（讀金鑰的模組自己先讀 .env）、路徑（`ROOT_DIR`、`DATA_DIR`：data/ 在哪只在這裡算一次）、計時器、子智能體用腦路由、Live 連線相容補丁 |
 
 ### services/
 
 | 領域 | 模組 |
 |---|---|
 | 鋼琴 | `piano_engine.py`（點曲、意圖判斷、排隊、彈唱同步）；視窗本體是獨立程序 `test_virtual_piano.py`；`midi_editor.py`、`soundfont.py` |
+| 抓譜 | `pianist_midi_engine.py`（依序試 OnlineSequencer、BitMidi、YouTube 轉錄）、`onlinesequencer_engine.py`、`bitmidi_engine.py`、`cloud_mp3_to_midi.py`→`audio_to_piano_midi.py`（舊的音訊轉 MIDI；新的扒譜在 `audio_to_score.py`）。10-26 前散在根目錄 |
 | 翻唱與音樂 | `auto_cover_pipeline.py`（yt-dlp → Roformer 分離 → RVC → 雙軌播放；隊列與彈唱會合）、`roformer_sep.py`、`rvc_pitch.py`、`neural_voice_converter.py`、`audio_to_score.py`（扒譜、伴奏轉鋼琴譜）、`stem_pack.py`、`acestep_music.py` |
 | 說話 | `tts_router.py`（引擎鏈、快取、品質檢查）＋根目錄 `local_xiaoyi_service.py`（本機 GPT-SoVITS）、`cosyvoice_server.py`（獨立 venv） |
 | 舞台 | `vts_client.py`（VTube Studio 連線、表情、走位）、`stage_actions.py`（表情時間軸、表情守護）、`audio_analysis.py`（嘴型包絡、回音比對） |
-| 輸入 | `tiktok_listener.py`、`twitch_listener.py`、`youtube_live_listener.py`、`chat_source.py`、`stt.py` |
+| 輸入 | `tiktok_listener.py`、`twitch_listener.py`、`youtube_live_listener.py`（三個平台丟進佇列的項目都由 `chat_source.make_chat_item` 拼）、`chat_source.py`、`stt.py` |
 | 看與找 | `screen_capture.py`、`web_search.py`（Tavily 多金鑰＋DuckDuckGo＋Groq 摘要）、`video_watch.py`、`yt_companion_service.py`、`desktop_helper.py` |
 | 後台與記憶 | `web_dashboard.py`（網頁後台）、`dashboard_bridge.py`（後台 ↔ 主程式）、`rag_store.py`／`rag_memory_service.py`／`embedder.py` |
 
@@ -109,6 +110,7 @@ flowchart TD
 |---|---|
 | `tools/sim/` | 實機測試：`live_up.sh`（模擬直播包裝開 7L，**開好後確認截圖入口都擋了，沒擋住就關掉**）、`live_down.sh`、`ft.py`（全功能實測各組）、`ex.py`（在跑著的 7L 裡執行一段程式）、`test_all.sh` |
 | `tools/replay.py` | 從流水帳挑一段輸入，丟進乾跑包裝（`tests/dryrun.py`）重跑，列出紙條、舞台指令、她要講的話 |
+| `scripts/` | 偶爾手動跑的維護腳本：訓練聲線（`train_xiaoyi_rvc`、`train_7l_tts_voiceprint`）、電擊音效（`gen_screams`、`update_screams`）、知識庫（`ingest_rag`）、VTS token、譜面渲染、金鑰檢查…。根目錄只留有 .bat 啟動的程式（主程式、鋼琴視窗、NDI 接收器、連點、錄聲紋、DC 機器人）和 DC 那塊；一次性的探測腳本在 `scratch/`（不入庫） |
 
 ## 3. 執行時的程序與通訊
 
@@ -136,7 +138,10 @@ flowchart TD
 
 - 主程式還有幾個大函式跟全域狀態綁得很緊：`continuous_live_worker`（約 400 行）、`play_voice_complete`（約 290 行）、`execute_tool_dispatch`（約 220 行）、`streamer_mind_loop_worker`、`chat_processor_worker`（各約 180 行）。後面兩個是乾跑包裝和情境測試直接從主檔抽出來跑的核心流程，要搬到 workers/ 得先讓乾跑支援 `host` 模組（REDESIGN I 的下一步）。
 - `services/piano_engine.py` 將近 3,000 行，點曲意圖、排隊、電台、作曲、合奏都在一起。
-- 主程式內部的段落編號（`# 1.`、`# 12.` 那些）跟實際內容已對不上，找東西請用函式名稱搜。
+- `ClassicalPianoSoundEngine`（鋼琴音源）在 `services/piano_engine.py` 和鋼琴視窗 `test_virtual_piano.py` 各一份，已經分岔（83 行不同）；視窗是獨立程序，合併前要先決定音源歸誰。
+- RAG 記憶只寫不讀：`rag_memory_service.add_rag_memory` 每句對話都存，`search_rag_memory` 沒有呼叫端。
+- `chat_source` 的 `start_chat_worker`／`stop_chat_worker`（後台開關監聽器）沒接到任何按鈕。
+- `audio_to_piano_midi`（舊的音訊轉 MIDI）和 `audio_to_score`（新的扒譜）兩套並存。
 
 ## 6. 整理紀錄
 
@@ -166,3 +171,9 @@ flowchart TD
 - 主檔 6,689 行。
 - 老爸的決定（REDESIGN 第 8 節）：VTuber 模式也開 Live 主腦；她講話時聽得到老爸插話（聲紋分得出她的回音）；短回覆也切段；點歌只留主腦回覆；畫面變化只讓她知道。主檔 6,699 行。
 
+**2026-10-26 第五輪（整理散落的東西）**：一項一個 commit，每項過完整測試；最後實機冒煙。
+- **根目錄**：18 個一次性的金鑰／模型探測腳本移出版控（留在 `scratch/root_probes_20261007/`）；9 月的狀態輸出檔刪掉；09-22 的研究報告移到 `docs/` 加日期；加 `pytest.ini` 只收 `tests/`。
+- **搬家**：5 個 MIDI 抓譜引擎 → `services/`（寫死的 .env 路徑改走 `load_project_env`）；8 個維護腳本 → `scripts/`（路徑改以專案根目錄為準）。
+- **刪**：63 個沒用到的 import（`core` 不再 import `services.piano_engine`；主檔的 `from core.db import *` 一個名字都沒用到）、piano_engine 的兩個空 stub、tts_router 的舊名別名、主檔的 `load_prompt` 包裝、groq_router 三個沒人叫的函式。
+- **收攏**：`DATA_DIR` 只在 `core/paths` 算一次；三個直播平台的佇列項目只有 `chat_source.make_chat_item` 一個出處（TikTok 原本自己拼了九處）。
+- **主檔段落**：標題重排成 1～12 連號、對得上內容，檔頭目錄改成段落對照表。主檔 6,751 行。
