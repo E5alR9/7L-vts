@@ -26,6 +26,7 @@ import time
 import asyncio
 from typing import Any, Dict, List, Optional
 
+from core import usage
 from core.env_config import load_project_env
 
 load_project_env()   # 下面載入時就讀 GROQ 金鑰：誰先 import 本模組都一樣
@@ -448,8 +449,11 @@ async def groq_chat(
                     kwargs["tools"] = wire_tools
 
                 await asyncio.wait_for(throttle_rpm(), timeout=remaining)   # 每分鐘請求上限（GROQ_REQUESTS_PER_MINUTE）
-                raw = await asyncio.wait_for(client.chat.completions.create(**kwargs),
-                                             timeout=max(0.3, min(timeout, deadline - time.monotonic())))
+                with usage.timed(f"Groq/{m_name}", default_role="Groq") as u:
+                    raw = await asyncio.wait_for(client.chat.completions.create(**kwargs),
+                                                 timeout=max(0.3, min(timeout, deadline - time.monotonic())))
+                    u.ok = bool(raw and raw.choices)
+                    u.tokens = getattr(getattr(raw, "usage", None), "total_tokens", 0) or 0
 
                 if not raw or not raw.choices:
                     continue

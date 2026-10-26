@@ -94,7 +94,8 @@ def test_looking_at_images_is_tool_free_and_time_limited():
     async def rest_chat(system, prompt, **k):
         calls.append(k)
         return pytypes.SimpleNamespace(text="老爸在看鋼琴影片")
-    ns = {"types": types, "base64": base64, "rest_chat": rest_chat, "GEMINI_MODELS": ["m"], "VISION_TOOL_TIMEOUT_SEC": 45.0}
+    ns = {"types": types, "base64": base64, "rest_chat": rest_chat, "GEMINI_MODELS": ["m"], "VISION_TOOL_TIMEOUT_SEC": 45.0,
+          "usage": __import__("core.usage", fromlist=["usage"])}
     for n in ("_image_parts", "describe_images"):
         exec(compile(ast.Module(body=[_fn(n)], type_ignores=[]), n, "exec"), ns)
     img = base64.b64encode(b"\xff\xd8jpeg").decode()

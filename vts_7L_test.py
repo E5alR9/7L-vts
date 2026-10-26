@@ -175,6 +175,7 @@ from core.utils import (
 )
 from core.identity import is_owner_account, claims_owner_identity
 import core.stage_state as stage
+from core import usage
 from core import eventlog
 from core.speech_queue import SpeechQueue
 from core.hard_command import asks_to_remember_model_position, parse_hard_command, build_slip_text, display_requester, parse_slip_for_song, strip_blob_noise, sanitize_search_query, rescue_claim, split_original_request, PIANO_CONTROL_TOOLS, STAGE_CONTROL_TOOLS, is_stage_control, structured_stage_command, PLAY_TOOLS, stage_request_unasked
@@ -553,6 +554,7 @@ async def execute_tool_dispatch(fn_name: str, fn_args: dict, caller_target: str 
 VISION_TIME_BUDGET_SEC = 15.0   # 餘光視覺一次最多花這麼久（超過看到的也是舊畫面）
 
 
+@usage.role_scope("餘光視覺")
 async def get_lightweight_gemini_vision(image_base64: str, temporal_frames: list | None = None, prompt: str = "") -> str:
     """PROVIDER: GEMINI-VISION（3.1-flash-lite→3.6-flash；見 docs/AI_SOURCES.md） 【3.1-flash-lite 深度視覺認真看】：受 Live API 哨兵喚醒時才精準啟動，支援傳入上次看到現在的所有時序影格，形成動態視覺感知。"""
     if not image_base64:
@@ -629,18 +631,19 @@ async def get_lightweight_gemini_vision(image_base64: str, temporal_frames: list
                 if key_cooling(g_key, model_name):
                     continue
                 try:
-                    async with track_key(g_key):
-                        resp = await asyncio.wait_for(
-                            client.aio.models.generate_content(
-                                model=model_name,
-                                contents=[types.Content(role="user", parts=all_parts)],
-                            config=types.GenerateContentConfig(
-                                temperature=0.2,
-                                safety_settings=UNRESTRICTED_SAFETY_SETTINGS
-                            )
-                        ),
-                        timeout=min(6.0, remaining)
-                    )
+                    with usage.timed(model_name, role="餘光視覺"):
+                        async with track_key(g_key):
+                            resp = await asyncio.wait_for(
+                                client.aio.models.generate_content(
+                                    model=model_name,
+                                    contents=[types.Content(role="user", parts=all_parts)],
+                                config=types.GenerateContentConfig(
+                                    temperature=0.2,
+                                    safety_settings=UNRESTRICTED_SAFETY_SETTINGS
+                                )
+                            ),
+                            timeout=min(6.0, remaining)
+                        )
                     clean_desc = resp.text.strip() if resp.text else ""
                     if clean_desc and not any(k in clean_desc for k in ["沒辦法接收", "無法接收", "視訊鏡頭", "看不到畫面", "需要鏡頭", "無法看見"]):
                         frame_info = f"({n_hist} 幀動態)" if n_hist > 0 else "(靜態)"
@@ -667,6 +670,7 @@ def _image_parts(images) -> list:
     return parts
 
 
+@usage.role_scope("看畫面")
 async def describe_images(prompt: str, images) -> str:
     """PROVIDER: GEMINI（看畫面、照鏡子；見 docs/AI_SOURCES.md）。描述圖片，回一段文字；看不了回空字串。
     以前走 450 行的 fetch_ai_response（多通道競速、Groq 前鋒、串流嘴巴、工具第二輪），
@@ -1020,6 +1024,7 @@ _SLEEP_FALLBACKS = [
 ]
 
 
+@usage.role_scope("入睡短話")
 async def _doze_one_liner(hint: str) -> str:
     """入睡短話：Groq 現寫一句（20~40 字口語）；失敗才輪替罐頭底線。"""
     global _DOZE_FALLBACK_IDX
@@ -1501,6 +1506,7 @@ DRAWING_DIR = os.path.join(PLAYGROUND_DIR, "drawings")
 os.makedirs(DRAWING_DIR, exist_ok=True)
 
 
+@usage.role_scope("畫圖")
 async def generate_ai_image(prompt: str) -> str:
     """PROVIDER: GEMINI-IMAGE（Nano Banana 系； 配額表全系 0/0/0，現降級中；見 docs/AI_SOURCES.md）使用 Google 頂尖 AI 生圖模型 (Nano Banana / Gemini Image / Imagen / FLUX) 繪製高品質圖片、二次元插圖或藝術創作，並自動在老爸的螢幕上彈出展示。
     
@@ -1524,14 +1530,15 @@ async def generate_ai_image(prompt: str) -> str:
                 if key_cooling(g_key, img_model):
                     continue
                 try:
-                    async with track_key(g_key):
-                        res = await asyncio.wait_for(
-                            temp_client.aio.models.generate_content(
-                                model=img_model,
-                                contents=prompt
-                            ),
-                            timeout=8.0
-                        )
+                    with usage.timed(img_model, role="畫圖"):
+                        async with track_key(g_key):
+                            res = await asyncio.wait_for(
+                                temp_client.aio.models.generate_content(
+                                    model=img_model,
+                                    contents=prompt
+                                ),
+                                timeout=8.0
+                            )
                     if res and res.candidates:
                         for cand in res.candidates:
                             if cand.content and cand.content.parts:
@@ -1948,6 +1955,7 @@ async def live_api_direct_sentence_emotions(clean_text: str, total_duration: flo
         if session is None:
             return []
         turn_done = False
+        _t0 = time.perf_counter()
         try:
             async with asyncio.timeout(3.0):
                 await session.send_realtime_input(text=f"7L 正在發話：「{clean_text.strip()}」（語音總時長 {total_duration:.1f} 秒）")
@@ -1961,9 +1969,12 @@ async def live_api_direct_sentence_emotions(clean_text: str, total_duration: flo
                             break
                         if getattr(c, 'generation_complete', False):
                             break
-        except Exception:
+        except Exception as e:
+            usage.note(LIVE_MODEL, False, role="神態導演", rate_limited=usage.is_rate_limited(e),
+                       ms=(time.perf_counter() - _t0) * 1000)
             await _director_drop_session()
             return []
+        usage.note(LIVE_MODEL, bool(output_text.strip()), role="神態導演", ms=(time.perf_counter() - _t0) * 1000)
         if not turn_done:
             spawn(_director_drain_then_release(session))
             lock_handed_off = True
@@ -2530,6 +2541,7 @@ def get_combined_temporal_screen_snapshot():
     combined.extend(latest_screen_cache)
     return combined
 
+@usage.role_scope("畫面哨兵")
 async def check_screen_change_via_live_api(img_bytes: bytes, current_context: str) -> bool:
     """ 【Live API 餘光視覺哨兵】：
     利用 Live API 無限額度特性保持雙眼實時看著螢幕畫面，
@@ -3098,6 +3110,7 @@ async def instinct_live_worker():
                             if move_match:
                                 pos_tag = move_match.group(1).strip()
                                 spawn(vc.apply_spatial_position(pos_tag, is_instinct=True))
+                    usage.note(LIVE_MODEL, True, role="本能腦")
                         
         except asyncio.CancelledError:
             break
@@ -3370,6 +3383,7 @@ async def _rest_speak(vts, input_queue, raw: str, origin: str) -> str:
     return spoken
 
 
+@usage.role_scope("REST 大腦")
 async def _rest_answer_slip(vts, input_queue, slip: str, origin: str) -> None:
     """一張紙條交給 REST 大腦。系統提示詞跟 Live 主腦同一份，另外帶最近的對話和鋼琴狀態（REST 沒有連線記憶）。
     她可以呼叫 invoke_subagent，跟 Live 走同一套子智能體；子智能體要她講結果時，帶著結果再問她一次。"""
@@ -3674,6 +3688,7 @@ async def continuous_live_worker(vts):
                                         if turn_buffer.strip():
                                             global LAST_BRAIN_TURN_TS
                                             LAST_BRAIN_TURN_TS = time.time()
+                                            usage.note(live_m, True, role="主腦")
                                             from core.memory import append_to_unified_memory
                                             append_to_unified_memory(speaker="7L", target="dad", content=_brain_text_for_memory(turn_buffer),
                                                                      role="assistant", source="live_api")
@@ -4727,6 +4742,7 @@ def _sentry_answer_ok(text: str) -> bool:
     return "[SILENCE]" in t or "[PASS]" in t or "[SPEAK" in t.upper() or t.upper() == "SILENCE"
 
 
+@usage.role_scope("看板哨兵")
 async def judge_should_speak(memory_context: str, unread_batch_desc: str) -> dict:
     """看板哨兵：只判斷她現在該不該開口（二元決策），不用主力模型額度。
     先問 Live 單次呼叫（老爸指定：Live 不限呼叫次數，哨兵一場直播要問幾百次）；每題新開一條連線，
@@ -5136,7 +5152,8 @@ async def streamer_mind_loop_worker(vts, input_queue):
             sys_instruction, prompt_user_input = await _streamer_mind_prompt(
                 board_context, users_involved, has_dad_message, log_target, log_focus)
             # 提示詞說了不要自己呼叫工具（點歌這類由 CPU 硬指令處理），所以不給工具
-            _r = await rest_chat(sys_instruction, prompt_user_input, models=STREAMER_MIND_MODELS, temperature=0.78)
+            with usage.as_role("看板 REST"):
+                _r = await rest_chat(sys_instruction, prompt_user_input, models=STREAMER_MIND_MODELS, temperature=0.78)
             full_reply = re.sub(r'\[PASS\]', '', normalize_silence_token(_r.text), flags=re.IGNORECASE).strip() if _r else ""
             used_model_name = _r.model if _r else ""
 
@@ -5395,12 +5412,13 @@ async def _gemini_tool_pass(task_ins, target, requester_name, system_instruction
                 safety_settings=UNRESTRICTED_SAFETY_SETTINGS,
                 system_instruction=system_instruction_text,
             )
-            async with track_key(gkey):
-                resp = await asyncio.wait_for(client.aio.models.generate_content(
-                    model=gmodel,
-                    contents=[types.Content(role="user", parts=[types.Part.from_text(text=task_ins)])],
-                    config=cfg,
-                ), timeout=_SUBAGENT_GEMINI_TOOL_TIMEOUT)
+            with usage.timed(gmodel, role="子智能體"):
+                async with track_key(gkey):
+                    resp = await asyncio.wait_for(client.aio.models.generate_content(
+                        model=gmodel,
+                        contents=[types.Content(role="user", parts=[types.Part.from_text(text=task_ins)])],
+                        config=cfg,
+                    ), timeout=_SUBAGENT_GEMINI_TOOL_TIMEOUT)
             calls = list(getattr(resp, "function_calls", None) or [])
             if not calls:
                 return None, None
@@ -5435,12 +5453,13 @@ async def _gemini_think_pass(task_ins, target, requester_name, system_instructio
                 safety_settings=UNRESTRICTED_SAFETY_SETTINGS,
                 system_instruction=system_instruction_text + _SUBAGENT_THINK_SUFFIX,
             )
-            async with track_key(gkey):
-                resp = await asyncio.wait_for(client.aio.models.generate_content(
-                    model=gmodel,
-                    contents=[types.Content(role="user", parts=[types.Part.from_text(text=task_ins)])],
-                    config=cfg,
-                ), timeout=_SUBAGENT_GEMINI_THINK_TIMEOUT)
+            with usage.timed(gmodel, role="子智能體"):
+                async with track_key(gkey):
+                    resp = await asyncio.wait_for(client.aio.models.generate_content(
+                        model=gmodel,
+                        contents=[types.Content(role="user", parts=[types.Part.from_text(text=task_ins)])],
+                        config=cfg,
+                    ), timeout=_SUBAGENT_GEMINI_THINK_TIMEOUT)
             think_raw = (getattr(resp, "text", "") or "").strip()
             think_steps, final_reply = _extract_think_reply(think_raw)
             if think_steps:
@@ -5503,6 +5522,7 @@ async def _resolve_expression(exp_name: str, speaker: str = "") -> str:
     return "direct"
 
 
+@usage.role_scope("子智能體")
 async def nv_interpret_task(task_ins: str, target: str = "dad", requester_name: str = ""):
     """A 架構子智能體（副腦兩棒制，用腦可配）：
     第一棒「工具判定」（temp 0 + tools）：是硬指令就派發；

@@ -133,6 +133,7 @@ def _sentries(answer, groq=None):
             raise RuntimeError("Groq 掛了")
         return pytypes.SimpleNamespace(text=groq)
     ns = {"live_one_shot": fake_one_shot, "groq_chat": fake_groq, "re": re, "asyncio": asyncio,
+          "usage": __import__("core.usage", fromlist=["usage"]),
           "log_print": lambda *a: None, "KEYS_VISION": ["V"], "KEYS_AUDIENCE_LIVE": ["A"], "GEMINI_KEYS": ["G"]}
     for n in ast.parse(src).body:
         if (isinstance(n, (ast.AsyncFunctionDef, ast.FunctionDef)) and n.name in (

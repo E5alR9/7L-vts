@@ -2051,6 +2051,41 @@ body.frosted-theme::before {
   min-height: 60px;
 }
 
+/* 模型用量表 */
+.usage-box {
+  overflow-x: auto;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.usage-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+}
+
+.usage-table th,
+.usage-table td {
+  padding: 4px 6px;
+  text-align: right;
+  white-space: nowrap;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.usage-table th:nth-child(-n+2),
+.usage-table td:nth-child(-n+2) {
+  text-align: left;
+}
+
+.usage-table th {
+  color: #94a3b8;
+  font-weight: 600;
+}
+
+.usage-table .usage-bad {
+  color: #fda4af;
+}
+
 /* 📜 視覺時序歷史串流 (全景平滑滾動，可隨意往上回顧歷史畫面感知) */
 .vision-stream-header {
   display: flex;

@@ -215,9 +215,11 @@ async def live_one_shot(system_text: str, prompt: str, pool: List[str], image_jp
     """依序試 pool（不夠從全部 key 補，冷卻中的排後面）前 max_keys 把沒冷卻的 key，每把限時 timeout 秒。
     有圖先送圖再送 prompt；回這一回合的轉寫文字。accept 不認的回覆（答非所問）換下一把再問；
     限流的 key 記冷卻。全部失敗回 ""。"""
+    from core import usage
     for g_key in get_dynamic_live_key_candidates(pool)[:max_keys]:
         if key_cooling(g_key, LIVE_ONE_SHOT_MODEL):
             continue
+        t0 = time.perf_counter()
         try:
             client = genai.Client(api_key=g_key)
             cfg = types.LiveConnectConfig(
@@ -239,9 +241,13 @@ async def live_one_shot(system_text: str, prompt: str, pool: List[str], image_jp
                             if c.turn_complete or getattr(c, "generation_complete", False):
                                 break
             text = text.strip()
-            if text and (accept is None or accept(text)):
+            good = bool(text) and (accept is None or accept(text))
+            usage.note(LIVE_ONE_SHOT_MODEL, good, default_role="Live 單次", ms=(time.perf_counter() - t0) * 1000)
+            if good:
                 return text
         except Exception as e:
+            usage.note(LIVE_ONE_SHOT_MODEL, False, default_role="Live 單次", rate_limited=usage.is_rate_limited(e),
+                       ms=(time.perf_counter() - t0) * 1000)
             report_gemini_key_error(g_key, e, LIVE_ONE_SHOT_MODEL)
     return ""
 

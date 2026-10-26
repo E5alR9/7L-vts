@@ -78,6 +78,8 @@ def _load(fx):
     )
     logs = []
     ns = {
+        "usage": __import__("core.usage", fromlist=["usage"]),
+        "time": __import__("time"),
         "asyncio": asyncio,
         "genai": fake_genai,
         "types": fake_types,

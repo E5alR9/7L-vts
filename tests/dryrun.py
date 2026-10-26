@@ -29,7 +29,7 @@ from zoneinfo import ZoneInfo
 from google.genai import types
 
 import core.hard_command as hc
-from core import eventlog
+from core import eventlog, usage
 import core.input_sources as ins
 import core.stage_state as stage
 from core.speech_queue import SpeechQueue
@@ -175,7 +175,7 @@ class DryRun:
             "CURRENT_PROCESSING_USER_INPUT": "", "last_interaction_time": 0.0, "LAST_TTS_END_TIME": 0.0,
             "LIVE_SESSION_ACTIVE": self.live, "_LIVE_DOWN_SINCE": time.time() - (0 if self.live else 3600),
             "_BRAIN_INPUT_ORIGIN": {"who": "dad", "ts": 0.0, "said": "", "human": False, "name": ""},
-            "eventlog": eventlog, "_LIVE_SLIP_RETRY": collections.deque(),
+            "eventlog": eventlog, "usage": usage, "_LIVE_SLIP_RETRY": collections.deque(),
             "_VISION_STATE": {"report_ts": 0.0, "mirror_ts": 0.0}, "_PING_LAST_TS": {}, "_SONG_ACK_IDX": 0,
             "_DESKTOP_DOWN_UNTIL": float("inf"),   # 桌機代答關掉
             "STREAMER_MIND_BOARD": [], "STREAMER_MIND_MODELS": ["m"], "REST_BRAIN_MODELS": ["m"],

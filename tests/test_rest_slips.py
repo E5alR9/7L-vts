@@ -15,6 +15,7 @@ TREE = ast.parse(MAIN)
 
 def _load(*names, **ns):
     ns.setdefault("log_print", lambda *a, **k: None)
+    ns.setdefault("usage", __import__("core.usage", fromlist=["usage"]))   # 主程式函式掛著 @usage.role_scope
     for name in names:
         fn = next(n for n in TREE.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == name)
         exec(compile(ast.Module(body=[fn], type_ignores=[]), name, "exec"), ns)

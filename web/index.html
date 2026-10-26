@@ -543,6 +543,23 @@
             7L 正在靜候老爸發言或直播間互動...
           </div>
         </div>
+
+        <!-- 模型用量（core/usage.py）：誰在燒額度 -->
+        <div class="glass-panel">
+          <div class="panel-head">
+            <div class="head-title">
+              <span class="panel-pill font-mono">USAGE</span>
+              <h3>模型用量（最近一小時）</h3>
+            </div>
+            <span class="tip-text font-mono" id="monUsageTotal">—</span>
+          </div>
+          <div class="frosted-desc-box usage-box">
+            <table class="usage-table">
+              <thead><tr><th>誰叫的</th><th>模型</th><th>次數</th><th>失敗</th><th>限流</th><th>平均</th><th>token</th></tr></thead>
+              <tbody id="monUsageRows"><tr><td colspan="7">還沒有呼叫</td></tr></tbody>
+            </table>
+          </div>
+        </div>
       </div>
     </section>
 

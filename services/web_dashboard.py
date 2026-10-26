@@ -1118,6 +1118,16 @@ async def api_get_tools(request):
     except Exception as e:
         return web.json_response({"ok": False, "error": str(e)}, status=500)
 
+async def api_get_model_usage(request):
+    """模型用量：最近一小時（?window=秒 可改）照角色、模型分組的次數、失敗、限流、平均毫秒、token（core/usage.py）。"""
+    from core import usage
+    try:
+        window = float(request.query.get("window", 3600))
+    except ValueError:
+        window = 3600.0
+    return web.json_response({"ok": True, **usage.report(window)})
+
+
 async def api_get_tool_history(request):
     """取得工具調用紀錄"""
     try:
@@ -1453,6 +1463,7 @@ async def start_web_dashboard(
     app.router.add_post("/api/prompts/reset", api_reset_prompts)
     app.router.add_get("/api/tools", api_get_tools)
     app.router.add_get("/api/tools/history", api_get_tool_history)
+    app.router.add_get("/api/model_usage", api_get_model_usage)
     app.router.add_post("/api/tools/execute", api_execute_tool)
     app.router.add_post("/api/tools/clear_history", api_clear_tool_history)
     app.router.add_get("/api/settings", api_get_settings)

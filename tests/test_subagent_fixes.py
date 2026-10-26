@@ -32,6 +32,7 @@ def _const_pattern(name):
 
 def _load(*names, **ns):
     ns.setdefault("log_print", lambda *a, **k: None)
+    ns.setdefault("usage", __import__("core.usage", fromlist=["usage"]))   # 主程式函式掛著 @usage.role_scope
     ns.setdefault("resolve_tool_name", resolve_tool_name)
     ns.setdefault("_SUBAGENT_MIRROR_TASK_RE", __import__("re").compile(_const_pattern("_SUBAGENT_MIRROR_TASK_RE")))
     for n in names:

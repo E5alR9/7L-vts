@@ -14,7 +14,7 @@ from typing import List, Optional
 from google import genai
 from google.genai import types
 
-from core import groq_router
+from core import groq_router, usage
 from core.llm_engine import (GEMINI_KEYS, UNRESTRICTED_SAFETY_SETTINGS, key_cooling, report_gemini_key_error,
                              sort_keys_by_load, track_key)
 from core.utils import log_print
@@ -52,9 +52,12 @@ async def _groq_once(prompt: str, temperature: float, max_tokens: int) -> Option
 
 async def _gemini_once(key: str, model: str, parts, cfg, timeout: float):
     client = genai.Client(api_key=key)
-    async with track_key(key):
-        return await asyncio.wait_for(client.aio.models.generate_content(
-            model=model, contents=[types.Content(role="user", parts=parts)], config=cfg), timeout=timeout)
+    with usage.timed(model, default_role="REST") as u:
+        async with track_key(key):
+            resp = await asyncio.wait_for(client.aio.models.generate_content(
+                model=model, contents=[types.Content(role="user", parts=parts)], config=cfg), timeout=timeout)
+        u.tokens = getattr(getattr(resp, "usage_metadata", None), "total_token_count", 0) or 0
+    return resp
 
 
 def _reply_from(resp, model: str) -> RestReply:

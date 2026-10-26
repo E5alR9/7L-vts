@@ -87,6 +87,39 @@ class SevenLMonitorApp {
     this.loadToolHistory();
     this.loadMemoryManagerList();
     this.loadSwitches();
+    this.loadModelUsage();
+    setInterval(() => this.loadModelUsage(), 15000);
+  }
+
+  // 模型用量（/api/model_usage）：最近一小時誰叫了哪個模型幾次
+  async loadModelUsage() {
+    const body = document.getElementById('monUsageRows');
+    const total = document.getElementById('monUsageTotal');
+    if (!body) return;
+    try {
+      const resp = await fetch('/api/model_usage');
+      const data = await resp.json();
+      if (!data.ok || !Array.isArray(data.rows)) return;
+      const rows = data.rows;
+      const calls = rows.reduce((n, r) => n + r.calls, 0);
+      safeSetText(total, `${calls} 次`);
+      if (rows.length === 0) {
+        body.innerHTML = '<tr><td colspan="7">還沒有呼叫</td></tr>';
+        return;
+      }
+      body.innerHTML = rows.map(r => `
+        <tr>
+          <td>${this.escapeHtml(r.role)}</td>
+          <td class="font-mono">${this.escapeHtml(r.model)}</td>
+          <td class="font-mono">${r.calls}</td>
+          <td class="font-mono ${r.fails ? 'usage-bad' : ''}">${r.fails}</td>
+          <td class="font-mono ${r.rate_limited ? 'usage-bad' : ''}">${r.rate_limited}</td>
+          <td class="font-mono">${(r.avg_ms / 1000).toFixed(1)}s</td>
+          <td class="font-mono">${r.tokens || '—'}</td>
+        </tr>`).join('');
+    } catch (e) {
+      console.warn('載入模型用量異常:', e);
+    }
   }
 
   initElements() {
