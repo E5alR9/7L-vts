@@ -178,7 +178,7 @@ from core.utils import (
 )
 from core.identity import is_owner_account, claims_owner_identity
 import core.stage_state as stage
-from core import usage
+from core import usage, promptkit
 from core import eventlog
 from core.speech_queue import SpeechQueue
 from core.hard_command import asks_to_remember_model_position, parse_hard_command, build_slip_text, display_requester, parse_slip_for_song, strip_blob_noise, sanitize_search_query, rescue_claim, split_original_request, PIANO_CONTROL_TOOLS, STAGE_CONTROL_TOOLS, is_stage_control, structured_stage_command, PLAY_TOOLS, stage_request_unasked
@@ -1864,13 +1864,7 @@ async def _director_ensure_session():
             live_cfg = types.LiveConnectConfig(
                 response_modalities=[types.Modality.AUDIO],
                 output_audio_transcription=types.AudioTranscriptionConfig(),
-                system_instruction=types.Content(parts=[types.Part(text="""妳是虛擬主播 7L 的即時神態導演（Live API Emotion Director）。
-分析 7L 即將發出的語音句子與總秒數，給出這句話中「上半句」與「下半句」的動態表情切換時間點（不限每句只能一種，上半句與下半句隨時可變！）。
-可選表情與動作：""" + _menu_names + """、正常（收回）。
-輸出格式（每行一個，秒數從小到大，秒數不可超過總秒數）：
-[0.0s: 表情名]
-[秒數: 表情名]
-請直接輸出時間戳標籤！""")])
+                system_instruction=types.Content(parts=[types.Part(text=promptkit.director_system(_menu_names))])
             )
             cm = client.aio.live.connect(model=LIVE_MODEL, config=live_cfg)
             session = await cm.__aenter__()
@@ -2555,14 +2549,8 @@ async def check_screen_change_via_live_api(img_bytes: bytes, current_context: st
     if not img_bytes or len(img_bytes) < 1000:
         return False
     decision = await live_one_shot(
-        """妳是 7L 的背景餘光視覺神經哨兵。
-妳正透過雙眼看著老爸的電腦螢幕畫面。
-妳的任務是保持眼睛在看，但【請保持安靜，僅使用表情代碼回應】！
-妳只負責做極速二元決策：
-- [NO_CHANGE]：若畫面維持在先前的操作中（如持續寫程式碼、同一個視窗/軟體中微調打字、滑鼠移動、無重大新動態），請【只輸出】: [NO_CHANGE]
-- [LOOK_SERIOUS]：只有當發生重大改變（如切換到完全不同的應用程式、跳出報錯或提示視窗、開啟新遊戲/影片、完成重大部署/編譯、畫面焦點徹底改變）時，才輸出: [LOOK_SERIOUS]
-請直接輸出 [NO_CHANGE] 或 [LOOK_SERIOUS]！""",
-        f"前次已知畫面狀態：『{current_context}』。請看當前畫面，是否有出現重大新事件需要認真看？只輸出 [NO_CHANGE] 或 [LOOK_SERIOUS]：",
+        promptkit.SCREEN_SENTRY_SYSTEM,
+        promptkit.screen_sentry_user(current_context),
         KEYS_VISION if KEYS_VISION else GEMINI_KEYS, image_jpeg=img_bytes, timeout=3.8,
         accept=lambda t: any(m in t.upper() for m in ("LOOK_SERIOUS", "NO_CHANGE", "[SILENCE]")))
     return "LOOK_SERIOUS" in decision.upper()
@@ -3014,42 +3002,13 @@ def use_rest_brain() -> bool:
     return live_brain_down_for() >= LIVE_FALLBACK_AFTER_SEC
 
 async def build_brain_system_prompt(owner: str, char_name: str) -> str:
-    """主腦的系統提示詞：人設、限制、說話規則、雲端知識、技術硬規則。Live 主腦和 REST 大腦共用。"""
-    cloud_kn = await get_cloud_knowledge()
-    cloud_kn_prompt = PromptTemplateEngine.format_cloud_knowledge_prompt(cloud_kn, current_custom_name=owner)
-    p_persona = load_prompt("7L_persona.md", char_name=char_name, owner=owner)
-    p_constraints = load_prompt("7L_constraints.md", char_name=char_name, owner=owner)
-    p_responses = load_prompt("7L_responses.md", char_name=char_name, owner=owner,
-                              expression_menu=vc.EXPRESSION_MENU_TEXT)
-    return f"""{p_persona}
-
-{p_constraints}
-
-{p_responses}
-
-{cloud_kn_prompt}
-{PromptTemplateEngine.HARD_TECHNICAL_RULES}
-"""
+    """主腦的系統提示詞（core/promptkit.brain_system）。Live 主腦和 REST 大腦共用。"""
+    return promptkit.brain_system(owner, char_name, await get_cloud_knowledge(), vc.EXPRESSION_MENU_TEXT)
 
 
 def load_prompt(filename: str, **kwargs) -> str:
-    """模組級提示詞載入器（唯一真相來源）：讀 prompts/*.md 並代入變數。
-    md 內若有非佔位符大括號則退回原文，避免整段炸掉；缺檔回空字串。"""
-    import os
-    try:
-        base = os.path.join(os.path.dirname(os.path.abspath(__file__)), "prompts")
-        path = os.path.join(base, filename)
-        if not os.path.exists(path):
-            return ""
-        with open(path, "r", encoding="utf-8") as f:
-            raw = f.read()
-        try:
-            return raw.format(**kwargs)
-        except (KeyError, IndexError, ValueError):
-            log_print(f"⚠️ [提示詞載入] {filename} 含非佔位符大括號，已跳過變數替換")
-            return raw
-    except Exception:
-        return ""
+    """讀 prompts/*.md 並代入變數（core/promptkit.py）。"""
+    return promptkit.load_prompt(filename, **kwargs)
 
 async def instinct_live_worker():
     """身體本能守護進程：常駐接收音訊，平行輸出動作與表情 (權限低於主腦意識)"""
@@ -3067,18 +3026,7 @@ async def instinct_live_worker():
             client = genai.Client(api_key=live_key)
             
             import services.vts_client as _vc_menu
-            system_instruction = ("""妳是 7L 的「身體本能神經中樞」。妳的權限極低，只負責控制肌肉反射。
-任務：聆聽周遭聲音或老爸的話語，即時輸出當下的反射表情或動作。
-【指令優先】：若聽到明確的表情指令（如「做暈表情」「換成哭哭」「恢復正常」），放下反射、直接輸出對應 [EXPRESSION: 名]！指令永遠優先於反射。
-【場合對照】（跟主腦同一套，別為秀而秀）：
-""" + _vc_menu.EXPRESSION_MENU_TEXT + """
-【支援的動作清單】（只能輸出以下標籤，不要自創）：
-- 臉部表情：[EXPRESSION: 名]，名字只能用上面【場合對照】裡的（麥克風、遊戲機是道具，系統會自動拿，不要輸出）
-- 瞬時反應：[EXPRESSION: WINK] / [EXPRESSION: 震驚] / [EXPRESSION: 皺眉] / [EXPRESSION: 翻白眼]
-- 身體走位：[MOVE: 靠近] / [MOVE: 遠離] / [MOVE: 躲角落] / [MOVE: 原位] / [MOVE: 中間] / [MOVE: 左邊] / [MOVE: 右邊] / [MOVE: 鋼琴旁]
-- 重置表情：[EXPRESSION: _RESET_]
-
-請直接輸出對應標籤（例如 [EXPRESSION: 臉紅] 或 [MOVE: 靠近]），絕對不要輸出任何對話台詞！如果當下不需要特別反應，請保持沉默 [SILENCE]。""")
+            system_instruction = promptkit.instinct_system(_vc_menu.EXPRESSION_MENU_TEXT)
 
             live_cfg = types.LiveConnectConfig(
                 response_modalities=[types.Modality.AUDIO], 
@@ -4733,11 +4681,7 @@ def add_to_streamer_mind_board(user_display: str, unique_id: str, content: str, 
 # 2026-10-26 改兩處：以前「任何請求提問→老爸(請示)」，Groq 照字面把「7L 妳晚餐吃什麼」也轉給老爸（8 題對 5）；
 # 改成跟看板 REST 提示詞同一條規則（問她、找她就回觀眾，要老爸決定或承諾的才轉老爸），老爸那行寫明只認【老爸】。
 # 新版 Groq 跑三輪都 8/8、Live 8/8（舊版 Live 7/8）。
-_SENTRY_SYSTEM = """妳是 7L 的潛意識哨兵：只決定她現在該不該開口。
-- 老爸（只有標著【老爸】的訊息才是他；直播觀眾留言都不是）：對妳說話、下指令、問話、點歌→[SPEAK: target=老爸, focus=重點, song=歌名(若點歌)]；自言自語/雜音/咳嗽→[SILENCE]。
-- 觀眾彈幕：指名 7L、跟她聊天、問她問題、找她幫忙、點歌、稱讚→[SPEAK: target=觀眾名, focus=重點, song=歌名(若點歌)]；聊遊戲戰況/嘴主播→[SPEAK: target=老爸(吐槽), focus=重點, user=觀眾名]；要老爸做決定或承諾的請求（加好友、組隊、借帳號、抽獎、要聯絡方式、線下邀約）→[SPEAK: target=老爸(請示), focus=重點, user=觀眾名]；刷屏/符號/無需插話→[SILENCE]。
-- 彈鋼琴時照常判定，不因彈琴沉默。
-只輸出 [SILENCE] 或 [SPEAK: ...]！"""
+_SENTRY_SYSTEM = promptkit.BOARD_SENTRY_SYSTEM
 
 
 def _sentry_answer_ok(text: str) -> bool:
