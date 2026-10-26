@@ -452,14 +452,8 @@ class DashboardBridge:
             c.yt_comp.IS_YT_WATCHER_ENABLED = target_val
             log_print(f"🎛️ [系統開關] YouTube 即時伴看已{'🟢 開啟' if target_val else '🔴 關閉'}")
         elif key == "MODE_TOGGLE":
-            new_mode = "companion" if target_val else "vtuber"
-            os.environ["MODE"] = new_mode
-            if new_mode == "companion":
-                os.environ["OPERATOR_INPUT"] = "1"
-                os.environ["OPERATOR_SPEECH"] = "1"
-            else:
-                os.environ["OPERATOR_INPUT"] = "0"
-                os.environ["OPERATOR_SPEECH"] = "0"
+            from core.settings import apply_mode
+            new_mode = apply_mode("companion" if target_val else "vtuber")
             self.run_mode = new_mode
             log_print(f"🎛️ [系統開關] 運行模式已切換為 {new_mode} (已即時生效，徹底生效請點擊重啟大腦)")
 

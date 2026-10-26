@@ -50,6 +50,9 @@ import os
 from dotenv import load_dotenv
 #  用「本檔所在目錄」明確載入 .env：確保第一時間套用 MODE
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"), override=True)
+#  運行模式開機定一次（後台存過模式開關就照開關），要在 import 記憶模組之前：記憶檔路徑一 import 就定了
+from core import settings as _settings
+SETTINGS = _settings.boot(os.path.join(os.path.dirname(os.path.abspath(__file__)), "data"))
 
 
 
@@ -6633,29 +6636,12 @@ async def main():
     # 啟動全部背景協程
     # （GPT-SoVITS 預熱已提早至 main() 開頭啟動）
     spawn(mic_volume_worker())
-    # ── 提前載入雲端 MODE_TOGGLE，取代 .env ──
-    try:
-        from core.memory import get_cloud_knowledge
-        kn = await get_cloud_knowledge()
-        switches = kn.get("system_switches", {})
-        if "MODE_TOGGLE" in switches:
-            new_mode = "companion" if switches["MODE_TOGGLE"] else "vtuber"
-            import os
-            os.environ["MODE"] = new_mode
-            if new_mode == "companion":
-                os.environ["OPERATOR_INPUT"] = "1"
-                os.environ["OPERATOR_SPEECH"] = "1"
-            else:
-                os.environ["OPERATOR_INPUT"] = "0"
-                os.environ["OPERATOR_SPEECH"] = "0"
-    except Exception as e:
-        log_print(f"⚠️ [雲端模式載入失敗]: {e}")
-
+    # 運行模式在檔案最上面 core.settings.boot() 就定好了（後台存的模式開關也是那時套用）
     #  運行模式裝配（MODE=companion|vtuber）：決定裝哪些 worker
     from core.identity import get_mode as _get_run_mode
     _RUN_MODE = _get_run_mode()
     _IS_VTUBER = (_RUN_MODE == "vtuber")
-    log_print(f"🎭 [運行模式] MODE={_RUN_MODE}（companion=1對1伴侶 / vtuber=只對觀眾7x24）")
+    log_print(f"🎭 [運行模式] MODE={_RUN_MODE}（companion=1對1伴侶 / vtuber=只對觀眾7x24；照{SETTINGS.source}）")
     #  操作者輸入預設停用（OPERATOR_INPUT=1 才開；vtuber 模式強制關）：直播輸入只收聊天室觀眾留言
     if operator_input_enabled():
         spawn(continuous_live_worker(vts))
