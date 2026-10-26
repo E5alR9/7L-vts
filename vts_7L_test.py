@@ -3247,7 +3247,7 @@ async def _rest_answer_slip(vts, input_queue, slip: str, origin: str) -> None:
 
 
 async def rest_slip_worker(vts, input_queue):
-    """沒有 Live 主腦時接紙條（2026-10-26）：Live 斷線太久，或 VTuber 模式本來就不開 Live 主腦，
+    """沒有 Live 主腦時接紙條（2026-10-26）：Live 斷線超過 LIVE_FALLBACK_AFTER_SEC 秒，
     紙條就由 REST 大腦一張一張回。以前紙條只有 Live 主腦會收：沒 Live 時老爸的話、唱完的謝幕、
     看完畫面的回報都堆在佇列裡沒人接，Live 回來才一口氣倒給它。"""
     while True:
@@ -5051,7 +5051,7 @@ async def streamer_mind_loop_worker(vts, input_queue):
                 except Exception as e:
                     log_print(f"⚠️ [哨兵攔截失敗] 轉交紙條失敗 ({e})，降級回傳統 REST API 產生回覆...")
 
-            # Live 主腦不在（斷線太久，或 VTuber 模式本來就不開）：REST 大腦直接回
+            # Live 主腦不在（斷線太久）：REST 大腦直接回
             sys_instruction, prompt_user_input = await _streamer_mind_prompt(
                 board_context, users_involved, has_dad_message, log_target, log_focus)
             # 提示詞說了不要自己呼叫工具（點歌這類由 CPU 硬指令處理），所以不給工具
@@ -6334,7 +6334,6 @@ async def discord_mic_on(ctx):
 async def discord_mic_off(ctx):
     await control_mic(ctx, "off")
 
-# ⚠️ init_gpt_sovits() 內部會暫時 os.chdir(GPT-SoVITS)，此期間其他程式碼請使用絕對路徑
 def _prewarm_embedder():
     """知識庫向量模型背景預載（2026-10-24）：第一次 search_knowledge 不用在對話當下載入／下載。"""
     try:
@@ -6345,6 +6344,7 @@ def _prewarm_embedder():
         log_print(f"⚠️ [知識庫] 向量模型預載失敗（第一次查詢時再試）: {e}")
 
 
+# ⚠️ init_gpt_sovits() 內部會暫時 os.chdir(GPT-SoVITS)，此期間其他程式碼請使用絕對路徑
 def _prewarm_xiaoyi():
     try:
         import local_xiaoyi_service

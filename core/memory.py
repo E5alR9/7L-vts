@@ -938,7 +938,7 @@ def get_recent_thoughts_by_chars(max_chars: int = 1000) -> List[Dict[str, Any]]:
 
 def get_unified_memory_context(limit: int = 100, thought_char_limit: int = 1000, include_dialogue: bool = True) -> str:
     """提取雙軌全景時序記憶：
-    - 💬 對話部分：取最近 limit 句真實對話（預設 60 句，可擴至百句，上限 500 句，永不被心流擠佔）
+    - 💬 對話部分：取最近 limit 句真實對話（預設 100 句，上限 500 句，永不被心流擠佔）
     - 💭 心流部分：取最近約 thought_char_limit 字（預設約 1000 字），嚴格控管字數，確保回覆時不會卡太久
     """
     global UNIFIED_DIALOGUE_MEMORY, UNIFIED_THOUGHT_MEMORY

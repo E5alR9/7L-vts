@@ -1,13 +1,14 @@
 # -*- coding: utf-8 -*-
 """
-🪪 身份配置（Identity）：擁有者／角色／模式，全部 env 可配、拒絕寫死。
+🪪 身份配置（Identity）：擁有者／角色／模式。
 
-    MODE            companion | vtuber（預設 vtuber，相容舊行為）
-    OWNER_NAME      擁有者稱謂（預設「老爸」）
-    CHARACTER_NAME  角色名（預設「7L」）
+    MODE            companion | vtuber（預設 vtuber）。開機由 core/settings.boot 定一次（後台存的模式開關優先），
+                    執行中切換只經 settings.apply_mode
+    OWNER_NAME      擁有者稱謂（預設「老爸」），讀環境變數
+    CHARACTER_NAME  角色名（預設「7L」），讀環境變數
+    OWNER_ACCOUNT_IDS  老爸的平台帳號（認老爸只信這個）寫在本檔
 
-惰性讀取：改 .env 後重啟生效（MODE 切換需重啟以重裝 worker）。
-見 docs/AI_SOURCES.md；白名單在 core/env_config.py。
+白名單在 core/env_config.py；啟動步驟見 docs/GETTING_STARTED.md。
 """
 import os
 

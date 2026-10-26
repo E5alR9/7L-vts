@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """給模型看的工具宣告（2026-10-25 從主程式搬出來）。
 
-INTERACTIONS_TOOLS：專案格式的函式工具清單（主腦 REST、Groq、NV 共用；core.groq_router 會轉成 OpenAI 格式）。
+INTERACTIONS_TOOLS：專案格式的函式工具清單（子智能體 Gemini／NV／Groq 和後台手動工具共用；core.groq_router 會轉成 OpenAI 格式）。主腦只拿 LIVE_API_TOOLS／REST_BRAIN_TOOLS。
 build_genai_declarations：轉成 Gemini FunctionDeclaration；GENAI_TOOLS 是轉好的（子智能體用）。
 LIVE_API_TOOLS：Live 主腦只拿一個 invoke_subagent（非阻塞），實際操作交給子智能體。
 工具的執行在主程式的 execute_tool_dispatch。

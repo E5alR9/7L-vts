@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
-"""CPU 硬指令拆解（B 架構專用）：純正則、零 API、零幻覺、零成本。
+"""CPU 硬指令：純正則、零 API、零幻覺、零成本。
 
-只負責把「唱歌」「彈琴」兩類**明確祈使句**拆成 (工具名, 參數)；
-拆不出來就回 (None, {})，交還 A 架構（Live 主腦 → invoke_subagent → NV 解讀）。
+本檔五塊：(1) parse_hard_command：把點歌（唱歌／彈琴）、鋼琴停止／暫停／繼續、停止唱歌、貼 YouTube 連結看片
+這些**明確祈使句**拆成 (工具名, 參數)；(2) 彈加唱混用句、結構化舞台動作（主腦直接填 action）；
+(3) 主腦翻舊點歌的檢查（stage_request_unasked）；(4) 搜尋字串消毒、斷線救援；(5) 給主腦的紙條文案。
+拆不出來就回 (None, {})，交還主腦（Live → invoke_subagent → NV 解讀）。
 搜尋類指令刻意不在這裡處理（資訊型工具結果無處可去，只能燒 API）。
 
 2026-10-09 修正直播誤觸（兩個真實案例）：
@@ -208,7 +210,7 @@ def extract_watch_url(text: Optional[str]) -> Optional[str]:
 
 
 def extract_ask_desktop(text: Optional[str]) -> Optional[str]:
-    """桌機助手關鍵字（B 架構，2026-10-11）：問Gemini＋問題，回問題文本。
+    """桌機助手關鍵字（2026-10-11）：問Gemini＋問題，回問題文本。
     錨定句首（「唱一首問Gemini的歌」這種不搶唱歌的）。零 API，純正則。"""
     if not text:
         return None
@@ -436,12 +438,12 @@ def stage_request_unasked(said: str, songs=(), her_last: str = "") -> bool:
 
 
 def parse_hard_command(text: Optional[str]) -> Tuple[Optional[str], Dict]:
-    """B 架構入口：把純文字拆成 (工具名, 參數)。
+    """CPU 硬指令入口：把純文字拆成 (工具名, 參數)。
 
-    只認點歌（唱歌/彈琴）、鋼琴的停止／暫停／繼續、停止唱歌、貼 YouTube 連結點播看片。表情不歸 CPU（交還主腦/A 架構，避免誤觸搶戲）。
+    只認點歌（唱歌/彈琴）、鋼琴的停止／暫停／繼續、停止唱歌、貼 YouTube 連結點播看片。表情不歸 CPU（交還主腦，避免誤觸搶戲）。
     混用句（彈X加唱Y）走 parse_mixed_command，不在這裡處理。
     桌機助手（問Gemini）最優先判定：顯式問句不跟唱歌搶。
-    回 (None, {}) 代表無硬指令，交還 A 架構（Live 主腦 → invoke_subagent → NV 解讀）。
+    回 (None, {}) 代表無硬指令，交還主腦（Live → invoke_subagent → NV 解讀）。
     """
     ask = extract_ask_desktop(text)
     if ask:
@@ -462,7 +464,7 @@ def parse_hard_command(text: Optional[str]) -> Tuple[Optional[str], Dict]:
 
 
 # 唱歌/麥克風/話筒刻意排除：麥克風由翻唱管線自動管理，手動會打架
-# （_RESET_NAMES 給 build_slip_text 表情紙條用；表情本體走主腦/A 架構，不歸 CPU）
+# （_RESET_NAMES 給 build_slip_text 表情紙條用；表情本體走主腦，不歸 CPU）
 _RESET_NAMES = {"正常", "重置", "預設", "恢復", "_RESET_"}
 
 

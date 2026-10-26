@@ -17,7 +17,7 @@ IS_STREAMING = False
 current_tiktok_status_str = '[📱 TikTok: 待命中]'
 ACTIVE_TIKTOK_ID = ""
 
-# 📱 16.5 TikTok 直播間實時彈幕與禮物監聽模組
+# 📱 TikTok 直播間實時彈幕與禮物監聽模組
 # ────────────────────────────────────────────────────────
 TIKTOK_UNIQUE_ID = os.getenv("TIKTOK_USERNAME", "e5alr9qub2, e_7l_9")
 EULER_SIGN_KEY = os.getenv("SIGN_API_KEY") or os.getenv("EULERSTREAM_API_KEY")
@@ -532,12 +532,4 @@ async def tiktok_live_worker(input_queue):
                 pass
             IS_STREAMING = False
             ACTIVE_TIKTOK_ID = ""
-
-# ────────────────────────────────────────────────────────
-# 🚀 17. 主程式進入點與終端機即時狀態列 (main Entry Point & ANSI Status Bar)
-# ────────────────────────────────────────────────────────
-# 💡 功能目的：
-#    - 系統總指揮中心：連線 VTube Studio WebSocket (Port 8001) 並完成 Token 認證。
-#    - 同時啟動所有背景感知工作協程（麥克風、畫面截圖、餘光視覺、鋼琴合成、CMA 監控、TikTok 彈幕）。
-#    - 在終端機以 ANSI 虛擬終端即時刷新單行乾淨狀態列（旋轉游標、當前大腦狀態、麥克風音量、TikTok 動態）。
 

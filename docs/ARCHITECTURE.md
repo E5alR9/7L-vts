@@ -33,7 +33,7 @@ flowchart TD
 2. **CPU 硬指令**（`core/hard_command.parse_hard_command`）：點歌、彈琴、彈加唱、鋼琴停止／暫停／繼續、停止唱歌，純正則、零 API。觀眾不能控制鋼琴和停歌（`STAGE_CONTROL_TOOLS`）。
 3. **老爸的話**：麥克風由 Live 主腦的原生音訊直接聽；打字、`chat_input.txt`、直播間老爸帳號由 `process_chat_message` 寫進記憶、跑 CPU 硬指令、遞紙條（`send_brain_slip`，老爸身分）。
    - Live 主腦斷線超過 `LIVE_FALLBACK_AFTER_SEC`（8 秒）時，麥克風改走舊 STT `mic_worker`（Google 語音辨識＋聲紋＋回音過濾），聽到的話一樣遞紙條；Live 回來就交回。
-4. **觀眾的話**：寫進看板 `STREAMER_MIND_BOARD`，`judge_should_speak`（哨兵：Live 單次呼叫優先、Groq 備援）判斷要不要回。要回時：Live 主腦在就把紙條塞給它；不在（`use_rest_brain()`：斷線太久，或 **VTuber 模式本來就不開 Live 主腦**）就用看板專用的提示詞叫 `rest_chat` 直接回。
+4. **觀眾的話**：寫進看板 `STREAMER_MIND_BOARD`，`judge_should_speak`（哨兵：Live 單次呼叫優先、Groq 備援）判斷要不要回。要回時：Live 主腦在就把紙條塞給它；不在（`use_rest_brain()`：斷線太久）就用看板專用的提示詞叫 `rest_chat` 直接回。
 5. **Live 主腦**只有一個工具 `invoke_subagent`（非阻塞）。
    - 舞台動作（彈、唱、彈加唱、停／暫停／繼續鋼琴、停歌、看片）她直接填 `action`＋`song`／`url`，`structured_stage_command` 轉成工具，交給 `run_stage_commands` 執行。權限、去重、應答都在 `run_stage_commands`，CPU 硬指令也走它。
    - 她自己要彈唱時，`stage_request_unasked` 先對照觸發這輪的那句人話有沒有人點歌：Live 續接的對話會讓她翻出舊點歌。

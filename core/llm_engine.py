@@ -192,7 +192,7 @@ _KEY_LIMIT_MARKERS = ("429", "resource_exhausted", "resource exhausted", "rate l
 
 
 def report_gemini_key_error(key: str, err, model: str = "") -> bool:
-    """fetch_ai_response 以外的 Gemini 呼叫點遇錯時呼叫：限流／配額／過載就把 (key, model) 冷卻，
+    """所有 Gemini 呼叫點遇錯時呼叫：限流／配額／過載就把 (key, model) 冷卻，
     之後候選池會把這把 key 排到最後，其他呼叫點不會再先撞它。回傳是否有冷卻。"""
     err_low = str(err).lower()
     if not key or not any(m in err_low for m in _KEY_LIMIT_MARKERS):

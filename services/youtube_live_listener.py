@@ -33,7 +33,7 @@ _CONT_PATTERNS = [
 
 
 def normalize_video_id(raw: str) -> str:
-    """接受完整網址（v= / youtu.be/ / live/）或裸 ID。頻道輸入請用 resolve_live_video_id。"""
+    """接受完整網址（v= / youtu.be/ / live/）或裸 ID。頻道輸入由 worker 內的 resolve_channel 解析，並跟進該頻道目前的直播。"""
     raw = (raw or "").strip().strip("'\"")
     if not raw:
         return ""

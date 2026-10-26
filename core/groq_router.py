@@ -3,8 +3,8 @@
 PROVIDER: GROQ（api.groq.com 直連；見 docs/AI_SOURCES.md）
 
 🎯 目的：
-   把所有「純文字」AI 呼叫（發言哨兵、背景決策、記憶審查、搜尋提煉、觀眾回應）
-   統一走 Groq 第一梯隊，Gemini 只保留給視覺與 Live API 音訊。
+   純文字的快線：REST 大腦第一棒（core/rest_brain）、哨兵的 Groq 備援、搜尋提煉、鋼琴意圖解析；
+   多模態與 Live 走 Gemini。
 
 ⚙️ 設計：
    1. 多金鑰輪詢 (round-robin) + 逐 (金鑰, 模型) 冷卻，遇 429 自動降級到下一梯隊。

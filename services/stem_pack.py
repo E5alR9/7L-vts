@@ -8,7 +8,7 @@ PROVIDER: LOCAL（demucs htdemucs_6s＋librosa；見 docs/AI_SOURCES.md）。
   karaoke.wav      去人聲伴奏（跟唱／跟彈用）
   slowed_075.wav   降速 75% 不變調（扒 solo 用）
   chords.txt       和弦進行（段落時間＋和弦名）
-  melody.mid       主旋律 MIDI（既有逆向管線）
+  melody.mid       主旋律 MIDI（實際寫到 midi_sheets/<vid>_melody.mid，會進鋼琴曲庫）
 
 依賴：demucs（已裝）。模型首次自動下載。
 """
