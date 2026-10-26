@@ -19,9 +19,6 @@ duckduckgo_search
 tavily-python
 
 # ── 語音：TTS / STT / 音訊 ─────────────────────────────────────
-kokoro-onnx                # 本地小模型 TTS（預設引擎）
-misaki[zh]                 # kokoro-v1.1-zh 官方 G2P（注音+數字調 tokenization，缺了會唸成別的口音）
-num2words                  # misaki 英文段（中英混說）需要
 edge-tts                   # 雲端備援 TTS（台灣腔女聲 / 日文）
 espeakng-loader            # phonemizer 的 espeak-ng 資料（Windows 內建）
 phonemizer

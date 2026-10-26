@@ -36,7 +36,7 @@ copy .env.example .env   # 若無範例檔，直接新建 .env
 | `TWITCH_CHANNELS` | 主播用 | 小寫頻道名，逗號分隔 |
 | `YOUTUBE_CHANNEL` | 主播用 | `@handle`，自動跟播 |
 | `SIGN_API_KEY` | TikTok 用 | Euler 簽章 |
-| `FIREBASE_ENABLED` | 否（預設 0＝純本地） | 多機同步才開＋`FIREBASE_CRED_JSON` |
+| `FIREBASE_ENABLED` | 否（預設開；0＝純本地） | 還要有 `FIREBASE_CRED_JSON` 才會真的連 |
 
 控制台（http://localhost:7860 → 系統設定）可白名單直改，機密只寫不讀。
 

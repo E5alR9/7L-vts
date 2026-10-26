@@ -1333,10 +1333,10 @@ def is_system_overloaded():
 # ────────────────────────────────────────────────────────
 #  5. 雲端記憶連線與老爸的個人檔案
 # ────────────────────────────────────────────────────────
-#  Firestore 客戶端在 core/db、記憶本體在 core/memory；預設拔除（FIREBASE_ENABLED=1 才連），只當備份。
+#  Firestore 客戶端在 core/db、記憶本體在 core/memory；預設開（有 FIREBASE_CRED_JSON 就連），只當備份。
 
 db = None
-# PROVIDER: FIRESTORE（預設拔除：FIREBASE_ENABLED=1 才連；全呼叫點另有本地 JSON 備援）
+# PROVIDER: FIRESTORE（預設開；FIREBASE_ENABLED=0 關掉；本機 JSON 是正本，Firestore 只當備份）
 _FIREBASE_ON = (os.getenv("FIREBASE_ENABLED", "1") or "1").strip().lower() in ("1", "true", "yes")
 if FIREBASE_CRED_JSON and _FIREBASE_ON:
     try:
@@ -1347,7 +1347,7 @@ if FIREBASE_CRED_JSON and _FIREBASE_ON:
     except Exception as e:
         print(f"【⚠️ 系統警告】Firebase 連線失敗: {e}，將僅使用本地快取。")
 else:
-    print("【ℹ️ 系統通知】純本地模式（Firebase 預設拔除；多機同步需設 FIREBASE_ENABLED=1＋FIREBASE_CRED_JSON）。")
+    print("【ℹ️ 系統通知】純本地模式（沒有 FIREBASE_CRED_JSON，或 FIREBASE_ENABLED=0）。")
 
 async def get_user_profile():
     profile = None

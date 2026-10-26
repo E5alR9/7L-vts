@@ -22,7 +22,7 @@
 |---|---|---|---|---|---|
 | mic 快覽＋系統音轉錄（現行） | GOOGLE-WEB-SPEECH | `recognize_google(zh-TW)` 非官方免費端點（`listen_once_fast`／`transcribe_audio_bytes`） | 無 | 非官方，無配額概念（隨時可死） | 將遷 3.5-transcribe |
 | 官方 STT（規劃） | GEMINI-TRANSCRIBE | gemini-3.5-transcribe（說話人分離＋詞戳＋自訂詞表） | 同 Gemini keys | RPM 3／RPD 25 | 常駐轉錄仍走本地 faster-whisper（已在 requirements，未接線） |
-| TTS 主力 | LOCAL | kokoro-ONNX → cosyvoice 本地服務 → 曉伊 GPT-SoVITS（`services/tts_router.py` 引擎鏈） | `TTS_ENGINE`／`TTS_FALLBACK`／`COSYVOICE_URL` | 無 | 120 秒自動升級回鏈首 |
+| TTS 主力 | LOCAL＋CLOUD | `TTS_ENGINE` 預設 cloud_gptsovits，備援 `TTS_FALLBACK` 預設曉伊 GPT-SoVITS；cosyvoice／edge／elevenlabs 選配（`services/tts_router.py` 引擎鏈） | `TTS_ENGINE`／`TTS_FALLBACK`／`COSYVOICE_URL` | 無 | 120 秒自動升級回鏈首 |
 | TTS 備援 | CLOUD | edge-tts（微軟）／elevenlabs（月 10K 字元守衛） | `ELEVENLABS_API_KEY` | RPD 10（Gemini TTS 系同） | Gemini 3.8-flash-tts 系可追加進鏈 |
 | mic 快覽 | GOOGLE-WEB-SPEECH | `recognize_google(zh-TW)`（`listen_once_fast`） | 無 | 非官方 | 深層理解走 Gemini Live audio_b64 |
 | 系統音／轉錄備援 | LOCAL-faster-whisper | `services/stt.py`（`STT_BACKEND=auto`，small／CPU int8） | 無 | 無 | Google 失敗自動退本地 |

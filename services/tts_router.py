@@ -48,8 +48,6 @@ for _e in ENGINE_ORDER + _FALLBACK:
 if not ENGINE_CHAIN:
     ENGINE_CHAIN = ["xiaoyi", "edge"]
 
-ZH_VOICE = os.getenv("TTS_ZH_VOICE") or "zf_001"
-JA_VOICE = os.getenv("TTS_JA_VOICE") or "edge"
 TTS_SPEED = float(os.getenv("TTS_SPEED") or "1.0")
 
 _active_engine: Optional[str] = None

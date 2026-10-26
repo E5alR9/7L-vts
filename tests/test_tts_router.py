@@ -35,7 +35,7 @@ def test_detect_language_mixed_prefers_chinese_with_markers():
 def test_file_extension_mapping():
     assert t.file_extension("edge") == ".mp3"
     assert t.file_extension("elevenlabs") == ".mp3"
-    for eng in ("kokoro", "cosyvoice", "xiaoyi", "unknown_engine"):
+    for eng in ("cosyvoice", "xiaoyi", "unknown_engine"):
         assert t.file_extension(eng) == ".wav"
 
 
@@ -125,10 +125,6 @@ def test_engine_chain_has_no_duplicates():
 def test_get_active_engine_initially_none_or_registered():
     ae = t.get_active_engine()
     assert ae is None or ae in t._ENGINES
-
-
-def test_voice_defaults_present():
-    assert t.ZH_VOICE, "中文聲線不可為空"
 
 
 def test_engine_timeout_falls_back():

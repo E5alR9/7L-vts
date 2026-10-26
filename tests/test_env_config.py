@@ -12,7 +12,7 @@ GROQ_API_KEYS=gsk_aaa111,
 gsk_bbb222,
 gsk_ccc333
 GEMINI_API_KEY=AIzaSECRETSECRET
-TTS_ENGINE=kokoro
+TTS_ENGINE=edge
 OPERATOR_INPUT=0
 GROQ_REQUESTS_PER_MINUTE=20
 TWITCH_CHANNELS=
@@ -30,20 +30,20 @@ def test_read_env_handles_multiline_keys(tmp_path):
     p = _write(tmp_path)
     cfg = ec.read_env_file(p)
     assert cfg["GROQ_API_KEYS"] == "gsk_aaa111,\ngsk_bbb222,\ngsk_ccc333"  # 三行完整保留
-    assert cfg["TTS_ENGINE"] == "kokoro"
+    assert cfg["TTS_ENGINE"] == "edge"
     assert cfg["TWITCH_CHANNELS"] == ""
 
 
 def test_update_single_key_preserves_multiline_block(tmp_path):
     p = _write(tmp_path)
-    applied, restart, errors = ec.update_settings({"TTS_ENGINE": "cosyvoice,kokoro"}, path=p)
+    applied, restart, errors = ec.update_settings({"TTS_ENGINE": "cosyvoice,xiaoyi"}, path=p)
     assert errors == {}
     assert applied == ["TTS_ENGINE"] and restart == ["TTS_ENGINE"]   # TTS_ENGINE restart=True
     cfg = ec.read_env_file(p)
     # 多行金鑰必須原封不動（這就是區塊替換的價值）
     assert cfg["GROQ_API_KEYS"] == "gsk_aaa111,\ngsk_bbb222,\ngsk_ccc333"
     assert cfg["GEMINI_API_KEY"] == "AIzaSECRETSECRET"
-    assert cfg["TTS_ENGINE"] == "cosyvoice,kokoro"
+    assert cfg["TTS_ENGINE"] == "cosyvoice,xiaoyi"
 
 
 def test_update_appends_missing_key(tmp_path):
@@ -110,7 +110,7 @@ def test_secret_write_only(tmp_path):
     assert ec.read_env_file(p)["GROQ_API_KEYS"] == "gsk_new_key_123"
     # 非機密欄位會回傳值
     t = specs["TTS_ENGINE"]
-    assert t["secret"] is False and t["value"] == "kokoro"
+    assert t["secret"] is False and t["value"] == "edge"
 
 
 def test_hot_apply_non_restart_keys(tmp_path, monkeypatch):

@@ -1,7 +1,7 @@
 # 啟動 CosyVoice3 本地 TTS 服務（models/cosyvoice/Fun-CosyVoice3-0.5B → http://127.0.0.1:9881）
 # 用法： powershell -ExecutionPolicy Bypass -File scripts\start_cosyvoice.ps1
 # 說明： 服務是常駐程序；啟動需 25~60 秒載入 9.3GB 權重。
-#       tts_router 的 cosyvoice 引擎在服務沒好之前會自動降級 kokoro/edge（不影響直播）。
+#       tts_router 的 cosyvoice 引擎在服務沒好之前會自動降級到下一個引擎（不影響直播）。
 
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
 $root = Split-Path $PSScriptRoot -Parent
@@ -61,5 +61,5 @@ for ($i = 1; $i -le 18; $i++) {
         if ($h.ok) { Write-Host "[$($i*5)s] 就緒 ✅ sr=$($h.sample_rate)"; exit 0 }
     } catch { }
 }
-Write-Host "[CosyVoice] 90 秒內未就緒（可稍後再查 $log），tts_router 期間會自動用 kokoro"
+Write-Host "[CosyVoice] 90 秒內未就緒（可稍後再查 $log），tts_router 期間會先用下一個引擎"
 exit 0

@@ -32,7 +32,7 @@ subtitle.txt
 STOP_7L.flag
 
 # --- large binaries / regenerable artifacts ---
-# Kokoro 模型檔請用 scripts 下載，不入庫（合計約 361MB）
+# 模型檔（聲紋、向量、CosyVoice…）不入庫，用 scripts 下載重建
 models/
 # SoundFont 音源（scripts/render_sf.py 用；用下載重建，不入庫，144MB）
 soundfonts/*.sf2

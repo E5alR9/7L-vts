@@ -109,8 +109,8 @@ def test_normalize_silence_token(raw, expected):
 
 
 def test_prompts_teach_silence_not_pass():
-    for f in ("7L_audience.md",):
-        assert "[PASS]" not in open(os.path.join(ROOT, "prompts", f), encoding="utf-8").read()
+    for f in os.listdir(os.path.join(ROOT, "prompts")):
+        assert "[PASS]" not in open(os.path.join(ROOT, "prompts", f), encoding="utf-8").read(), f
     assert "可輸出 [PASS] 略過" not in MAIN_SRC
 
 
