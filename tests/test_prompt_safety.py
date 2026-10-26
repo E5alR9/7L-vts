@@ -163,7 +163,7 @@ def test_host_interject_is_labeled_as_host_and_always_answered():
         {"unique_id": "video:x", "user": "E5 點播的片", "source": "video_watch", "time_str": "21:02", "content": "📺 看完"}])
     assert "【主持「E5」】：大家晚安" in text and "【TikTok 直播觀眾「小明」】" in text
     assert "【點播看片筆記（E5 點播的片）】" in text and viewers == ["小明"] and has_dad is False
-    assert "elif _host_msgs:" in src and src.index("elif _host_msgs:") < src.index("judge_subconscious_intent_via_live_api(")
+    assert "elif _host_msgs:" in src and src.index("elif _host_msgs:") < src.index("judge_should_speak(")
 
 
 def test_fallback_prompt_is_built_only_when_live_brain_is_away():

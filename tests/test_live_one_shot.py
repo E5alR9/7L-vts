@@ -115,7 +115,10 @@ def test_max_keys_limits_attempts(fake_live):
 
 # —— 主程式兩個哨兵改用共用版之後的判讀 ——
 
-def _sentries(answer):
+def _sentries(answer, groq=None):
+    """answer：Live 單次呼叫回的字；groq：Groq 回的字（None＝Groq 失敗）。"""
+    import asyncio
+    import types as pytypes
     src = open(os.path.join(ROOT, "vts_7L_test.py"), encoding="utf-8").read()
     calls = []
 
@@ -123,11 +126,18 @@ def _sentries(answer):
         calls.append((prompt, kw))
         accept = kw.get("accept")
         return answer if (answer and (accept is None or accept(answer))) else ""
-    ns = {"live_one_shot": fake_one_shot, "re": re, "KEYS_VISION": ["V"], "KEYS_AUDIENCE_LIVE": ["A"],
-          "GEMINI_KEYS": ["G"]}
+
+    async def fake_groq(messages, **kw):
+        calls.append(("groq", kw))
+        if groq is None:
+            raise RuntimeError("Groq 掛了")
+        return pytypes.SimpleNamespace(text=groq)
+    ns = {"live_one_shot": fake_one_shot, "groq_chat": fake_groq, "re": re, "asyncio": asyncio,
+          "log_print": lambda *a: None, "KEYS_VISION": ["V"], "KEYS_AUDIENCE_LIVE": ["A"], "GEMINI_KEYS": ["G"]}
     for n in ast.parse(src).body:
-        if isinstance(n, ast.AsyncFunctionDef) and n.name in (
-                "check_screen_change_via_live_api", "judge_subconscious_intent_via_live_api"):
+        if (isinstance(n, (ast.AsyncFunctionDef, ast.FunctionDef)) and n.name in (
+                "check_screen_change_via_live_api", "judge_should_speak", "_sentry_answer_ok")) or (
+                isinstance(n, ast.Assign) and getattr(n.targets[0], "id", "") == "_SENTRY_SYSTEM"):
             exec(compile(ast.Module(body=[n], type_ignores=[]), "x", "exec"), ns)
     return ns, calls
 
@@ -146,18 +156,31 @@ def test_screen_sentry_reads_decision():
 
 def test_intent_sentry_parses_decision():
     ns, _ = _sentries("[SPEAK: target=老爸, focus=點歌, song=晴天]")
-    got = _run(ns["judge_subconscious_intent_via_live_api"]("記憶", "老爸：唱晴天"))
+    got = _run(ns["judge_should_speak"]("記憶", "老爸：唱晴天"))
     assert got == {"should_speak": True, "target": "老爸", "focus": "點歌", "song": "晴天",
                    "raw": "[SPEAK: target=老爸, focus=點歌, song=晴天]"}
     ns, _ = _sentries("[SILENCE]")
-    assert _run(ns["judge_subconscious_intent_via_live_api"]("記憶", "咳嗽"))["should_speak"] is False
+    assert _run(ns["judge_should_speak"]("記憶", "咳嗽"))["should_speak"] is False
     ns, _ = _sentries("")                                               # Live 全忙：放行給主腦判斷
-    assert _run(ns["judge_subconscious_intent_via_live_api"]("記憶", "x"))["raw"] == "FALLBACK_ALLOW"
+    assert _run(ns["judge_should_speak"]("記憶", "x"))["raw"] == "FALLBACK_ALLOW"
 
 
 def test_live_one_shot_not_copied_back_into_main():
     src = open(os.path.join(ROOT, "vts_7L_test.py"), encoding="utf-8").read()
     for n in ast.parse(src).body:
         if isinstance(n, ast.AsyncFunctionDef) and n.name in (
-                "check_screen_change_via_live_api", "judge_subconscious_intent_via_live_api"):
+                "check_screen_change_via_live_api", "judge_should_speak"):
             assert "live.connect" not in ast.get_source_segment(src, n)
+
+
+def test_board_sentry_asks_live_first_and_groq_only_when_live_fails():
+    """看板哨兵先問 Live（不限呼叫次數）；Live 都沒回或答非所問才問 Groq（有每日上限）。"""
+    ns, calls = _sentries("[SPEAK: target=小明, focus=晚安]", groq="[SILENCE]")
+    got = _run(ns["judge_should_speak"]("記憶", "小明：7L 晚安"))
+    assert got["should_speak"] and got["target"] == "小明" and len(calls) == 1 and calls[0][0] != "groq"
+    assert calls[0][1]["accept"]("[SILENCE]") and not calls[0][1]["accept"]("嗯…我覺得可以回")   # 答非所問 Live 自己換下一把
+    ns, calls = _sentries("", groq="[SPEAK: target=小明, focus=晚安]")
+    assert _run(ns["judge_should_speak"]("記憶", "小明：7L 晚安"))["target"] == "小明"
+    assert [c[0] for c in calls][-1] == "groq" and len(calls) == 2          # Live 沒回：問 Groq
+    ns, calls = _sentries("", groq="嗯…我覺得可以回")
+    assert _run(ns["judge_should_speak"]("記憶", "x"))["raw"] == "FALLBACK_ALLOW"   # 都答非所問：放行給主腦

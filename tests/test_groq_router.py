@@ -184,3 +184,13 @@ def test_groq_chat_gives_up_at_the_total_deadline(monkeypatch):
     r = asyncio.run(gr.groq_chat([{"role": "user", "content": "hi"}], timeout=0.2, total_timeout=0.7))
     assert r is None
     assert _t.monotonic() - t0 < 1.5 and len(calls) <= 5
+
+
+def test_clients_share_one_connection_pool():
+    """每把金鑰各建一個 AsyncGroq 要各載一次 SSL 設定：26 把 6 秒，而且是在第一次呼叫時同步建、整個程式凍住
+    （2026-10-26 量的）。共用一個 HTTP 連線池。"""
+    import core.groq_router as gr
+    cs = gr.make_async_clients(["k1", "", "k2", "k3"])
+    assert len(cs) == 3
+    assert cs[0]._client is cs[1]._client is cs[2]._client
+    assert [c.api_key for c in cs] == ["k1", "k2", "k3"]

@@ -116,6 +116,14 @@ _model_cooldown: Dict[str, float] = {}
 _call_step = 0
 
 
+def make_async_clients(keys) -> List[Any]:
+    """每把金鑰一個 AsyncGroq，共用同一個 HTTP 連線池。各自建的話每個都要載一次 SSL 設定，
+    26 把要 6 秒，而且是在第一次 groq_chat 裡同步建、整個程式凍住（2026-10-26 量的）；共用只要 0.5 秒。"""
+    from groq import AsyncGroq, DefaultAsyncHttpxClient
+    shared = DefaultAsyncHttpxClient()
+    return [AsyncGroq(api_key=k, http_client=shared) for k in keys if k]
+
+
 def _get_clients() -> List[Any]:
     """延遲建立 AsyncGroq 用戶端（每把金鑰一個）"""
     global _clients, _client_error, GROQ_KEYS
@@ -127,8 +135,7 @@ def _get_clients() -> List[Any]:
     if not GROQ_KEYS:
         return _clients
     try:
-        from groq import AsyncGroq
-        _clients = [AsyncGroq(api_key=k) for k in GROQ_KEYS if k]
+        _clients = make_async_clients(GROQ_KEYS)
     except Exception as e:  # pragma: no cover - 套件缺失時保持靜默降級
         _client_error = str(e)
         _clients = []

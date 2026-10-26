@@ -180,7 +180,7 @@ class DryRun:
             "pe": pe, "execute_tool_dispatch": execute_tool_dispatch, "_mixed_piano_run": mixed_piano_run,
             "_song_ack_missing_original": anoop, "nv_interpret_task": nv_interpret_task, "rest_chat": self.brain,
             "build_brain_system_prompt": build_system, "get_unified_memory_context": lambda **k: "",
-            "judge_subconscious_intent_via_live_api": sentry, "get_recent_100_memory_context": lambda: "",
+            "judge_should_speak": sentry, "get_recent_100_memory_context": lambda: "",
             "_streamer_mind_prompt": streamer_prompt, "append_to_unified_memory": memory,
             "fetch_from_long_term_memory": fetch_hist, "save_to_long_term_memory": anoop,
             "save_viewer_profile": anoop, "record_bot_message": lambda *a: None, "update_subtitle": lambda *a: None,

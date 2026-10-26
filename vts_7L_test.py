@@ -16,7 +16,7 @@
 #    Live 主腦           continuous_live_worker（工具 invoke_subagent）、instinct_live_worker（身體本能）
 #    背景工作            mic_worker、peripheral_vision_worker、system_audio_worker、speech_queue_worker、
 #                        autonomous_wander_worker、busy_expression_worker、vts_health_worker …
-#    看板與哨兵          add_to_streamer_mind_board、judge_subconscious_intent_via_live_api、streamer_mind_loop_worker
+#    看板與哨兵          add_to_streamer_mind_board、judge_should_speak、streamer_mind_loop_worker
 #    子智能體            _handle_invoke_subagent、nv_interpret_task、_gemini_tool_pass、_nv_tool_pass、
 #                        background_tool_executor（CPU 硬指令）、run_stage_commands（舞台動作共用執行）
 #    給主腦的資料        send_brain_slip（要她回話）、add_brain_context（不用回話的背景資料）
@@ -110,6 +110,7 @@ import logging
 from core.tool_schema import (INTERACTIONS_TOOLS, LIVE_API_TOOLS, REST_BRAIN_TOOLS, GENAI_TOOLS,
                               resolve_tool_name)
 from core.rest_brain import rest_chat
+from core.groq_router import groq_chat
 
 
 
@@ -779,9 +780,8 @@ print("===========================\n")
 
 # 初始化 Groq 客戶端池
 try:
-    from groq import AsyncGroq
-    for key in GROQ_KEYS:
-        if key: GROQ_CLIENTS.append(AsyncGroq(api_key=key))
+    from core.groq_router import make_async_clients
+    GROQ_CLIENTS.extend(make_async_clients(GROQ_KEYS))   # 共用連線池：各自建 26 個要 6 秒
 except ImportError:
     pass
 
@@ -3070,6 +3070,33 @@ LAST_BRAIN_TOOL_TS = 0.0
 LAST_BRAIN_TURN_TS = 0.0
 # Live 服務端上次有任何回包的時間戳（2026-10-11：有回包＝session 活著，只是不緊不慢）
 LAST_LIVE_RX_TS = 0.0
+# 主腦最後一次真的產出（轉寫的字、工具呼叫）的時間。LAST_LIVE_RX_TS 是任何回包都算：
+# 金鑰額度用完時連線還在、伺服器照樣送續接資訊之類的封包，只看它會以為她活著（2026-10-26 實機整輪不出聲）
+LAST_BRAIN_OUTPUT_TS = 0.0
+# 紙條送出 20 秒主腦一點產出都沒有＝記一次；連 LIVE_MUTE_STRIKES 次就當這把金鑰／模型啞了，冷卻、換下一把重連
+LIVE_MUTE_STRIKES = 2
+_LIVE_MUTE = {"strikes": 0, "rotate": ""}
+
+
+def _brain_output_seen() -> None:
+    global LAST_BRAIN_OUTPUT_TS
+    LAST_BRAIN_OUTPUT_TS = time.time()
+    _LIVE_MUTE["strikes"] = 0
+
+
+def _note_live_mute(slip=None) -> bool:
+    """一張紙條沒得到任何產出：記一次；連滿 LIVE_MUTE_STRIKES 次就關掉連線，讓 continuous_live_worker 冷卻這把換下一把，
+    這張紙條排到重送佇列最前面給新連線（Live 一直接不上的話 REST 大腦也會從那裡接）。回 True＝換了。"""
+    _LIVE_MUTE["strikes"] += 1
+    session = globals().get("GLOBAL_LIVE_SESSION")
+    if _LIVE_MUTE["strikes"] < LIVE_MUTE_STRIKES or session is None or _LIVE_MUTE["rotate"]:
+        return False
+    _LIVE_MUTE["rotate"] = f"連續 {_LIVE_MUTE['strikes']} 張紙條都沒回應"
+    log_print(f"🔇 [Live 主腦不回話] {_LIVE_MUTE['rotate']}（連線還在但不生成，多半是額度用完），換一把金鑰重連")
+    if slip:
+        _LIVE_SLIP_RETRY.appendleft(slip)
+    spawn(session.close())
+    return True
 
 GLOBAL_LIVE_SESSION = None
 INSTINCT_LIVE_SESSION = None
@@ -3220,15 +3247,15 @@ async def instinct_live_worker():
             await asyncio.sleep(3)
 
 def _slip_needs_rescue(now: float, sent_ts: float, tool_ts: float, turn_ts: float,
-                       rx_ts: float, timeout: float = 20.0) -> bool:
-    """純函數：紙條送出 timeout 秒後，工具＋說話＋服務端回包三無 → 真安靜，值得撿回一次。
-    任一有動靜都不撿（腦慢不等於腦死；服務端在回包就讓子彈飛）。"""
+                       output_ts: float, timeout: float = 20.0) -> bool:
+    """純函數：紙條送出 timeout 秒後，工具、說完一段、任何產出（轉寫的字）都沒有 → 真安靜，值得撿回一次。
+    任一有動靜都不撿（腦慢不等於腦死）。以前第三項看「服務端有回包」，額度用完時照樣有回包，永遠不撿。"""
     if now - sent_ts < timeout:
         return False
-    return tool_ts < sent_ts and turn_ts < sent_ts and rx_ts < sent_ts
+    return tool_ts < sent_ts and turn_ts < sent_ts and output_ts < sent_ts
 
 
-async def _slip_watchdog(prompt: str, sent_ts: float, timeout: float = 20.0):
+async def _slip_watchdog(prompt: str, sent_ts: float, timeout: float = 20.0, slip=None):
     """紙條看門狗（2026-10-10 起源：動作紙條只管送不管腦理不理）。
     2026-10-11 擴大＋精準化：
     - 所有紙條都盯（聊天紙條裸奔會靜默丟失——「收到請回答」連啞兩次）；
@@ -3260,9 +3287,12 @@ async def _slip_watchdog(prompt: str, sent_ts: float, timeout: float = 20.0):
         if not _slip_needs_rescue(_t.time(), sent_ts,
                                   globals().get("LAST_BRAIN_TOOL_TS", 0.0),
                                   globals().get("LAST_BRAIN_TURN_TS", 0.0),
-                                  globals().get("LAST_LIVE_RX_TS", 0.0), timeout):
-            return  # 腦有動靜（調工具/說話了/服務端有回包），收工
+                                  globals().get("LAST_BRAIN_OUTPUT_TS", 0.0), timeout):
+            return  # 腦有動靜（調工具/說話了/有產出），收工
         log_print(f"⚠️ [紙條無回應] 主腦 {timeout:.0f} 秒沒理會紙條（{(prompt or '')[:40]}…），撿回一次。")
+        slip = slip or prompt
+        if _note_live_mute(slip):
+            return  # 換連線了，紙條已排給新連線
         import hashlib as _hl
         try:
             _key = "slip:" + _hl.sha1((prompt or "").encode("utf-8")).hexdigest()[:16]
@@ -3271,7 +3301,7 @@ async def _slip_watchdog(prompt: str, sent_ts: float, timeout: float = 20.0):
         if not rescue_claim(_key, _t.time()):
             return
         try:
-            send_brain_slip(prompt)
+            send_brain_slip(*_unpack_slip(slip))
             log_print("🛟 [紙條撿回] 已重發一次，等主腦回應。")
         except Exception:
             log_swallowed()
@@ -3590,6 +3620,7 @@ async def continuous_live_worker(vts):
                 _set_live_active(True)
                 log_print(f"✅ 已成功連線至 Live API！模型: {live_m} (通道 G{current_k_idx}) 麥克風持續收音中...")
                 clean_fail_count = 0  # 連上即歸零：上輪是健康連線。
+                _LIVE_MUTE["strikes"] = 0  # 新連線重新算「沒回應」次數
                 if _resume_handle:
                     log_print("🔗 [Live 續接] 已接回上一段對話（換線不失憶）。")
                 if recent_ctx and recent_ctx.strip():
@@ -3698,6 +3729,7 @@ async def continuous_live_worker(vts):
                                     log_print(f"🤖 [Live 主腦決策] 呼叫工具: {fn_name}({fn_args})")
                                     global LAST_BRAIN_TOOL_TS
                                     LAST_BRAIN_TOOL_TS = time.time()
+                                    _brain_output_seen()
                                             
                                     if fn_name == "invoke_subagent":
                                         # 來幾個跑幾個、互不堵塞：每通呼叫獨立背景任務，
@@ -3740,6 +3772,7 @@ async def continuous_live_worker(vts):
                                         _note_brain_origin("dad", user_transcription_buffer)
                                         
                                     if c.output_transcription and c.output_transcription.text:
+                                        _brain_output_seen()
                                         if user_transcription_buffer.strip():
                                             user_spoken = user_transcription_buffer.strip()
                                             user_spoken = to_tw(user_spoken)
@@ -3821,7 +3854,8 @@ async def continuous_live_worker(vts):
                                     #  所有紙條都掛看門狗（聊天紙條裸奔會靜默丟失）；
                                     #  自主閒聊除外（[SILENCE] 是合法答案，盯了只會狼來了）。
                                     if "【自主閒聊】" not in (prompt or ""):
-                                        spawn(_slip_watchdog(prompt, sent_ts))
+                                        spawn(_slip_watchdog(prompt, sent_ts,
+                                                             slip=(prompt, origin, said, name) if origin else prompt))
                             except Exception as inner_e:
                                 log_print(f"⚠️ [黑板同步] 發送失敗 ({inner_e})，訊息已退回佇列等待重連...")
                                 # 沒送成功的紙條排到最前面，並撤銷去重記帳，重連後才不會被當重複丟掉
@@ -3898,7 +3932,14 @@ async def continuous_live_worker(vts):
             _set_live_active(False)
             err_str = str(e).lower()
             _quota_hit = any(w in err_str for w in ["limit", "exceed", "quota", "403", "429"])
-            if _quota_hit:
+            if _LIVE_MUTE["rotate"]:
+                log_print(f"🔇 [Live 主腦不回話] {_LIVE_MUTE['rotate']}：模型 {live_models[current_m_idx]} 通道 G{current_k_idx} 冷卻，換下一把")
+                if GEMINI_KEYS:
+                    report_gemini_key_error(GEMINI_KEYS[current_k_idx % len(GEMINI_KEYS)],
+                                            Exception("429 RESOURCE_EXHAUSTED：主腦連線還在但不生成"), live_models[current_m_idx])
+                _LIVE_MUTE.update(strikes=0, rotate="")
+                _quota_hit, e = True, Exception("主腦不回話")
+            elif _quota_hit:
                 log_print(f"⚠️ [Live 連線超限 429] 模型 {live_models[current_m_idx]} 通道 G{current_k_idx} 耗盡。")
                 if GEMINI_KEYS:
                     report_gemini_key_error(GEMINI_KEYS[current_k_idx % len(GEMINI_KEYS)], e, live_models[current_m_idx])
@@ -5434,26 +5475,47 @@ def add_to_streamer_mind_board(user_display: str, unique_id: str, content: str, 
 # 8 大大腦優先順序梯隊 (頂配高智商旗艦大腦優先)
 
 
-async def judge_subconscious_intent_via_live_api(memory_context: str, unread_batch_desc: str) -> dict:
-    """ 【Live API 潛意識發言決策哨兵】：
-    利用 Live API 無限額度特性，實時審閱 100 句記憶與新彈幕，
-    極速判定當前是否該開口發話（二元決策），絕不浪費主力模型額度！
-    回傳 dict: {"should_speak": bool, "target": str, "focus": str, "song": str, "raw": str}
-    """
-    decision_clean = await live_one_shot(
-        """妳是 7L 的潛意識哨兵：只決定她現在該不該開口。
-- 老爸（麥克風/打字標註老爸）：對妳說話、下指令、問話、點歌→[SPEAK: target=老爸, focus=重點, song=歌名(若點歌)]；自言自語/雜音/咳嗽→[SILENCE]。
-- 觀眾彈幕：指名 7L、聊天、點歌、稱讚→[SPEAK: target=觀眾名, focus=重點, song=歌名(若點歌)]；聊遊戲戰況/嘴主播→[SPEAK: target=老爸(吐槽), focus=重點, user=觀眾名]；任何請求提問→[SPEAK: target=老爸(請示), focus=重點, user=觀眾名]；刷屏/符號/無需插話→[SILENCE]。
+# 2026-10-26 改兩處：以前「任何請求提問→老爸(請示)」，Groq 照字面把「7L 妳晚餐吃什麼」也轉給老爸（8 題對 5）；
+# 改成跟看板 REST 提示詞同一條規則（問她、找她就回觀眾，要老爸決定或承諾的才轉老爸），老爸那行寫明只認【老爸】。
+# 新版 Groq 跑三輪都 8/8、Live 8/8（舊版 Live 7/8）。
+_SENTRY_SYSTEM = """妳是 7L 的潛意識哨兵：只決定她現在該不該開口。
+- 老爸（只有標著【老爸】的訊息才是他；直播觀眾留言都不是）：對妳說話、下指令、問話、點歌→[SPEAK: target=老爸, focus=重點, song=歌名(若點歌)]；自言自語/雜音/咳嗽→[SILENCE]。
+- 觀眾彈幕：指名 7L、跟她聊天、問她問題、找她幫忙、點歌、稱讚→[SPEAK: target=觀眾名, focus=重點, song=歌名(若點歌)]；聊遊戲戰況/嘴主播→[SPEAK: target=老爸(吐槽), focus=重點, user=觀眾名]；要老爸做決定或承諾的請求（加好友、組隊、借帳號、抽獎、要聯絡方式、線下邀約）→[SPEAK: target=老爸(請示), focus=重點, user=觀眾名]；刷屏/符號/無需插話→[SILENCE]。
 - 彈鋼琴時照常判定，不因彈琴沉默。
-只輸出 [SILENCE] 或 [SPEAK: ...]！""",
-        f"""【最新滾動記憶與近期全景上下文】：
+只輸出 [SILENCE] 或 [SPEAK: ...]！"""
+
+
+def _sentry_answer_ok(text: str) -> bool:
+    """哨兵回的是 [SILENCE] 或 [SPEAK: …]（答非所問的不算，換下一個問）。"""
+    t = (text or "").strip()
+    return "[SILENCE]" in t or "[PASS]" in t or "[SPEAK" in t.upper() or t.upper() == "SILENCE"
+
+
+async def judge_should_speak(memory_context: str, unread_batch_desc: str) -> dict:
+    """看板哨兵：只判斷她現在該不該開口（二元決策），不用主力模型額度。
+    先問 Live 單次呼叫（老爸指定：Live 不限呼叫次數，哨兵一場直播要問幾百次）；每題新開一條連線，
+    2026-10-26 實測握手加生成 0.8～1.8 秒、新提示詞 8 題全對（同一條連線連問會讓答案錯位，常駐連線不可行）。
+    Live 兩把都失敗、超時或答非所問才問 Groq（0.2 秒、也是 8 題全對，但有每日次數上限）。
+    回傳 dict: {"should_speak": bool, "target": str, "focus": str, "song": str, "raw": str}"""
+    prompt = f"""【最新滾動記憶與近期全景上下文】：
 {memory_context}
 
 【剛收到的最新未讀輸入】：
 {unread_batch_desc}
 
-請即刻給出潛意識發言決策（[SILENCE] 或 [SPEAK: ...]）：""",
-        KEYS_AUDIENCE_LIVE if KEYS_AUDIENCE_LIVE else GEMINI_KEYS, timeout=3.5)
+請即刻給出潛意識發言決策（[SILENCE] 或 [SPEAK: ...]）："""
+    decision_clean = await live_one_shot(_SENTRY_SYSTEM, prompt, KEYS_AUDIENCE_LIVE if KEYS_AUDIENCE_LIVE else GEMINI_KEYS,
+                                         timeout=3.5, max_keys=2, accept=_sentry_answer_ok)
+    if not decision_clean:
+        try:
+            r = await asyncio.wait_for(groq_chat([{"role": "system", "content": _SENTRY_SYSTEM},
+                                                  {"role": "user", "content": prompt}],
+                                                 temperature=0.2, max_tokens=80, timeout=2.5), timeout=3.0)
+            decision_clean = (r.text or "").strip() if r else ""
+            if not _sentry_answer_ok(decision_clean):
+                decision_clean = ""
+        except Exception as e:
+            log_print(f"⚠️ [看板哨兵] Live 和 Groq 都沒回：{type(e).__name__}")
     if not decision_clean:
         # 若 Live API 暫時連線繁忙，預設放行由主力大腦判定
         return {"should_speak": True, "target": "", "focus": "", "song": "", "raw": "FALLBACK_ALLOW"}
@@ -5796,7 +5858,7 @@ async def streamer_mind_loop_worker(vts, input_queue):
                 sentry_decision = {"should_speak": True, "target": _host_msgs[-1].get("user", "") or "主持",
                                    "focus": "接主持的話：" + (_host_msgs[-1].get("content", "") or "")[:30]}
             else:
-                sentry_decision = await judge_subconscious_intent_via_live_api(memory_100_context, board_context_for_sentry)
+                sentry_decision = await judge_should_speak(memory_100_context, board_context_for_sentry)
             if not sentry_decision["should_speak"]:
                 for m in batch_to_process:
                     m["status"] = "read"
@@ -7383,6 +7445,10 @@ async def main():
 
     # 知識庫向量模型背景預載：第一次 search_knowledge 不用在對話當下載入／下載（2026-10-24 實機卡 18 秒）
     spawn(asyncio.to_thread(_prewarm_embedder))
+
+    # Groq 第一次呼叫要先抓模型清單（約 6 秒），開機就抓好：看板哨兵第一次判斷不用等
+    import core.groq_router as _gr
+    spawn(asyncio.to_thread(_gr.get_available_models))
 
     try:
         rag_service.init_rag(GEMINI_KEYS[0])
