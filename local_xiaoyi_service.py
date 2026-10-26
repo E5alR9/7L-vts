@@ -49,6 +49,12 @@ class _WebLogStream:
         self.current_bert_step = 0
         self._owner = None  # 進入 capture 的線程 id：只解析主人的輸出（2026-10-11）
         self._real_out = None  # 原 stdout：別的線程（如 RVC）原樣放行，不攔截
+        self._last_progress = ("", 0.0)   # 上次推給後台的進度（階段, 時間）：同一階段最多 0.3 秒推一次
+
+    def _attr(self, name):
+        """自己的屬性一律從 __dict__ 拿：讀不到就當沒設，不要經 __getattr__ 丟出只寫名字的錯誤
+        （2026-10-26 子智能體執行時冒出「_owner」，就是這裡）。"""
+        return self.__dict__.get(name)
 
     def _dispatch_progress(self, line: str):
         try:
@@ -94,7 +100,10 @@ class _WebLogStream:
                 stage = "神經網路推理中"
                 pct = 75
 
-            if stage:
+            last_stage, last_t = self._attr("_last_progress") or ("", 0.0)
+            if stage and (stage != last_stage or time.time() - last_t >= 0.3):
+                # 2026-10-26 實測一句話推二十幾則進度、加上日誌每秒 8 則以上，後台處理不完，畫面跟不上
+                self.__dict__["_last_progress"] = (stage, time.time())
                 web_dash.broadcast_event("tts_progress", {
                     "active": True,
                     "stage": stage,
@@ -110,9 +119,10 @@ class _WebLogStream:
             return
         #  2026-10-11：sys.stdout 是全進程共享的，RVC 在別的線程的 tqdm 也會寫進來。
         #  非主人的輸出原樣放行到真終端，不解析、不廣播（否則 RVC 進度污染粉色 TTS 框）。
-        if self._owner is not None and threading.get_ident() != self._owner:
+        owner = self._attr("_owner")
+        if owner is not None and threading.get_ident() != owner:
             try:
-                (self._real_out or sys.__stdout__).write(s)
+                (self._attr("_real_out") or sys.__stdout__).write(s)
             except Exception:
                 pass
             return
@@ -122,11 +132,12 @@ class _WebLogStream:
             line = self._pending[:split_idx].strip()
             self._pending = self._pending[split_idx+1:]
             if line:
-                try:
-                    import services.web_dashboard as web_dash
-                    web_dash.broadcast_event("tts_log", {"text": f"{self.prefix}{line}"})
-                except Exception:
-                    pass
+                if "%|" not in line:   # tqdm 進度條只拿來算進度，不推進後台日誌（一句話會推幾十行）
+                    try:
+                        import services.web_dashboard as web_dash
+                        web_dash.broadcast_event("tts_log", {"text": f"{self.prefix}{line}"})
+                    except Exception:
+                        pass
                 self._dispatch_progress(line)
 
     def __getattr__(self, name):
@@ -134,23 +145,25 @@ class _WebLogStream:
         # 別的執行緒、套件拿 sys.stdout.buffer 之類的不能因為 TTS 正在攔截就炸掉（2026-10-25 狀態列崩潰）
         if name.startswith("_"):
             raise AttributeError(name)
-        return getattr(self._real_out or sys.__stdout__, name)
+        return getattr(self._attr("_real_out") or sys.__stdout__, name)
 
     def flush(self):
-        if self._owner is not None and threading.get_ident() != self._owner:
+        owner = self._attr("_owner")
+        if owner is not None and threading.get_ident() != owner:
             try:
-                (self._real_out or sys.__stdout__).flush()   # 別人的 flush 不能搶走 TTS 還沒寫完的那一行
+                (self._attr("_real_out") or sys.__stdout__).flush()   # 別人的 flush 不能搶走 TTS 還沒寫完的那一行
             except Exception:
                 pass
             return
-        line = self._pending.strip()
+        line = (self._attr("_pending") or "").strip()
         self._pending = ""
         if line:
-            try:
-                import services.web_dashboard as web_dash
-                web_dash.broadcast_event("tts_log", {"text": f"{self.prefix}{line}"})
-            except Exception:
-                pass
+            if "%|" not in line:
+                try:
+                    import services.web_dashboard as web_dash
+                    web_dash.broadcast_event("tts_log", {"text": f"{self.prefix}{line}"})
+                except Exception:
+                    pass
             self._dispatch_progress(line)
 
 @contextmanager

@@ -2001,10 +2001,6 @@ async def play_voice_complete(text, target: str = "dad", raw_actions_text: str =
         CURRENT_SPEAKING_TARGET = target
         # 在前端與對話紀錄中，只顯示乾淨的台詞（不會看到一堆 [SPEED] [PITCH] 的標籤）
         record_bot_message(clean_spoken if clean_spoken else source_text)
-        try:
-            web_dash.broadcast_event("ai_speech", {"text": clean_spoken if clean_spoken else source_text, "target": target})
-        except Exception:
-            pass
 
         target_vts = vts or vc.GLOBAL_VTS
 
@@ -2100,8 +2096,6 @@ async def play_voice_complete(text, target: str = "dad", raw_actions_text: str =
             _used_music_fallback = False
 
             try:
-                # 初始更新字幕
-                await asyncio.to_thread(update_subtitle, text)
                 first_chunk = True
 
                 _prev_part_end = 0.0
@@ -2125,6 +2119,14 @@ async def play_voice_complete(text, target: str = "dad", raw_actions_text: str =
                     # 若第一句剛開始播，掛載神態時間軸
                     if first_chunk:
                         first_chunk = False
+                        # 字幕和後台的「她說的話」等聲音真的出來才更新（2026-10-26 老爸：後台跟聲音不同步）。
+                        # 以前在合成前就更新，文字比聲音早約 2 秒，長回覆整段先跳出來
+                        await asyncio.to_thread(update_subtitle, text)
+                        try:
+                            web_dash.broadcast_event("ai_speech", {"text": clean_spoken if clean_spoken else source_text,
+                                                                   "target": target})
+                        except Exception:
+                            log_swallowed()
                         if len(pre_timeline) >= 2:
                             final_tl = parse_action_timeline(raw_actions_text, est_duration)
                             if target_vts:
