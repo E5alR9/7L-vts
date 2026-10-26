@@ -27,3 +27,12 @@ def _memory_files_in_tmp(tmp_path_factory):
             mp.setattr(mem, name, os.path.join(tmp, os.path.basename(getattr(mem, name))))
         mp.setattr(db, "db", None)
         yield tmp
+
+
+@pytest.fixture(autouse=True)
+def _eventlog_in_memory():
+    """流水帳（core.eventlog）在測試裡記在記憶體，不寫到 data/。"""
+    from core import eventlog
+    eventlog.set_default(eventlog.EventLog(":memory:"))
+    yield
+    eventlog.set_default(None)

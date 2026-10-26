@@ -4,6 +4,8 @@ import ast
 import os
 import time
 
+from core import eventlog
+from core.hard_command import PIANO_CONTROL_TOOLS as _PIANO_CONTROL
 from core.prompts import TextCleanEngine as T
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -48,7 +50,7 @@ def test_main_brain_reads_tool_call_messages():
 
 
 def test_hard_command_dedupe_window():
-    ns = {"_HARD_CMD_RECENT": {}, "_HARD_CMD_DEDUPE_SEC": 20.0}
+    ns = {"eventlog": eventlog, "PIANO_CONTROL_TOOLS": _PIANO_CONTROL, "_HARD_CMD_DEDUPE_SEC": 20.0}
     exec(compile(ast.Module(body=[_fn("_hard_cmd_seen_recently")], type_ignores=[]), "x", "exec"), ns)
     f = ns["_hard_cmd_seen_recently"]
     now = time.time()
@@ -103,7 +105,7 @@ def test_precise_sleep_exists_for_text_sheet_playback():
     assert 0.018 <= time.perf_counter() - t < 0.2
 
 
-def _run_executor(text, target, recent=None):
+def _run_executor(text, target):
     """跑 background_tool_executor（假的派發），回 (結果, 派發過的工具)。"""
     import asyncio
     import collections
@@ -123,7 +125,7 @@ def _run_executor(text, target, recent=None):
           "split_original_request": split_original_request, "is_stage_control": is_stage_control,
           "execute_tool_dispatch": execute_tool_dispatch, "_song_ack": _song_ack, "spawn": __import__("core.utils", fromlist=["spawn"]).spawn,
           "is_live_brain_active": lambda: False, "LIVE_API_SYSTEM_PROMPT_QUEUE": collections.deque(),
-          "_HARD_CMD_RECENT": {} if recent is None else recent, "_HARD_CMD_DEDUPE_SEC": 20.0}
+          "eventlog": eventlog, "_HARD_CMD_DEDUPE_SEC": 20.0}
     for name in ("_hard_cmd_seen_recently", "_dispatch_in_background", "run_stage_commands", "background_tool_executor"):
         exec(compile(ast.Module(body=[_fn(name)], type_ignores=[]), name, "exec"), ns)
 
@@ -146,13 +148,15 @@ def test_viewers_cannot_control_the_piano():
 
 
 def test_pause_resume_pause_is_not_blocked_by_dedupe():
-    recent = {}
+    """去重查流水帳（同一個測試裡共用一本）：換了指令照樣執行，同一個再來才擋。"""
     for text, tool in (("暫停鋼琴", "pe.pause_virtual_piano"), ("繼續彈", "pe.resume_virtual_piano"),
                        ("暫停鋼琴", "pe.pause_virtual_piano")):
-        _, sent = _run_executor(text, "dad", recent)
+        _, sent = _run_executor(text, "dad")
         assert sent == [tool], text
-    _, sent = _run_executor("暫停鋼琴", "dad", recent)   # 同一則被主腦再送一次：照樣擋
+    _, sent = _run_executor("暫停鋼琴", "dad")   # 同一則被主腦再送一次：照樣擋
     assert sent == []
+    assert [e["text"].split("|")[0] for e in eventlog.get().recent("stage_cmd")] == [
+        "pe.pause_virtual_piano", "pe.resume_virtual_piano", "pe.pause_virtual_piano"]
 
 
 def test_piano_ack_does_not_say_sing():

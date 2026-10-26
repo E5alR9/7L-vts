@@ -68,7 +68,7 @@ def _run_worker(states, slips, dupes=()):
         return await aw
 
     ns = _load("_unpack_slip", "rest_slip_worker", use_rest_brain=use_rest, LIVE_API_SYSTEM_PROMPT_QUEUE=q,
-               _LIVE_SLIP_RETRY=deque(), _slip_is_dupe=lambda p, now: p in dupes, time=pytypes.SimpleNamespace(time=lambda: 0.0),
+               _LIVE_SLIP_RETRY=deque(), _slip_is_dupe=lambda p, now: p in dupes, _record_slip=lambda *a, **k: None, time=pytypes.SimpleNamespace(time=lambda: 0.0),
                _note_brain_origin=lambda o, s, n: origins.append((o, s, n)), _rest_answer_slip=answer,
                asyncio=pytypes.SimpleNamespace(sleep=no_sleep, wait_for=wait_for, TimeoutError=asyncio.TimeoutError))
     try:

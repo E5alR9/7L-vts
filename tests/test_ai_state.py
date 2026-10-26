@@ -57,11 +57,14 @@ def test_main_logs_and_broadcasts_each_transition():
     """主程式登記的監聽：記一行日誌、廣播給後台（高頻事件不進回放歷史）。"""
     logs, events = [], []
     wd = types.SimpleNamespace(broadcast_event=lambda t, d, keep_history=True: events.append((t, d, keep_history)))
-    ns = {"log_print": logs.append, "web_dash": wd}
+    from core import eventlog
+    ns = {"log_print": logs.append, "web_dash": wd, "eventlog": eventlog, "log_swallowed": lambda: None}
     fn = next(n for n in ast.parse(_vts_src()).body if isinstance(n, ast.FunctionDef) and n.name == "_on_ai_state_change")
     exec(compile(ast.Module(body=[fn], type_ignores=[]), "x", "exec"), ns)
     ns["_on_ai_state_change"]("IDLE", "THINKING", "處理對話")
     assert len(logs) == 1 and "IDLE → THINKING" in logs[0] and "處理對話" in logs[0]
+    ev = eventlog.get().recent("stage")[-1]                       # 也記進流水帳
+    assert ev["text"] == "IDLE→THINKING" and ev["meta"] == {"reason": "處理對話"}
     t, d, keep = events[0]
     assert t == "system_state_update" and keep is False
     assert d["ai_state"] == "thinking" and d["prev"] == "idle"

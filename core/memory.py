@@ -17,6 +17,7 @@ import services.piano_engine as pe
 import core.db as db_module
 from core.prompts import PromptTemplateEngine
 import services.rag_memory_service as rag_service
+from core import eventlog
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
 
@@ -523,6 +524,11 @@ def append_to_unified_memory(speaker: str, target: str, content: str, role: str 
         UNIFIED_DIALOGUE_MEMORY.append(entry)
 
     UNIFIED_LIVE_MEMORY.append(entry)
+    try:
+        eventlog.get().record(eventlog.memory_kind(speaker, role, target, source), clean_c, who=speaker, target=target,
+                              ts=now_t, role=role, source=source)
+    except Exception:
+        log_swallowed()
 
     # 磁碟寫入節流（每隔 2 秒；窗口內的後續寫入會在窗口結束時補存）
     _request_unified_save(now_t)
@@ -644,6 +650,12 @@ def init_unified_memory():
         UNIFIED_LIVE_MEMORY.extend(combined_all)
 
     _save_unified_memory_to_disk()
+    try:
+        n = eventlog.import_memory_entries(eventlog.get(), combined_all)
+        if n:
+            log_print(f"📒 [流水帳] 第一次開：舊對話記憶 {n} 筆匯進 {os.path.basename(eventlog.get().path)}")
+    except Exception:
+        log_swallowed()
     global _MEMORY_LOADED
     _MEMORY_LOADED = True
     cap_str = f"上限 {DIALOGUE_MEMORY_CAPACITY} 句" if DIALOGUE_MEMORY_CAPACITY > 0 else "⚡ 無上限"

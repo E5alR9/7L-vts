@@ -175,6 +175,7 @@ from core.utils import (
 )
 from core.identity import is_owner_account, claims_owner_identity
 import core.stage_state as stage
+from core import eventlog
 from core.speech_queue import SpeechQueue
 from core.hard_command import asks_to_remember_model_position, parse_hard_command, build_slip_text, display_requester, parse_slip_for_song, strip_blob_noise, sanitize_search_query, rescue_claim, split_original_request, PIANO_CONTROL_TOOLS, STAGE_CONTROL_TOOLS, is_stage_control, structured_stage_command, PLAY_TOOLS, stage_request_unasked
 from core.subagent_router import resolve_subagent_chain
@@ -919,6 +920,10 @@ tk_listener.IS_STREAMING = False
 def _on_ai_state_change(old: str, new: str, reason: str) -> None:
     log_print(f"🔀 [AI 狀態] {old} → {new}" + (f"（{reason}）" if reason else ""))
     try:
+        eventlog.get().record("stage", f"{old}→{new}", reason=reason)
+    except Exception:
+        log_swallowed()
+    try:
         # 狀態一天翻上千次，不進 RECENT_EVENTS，免得把後台重連要回放的聊天紀錄擠掉
         web_dash.broadcast_event("system_state_update", {
             "ai_state": new.lower(), "mode": new.lower(), "prev": old.lower(), "reason": reason,
@@ -1282,6 +1287,10 @@ def record_vision_history_entry(text: str, scene: str = ""):
     }
     VISION_HISTORY_STREAM.append(entry)
     try:
+        eventlog.get().record("vision", clean_t, ts=t_now, scene=entry["scene"])
+    except Exception:
+        log_swallowed()
+    try:
         web_dash.broadcast_event("vision_update", entry)
     except Exception:
         pass
@@ -1297,44 +1306,29 @@ LIVE_API_SYSTEM_PROMPT_QUEUE = asyncio.Queue()
 # 不用她回話的背景資料（YouTube 伴看筆記）：send_client_content(turn_complete=False) 悄悄放進主腦的對話，
 # 不會觸發回話，她講到一半也不會被打斷（2026-10-26 兩個 Live 模型實測）。
 LIVE_SILENT_CONTEXT_QUEUE = asyncio.Queue(maxsize=50)
-# 🛟 斷線救援：已送達紙條的案底（(時間, 全文)，只留最近 30 張）。
-# 佇列只重發「發送失敗」的；「送達後 session 立刻死亡、腦沒處理」的靠重連掃這裡撿回。
-RECENT_SLIPS = deque(maxlen=30)
+# 🛟 斷線救援：送達 RESCUE_WINDOW_SEC 秒內的紙條（流水帳 kind=slip、brain=live）。
+# 佇列只重發「發送失敗」的；「送達後 session 立刻死亡、腦沒處理」的靠重連翻這裡撿回。
 RESCUE_WINDOW_SEC = 120.0
-# 📄 紙條去重帳本：全文 sha1 → 送達時間（10 秒內一字不差直接丟）。
-_SLIP_LAST_TS = {}
 _SLIP_DEDUPE_SEC = 10.0
-_SLIP_LEDGER_MAX = 200
+
+
+def _record_slip(prompt: str, origin: str, name: str, brain: str, ts: float = None) -> None:
+    """紙條真的交給主腦了（Live 送出、REST 接手）：記進流水帳。去重、斷線救援都查這筆。"""
+    try:
+        eventlog.get().record("slip", prompt, who=origin or "system", target=brain, ts=ts, brain=brain, name=name)
+    except Exception:
+        log_swallowed()
 
 
 def _slip_is_dupe(prompt: str, now: float) -> bool:
     """紙條去重（2026-10-11）：一次點歌發三張同字紙條，自斷三次，應答活活被砍死。
-    10 秒內全文相同的紙條回 True（調用方跳過）；否則記帳回 False。記帳字典要清請直接 clear。"""
-    import hashlib
+    10 秒內交給過主腦、全文相同的紙條回 True（調用方跳過）。
+    以前另記一本「全文 sha1 → 時間」的帳，送失敗還要撤銷；現在查流水帳，送失敗的本來就沒記。"""
     try:
-        key = hashlib.sha1((prompt or "").encode("utf-8")).hexdigest()
+        return eventlog.get().seen("slip", prompt or "", _SLIP_DEDUPE_SEC, now)
     except Exception:
+        log_swallowed()
         return False
-    if now - _SLIP_LAST_TS.get(key, 0.0) < _SLIP_DEDUPE_SEC:
-        return True
-    _SLIP_LAST_TS[key] = now
-    if len(_SLIP_LAST_TS) > _SLIP_LEDGER_MAX:
-        try:
-            drop = len(_SLIP_LAST_TS) - _SLIP_LEDGER_MAX
-            for k in [k for k, _ in sorted(_SLIP_LAST_TS.items(), key=lambda kv: kv[1])[:drop]]:
-                _SLIP_LAST_TS.pop(k, None)
-        except Exception:
-            pass
-    return False
-
-
-def _slip_forget(prompt: str) -> None:
-    """撤銷一筆去重記帳：紙條沒送成功要重送時用，否則 10 秒內重送會被當成重複丟掉。"""
-    import hashlib
-    try:
-        _SLIP_LAST_TS.pop(hashlib.sha1((prompt or "").encode("utf-8")).hexdigest(), None)
-    except Exception:
-        pass
 
 
 # 送失敗待重送的紙條：下個 session 優先送（asyncio.Queue 不能插隊到最前面）
@@ -3063,7 +3057,6 @@ async def live_search_tool_task(query):
             log_print(f"⚠️ [搜網] 無法傳送 fallback: {inner_e}")
 
 
-LIVE_CONTEXT_MEMORY = []
 # 主腦上次調用工具的時間戳（紙條看門狗用：送出 20 秒還沒動靜＝她沒理會）
 LAST_BRAIN_TOOL_TS = 0.0
 # 主腦上次說完一段話（turn_complete）的時間戳（2026-10-11：看門狗只看工具有盲區，說話了也報警）
@@ -3558,6 +3551,7 @@ async def rest_slip_worker(vts, input_queue):
         try:
             if _slip_is_dupe(prompt, time.time()):
                 continue
+            _record_slip(prompt, origin, name, "rest")
             log_print(f"📥 [REST 大腦] Live 主腦不在，接紙條: {prompt[:80]}")
             _note_brain_origin(origin, said, name)
             await _rest_answer_slip(vts, input_queue, prompt, origin)
@@ -3727,6 +3721,10 @@ async def continuous_live_worker(vts):
                                     fn_args = getattr(_fc, 'args', {}) or {}
                                     fn_call_id = getattr(_fc, 'id', None)
                                     log_print(f"🤖 [Live 主腦決策] 呼叫工具: {fn_name}({fn_args})")
+                                    try:
+                                        eventlog.get().record("tool_call", fn_name, who="live_brain", args=dict(fn_args))
+                                    except Exception:
+                                        log_swallowed()
                                     global LAST_BRAIN_TOOL_TS
                                     LAST_BRAIN_TOOL_TS = time.time()
                                     _brain_output_seen()
@@ -3844,13 +3842,7 @@ async def continuous_live_worker(vts):
                                     await session.send_realtime_input(text=prompt)
                                     sent_ts = time.time()
                                     _note_brain_origin(origin, said, name)
-                                    LIVE_CONTEXT_MEMORY.append((sent_ts, prompt))
-                                    if len(LIVE_CONTEXT_MEMORY) > 10:
-                                        LIVE_CONTEXT_MEMORY.pop(0)
-                                    try:
-                                        RECENT_SLIPS.append((sent_ts, prompt))
-                                    except Exception:
-                                        log_swallowed()
+                                    _record_slip(prompt, origin, name, "live", sent_ts)
                                     #  所有紙條都掛看門狗（聊天紙條裸奔會靜默丟失）；
                                     #  自主閒聊除外（[SILENCE] 是合法答案，盯了只會狼來了）。
                                     if "【自主閒聊】" not in (prompt or ""):
@@ -3858,8 +3850,7 @@ async def continuous_live_worker(vts):
                                                              slip=(prompt, origin, said, name) if origin else prompt))
                             except Exception as inner_e:
                                 log_print(f"⚠️ [黑板同步] 發送失敗 ({inner_e})，訊息已退回佇列等待重連...")
-                                # 沒送成功的紙條排到最前面，並撤銷去重記帳，重連後才不會被當重複丟掉
-                                _slip_forget(prompt)
+                                # 沒送成功的紙條排到最前面（沒送成功就沒記進流水帳，重連後不會被當重複丟掉）
                                 _LIVE_SLIP_RETRY.appendleft((prompt, origin, said, name) if origin else prompt)
                                 raise inner_e
                     except asyncio.CancelledError: pass
@@ -6372,9 +6363,8 @@ async def _rescue_missed_song_requests():
         import time as _t
         now = _t.time()
         rescued = 0
-        for ts, prompt in list(RECENT_SLIPS):
-            if now - ts > RESCUE_WINDOW_SEC:
-                continue
+        for ev in eventlog.get().recent("slip", since=now - RESCUE_WINDOW_SEC, limit=30, brain="live"):
+            prompt = ev["text"]
             #  自創曲標記優先：紙條裡「自創曲《X》」直接還原，不走 CPU 閘門（也不走 YouTube）。
             _o_song, _o_src, _o_hit = "", "", False
             try:
@@ -6441,25 +6431,28 @@ async def _rescue_missed_song_requests():
         log_print(f"⚠️ [斷線救援異常]: {e}")
 
 
-_HARD_CMD_RECENT = {}          # (工具, 參數) → 上次執行時間
 _HARD_CMD_DEDUPE_SEC = 20.0
 
 
 def _hard_cmd_seen_recently(fn_name: str, fn_args, now: float) -> bool:
     """同一個硬指令 20 秒內只執行一次（2026-10-24 實機：一則「彈小星星」被執行 4 次）。
     老爸訊息先被 CPU 攔截執行一次，主腦接著呼叫 invoke_subagent 又是同一句；
-    舊碼主腦的工具呼叫全被漏接所以沒事，修好之後就重複了。沒看過就記帳並回 False。"""
+    舊碼主腦的工具呼叫全被漏接所以沒事，修好之後就重複了。沒看過就記進流水帳（kind=stage_cmd）並回 False。
+    鋼琴的停止／暫停／繼續只跟「上一個鋼琴控制」比：「暫停→繼續→暫停」20 秒內換了指令照樣執行。"""
     import json as _json
     try:
         key = f"{fn_name}|{_json.dumps(fn_args or {}, ensure_ascii=False, sort_keys=True)}"
     except Exception:
         key = f"{fn_name}|{fn_args}"
-    for k in [k for k, t in _HARD_CMD_RECENT.items() if now - t >= _HARD_CMD_DEDUPE_SEC]:
-        _HARD_CMD_RECENT.pop(k, None)
-    if key in _HARD_CMD_RECENT:
-        return True
-    _HARD_CMD_RECENT[key] = now
-    return False
+    log = eventlog.get()
+    if fn_name in PIANO_CONTROL_TOOLS:
+        last = log.last("stage_cmd", since=now - _HARD_CMD_DEDUPE_SEC, prefixes=[f"{t}|" for t in PIANO_CONTROL_TOOLS])
+        dup = last is not None and last["text"] == key
+    else:
+        dup = log.seen("stage_cmd", key, _HARD_CMD_DEDUPE_SEC, now)
+    if not dup:
+        log.record("stage_cmd", key, ts=now, tool=fn_name)
+    return dup
 
 
 async def background_tool_executor(user_text: str, target: str = "dad", requester_name: str = "", from_brain: bool = False):
@@ -6546,10 +6539,6 @@ async def run_stage_commands(cmds: list, target: str = "dad", requester_name: st
     if _hard_cmd_seen_recently(fn_name, fn_args, time.time()):
         log_print(f"⏭️ [CPU 硬體直連] {fn_name}({fn_args}) 剛剛已在處理，不重複執行")
         return True, fn_name, fn_args
-    if fn_name in PIANO_CONTROL_TOOLS:
-        # 去重只擋同一則訊息被執行兩次；「暫停→繼續→暫停」20 秒內換了指令，就把另外兩個的紀錄清掉
-        for _other in PIANO_CONTROL_TOOLS - {fn_name}:
-            _HARD_CMD_RECENT.pop(f"{_other}|{{}}", None)
     log_print(f"⚡ [CPU 硬體直連] 成功攔截指令: {fn_name}({fn_args})")
     # 自創曲歸隊（2026-10-11）：剝前綴＋找檔，後面執行/紙條/應答全用乾淨參數
     _o_need_file = False
@@ -6935,6 +6924,13 @@ async def chat_processor_worker(vts, input_queue):
                 continue
             user_input, user_audio_b64, req_time = item.text, item.audio_b64, item.timestamp
             source, platform_uid = item.source, item.platform_uid   # 認老爸只信監聽器給的平台帳號
+            try:
+                # 原樣記下（不含錄音），tools/replay.py 拿它重播一場
+                eventlog.get().record("input", user_input, who=item.viewer or item.user, target=source, ts=req_time,
+                                      source=source, platform_uid=platform_uid, viewer=item.viewer,
+                                      content=item.content, user=item.user, has_audio=bool(user_audio_b64))
+            except Exception:
+                log_swallowed()
 
             #  收到新輸入時，若包含立即關機指令，0.001 秒內立即安全退出！
             if check_immediate_shutdown(user_input):

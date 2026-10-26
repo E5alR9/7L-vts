@@ -29,6 +29,7 @@ from zoneinfo import ZoneInfo
 from google.genai import types
 
 import core.hard_command as hc
+from core import eventlog
 import core.input_sources as ins
 import core.stage_state as stage
 from core.speech_queue import SpeechQueue
@@ -42,7 +43,7 @@ _TREE = ast.parse(MAIN_SRC)
 MAIN_FUNCS = (
     "chat_processor_worker", "process_chat_message", "add_to_streamer_mind_board", "is_piano_song_request",
     "background_tool_executor", "run_stage_commands", "_hard_cmd_seen_recently", "_song_ack", "_dispatch_in_background",
-    "send_brain_slip", "_unpack_slip", "_owner_text_slip", "_slip_is_dupe", "_slip_forget",
+    "send_brain_slip", "_unpack_slip", "_owner_text_slip", "_slip_is_dupe", "_record_slip",
     "_note_brain_origin", "_brain_requester", "_her_words_before", "_brain_replaying_old_request",
     "is_live_brain_active", "live_brain_down_for", "use_rest_brain",
     "rest_slip_worker", "_rest_answer_slip", "_rest_speak", "_run_subagent_task",
@@ -55,7 +56,7 @@ MAIN_FUNCS = (
 MAIN_CONSTS = (
     "AUDIENCE_STAGE_DECLINE", "UNASKED_STAGE_DECLINE", "_SUBAGENT_VISION_TASK_RE", "_SUBAGENT_MIRROR_TASK_RE",
     "_SUBAGENT_TOTAL_TIMEOUT", "_SONG_ACK_LINES", "_PIANO_ACK_LINES", "_HARD_CMD_DEDUPE_SEC",
-    "_SLIP_DEDUPE_SEC", "_SLIP_LEDGER_MAX", "LIVE_FALLBACK_AFTER_SEC", "VISION_REPORT_QUIET_SEC",
+    "_SLIP_DEDUPE_SEC", "LIVE_FALLBACK_AFTER_SEC", "VISION_REPORT_QUIET_SEC",
     "_BARE_PING_NAMES", "_PING_COOLDOWN_SEC", "_PING_QUIET_SEC", "_DESKTOP_TOOL_HINTS",
 )
 
@@ -169,7 +170,7 @@ class DryRun:
             "CURRENT_PROCESSING_USER_INPUT": "", "last_interaction_time": 0.0, "LAST_TTS_END_TIME": 0.0,
             "LIVE_SESSION_ACTIVE": self.live, "_LIVE_DOWN_SINCE": time.time() - (0 if self.live else 3600),
             "_BRAIN_INPUT_ORIGIN": {"who": "dad", "ts": 0.0, "said": "", "human": False, "name": ""},
-            "_HARD_CMD_RECENT": {}, "_SLIP_LAST_TS": {}, "_LIVE_SLIP_RETRY": collections.deque(),
+            "eventlog": eventlog, "_LIVE_SLIP_RETRY": collections.deque(),
             "_VISION_STATE": {"report_ts": 0.0, "mirror_ts": 0.0}, "_PING_LAST_TS": {}, "_SONG_ACK_IDX": 0,
             "_DESKTOP_DOWN_UNTIL": float("inf"),   # 桌機代答關掉
             "STREAMER_MIND_BOARD": [], "STREAMER_MIND_MODELS": ["m"], "REST_BRAIN_MODELS": ["m"],
