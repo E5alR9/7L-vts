@@ -7,7 +7,7 @@ from typing import Tuple
 # Project imports
 from core.lang import has_kana
 
-DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
+from core.paths import DATA_DIR   # 執行時資料夾 data/：記憶、聲紋、音訊快取都在這（唯一出處）
 
 from core.identity import get_owner_name as _get_owner_name
 

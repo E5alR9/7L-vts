@@ -26,7 +26,7 @@ MODEL_FILENAME = "wespeaker_zh_cnceleb_resnet34.onnx"
 MODEL_PATH = os.path.join(MODEL_DIR, MODEL_FILENAME)
 MODEL_DOWNLOAD_URL = "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/wespeaker_zh_cnceleb_resnet34.onnx"
 
-DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
+from core.paths import DATA_DIR   # 執行時資料夾 data/：記憶、聲紋、音訊快取都在這（唯一出處）
 VOICEPRINT_FILE = os.path.join(DATA_DIR, "dad_voiceprint.npy")
 VOICEPRINT_7L_FILE = os.path.join(DATA_DIR, "7l_voiceprint.npy")
 

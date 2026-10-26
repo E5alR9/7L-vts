@@ -37,7 +37,7 @@ except ImportError:
 
 from mic_live_plugin.voiceprint_verifier import voiceprint_verifier
 
-DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+from core.paths import DATA_DIR   # 執行時資料夾 data/：記憶、聲紋、音訊快取都在這（唯一出處）
 VOICEPRINT_FILE = os.path.join(DATA_DIR, "dad_voiceprint.npy")
 CLEAN_SAMPLES_DIR = os.path.join(DATA_DIR, "clean_voice_samples")
 SAMPLE_RATE = 16000  # 16kHz 單聲道為 WeSpeaker 標準規格

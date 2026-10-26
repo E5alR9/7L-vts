@@ -12,7 +12,7 @@
    3. 舊的 qiwai 路徑（維持原作者機器相容）
 
 用法：
-    from core.paths import GPT_SOVITS_DIR, REF_VOICE_ZH
+    from core.paths import GPT_SOVITS_DIR, REF_VOICE_ZH, DATA_DIR
 """
 
 import os
@@ -38,6 +38,8 @@ def _resolve(env_name: str, *candidates: str) -> str:
 
 
 HOME: str = os.path.expanduser("~")
+ROOT_DIR: str = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # 專案根目錄（主程式所在）
+DATA_DIR: str = os.path.join(ROOT_DIR, "data")   # 執行時資料：記憶、觀眾檔、聲紋、音訊快取（以前六個模組各自算一次）
 
 # GPT-SoVITS 主安裝目錄（沒裝就是不存在，TTS 路由器會自動降級）
 GPT_SOVITS_DIR: str = _resolve(

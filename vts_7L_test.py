@@ -174,6 +174,7 @@ from core.utils import (
     speech_allowed, operator_input_enabled, to_tw, spawn,
 )
 from core.identity import is_owner_account, claims_owner_identity
+from core.paths import DATA_DIR   # 執行時資料夾 data/：記憶、聲紋、音訊快取都在這（唯一出處）
 import core.stage_state as stage
 from core import usage, promptkit
 from core import eventlog
@@ -812,7 +813,6 @@ except ImportError:
 #  高智商任務專屬倒序模型梯隊 (由 3.8 旗艦深度思考領銜，專攻找歌判斷、找譜語意、代碼、哲學與高難度推理)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.join(BASE_DIR, "data")
 os.makedirs(DATA_DIR, exist_ok=True)
 AUDIO_CACHE_DIR = os.path.join(DATA_DIR, "recent_audio")
 os.makedirs(AUDIO_CACHE_DIR, exist_ok=True)

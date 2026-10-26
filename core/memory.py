@@ -17,7 +17,7 @@ import core.db as db_module
 import services.rag_memory_service as rag_service
 from core import eventlog
 
-DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
+from core.paths import DATA_DIR   # 執行時資料夾 data/：記憶、聲紋、音訊快取都在這（唯一出處）
 
 # ── 模式隔離（MODE=companion|vtuber）：記憶檔案按模式後綴，兩邊永不互通 ──
 MODE = get_mode()
