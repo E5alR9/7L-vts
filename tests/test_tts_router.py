@@ -445,16 +445,30 @@ def test_clause_segmentation_keeps_words():
 
 def test_long_replies_are_split_at_punctuation_for_streaming():
     """長回覆以前整段一次合成，60 字以上要等 6～17 秒才出聲（2026-10-25 實測）：切段後第一段先念。"""
-    from services.tts_router import split_for_streaming as f
+    from services.tts_router import split_for_streaming as f, speech_timeline as tl
     t = "報告老爸。台北今天陰時多雲，氣溫25到27度，體感舒適。不過有短暫陣雨機會，出門記得帶把雨傘喔～"
     parts = f(t)
     assert "".join(parts) == t and len(parts) >= 2
-    assert len(parts[0]) <= 16 and all(len(p) <= 30 for p in parts[1:])
     assert all(p[-1] in "，。！？～" for p in parts[:-1])          # 只在標點切
-    assert f("好的老爸。") == ["好的老爸。"] and f("收到。晴天來囉～這首我也超喜歡的，彈給老爸聽。") == [
-        "收到。晴天來囉～這首我也超喜歡的，彈給老爸聽。"]           # 30 字內整段
-    assert f("哇。老爸你也太狠了吧。邊寫還能邊玩Roblox跟看VTuber？都不會錯亂喔？")[0] == "哇。老爸你也太狠了吧。"   # 太短的開頭帶上下一句
-    assert f("") == []
+    first, gaps = tl(parts)
+    assert first < tl([t])[0] - 1.5 and gaps < 0.3               # 早很多開口、中間不停
+    assert f("好的老爸。") == ["好的老爸。"] and f("") == []
+
+
+def test_split_choice_avoids_mid_sentence_gaps():
+    """2026-10-26：以前 30 字內一律整段（老爸怕碎音停頓）、長的第一段湊滿 4 字就切。
+    「收到。」這種太短的第一段念完、後面那段還沒合成好，實機量到停 1.6～1.7 秒。
+    現在照時間模型挑：只有算得出不停頓才切，短句也一樣。"""
+    from services.tts_router import split_for_streaming as f, speech_timeline as tl
+    for t in ("收到。晴天來囉～這首我也超喜歡的，彈給老爸聽。", "老爸早安。今天天氣很好，要不要出去走走？",
+              "收到老爸的訊息心情當然是超級好呀～想好今天要玩什麼了嗎？", "收到。老爸你看，我這就彈給你聽喔～"):
+        parts = f(t)
+        first, gaps = tl(parts)
+        assert "".join(parts) == t and gaps < 0.05, (t, parts)
+        assert first <= tl([t])[0]                                  # 不會比整段一次更晚開口
+        assert parts[0] not in ("收到。", "哇。")                    # 太短的第一段會停頓
+    assert len(f("老爸早安。今天天氣很好，要不要出去走走？")) == 2      # 短句算得出不停頓：切
+    assert f("收到。老爸你看，我這就彈給你聽喔～") == ["收到。老爸你看，我這就彈給你聽喔～"]   # 切了會停：整段
 
 
 def test_voice_playback_streams_split_chunks():

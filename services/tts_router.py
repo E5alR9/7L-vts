@@ -191,36 +191,67 @@ def transliterate_kana_to_zh(text: str) -> str:
     return "".join(out)
 
 
-def split_for_streaming(text: str, max_len: int = 30, first_min: int = 4) -> list:
-    """長回覆切成幾段，第一段合成好就先念、邊念邊合成後面（2026-10-25）。
-    以前整段一次合成，60 字以上要等 6～17 秒才出聲；合成約每字 0.1 秒、講話約每字 0.2 秒，
-    第一段念的時候後面早就合成好，段落之間只剩本來就有的句間、逗號停頓。
-    只在標點切：第一段湊滿 first_min 字就切（「哇。」「收到。」會帶上下一個子句），讓她盡快開口；
-    之後相鄰子句併到不超過 max_len。短句原樣一段。"""
-    t = (text or "").strip()
-    if len(t) <= max_len:
-        return [t] if t else []
-    clauses = re.findall(r"[^，,、；;。！？!?～~…]+[，,、；;。！？!?～~…]*", t)
-    if not clauses:
-        return [t]
-    first, i = "", 0
-    while i < len(clauses) and len(first) < first_min:
-        first += clauses[i]
-        i += 1
-    chunks = [first]
-    cur = ""
-    for c in clauses[i:]:
+# 切段的時間模型（2026-10-26 量的：81 句實機合成、92 句快取語音）：
+# 合成一段 ≈ 0.80 秒 + 每字 0.071 秒（九成誤差 0.48 秒內），一段合成完才合成下一段；
+# 念出來每字約 0.226 秒（快的時候 0.20）。前一段念完時下一段還沒合成好，中間就停頓。
+_SYNTH_BASE, _SYNTH_PER_CHAR = 0.80, 0.071
+_SPEAK_PER_CHAR = 0.20     # 取念得快的那頭：念得越快，下一段越容易趕不上
+_SYNTH_MARGIN = 0.4        # 合成慢一點也不停頓
+_GAP_WEIGHT = 3.0          # 句中停頓比晚一點開口難聽：停一秒當晚三秒開口算
+
+
+def speech_timeline(chunks) -> tuple:
+    """照時間模型算這樣切：(第一聲幾秒, 段間停頓加起來幾秒)。"""
+    ready, end, first, gaps = 0.0, None, None, 0.0
+    for i, c in enumerate(chunks):
+        n = len(c)
+        ready += _SYNTH_BASE + _SYNTH_PER_CHAR * n + (_SYNTH_MARGIN if i else 0.0)
+        if end is not None:
+            gaps += max(0.0, ready - end)
+        start = ready if end is None else max(ready, end)
+        first = start if first is None else first
+        end = start + _SPEAK_PER_CHAR * n
+    return first or 0.0, gaps
+
+
+def _merge_clauses(clauses: list, max_len: int) -> list:
+    """相鄰子句併到不超過 max_len；最後剩不到 4 字就併進前一段。"""
+    chunks, cur = [], ""
+    for c in clauses:
         if cur and len(cur) + len(c) > max_len:
             chunks.append(cur)
             cur = c
         else:
             cur += c
     if cur:
-        if len(cur) < 4 and len(chunks) > 1:
+        if len(cur) < 4 and chunks:
             chunks[-1] += cur
         else:
             chunks.append(cur)
-    return [c.strip() for c in chunks if c.strip()]
+    return chunks
+
+
+def split_for_streaming(text: str, max_len: int = 30) -> list:
+    """回覆切成幾段，第一段合成好就先念、邊念邊合成後面（2026-10-25）。只在標點切。
+    怎麼切由時間模型挑（2026-10-26）：每種「第一段到哪個標點」都算一次第一聲和段間停頓，挑最快出聲又不停頓的；
+    整段一次合成也是選項（60 字內）。以前 30 字內一律整段（老爸怕碎音停頓）、長的第一段湊滿 4 字就切——
+    「收到。」這種太短的第一段念完，後面那段還沒合成好，實機量到停 1.6～1.7 秒；
+    短句硬切也一樣會停，所以只有算得出不會停的時候才切。"""
+    t = (text or "").strip()
+    if not t:
+        return []
+    clauses = re.findall(r"[^，,、；;。！？!?～~…]+[，,、；;。！？!?～~…]*", t)
+    if len(clauses) <= 1:
+        return [t]
+    candidates = [[t]] if len(t) <= max_len * 2 else []
+    for i in range(1, len(clauses)):
+        candidates.append(["".join(clauses[:i])] + _merge_clauses(clauses[i:], max_len))
+
+    def cost(chunks):
+        first, gaps = speech_timeline(chunks)
+        return first + _GAP_WEIGHT * gaps
+    best = min(candidates, key=cost)
+    return [c.strip() for c in best if c.strip()]
 
 
 def detect_language(text: str) -> str:
