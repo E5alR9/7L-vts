@@ -1,6 +1,6 @@
 # REDESIGN — 7L 換個想法的地方
 
-> 2026-10-26 看完整體後寫的構想書。**H、A、E 已做完；L、B 量過不成立**（見第 7 節），其餘照第 3 節順序進行。前兩輪（見 [ARCHITECTURE.md](ARCHITECTURE.md) 第 6 節）是在原架構裡修；這份列的是「不修了，換個做法」划算的地方。每一項都寫：現在怎麼做 → 問題的根 → 新做法 → 怎麼驗證 → 失敗怎麼退 → 規模。最後有建議順序。照老規矩：一項一個（或幾個）commit，實機測，不行就 revert。
+> 2026-10-26 看完整體後寫的構想書。**H、A、E、C 已做完；L、B 量過不成立**（見第 7 節），其餘照第 3 節順序進行。前兩輪（見 [ARCHITECTURE.md](ARCHITECTURE.md) 第 6 節）是在原架構裡修；這份列的是「不修了，換個做法」划算的地方。每一項都寫：現在怎麼做 → 問題的根 → 新做法 → 怎麼驗證 → 失敗怎麼退 → 規模。最後有建議順序。照老規矩：一項一個（或幾個）commit，實機測，不行就 revert。
 
 ## 0. 體檢數字
 
@@ -87,7 +87,7 @@ flowchart LR
 
 **跟 A 的關係**：文字模態下「標籤被念出來」的問題自然沒了，但工具化仍是正解；兩個一起做效果最好，B 不成也不影響 A。
 
-### C. 舞台狀態收成一個物件，輪詢改成等事件
+### C. 舞台狀態收成一個物件，輪詢改成等事件（2026-10-26 做完，見第 7 節）
 
 **現在**：`current_ai_state`（IDLE／THINKING／TALKING／PIANO／SINGING／SLEEP）一條，旁邊還有 `IS_SINGING_ACTIVE`、`pe.is_piano_active`、`pe.is_piano_performing()`、`stage.IS_MP3_PLAYING`、`pygame.mixer.music.get_busy()`、`CURRENT_SPEAKING_TARGET`、`IS_SLEEPING`、`CURRENT_PLAYING_VOICE_TASK`。每個 worker 自己拼「現在能不能動」：speech_queue_worker 的 `is_vocal_upcoming`、streamer_mind 的 `is_speaking`（4 個條件）、臉迴圈的 `is_playing`（5 個條件）、死掉的 mic_worker 還有一條 5 個條件的。84 個 sleep 輪詢，一半在等某個旗標變。
 
@@ -366,3 +366,19 @@ class Speaker:
 - 測試包裝 `sim_run.py` 在主程式啟動前把所有截圖入口換成「不截圖」，開機後確認過畫面快取是空的。
 - 含畫面描述的測試日誌、一張舊的探測截圖已刪；7L 的記憶檔裡沒有存進畫面內容。
 - `data/last_vision_frame.jpg` 是 7L 那次看畫面存的（7L 自己的資料夾，平常會被覆蓋），要不要刪由老爸決定。
+
+### 2026-10-26：C 完成
+
+沒有另開 `core/stage.py`，而是擴充已經在的 `core/stage_state.py`（主程式本來就 `import ... as stage`）。
+
+| commit | 做了什麼 | 實機 |
+|---|---|---|
+| C-1 | AI 狀態從主程式搬到 `core.stage_state`，只能經 `set_ai_state` 改，主程式登記監聽記日誌、廣播。**鋼琴模組以前自己留一份**（開琴設 PIANO、收琴設 IDLE），跟主程式那份不相通，現在讀寫同一份。「她在講話嗎」收成 `voice_out()`／`talking()`／`singing()`。講完話回到台上的狀態收成 `_state_after_talking()`：以前播完一律設 IDLE，彈琴時狀態一直是 IDLE，臉部追蹤「彈琴時看琴鍵」那段從沒觸發 | 彈琴中狀態是 PIANO、講完回 PIANO、後台顯示 piano；收琴後 IDLE；彈小星星 2.1 秒開彈 |
+| C-2 | `notify_change`／`wait_change`：換狀態、開始／停止播放、開始／停止唱歌、看板來新留言時通知。看板巡邏、等語音播完、唱歌中等伴奏空檔、翻唱等開場白改成「舞台一變就叫醒」 | 單則留言 2.1 秒哨兵判定完；三則同時來只問一次哨兵；閒置 CPU 0% |
+
+**跟原計畫不同的地方**：
+- 鋼琴開彈前「等她說完開場白」那段，狀態統一後真的會等，結果罐頭應答加主腦應答講完，彈小星星要 17 秒才開彈。改回原本實際的行為（只等說話佇列被取走）。
+- 主檔的 `asyncio.sleep` 從 84 → 58，沒到原本寫的 30 以下：剩下的大多是本來就該定時跑的（餘光 5～20 秒、閒聊 30 秒、漫遊 12 秒、臉部追蹤每幀、狀態列），不是在等狀態，換成事件沒好處。
+- `IS_SLEEPING` 還是主程式的旗標（跟 AI 狀態的 SLEEP 並存，`set_sleep_mode` 兩個一起設），收進來的好處不大，先不動。
+
+**做 C 時看到、還沒處理的**：開機時從雲端恢復成休眠狀態，第一句話把她叫醒時，罐頭應答和主腦回覆都慢了約 5 秒才出聲（醒著時是 0.2 秒、1.9 秒）。
