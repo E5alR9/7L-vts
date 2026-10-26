@@ -69,6 +69,10 @@ def classify(item: InputItem) -> str:
     return "unknown"
 
 
+def has_wake_word(text: str) -> bool:
+    return any(w in (text or "") for w in WAKE_WORDS)
+
+
 def sleep_wake_decision(item: InputItem, operator_enabled: bool) -> str:
     """休眠中收到輸入：wake_audience（觀眾留言或主持插話：睜眼，說不說話交給哨兵）、
     wake_operator（老爸喊喚醒詞，或打字——打字是刻意對她說話，不用喚醒詞；麥克風才要，免得雜音吵醒）、
@@ -77,6 +81,12 @@ def sleep_wake_decision(item: InputItem, operator_enabled: bool) -> str:
         return "wake_audience"
     has_audio = bool(item.audio_b64)
     if is_operator(item.source, has_audio) and operator_enabled and (
-            any(w in item.text for w in WAKE_WORDS) or is_operator_typed(item.source, has_audio)):
+            has_wake_word(item.text) or is_operator_typed(item.source, has_audio)):
         return "wake_operator"
     return "ignore"
+
+
+def live_speech_wakes(heard: str, operator_enabled: bool) -> bool:
+    """Live 主腦連著時，老爸的麥克風直接送 Live，不經過輸入佇列（sleep_wake_decision 看不到）；
+    Live 把老爸的話轉成文字後用這個判斷：跟舊 STT 一樣要喊喚醒詞才醒，免得雜音吵醒。heard 要先轉繁體。"""
+    return bool(operator_enabled) and has_wake_word(heard)

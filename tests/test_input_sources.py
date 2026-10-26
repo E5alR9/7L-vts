@@ -1,11 +1,12 @@
 # -*- coding: utf-8 -*-
 """輸入來源分類只在 core.input_sources 定義一次（2026-10-25）：以前主程式抄了 6 份，
 有的漏 web_console、有的用 "text"，老爸在後台打字會被當成別人。"""
+import ast
 import os
 
 from conftest import ROOT
-from core.input_sources import (InputItem, classify, is_operator, parse_input_item, sleep_wake_decision,
-                                VIEWER_SOURCES)
+from core.input_sources import (InputItem, classify, is_operator, live_speech_wakes, parse_input_item,
+                                sleep_wake_decision, VIEWER_SOURCES)
 
 
 def test_parse_input_item():
@@ -40,6 +41,31 @@ def test_sleep_wake_decision():
     assert d("mic", "7L 起床", audio="A") == "wake_operator"
     assert d("console", enabled=False) == "ignore"                          # 操作者通道關掉就不理
     assert d("tiktok_ambient") == "ignore"
+
+
+def test_live_speech_wakes():
+    """Live 連著時麥克風不經過輸入佇列：Live 轉出來的文字也要能用喚醒詞叫醒她（2026-10-26）。"""
+    assert live_speech_wakes("7L 起床了", True) and live_speech_wakes("醒醒啦", True)
+    assert not live_speech_wakes("嗯嗯 他應該說了很多吧", True)                  # 一般講話不吵醒
+    assert not live_speech_wakes("7L 起床", False)                               # 操作者通道關掉就不理
+    assert not live_speech_wakes("", True)
+
+
+def test_live_brain_transcribes_and_wakes_on_mic():
+    """Live 要開「老爸講的話轉文字」，收到轉文字就聽喚醒詞；她這輪沒開口也要把老爸的話記下來。"""
+    main = open(os.path.join(ROOT, "vts_7L_test.py"), encoding="utf-8").read()
+    tree = ast.parse(main)
+    fn = lambda name: ast.get_source_segment(main, next(
+        n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == name))
+    worker = fn("continuous_live_worker")
+    assert "input_audio_transcription=types.AudioTranscriptionConfig()" in worker
+    recv = fn("receive_from_live")
+    assert "IS_SLEEPING and live_speech_wakes(to_tw(user_transcription_buffer), operator_input_enabled())" in recv
+    assert "await set_sleep_mode(False)" in recv
+    done = recv.index("if c.turn_complete or getattr(c, 'generation_complete', False):")
+    assert recv.index("_flush_user_speech()", done) < recv.index("if chunk_buffer.strip():", done)
+    flush = fn("_flush_user_speech")
+    assert 'source="mic"' in flush and "touch_interaction()" in flush
 
 
 def test_main_has_no_handwritten_source_lists():

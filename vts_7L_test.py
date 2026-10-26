@@ -211,7 +211,7 @@ from core.llm_engine import (
     API_LOCKS, save_api_locks, is_locked,
     UNRESTRICTED_SAFETY_SETTINGS
 )
-from core.input_sources import (parse_input_item, classify, sleep_wake_decision, is_operator,
+from core.input_sources import (parse_input_item, classify, sleep_wake_decision, live_speech_wakes, is_operator,
                                 VIEWER_SOURCES, WAKE_WORDS)
 from core.memory import init_unified_memory, flush_unified_memory, fetch_from_long_term_memory, save_to_long_term_memory, append_to_unified_memory, clear_all_memories, get_recent_100_memory_context, get_viewer_profile, save_viewer_profile, record_bot_message, get_cloud_knowledge, update_cloud_prompt_field, STREAMER_MIND_BOARD, DEFAULT_CHANNEL_ID, save_cloud_knowledge, get_unified_memory_context, RECENT_BOT_MESSAGES, USER_PROFILE_FILE
 
@@ -3427,6 +3427,9 @@ async def continuous_live_worker(vts):
                 response_modalities=[types.Modality.AUDIO], 
                 system_instruction=types.Content(parts=[types.Part.from_text(text=system_instruction)]),
                 tools=LIVE_API_TOOLS,
+                # 老爸講的話也要轉成文字：沒開的話 input_transcription 永遠是空的，麥克風的話不進記憶、後台看不到，
+                # 睡著時喊「起床」也聽不出來（2026-10-26 實機：流水帳 264 筆「聽到」沒有一筆來自麥克風）
+                input_audio_transcription=types.AudioTranscriptionConfig(),
                 output_audio_transcription=types.AudioTranscriptionConfig(),
                 session_resumption=types.SessionResumptionConfig(handle=_resume_handle),
                 context_window_compression=types.ContextWindowCompressionConfig(sliding_window=types.SlidingWindow()),
@@ -3532,6 +3535,21 @@ async def continuous_live_worker(vts):
                     turn_buffer = ""
                     user_transcription_buffer = ""
 
+                    def _flush_user_speech():
+                        """老爸這輪講的話記進記憶、推到後台（她開口前記，或這輪她沒開口也要記）。"""
+                        nonlocal user_transcription_buffer
+                        user_spoken = to_tw(user_transcription_buffer.strip())
+                        user_transcription_buffer = ""
+                        if not user_spoken:
+                            return
+                        touch_interaction()   # 老爸在講話：不要算成沒人互動，講著講著她就自己去睡
+                        from core.memory import append_to_unified_memory
+                        append_to_unified_memory(speaker=owner, target=char_name, content=user_spoken, role="user", source="mic")
+                        log_print(f"🎤 [老爸說話 (Live STT)] {user_spoken}")
+                        try:
+                            import services.web_dashboard as _wd
+                            _wd.broadcast_event("chat_sent", {"text": user_spoken, "from": owner})
+                        except Exception: log_swallowed()
 
                     goaway_pending = False
                     try:
@@ -3607,21 +3625,14 @@ async def continuous_live_worker(vts):
                                     if c.input_transcription and c.input_transcription.text:
                                         user_transcription_buffer += c.input_transcription.text
                                         _note_brain_origin("dad", user_transcription_buffer)
-                                        
+                                        # 麥克風直送 Live、不經過輸入佇列，那邊的喚醒判斷看不到：在這裡聽喚醒詞
+                                        if IS_SLEEPING and live_speech_wakes(to_tw(user_transcription_buffer), operator_input_enabled()):
+                                            log_print(f"☀️ [語音喚醒] Live 聽到老爸喊：「{to_tw(user_transcription_buffer.strip())}」，7L 睜眼！")
+                                            await set_sleep_mode(False)
+
                                     if c.output_transcription and c.output_transcription.text:
                                         _brain_output_seen()
-                                        if user_transcription_buffer.strip():
-                                            user_spoken = user_transcription_buffer.strip()
-                                            user_spoken = to_tw(user_spoken)
-                                            
-                                            from core.memory import append_to_unified_memory
-                                            append_to_unified_memory(speaker=owner, target=char_name, content=user_spoken, role="user", source="mic")
-                                            log_print(f"🎤 [老爸說話 (Live STT)] {user_spoken}")
-                                            try:
-                                                import services.web_dashboard as _wd
-                                                _wd.broadcast_event("chat_sent", {"text": user_spoken, "from": owner})
-                                            except Exception: log_swallowed()
-                                            user_transcription_buffer = ""
+                                        _flush_user_speech()
 
                                         text_chunk = c.output_transcription.text
                                     
@@ -3634,6 +3645,7 @@ async def continuous_live_worker(vts):
                                             turn_buffer += text_chunk
                                             
                                     if c.turn_complete or getattr(c, 'generation_complete', False):
+                                        _flush_user_speech()   # 她這輪沒開口（例如只回 [SILENCE]），老爸的話也要記
                                         if chunk_buffer.strip():
                                             sentence = chunk_buffer.strip()
                                             clean_sentence = await execute_actions(vts, sentence, input_queue, caller_target="dad", caller_user=owner)
