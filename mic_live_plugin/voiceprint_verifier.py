@@ -8,6 +8,7 @@
 """
 
 import os
+import threading
 import io
 import wave
 import base64
@@ -23,6 +24,7 @@ except ImportError:
 
 from core.paths import DATA_DIR, ROOT_DIR   # 專案根目錄、執行時資料夾 data/（唯一出處）
 MODEL_DIR = os.path.join(ROOT_DIR, "models")
+_EXTRACTOR_LOCK = threading.Lock()
 MODEL_FILENAME = "wespeaker_zh_cnceleb_resnet34.onnx"
 MODEL_PATH = os.path.join(MODEL_DIR, MODEL_FILENAME)
 MODEL_DOWNLOAD_URL = "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/wespeaker_zh_cnceleb_resnet34.onnx"
@@ -171,11 +173,12 @@ class VoiceprintVerifier:
                 pass
 
         try:
-            stream = self.extractor.create_stream()
-            stream.accept_waveform(sample_rate=float(sr), waveform=samples)
-            stream.input_finished()
-            if self.extractor.is_ready(stream):
-                emb = np.array(self.extractor.compute(stream), dtype=np.float32)
+            with _EXTRACTOR_LOCK:   # 一次只讓一個執行緒用模型（2026-10-27 追直播崩潰時加）
+                stream = self.extractor.create_stream()
+                stream.accept_waveform(sample_rate=float(sr), waveform=samples)
+                stream.input_finished()
+                emb = np.array(self.extractor.compute(stream), dtype=np.float32) if self.extractor.is_ready(stream) else None
+            if emb is not None:
                 # L2 正規化
                 norm = np.linalg.norm(emb)
                 if norm > 1e-6:

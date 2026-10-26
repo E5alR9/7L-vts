@@ -18,6 +18,7 @@ from typing import Callable, Optional, Tuple
 
 import numpy as np
 
+ENABLED = True           # 她講話時聽老爸插話；False＝她講話時麥克風一律送靜音（舊行為）
 WINDOW_SEC = 1.5
 CHECK_EVERY_SEC = 0.5
 MIN_RMS = 400            # int16；底噪、很小的回音不比
@@ -67,7 +68,7 @@ class BargeInDetector:
     async def check(self, now: Optional[float] = None) -> bool:
         """該比的時候比一次；連續 NEEDED 次像老爸回 True（呼叫端停掉她、把聲音送給 Live）。"""
         now = time.time() if now is None else now
-        if len(self.buf) < self.max_bytes or now - self.last_check < CHECK_EVERY_SEC:
+        if not ENABLED or len(self.buf) < self.max_bytes or now - self.last_check < CHECK_EVERY_SEC:
             return False
         self.last_check = now
         x = np.frombuffer(self.buf, dtype=np.int16).astype(np.float32)

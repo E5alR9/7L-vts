@@ -27,6 +27,17 @@
 
 
 import sys
+import faulthandler as _faulthandler
+import os as _os
+import time as _time
+# 崩潰紀錄（2026-10-27）：10/26 直播 python.exe 崩了 14 次（0xc0000005，在 python312.dll 裡），
+# 是 C 套件在背景執行緒弄壞記憶體，程式來不及記任何東西。faulthandler 會在崩潰當下把每個執行緒
+# 正在跑的那一行寫進 data/crash.log，下次崩就知道是誰。檔案開著不關（崩潰時才寫得進去）。
+_os.makedirs(_os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "data"), exist_ok=True)
+_CRASH_LOG = open(_os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "data", "crash.log"), "a", encoding="utf-8")
+_CRASH_LOG.write(f"\n===== 開機 {_time.strftime('%Y-%m-%d %H:%M:%S')}（pid {_os.getpid()}）=====\n")
+_CRASH_LOG.flush()
+_faulthandler.enable(file=_CRASH_LOG, all_threads=True)
 if __name__ == "__main__":
     if "__main__" in sys.modules:
         sys.modules["vts_7L_test"] = sys.modules["__main__"]

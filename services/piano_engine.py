@@ -696,10 +696,9 @@ def get_piano_realtime_prompt() -> str:
 def send_piano_ipc_command(cmd_dict: dict) -> bool:
     """透過 UDP (Port 39282) 向已開啟的 88 鍵鋼琴視窗發送控制指令 (換歌/調音量/調倍速/停止/關閉)"""
     try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.settimeout(0.3)
-        msg = json.dumps(cmd_dict).encode('utf-8')
-        sock.sendto(msg, ("127.0.0.1", 39282))
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.settimeout(0.3)
+            sock.sendto(json.dumps(cmd_dict).encode('utf-8'), ("127.0.0.1", 39282))
         return True
     except Exception:
         return False
