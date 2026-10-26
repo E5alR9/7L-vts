@@ -2856,6 +2856,9 @@ async def live_vision_tool_task():
     try:
         log_print("👁️ [視覺大腦啟動] 正在背景截圖並分析畫面...")
         current_screen_snapshot = get_combined_temporal_screen_snapshot()
+        if not current_screen_snapshot:
+            # 沒有畫面就不問模型：2026-10-26 實測沒圖也照問，模型照提示詞編出「在 main.py 裡改迴圈」，她當真講出來
+            raise Exception("還沒有畫面可以看（截圖失敗或還沒截到）")
         # 提示詞避開「程式碼／寫程式」：舊碼看到這些字會改走最慢的高智商梯隊，
         # 還讓她把畫面講成程式碼（2026-10-25 實機：畫面是鋼琴影片和 Minecraft）
         prompt = "請簡短描述這個畫面：開著哪些視窗、老爸主要在看什麼或做什麼。若是在寫 code，說出檔名與重點。用繁體中文。"

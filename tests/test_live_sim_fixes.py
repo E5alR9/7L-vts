@@ -264,6 +264,22 @@ def test_vision_reply_uses_whole_text_not_first_char():
     assert len(slips) == 1 and slips[0].endswith("這是鋼琴影片和 Minecraft")
 
 
+def test_vision_without_a_screen_does_not_ask_the_model():
+    """沒有畫面（截圖失敗、測試擋截圖）就不問模型：2026-10-26 實測沒圖也照問，模型編出「在 main.py 裡改迴圈」。"""
+    import asyncio
+    slips, asked = [], []
+
+    async def describe_images(prompt, images):
+        asked.append(images)
+        return "畫面中開著 main.py"
+    ns = {"log_print": lambda *a: None, "describe_images": describe_images, "get_combined_temporal_screen_snapshot": lambda: None,
+          "_VISION_STATE": {"report_ts": 0.0}, "time": time, "send_brain_slip": slips.append,
+          "_clean_result_for_brain": lambda t: t, "asyncio": asyncio, "VISION_TOOL_TIMEOUT_SEC": 45.0}
+    exec(compile(ast.Module(body=[_fn("live_vision_tool_task")], type_ignores=[]), "v", "exec"), ns)
+    asyncio.run(ns["live_vision_tool_task"]())
+    assert asked == [] and len(slips) == 1 and "沒看清楚畫面" in slips[0]
+
+
 def test_vision_report_does_not_retrigger_vision():
     ns = {"_VISION_STATE": {"report_ts": 0.0}, "VISION_REPORT_QUIET_SEC": 15.0}
     exec(compile(ast.Module(body=[_fn("_vision_report_recent")], type_ignores=[]), "v", "exec"), ns)
