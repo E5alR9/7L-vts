@@ -30,7 +30,7 @@ from core.hard_command import display_requester
 from core.utils import log_print, to_tw, log_swallowed, spawn
 from core.identity import get_owner_name
 from core.paths import ROOT_DIR
-from core.llm_engine import (GEMINI_KEYS, HIGH_IQ_GEMINI_MODELS, DEAD_GEMINI_MODELS, is_model_locked,
+from core.llm_engine import (GEMINI_KEYS, HIGH_IQ_GEMINI_MODELS, is_model_locked,
                              get_pingpong_alternating_index, get_pingpong_ring_indices)
 
 # —— 主程式交進來的東西（2026-10-25）——
@@ -1728,7 +1728,7 @@ async def resolve_piano_intent_by_ai(
         # 總時限：模型 × 3 把金鑰 × 4 秒，舊碼最壞 84 秒點曲才有反應，而且一行日誌都沒有（2026-10-25 健檢）
         deadline = time.time() + PIANO_INTENT_GEMINI_BUDGET_SEC
         for m in HIGH_IQ_GEMINI_MODELS:
-            if m in DEAD_GEMINI_MODELS or is_model_locked(m):
+            if is_model_locked(m):
                 continue
             ring_indices = get_pingpong_ring_indices(len(active_keys), CURRENT_GEMINI_KEY_STEP)[:3]
             for idx in ring_indices:
@@ -2884,7 +2884,7 @@ async def compose_and_play_original_piano(theme_or_title: str = "", mood_or_styl
         log_print(f"⚠️ [7L 原創作曲] Groq 沒寫成（{type(e).__name__} {str(e)[:60]}），改問 Gemini")
     active_keys = get_piano_gemini_keys()
     compose_deadline = time.time() + COMPOSE_BUDGET_SEC
-    for model_name in [m for m in HIGH_IQ_GEMINI_MODELS if m not in DEAD_GEMINI_MODELS and not is_model_locked(m)][:3]:
+    for model_name in [m for m in HIGH_IQ_GEMINI_MODELS if not is_model_locked(m)][:3]:
         if data or not active_keys or compose_deadline - time.time() < 3.0:
             break
         target_k_idx = get_pingpong_alternating_index(len(active_keys), CURRENT_GEMINI_KEY_STEP)

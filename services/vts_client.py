@@ -22,7 +22,6 @@ wink_side = "left"
 frown_timer = 0.0
 
 GLOBAL_VTS = None
-MY_CONTROLLED_EXPS = ["黑脸.exp3.json", "爱心.exp3.json", "星星眼.exp3.json", "红脸.exp3.json", "吐舌.exp3.json", "哭哭.exp3.json", "晕晕.exp3.json", "比心.exp3.json", "流汗.exp3.json", "生气.exp3.json", "着急.exp3.json", "花花.exp3.json", "问号.exp3.json", "黑化.exp3.json", "话筒.exp3.json", "打游戏.exp3.json", "双马尾.exp3.json", "右抬手.exp3.json", "左抬手.exp3.json"]
 CURRENT_ACTIVE_EXP = None
 CURRENT_ACTIVE_EXPS = set()  # 目前開在臉上的表情檔（小本本）
 EXPRESSION_HOLD_SECONDS = 3.5  #  說完話後表情持續保留的秒數（保持自然情緒餘韻）

@@ -330,20 +330,6 @@ class VoiceprintVerifier:
         except Exception:
             return True, 1.0
 
-    def add_verified_sample(self, audio_input: Union[str, bytes]):
-        """若判定為極高信心度之老爸發音，動態融入特徵池提升長遠辨識率"""
-        try:
-            emb = self.compute_embedding(audio_input)
-            if emb is not None:
-                # 只有與現有特徵一致性高於 0.85 時才納入擴充，防止污染
-                is_dad, score = self.verify_is_dad(audio_input, threshold=0.85)
-                if is_dad and len(self.anchor_embeddings) < 20:
-                    self.anchor_embeddings.append(emb)
-                    np.save(self.voiceprint_file, np.array(self.anchor_embeddings))
-                    self._register_anchor_to_manager()
-        except Exception:
-            pass
-
     def train_or_calibrate_7l_from_tts(
         self,
         ref_paths: Optional[List[str]] = None,

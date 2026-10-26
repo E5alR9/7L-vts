@@ -62,7 +62,6 @@ ON_NOTE_CB = None                # 新筆記交給 Live 主腦: cb(影片標題,
 
 # 🧠 影片劇情時序感知記憶池（保留最新 15 筆劇情記憶紀錄）
 YT_PERCEPTION_LOG = deque(maxlen=15)
-_LAST_MEMORY_TICK_TIME = 0.0
 
 # 內部控制
 _live_session = None
@@ -215,25 +214,6 @@ def add_perception_memory(text: str):
             ON_VISION_RECORD_CB(video_note, scene="觀賞影片")
         except Exception:
             pass
-
-def get_yt_memory_context() -> str:
-    """供 7L 主腦 fetch_ai_response 調用的時序影片記憶字串"""
-    if not IS_YT_COMPANION_ACTIVE and not YT_PERCEPTION_LOG:
-        return ""
-
-    title = CURRENT_YT_TITLE if CURRENT_YT_TITLE else "剛才觀看的影片"
-    lines = [
-        f"【🎬 7L 雙眼與雙耳感知的 YouTube 影片即時記憶】",
-        f"影片標題：《{title}》",
-        "（妳的眼耳感知神經正在/剛才同步觀看這部影片，以下是妳親眼看到和聽到的劇情進展筆記）："
-    ]
-    if YT_PERCEPTION_LOG:
-        for it in list(YT_PERCEPTION_LOG)[-8:]: # 取最新 8 筆
-            lines.append(f"- [{it['time']}] {it['content']}")
-    else:
-        lines.append("- (目前畫面正在加載或剛進入影片中)")
-    lines.append("👉 當老爸問妳影片內容、剛才那個人在幹嘛、或聊到這部片時，請直接以妳親眼看到和親耳聽到的記憶，用 7L 本人的口氣自然回答！")
-    return "\n".join(lines)
 
 async def _yt_companion_session_loop(target_hwnd, initial_rect, initial_title):
     """單次 YouTube 伴看感官連線"""

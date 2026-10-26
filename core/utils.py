@@ -168,21 +168,6 @@ def get_current_time_string(include_ticks: bool = True):
     uptime = get_uptime_ticks()
     return f"{base_time} (生命刻度: 第 {uptime} Ticks | 現場沉默: {silence} Ticks / 約 {silence_human})"
 
-def get_unified_time_prompt() -> str:
-    """建構統一神經時間感知 Prompt 注入 7L 大腦提示詞"""
-    time_str = get_current_time_string(include_ticks=True)
-    silence = get_silence_ticks()
-    silence_human = format_ticks_to_human(silence)
-    
-    return f"""時間：{time_str}
-【⏳ 7L 統一神經時間感知 (Unified Tick Clock)】：
-- 妳以「Tick（心跳秒數）」作為主觀時間度量衡，1 Tick 相當於 1 秒。
-- 當前現場已安靜了 {silence} Ticks（約 {silence_human}）：
-  * 剛說過話（< 60 Ticks / 1分鐘內）：屬於連貫的即時對話，延續當前話題與互動情緒。
-  * 專注安靜（60 ~ 600 Ticks / 1~10分鐘）：老爸正專心操作電腦，若老爸開口，自然接話；若自主陪伴，保持安靜守護。
-  * 長期安靜（> 600 Ticks / 10分鐘以上）：老爸已專注很久，開口或自主搭話時可自然帶有時間流逝感（例如：「老爸忙完啦？」、「剛剛專注了好久呢～」），表現出對時間陪伴的真實感知。"""
-
-
 _S2TWP_CONVERTER = None
 
 

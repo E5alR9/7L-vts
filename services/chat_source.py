@@ -4,7 +4,6 @@
 =====================================
 概念移植自 LiveCore（chat-source.ts / chat-runtime.ts），純 Python、零新依賴：
 
-1. parse_chat_source_url()  — 任意貼上網址 → 標準描述子（provider/mode/channel/video_id）
 2. make_chat_item()         — TikTok／Twitch／YouTube 丟進 input_queue 的統一格式（viewer／content／platform_uid）
 3. DedupTracker             — 訊息 ID 去重（上限 256，LiveCore 同值），防重連/重 poll 重複餵話
 4. backoff_delay()          — 指數退避 5→10→20→40→60s 上限（取代固定 5 秒硬重連）
@@ -14,110 +13,12 @@
 """
 import asyncio
 import collections
-import re
 import time
-from urllib.parse import urlparse, parse_qs
 
 from core.utils import log_print
 
 # ── 常數（對齊 LiveCore） ──────────────────────────────────────────────
-TWITCH_HOSTS = {"twitch.tv", "www.twitch.tv", "m.twitch.tv"}
-YOUTUBE_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be"}
-RESERVED_TWITCH_SEGMENTS = {
-    "directory", "downloads", "jobs", "login", "messages", "p", "search",
-    "settings", "signup", "store", "subscriptions", "turbo", "videos", "wallet",
-}
 DEDUP_MAXSIZE = 256
-
-
-def _host_ok(hostname, supported):
-    hostname = (hostname or "").lower()
-    return any(hostname == h or hostname.endswith("." + h) for h in supported)
-
-
-def parse_chat_source_url(url):
-    """純函式：任意網址 → 描述子 dict。
-
-    成功例：{"provider": "twitch", "mode": "channel", "channel": "xxx", ...}
-            {"provider": "youtube", "mode": "video", "video_id": "xxx", ...}
-            {"provider": "youtube", "mode": "channel", "channel": "@xxx", ...}
-    失敗：{"provider": None, ..., "error": "原因"}（絕不丟例外）
-    """
-    out = {"provider": None, "mode": None, "channel": "",
-           "video_id": "", "normalized_url": "", "display_label": "", "error": ""}
-    try:
-        raw = (url or "").strip()
-        if not raw:
-            out["error"] = "網址為空"
-            return out
-        if "://" not in raw:
-            raw = "https://" + raw
-        u = urlparse(raw)
-        host = (u.hostname or "").lower()
-        segs = [s for s in (u.path or "").split("/") if s]
-        qs = parse_qs(u.query or "")
-
-        if _host_ok(host, TWITCH_HOSTS):
-            if not segs or segs[0].lower() in RESERVED_TWITCH_SEGMENTS:
-                out["error"] = "不是 Twitch 頻道網址"
-                return out
-            login = re.sub(r"[^a-z0-9_]", "", segs[0].lower())
-            if not login:
-                out["error"] = "Twitch 頻道名無效"
-                return out
-            out.update(provider="twitch", mode="channel", channel=login,
-                       normalized_url=f"https://www.twitch.tv/{login}",
-                       display_label=f"Twitch #{login}")
-            return out
-
-        if _host_ok(host, YOUTUBE_HOSTS):
-            if host == "youtu.be" or host.endswith(".youtu.be"):
-                vid = segs[0] if segs else ""
-                if re.fullmatch(r"[A-Za-z0-9_\-]{6,}", vid or ""):
-                    out.update(provider="youtube", mode="video", video_id=vid,
-                               normalized_url=f"https://www.youtube.com/watch?v={vid}",
-                               display_label=f"YouTube 影片 {vid}")
-                    return out
-                out["error"] = "youtu.be 短網址無效"
-                return out
-            v = (qs.get("v") or [""])[0]
-            if v and re.fullmatch(r"[A-Za-z0-9_\-]{6,}", v):
-                out.update(provider="youtube", mode="video", video_id=v,
-                           normalized_url=f"https://www.youtube.com/watch?v={v}",
-                           display_label=f"YouTube 影片 {v}")
-                return out
-            if len(segs) >= 2 and segs[0] == "live" and re.fullmatch(r"[A-Za-z0-9_\-]{6,}", segs[1]):
-                vid = segs[1]
-                out.update(provider="youtube", mode="video", video_id=vid,
-                           normalized_url=f"https://www.youtube.com/watch?v={vid}",
-                           display_label=f"YouTube 影片 {vid}")
-                return out
-            if segs and segs[0].startswith("@"):
-                handle = segs[0].split("?")[0]
-                out.update(provider="youtube", mode="channel", channel=handle,
-                           normalized_url=f"https://www.youtube.com/{handle}/live",
-                           display_label=f"YouTube {handle}")
-                return out
-            if len(segs) >= 2 and segs[0] == "channel" and re.fullmatch(r"UC[A-Za-z0-9_\-]{20,}", segs[1]):
-                ch = f"channel/{segs[1]}"
-                out.update(provider="youtube", mode="channel", channel=ch,
-                           normalized_url=f"https://www.youtube.com/{ch}/live",
-                           display_label=f"YouTube {ch}")
-                return out
-            if len(segs) >= 2 and segs[0] in ("c", "user") and segs[1]:
-                ch = f"{segs[0]}/{segs[1]}"
-                out.update(provider="youtube", mode="channel", channel=ch,
-                           normalized_url=f"https://www.youtube.com/{ch}/live",
-                           display_label=f"YouTube {ch}")
-                return out
-            out["error"] = "不是可識別的 YouTube 影片/頻道網址"
-            return out
-
-        out["error"] = "不支援的網址（只吃 twitch.tv / youtube.com）"
-        return out
-    except Exception as e:
-        out["error"] = f"解析失敗：{e}"
-        return out
 
 
 PLATFORM_LABEL = {"tiktok": "TikTok", "twitch": "Twitch", "youtube": "YouTube"}

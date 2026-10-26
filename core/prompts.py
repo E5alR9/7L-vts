@@ -787,7 +787,6 @@ def neutralize_viewer_text(text, limit: int = 300) -> str:
 
 class PromptTemplateEngine:
     HARD_TECHNICAL_RULES = ""
-    TOOL_RULES_DESCRIPTION = ""
     DEFAULT_FEW_SHOT_EXAMPLES = []
 
     # 動態載入獨立的角色卡片設定 (CCv3 概念解耦)

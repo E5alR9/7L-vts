@@ -266,53 +266,5 @@ foreach ($s in $sessions) {
         clean_t = title.split(" - ")[0].split(" — ")[0].strip()
         return clean_t if len(clean_t) <= 15 else (pname.replace(".exe", ""))
 
-    def build_os_telemetry_prompt(self) -> str:
-        """
-        生成專門注入大腦 System Prompt 的作業系統底層即時情報
-        """
-        fg = self.get_foreground_window()
-        visible_apps = self.get_visible_windows(max_count=8)
-
-        fg_proc = fg.get("process_name", "")
-        fg_title = fg.get("window_title", "")
-        fg_label = fg.get("app_label", "桌面")
-
-        lines = [
-            "【💻 電腦底層行程與當前焦點情報 (Windows 原生 0 延遲硬體遙測)】：",
-        ]
-
-        if fg_title or fg_proc:
-            lines.append(f"- 🎯 最前端活躍焦點視窗 (老爸此刻正在操作)：【{fg_label}】(進程: {fg_proc} | 視窗標題: 「{fg_title}」)")
-        else:
-            lines.append("- 🎯 最前端焦點視窗：老爸目前停留在桌面或待命狀態。")
-
-        # 列出其他可見的應用程式
-        other_apps = []
-        for app in visible_apps:
-            p = app.get("process_name", "")
-            t = app.get("window_title", "")
-            label = app.get("app_label", "")
-            if p != fg_proc or t != fg_title:
-                other_apps.append(f"{label} (「{t[:20]}」)" if t else label)
-
-        if other_apps:
-            lines.append(f"- 🗂️ 背景同時運行/開啟中的應用程式：{'、'.join(other_apps[:6])}")
-
-        # 🎵 Windows 系統底層即時媒體播放情報 (GSMTC)
-        media_list = self.get_windows_media_info(max_cache_age=3.5)
-        if media_list:
-            m_strs = []
-            for m in media_list:
-                desc = f"[{m.get('app', '媒體')}] 『{m.get('title', '')}』"
-                if m.get("artist"):
-                    desc += f" (演出者: {m['artist']})"
-                m_strs.append(desc)
-            lines.append(f"- 🎵 電腦正在播放的音樂/影片 (Windows GSMTC 原生硬體級精準資訊)：{' ｜ '.join(m_strs)}")
-
-        lines.append("- 💡 互動指引：妳【100% 確切掌握】老爸當前正在使用或玩什麼程式，以及電腦背景正在播放的確切歌曲/影片！若老爸問起「妳知道我在開什麼/做什麼/聽什麼歌嗎？」，請直接自信點名說出（如歌曲名、演奏者、Roblox、寫 Code 等），無需依賴截圖，因為這是 Windows 底層核心直報的精準即時數據！")
-
-        return "\n".join(lines)
-
-
 # 全域單例
 os_desktop_sensor = OSDesktopSensor()

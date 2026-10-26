@@ -14,7 +14,7 @@ from transformers import HubertModel
 #  統一路徑解析（不再寫死原作者電腦）
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # 專案根目錄（本檔在 scripts/ 下）
 sys.path.insert(0, BASE_DIR)
-from core.paths import GPT_SOVITS_DIR, REF_VOICE_ZH, legacy_or_home
+from core.paths import GPT_SOVITS_DIR, REF_VOICE_ZH
 
 # 確保輸出編碼正確
 try:

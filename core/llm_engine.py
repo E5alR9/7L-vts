@@ -166,7 +166,7 @@ def parse_cooldown_seconds(error_text: str, headers=None) -> float:
         try: return max(10.0, float(match_sec.group(1)) + 5.0)
         except ValueError: pass
 
-    # 2. 404 或未開通 / 下架模型，鎖定至 PT 午夜 (並永久記錄至 DEAD_GEMINI_MODELS)
+    # 2. 404 或未開通 / 下架模型，鎖定至 PT 午夜 
     if "404" in error_lower or "not_found" in error_lower or "no longer available" in error_lower:
         return get_seconds_until_pt_midnight()
 
@@ -386,7 +386,6 @@ def record_model_failure(model_name: str, err_str: str):
         MODEL_FAIL_COUNT[model_name] = 0
 
 
-DEAD_GEMINI_MODELS = set()
 
 # ── REST 金鑰同斥追蹤（2026-10-11：同一把 key 不被多個工具同時打，分散流量）──
 # 單 event loop 內 dict 操作原子性足夠；Live 長持會話不納入（只管 REST 一次性呼叫）。

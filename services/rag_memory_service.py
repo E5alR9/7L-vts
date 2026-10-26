@@ -249,11 +249,3 @@ async def related_memories_block(query: str, k: int = RELATED_MAX, timeout: floa
     uniq.sort(key=lambda x: x["ts"] or 0)
     return format_related(uniq[:k + VIEWER_LATEST * 2])
 
-
-def clear_rag_memory():
-    """清除所有 RAG 記憶 (本地)"""
-    try:
-        rag_store.reset()
-        print("🗑️ [RAG 記憶庫] 本地向量資料庫已清空")
-    except Exception as e:
-        print(f"⚠️ [RAG 清空失敗]: {e}")

@@ -22,10 +22,6 @@ def get_mode() -> str:
     return m if m in MODES else "vtuber"
 
 
-def is_companion() -> bool:
-    return get_mode() == "companion"
-
-
 def is_vtuber() -> bool:
     return get_mode() != "companion"
 

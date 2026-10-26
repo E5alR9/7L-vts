@@ -55,10 +55,6 @@ SETTINGS = _settings.boot(os.path.join(os.path.dirname(os.path.abspath(__file__)
 
 
 
-try:
-    from EulerApiSdk.models import record_string_unknown  # noqa: F401
-except ImportError:
-    record_string_unknown = None
 from google.genai import types
 from services.twitch_listener import twitch_live_worker
 from services.youtube_live_listener import youtube_live_worker
@@ -92,7 +88,6 @@ from typing import Optional
 import collections
 from collections import deque
 import shutil
-import platform
 import warnings
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -103,7 +98,6 @@ try:
 except ImportError:
     msvcrt = None
 
-GLOBAL_INPUT_QUEUE: Optional[asyncio.Queue] = None
 input_queue: Optional[asyncio.Queue] = None
 
 import logging
@@ -555,7 +549,7 @@ async def execute_tool_dispatch(fn_name: str, fn_args: dict, caller_target: str 
         except (TypeError, ValueError):
             sec = 60
         msg = fn_args.get("message", "提醒時間到")
-        spawn(set_timer(sec, msg, GLOBAL_INPUT_QUEUE or input_queue, caller_user=caller_user))
+        spawn(set_timer(sec, msg, caller_user=caller_user))
     elif fn_name == "control_microphone":
         is_en = fn_args.get("is_enabled", True)
         control_microphone(is_en)
@@ -770,7 +764,7 @@ except ImportError:
 # 導入 Google 官方 GenAI SDK (主力視覺與大腦)
 from google import genai
 
-from mic_live_plugin import mic_live_analyzer, voiceprint_verifier  # noqa: F401
+from mic_live_plugin import voiceprint_verifier  # noqa: F401
 
 # ────────────────────────────────────────────────────────
 #  2. 環境變數與金鑰
@@ -797,7 +791,6 @@ print(f"  👁️ 餘光視覺感知通道: 偏好 {len(KEYS_VISION)} 把＋全�
 print(f"  📻 鋼琴電台與 Proactive: 全量 {len(KEYS_PROACTIVE)} 把")
 print(f"  👑 老爸主腦專屬對話: 享有全量 {len(KEYS_DAD_MAIN)} 把金鑰完整矩陣！")
 
-mic_live_analyzer.set_api_keys(KEYS_MIC_LIVE)
 
 
 
@@ -897,49 +890,6 @@ def save_local_audio_clip(audio_base64: str) -> Optional[str]:
 # ────────────────────────────────────────────────────────
 #  螢幕解析度與硬體規格；AI 狀態變化的掛鉤（狀態本體在 core/stage_state）；睡眠模式；
 #  彈加唱的會合 _mixed_piano_run；紙條記帳與去重（流水帳在 core/eventlog）。
-
-def get_screen_resolution():
-    """動態檢測 Windows 實體螢幕解析度 (支援 DPI 感知與多螢幕)"""
-    try:
-        user32 = ctypes.windll.user32
-        try:
-            ctypes.windll.shcore.SetProcessDpiAwareness(2)  # Per-monitor DPI aware
-        except Exception:
-            try:
-                user32.SetProcessDPIAware()
-            except Exception:
-                log_swallowed()
-        w = user32.GetSystemMetrics(0) # SM_CXSCREEN
-        h = user32.GetSystemMetrics(1) # SM_CYSCREEN
-        if w > 0 and h > 0:
-            return w, h
-    except Exception:
-        log_swallowed()
-    return 1920, 1080
-
-try:
-    cpu_info = platform.processor()
-    ram_info = f"{round(psutil.virtual_memory().total / (1024**3))}GB"
-    gpu_info = "獨立顯示卡"
-    try:
-        ps_out = subprocess.check_output(
-            ['powershell', '-NoProfile', '-Command', '(Get-CimInstance Win32_VideoController).Name'],
-            text=True,
-            stderr=subprocess.DEVNULL
-        ).strip()
-        if ps_out:
-            gpu_info = ps_out.splitlines()[0].strip()
-    except Exception:
-        try:
-            gpu_output = subprocess.check_output("wmic path win32_VideoController get name", shell=True, text=True, stderr=subprocess.DEVNULL)
-            gpu_info = gpu_output.split('\n')[1].strip()
-        except Exception:
-            pass
-    cur_scr_w, cur_scr_h = get_screen_resolution()
-    system_specs = f"螢幕解析度: {cur_scr_w}x{cur_scr_h} / CPU: {cpu_info} / GPU: {gpu_info} / RAM: {ram_info}"
-except Exception:
-    cur_scr_w, cur_scr_h = get_screen_resolution()
-    system_specs = f"螢幕解析度: {cur_scr_w}x{cur_scr_h} / 高階硬體設備"
 
 from core.identity import get_owner_name as _owner_name
 DEFAULT_USER_TITLE = _owner_name()  # 跟 core.prompts、鋼琴同一個來源（env OWNER_NAME，預設老爸）
@@ -1603,12 +1553,10 @@ def control_microphone(is_enabled: bool) -> str:
 
 
 LAST_TTS_END_TIME = 0.0
-MP3_ECHO_TRAILING_CHUNKS = 0
 
 
 
 
-RECENT_SYSTEM_AUDIO_TRANSCRIPTS = []  # [(timestamp, text), ...]
 LATEST_SYSTEM_AUDIO_RMS = 0.0
 LATEST_SYSTEM_AUDIO_TEXT = ""
 LATEST_SYSTEM_AUDIO_TEXT_TIME = 0.0
@@ -1626,7 +1574,6 @@ def is_7l_voice_echo(stt_text: str, is_dad_verified: bool = False) -> bool:
     比對 STT 文字與 7L 剛說的話，精準過濾麥克風收錄之自身喇叭殘響。
      嚴格遵循「過濾只過濾一次就好」原則：每句發話最多只攔截一次回音，絕不重複誤殺。
     """
-    global MP3_ECHO_TRAILING_CHUNKS
     clean_stt = normalize_text_for_echo(stt_text)
     if not clean_stt:
         return False
@@ -1667,7 +1614,6 @@ def is_7l_voice_echo(stt_text: str, is_dad_verified: bool = False) -> bool:
     if clean_stt in combined_recent or any(clean_stt in m for m in recent_pool):
         if stt_len >= 6 or any(clean_stt == m for m in recent_pool):
             if not is_dad_verified or stt_len >= 12:
-                MP3_ECHO_TRAILING_CHUNKS = 0
                 log_print(f"🔇 [7L 喇叭回音過濾] 判定為 7L 自身發話喇叭回音 (精確包含): 「{stt_text}」 ➔ 已過濾")
                 return True
 
@@ -1700,41 +1646,8 @@ def is_7l_voice_echo(stt_text: str, is_dad_verified: bool = False) -> bool:
         longest_ratio = longest_match.size / stt_len
         
         if longest_match.size >= min_longest_size and (coverage >= cov_threshold or longest_ratio >= longest_threshold):
-            MP3_ECHO_TRAILING_CHUNKS = 0
             log_print(f"🔇 [7L 喇叭回音過濾] 判定為 7L 自身發話喇叭回音 (覆蓋率 {coverage:.2f}, 長度比 {longest_ratio:.2f}): 「{stt_text}」 ➔ 已過濾")
             return True
-
-    return False
-
-def is_computer_audio_echo(stt_text: str) -> bool:
-    """ Windows 系統內部音訊 WASAPI Loopback 實時鑑別：
-    精準識別電腦正在播放的影片、他人語音、遊戲音效或背景音樂，不誤觸發老爸指令。
-    """
-    global current_system_audio_context
-    clean_stt = normalize_text_for_echo(stt_text)
-    if not clean_stt:
-        return False
-        
-    if LATEST_SYSTEM_AUDIO_RMS > 0.008 and RECENT_SYSTEM_AUDIO_TRANSCRIPTS:
-        now = time.time()
-        recent_sys_texts = [normalize_text_for_echo(txt) for t_stamp, txt in RECENT_SYSTEM_AUDIO_TRANSCRIPTS if (now - t_stamp) < 8.0 and txt]
-        combined_sys = "".join(recent_sys_texts)
-        
-        if combined_sys:
-            if clean_stt in combined_sys or any(clean_stt in t for t in recent_sys_texts):
-                log_print(f"🎧 [電腦音訊識別] 識別為電腦內部音訊: 「{stt_text}」 ➔ 記入環境音情報，不誤觸發老爸指令！")
-                current_system_audio_context = f"電腦正在播放音訊/影片：『{stt_text}』"
-                return True
-                
-            for sys_m in recent_sys_texts:
-                if not sys_m: continue
-                matcher = difflib.SequenceMatcher(None, clean_stt, sys_m)
-                match_sum = sum(b.size for b in matcher.get_matching_blocks())
-                coverage = match_sum / len(clean_stt)
-                if coverage >= 0.50:
-                    log_print(f"🎧 [電腦音訊識別] 識別為電腦內部音訊（覆蓋率 {coverage:.2f}）: 「{stt_text}」 ➔ 記入環境音情報，不誤觸發老爸指令！")
-                    current_system_audio_context = f"電腦正在播放音訊/影片：『{stt_text}』"
-                    return True
 
     return False
 
@@ -1778,7 +1691,6 @@ SPEECH_PLAYBACK_LOCK = asyncio.Lock()
 
 async def interrupt_current_speech(clear_queue: bool = True, reason: str = "7L 自主插話/中斷"):
     """ 即時中斷 7L 當前正在播出的語音（支援自己插話自己、老爸秒級打斷與即時清空排隊）"""
-    global MP3_ECHO_TRAILING_CHUNKS
     try:
         # 1. 清空舊的排隊語音
         if clear_queue:
@@ -1803,7 +1715,6 @@ async def interrupt_current_speech(clear_queue: bool = True, reason: str = "7L �
             pass
 
         stage.IS_MP3_PLAYING = False
-        MP3_ECHO_TRAILING_CHUNKS = 1
         await asyncio.to_thread(update_subtitle, "")
         log_print(f"⚡ [{reason}] 已秒級中斷前一句語音，無縫切換開口說新句子！")
     except Exception as e:
@@ -1975,7 +1886,7 @@ async def live_api_direct_sentence_emotions(clean_text: str, total_duration: flo
 
 
 async def play_voice_complete(text, target: str = "dad", raw_actions_text: str = "", vts=None):
-    global LAST_TTS_END_TIME, MP3_ECHO_TRAILING_CHUNKS, CURRENT_SPEAKING_TARGET
+    global LAST_TTS_END_TIME, CURRENT_SPEAKING_TARGET
 
     is_singing_now = is_singing_active()
     backup_envelope = stage.CURRENT_MOUTH_ENVELOPE if is_singing_now else None
@@ -2218,7 +2129,6 @@ async def play_voice_complete(text, target: str = "dad", raw_actions_text: str =
 
                     set_ai_state(_state_after_talking(), "語音播完", only_from="TALKING")
 
-                MP3_ECHO_TRAILING_CHUNKS = 1
                 LAST_TTS_END_TIME = time.time()
 
                 if pe.is_piano_active and pe.current_piano_song_title:
@@ -2245,7 +2155,6 @@ async def play_voice_complete(text, target: str = "dad", raw_actions_text: str =
             if 'director_task' in locals() and director_task and not director_task.done():
                 director_task.cancel()
             stage.IS_MP3_PLAYING = False
-            MP3_ECHO_TRAILING_CHUNKS = 1
             LAST_TTS_END_TIME = time.time()
             set_ai_state("IDLE", "語音被取消", only_from="TALKING")
             raise
@@ -2264,7 +2173,6 @@ async def play_voice_complete(text, target: str = "dad", raw_actions_text: str =
             if 'timeline_task' in locals() and timeline_task and not timeline_task.done():
                 timeline_task.cancel()
             stage.IS_MP3_PLAYING = False
-            MP3_ECHO_TRAILING_CHUNKS = 1
             LAST_TTS_END_TIME = time.time()
             set_ai_state("IDLE", "語音合成錯誤", only_from="TALKING")
 
@@ -2539,7 +2447,7 @@ async def check_screen_change_via_live_api(img_bytes: bytes, current_context: st
 # ────────────────────────────────────────────────────────
 #  9. 計時器、她話裡的動作標記
 # ────────────────────────────────────────────────────────
-async def set_timer(seconds: int, message: str, target_queue: Optional[asyncio.Queue] = None, caller_user: str = ""):
+async def set_timer(seconds: int, message: str, caller_user: str = ""):
     """設定定時感測提醒 (已全面升級至 API Live 定時感測中樞)"""
     # ⚠️ 定時人不一定是老爸：caller 原樣透傳，未知就空著，提醒文案走中性
     live_timer_hub.add_timer(seconds, message, source="代碼指令/標籤", caller_user=caller_user or "")
@@ -2577,7 +2485,7 @@ async def execute_actions(vts, text, input_queue, execute_visuals: bool = False,
         t_sec = int(tm.group(1))
         t_msg = tm.group(2).strip() or "計時時間到"
         log_print(f"⏱️ [計時器啟動] 設定 {t_sec} 秒後提醒: 「{t_msg}」")
-        spawn(set_timer(t_sec, t_msg, input_queue, caller_user=caller_user))
+        spawn(set_timer(t_sec, t_msg, caller_user=caller_user))
         text = text.replace(tm.group(0), "")
 
     #  檢測 7L 自我插話標籤 [INTERRUPT_SELF] / [CUT_IN] / [插話] / [中斷]
@@ -3915,10 +3823,6 @@ async def mic_worker(recognizer, input_queue):
                 if is_currently_speaking:
                     log_print(f"🎙️ [老爸語音接收] 聲紋確認 ({vp_score:.2f}) ➔ 7L 說話不中斷，背景接收老爸輸入！")
 
-                #  4. 電腦內部聲音 (WASAPI Loopback 遊戲/影片) 輔助過濾
-                if cleaned_text and is_computer_audio_echo(cleaned_text):
-                    continue
-                
                 saved_audio_path = save_local_audio_clip(audio_b64) if audio_b64 else ""
                 LATEST_REALWORLD_SPEECH_TEXT = cleaned_text
                 LATEST_REALWORLD_SPEECH_TIME = time.time()
@@ -6648,9 +6552,8 @@ async def main():
     recognizer.dynamic_energy_threshold = True
     recognizer.non_speaking_duration = float(os.getenv("MIC_NON_SPEAKING_DURATION", "0.8"))
 
-    global input_queue, GLOBAL_INPUT_QUEUE
+    global input_queue
     input_queue = asyncio.Queue()
-    GLOBAL_INPUT_QUEUE = input_queue
     
     # 啟動全部背景協程
     # （GPT-SoVITS 預熱已提早至 main() 開頭啟動）

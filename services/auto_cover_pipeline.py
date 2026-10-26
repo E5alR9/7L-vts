@@ -237,7 +237,6 @@ def pitch_shift_vocal_to_female(vocal_in: str, vocal_out: str, semitones: float 
         return False
 
 
-_IS_PRODUCING_COVER = False
 IS_SINGING_ACTIVE = False
 stage.register_singing_probe(lambda: IS_SINGING_ACTIVE)   # 「她在唱嗎」全程式看這個旗（core.stage_state.singing）
 
@@ -602,8 +601,7 @@ def request_cover_song(song_name: str, requester: str = "", source_mp3: str = ""
 async def _sing_orchestrator():
     """隊列調度：一次只做一首背景準備（GPU 安全），備好＋舞台空了就開唱，全空就收工。
     播放本身也是背景任務——迴圈全程每 0.5 秒轉一圈，台上唱歌時照樣開新的背景準備。"""
-    global _ORCH_TASK, _PREPARE_TASK, _PLAY_TASK, _IS_PRODUCING_COVER
-    _IS_PRODUCING_COVER = True
+    global _ORCH_TASK, _PREPARE_TASK, _PLAY_TASK
     try:
         while True:
             play_busy = _PLAY_TASK is not None and not _PLAY_TASK.done()
@@ -624,7 +622,6 @@ async def _sing_orchestrator():
             await asyncio.sleep(0.5)
     finally:
         _ORCH_TASK = None
-        _IS_PRODUCING_COVER = False
 
 async def _run_with_heartbeat(awaitable_fn, label: str, song: str, interval: float = 30.0):
     """長任務心跳（2026-10-11：分離/RVC 幾分鐘零輸出，看起來像空轉）。
@@ -753,9 +750,6 @@ async def play_prepared_song(title: str, vocal_path: str, inst_path: str, gen: i
     print(f"🚨 [翻唱引擎] 已將謝幕指示塞給 Live 主腦，由主腦動態接管發言！")
     return f"謝謝大家～剛才唱給大家的是 7L 的翻唱歌曲《{title}》！希望老爸喜歡～"
 
-async def produce_and_sing_cover(song_name: str, requester: str = "") -> str:
-    """點歌入口（相容舊名）：一律進隊列；台上有人就排隊＋背景 RVC 照做，不再丟掉。"""
-    return request_cover_song(song_name, requester)
 _PREPARING = set()  # 正在背景準備的 (origin, 去重鍵)：同首併發只做一次
 _PREPARE_WAIT_SEC = 600.0
 
@@ -1041,17 +1035,3 @@ async def play_cover_audio(vocal_path: str, song_name: str, inst_path: str = Non
                 spawn(_toggle_mic_off())
         stage.stop_playback()
         _core_set_ai_state("IDLE", f"演唱結束《{song_name}》", only_from="SINGING")
-
-if __name__ == "__main__":
-    async def test():
-        res = await produce_and_sing_cover("Never Gonna Give You Up")
-        print("點歌結果:", res)
-        # 等背景隊列排空（準備＋演唱跑完才結束）
-        for _ in range(3600):
-            if (not SONG_REQUEST_QUEUE and not READY_SONGS and not _stage_busy()
-                    and (_ORCH_TASK is None or _ORCH_TASK.done())
-                    and (_PREPARE_TASK is None or _PREPARE_TASK.done())):
-                break
-            await asyncio.sleep(1)
-        print("隊列已排空。")
-    asyncio.run(test())

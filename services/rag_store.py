@@ -141,17 +141,6 @@ def get_where(where: Dict, limit: int = 50) -> List[Dict]:
             for d, m in zip(res.get("documents") or [], res.get("metadatas") or []) if d]
 
 
-def search_multi(queries: List[str], k: int = 4) -> List[Dict]:
-    """多組查詢 -> 合併去重（依分數取前 k 筆）"""
-    seen: Dict[str, dict] = {}
-    for q in queries:
-        for hit in search(q, k=k):
-            key = hit["text"][:120]
-            if key not in seen or hit["score"] > seen[key]["score"]:
-                seen[key] = hit
-    return sorted(seen.values(), key=lambda x: -x["score"])[:k]
-
-
 def rag_prompt_block(query: str, k: int = 3, min_score: float = None, budget_chars: int = 3500) -> str:
     """產生可直接拼進 system/user prompt 的【RAG 記憶檢索】段落；無命中回傳空字串。
 
