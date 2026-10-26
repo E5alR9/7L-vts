@@ -73,7 +73,7 @@ def _fake_core(**kw):
         live_timer_hub=types.SimpleNamespace(get_sensor_summary=lambda: {}),
         IS_AUTO_PIANO_ENABLED=False, IS_AUTO_WANDER_ENABLED=True, IS_PROACTIVE_SPEAK_ENABLED=True,
         IS_PERIPHERAL_VISION_ENABLED=True, IS_FACE_TRACKING_ENABLED=True, IS_MIC_ENABLED=True, IS_SLEEPING=False,
-        current_ai_state="PIANO", current_ai_status_str=" 正常運作中", current_mic_action_str="待命",
+        current_ai_status_str=" 正常運作中", current_mic_action_str="待命",
         is_user_listening=False, CURRENT_SYSTEM_AUDIO_VOL_PERCENT=0, CURRENT_MIC_VOL_PERCENT=0,
         LATEST_SYSTEM_AUDIO_TEXT="", LATEST_SYSTEM_AUDIO_TEXT_TIME=0.0, LATEST_SYSTEM_MUSIC_INFO="",
         LATEST_SYSTEM_MUSIC_TIME=0.0, LATEST_REALWORLD_SPEECH_TEXT="", LATEST_REALWORLD_SPEECH_TIME=0.0,
@@ -83,12 +83,12 @@ def _fake_core(**kw):
         **kw,
     )
 
+    import core.stage_state as stage
+    stage.AI_STATE = "PIANO"
+
     def set_ai_state(new, reason="", only_from=None):
         calls["set_ai_state"].append((new, only_from))
-        if only_from is None or core.current_ai_state == only_from:
-            core.current_ai_state = new
-            return True
-        return False
+        return stage.set_ai_state(new, reason, only_from=only_from)
     core.set_ai_state = set_ai_state
     return core, calls
 

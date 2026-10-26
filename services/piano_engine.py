@@ -10,6 +10,7 @@ import urllib.parse
 import aiohttp
 import numpy as np
 import pygame
+import core.stage_state as stage
 import pygame.sndarray
 import pygame.midi
 import socket
@@ -107,7 +108,6 @@ def get_piano_gemini_keys() -> list:
     return GEMINI_KEYS
     return []
 CURRENT_SPEAKING_TARGET = "none"
-current_ai_state = "IDLE"
 CURRENT_GEMINI_KEY_STEP = 0
 LAST_PLAY_REQUEST_TIME: Dict[str, float] = {}
 PIANO_INTENT_GEMINI_BUDGET_SEC = 12.0   # 點曲意圖判斷：Groq 沒回之後，Gemini 兜底最多再花這麼久
@@ -1259,11 +1259,11 @@ LAST_PIANO_PLAY_START_TIME = 0.0
 
 async def open_virtual_piano() -> str:
     """拿出 88 鍵平台鋼琴視覺化視窗並就位待命，不自動彈奏曲目（供老爸彈奏、點歌或練習）。"""
-    global is_piano_active, current_piano_song_title, current_piano_task, current_piano_process, current_ai_state, PIANO_SESSION_ID, LAST_PIANO_OPEN_TIME
+    global is_piano_active, current_piano_song_title, current_piano_task, current_piano_process, PIANO_SESSION_ID, LAST_PIANO_OPEN_TIME
     
     LAST_PIANO_OPEN_TIME = time.time()
     is_piano_active = True
-    current_ai_state = "PIANO"
+    stage.set_ai_state("PIANO", "拿出鋼琴", only_from="IDLE")
     current_piano_song_title = ""
     
     # 1. 走位到鋼琴位置
@@ -1474,7 +1474,7 @@ async def stop_virtual_piano(force: bool = False) -> str:
     """收起鋼琴（停止演奏、關閉桌面鋼琴介面並讓 7L 回到原本位置）。
     force：老爸親口說的或後台按的。3.5 秒防護是擋主腦剛開琴又自己收；老爸的指令不擋
     （2026-10-25 實機：主腦自己點了曲剛拿出鋼琴，老爸說「收起鋼琴」被忽略，主腦還說收好了）。"""
-    global is_piano_active, current_piano_song_title, current_piano_task, current_piano_process, current_ai_state, PIANO_SESSION_ID, IS_PIANO_AUTO_RADIO_MODE, LAST_PIANO_OPEN_TIME
+    global is_piano_active, current_piano_song_title, current_piano_task, current_piano_process, PIANO_SESSION_ID, IS_PIANO_AUTO_RADIO_MODE, LAST_PIANO_OPEN_TIME
     if not force and time.time() - LAST_PIANO_OPEN_TIME < 3.5:
         log_print("🛡️ [鋼琴安全防護] 88 鍵鋼琴剛在 3.5 秒內被拿出，自動忽略衝突的【收起鋼琴】指令！")
         return ""
@@ -1505,8 +1505,7 @@ async def stop_virtual_piano(force: bool = False) -> str:
     if vc.GLOBAL_VTS:
         await _vts_soon(set_vts_expression(vc.GLOBAL_VTS, "_RESET_"))
         await _vts_soon(move_vts_spatial(target_pos="原位", duration=1.5))
-    if current_ai_state == "PIANO":
-        current_ai_state = "IDLE"
+    stage.set_ai_state("IDLE", "收起鋼琴", only_from="PIANO")
     await _show_subtitle("")
     _remember("鋼琴演奏結束並收起，7L 回到基準原位")
     log_print("✅ [鋼琴舞台] 已成功收起鋼琴，7L 已優雅回到基準原位！")
@@ -1998,7 +1997,7 @@ async def generate_dynamic_piano_chatter(song_title: str, target: str = "dad", r
 
 async def play_piano_worker(song_title: str, sheet_text: str, bpm: int, mode: str, midi_file: str = None, session_id: int = 0, start_at: float = 0.0):
     """背景鋼琴演奏與 Live2D 姿態連動協程 (自動喚出視覺化 88 鍵瀑布流視窗並支援點播隊列與連續隨機電台自動接續)"""
-    global is_piano_active, current_piano_song_title, current_piano_midi_file, current_piano_process, current_ai_state, PIANO_SESSION_ID, IS_PIANO_AUTO_RADIO_MODE, LAST_PIANO_OPEN_TIME
+    global is_piano_active, current_piano_song_title, current_piano_midi_file, current_piano_process, PIANO_SESSION_ID, IS_PIANO_AUTO_RADIO_MODE, LAST_PIANO_OPEN_TIME
     if session_id != PIANO_SESSION_ID:
         return
         
@@ -2006,19 +2005,21 @@ async def play_piano_worker(song_title: str, sheet_text: str, bpm: int, mode: st
         LAST_PIANO_OPEN_TIME = time.time()
         is_piano_active = True
         current_piano_song_title = song_title
-        current_ai_state = "PIANO"
+        stage.set_ai_state("PIANO", f"彈《{song_title}》", only_from="IDLE")
         
         # 1. 走位到鋼琴位置
         await _vts_soon(move_vts_spatial(target_pos="鋼琴旁", duration=1.2))
         
-        # 🌟 溫柔等待：等待 7L 說完開場白 (例如「好喔，7L 這就為老爸演奏...」) 後再開始彈奏，絕不搶先發聲
+        # 等她的應答排進說話佇列、被取走再開彈（最多 10 秒）。不等她整句說完：2026-10-26 試過，
+        # 罐頭應答加主腦應答兩句講完，「彈小星星」要 17 秒才開彈。以前這裡還看本模組自己留的那份
+        # AI 狀態等 TALKING，那份永遠不是 TALKING，實際上一直就是現在這樣
         speech_wait_start = time.time()
         while time.time() - speech_wait_start < 10.0:
             if session_id != PIANO_SESSION_ID or not is_piano_active:
                 return
             is_speaking = False
             try:
-                is_speaking = pygame.mixer.music.get_busy() or _speech_pending() or current_ai_state == "TALKING"
+                is_speaking = pygame.mixer.music.get_busy() or _speech_pending()
             except Exception:
                 log_swallowed()
             if not is_speaking and time.time() - speech_wait_start > 0.6:
@@ -2291,8 +2292,7 @@ async def play_piano_worker(song_title: str, sheet_text: str, bpm: int, mode: st
                 SOUND_ENGINE.all_notes_off()
             if vc.GLOBAL_VTS:
                 await _vts_soon(set_vts_expression(vc.GLOBAL_VTS, "_RESET_"))
-            if current_ai_state == "PIANO":
-                current_ai_state = "IDLE"
+            stage.set_ai_state("IDLE", "鋼琴演奏結束", only_from="PIANO")
             await _show_subtitle("")
             log_print(f"🎹 [鋼琴舞台] 鋼琴演奏舞台結束，回到常規姿態！")
 
@@ -2789,7 +2789,7 @@ async def mashup_virtual_piano(*songs, song_name1: str = "", song_name2: str = "
     await _vts_soon(move_vts_spatial(target_pos="鋼琴旁", duration=1.2))
     
     # 4. 啟動或透過 IPC 發送多音軌即時並發演奏指令 (真正多音軌同時執行，無數量限制！)
-    global current_piano_task, PIANO_SESSION_ID, is_piano_active, current_piano_song_title, current_piano_midi_file, current_piano_process, current_ai_state
+    global current_piano_task, PIANO_SESSION_ID, is_piano_active, current_piano_song_title, current_piano_midi_file, current_piano_process
     _take_stage(titles_display, multi_path_str, note=f"鋼琴開始多曲合奏 {titles_display}")
     
     if is_piano_window_alive():
@@ -2814,8 +2814,7 @@ async def mashup_virtual_piano(*songs, song_name1: str = "", song_name2: str = "
         ]
         current_piano_process = subprocess.Popen(piano_cmd)
         
-    if current_ai_state != "PIANO":
-        current_ai_state = "PIANO"
+    if stage.set_ai_state("PIANO", "雙曲合奏", only_from="IDLE"):
         if vc.GLOBAL_VTS:
             spawn(set_vts_expression(vc.GLOBAL_VTS, "星星眼"))
             

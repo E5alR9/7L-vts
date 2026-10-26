@@ -228,6 +228,7 @@ def pitch_shift_vocal_to_female(vocal_in: str, vocal_out: str, semitones: float 
 
 _IS_PRODUCING_COVER = False
 IS_SINGING_ACTIVE = False
+stage.register_singing_probe(lambda: IS_SINGING_ACTIVE)   # 「她在唱嗎」全程式看這個旗（core.stage_state.singing）
 
 # —— 點歌排隊（2026-10-09：台上有人在唱就排隊＋背景 RVC 照做，不再直接丟掉）——
 # 流程：請求進 SONG_REQUEST_QUEUE → 背景一次只做一首準備（GPU 安全）→
@@ -246,23 +247,19 @@ _PLAY_TASK = None
 _HOST = {}
 
 
-def bind_host(set_ai_state=None, get_ai_state=None, speech_queue=None, get_last_tts_end=None, send_brain_slip=None):
-    """main() 開機時呼叫：AI 狀態的讀寫、說話佇列、上次講完話的時間、給主腦遞紙條。"""
-    _HOST.update({k: v for k, v in dict(set_ai_state=set_ai_state, get_ai_state=get_ai_state,
-                                        speech_queue=speech_queue, get_last_tts_end=get_last_tts_end,
+def bind_host(speech_queue=None, get_last_tts_end=None, send_brain_slip=None):
+    """main() 開機時呼叫：說話佇列、上次講完話的時間、給主腦遞紙條。AI 狀態直接讀寫 core.stage_state。"""
+    _HOST.update({k: v for k, v in dict(speech_queue=speech_queue, get_last_tts_end=get_last_tts_end,
                                         send_brain_slip=send_brain_slip).items() if v is not None})
 
 
 def _ai_state() -> str:
-    fn = _HOST.get("get_ai_state")
-    return fn() if fn else ""
+    return stage.ai_state()
 
 
 def _core_set_ai_state(new: str, reason: str = "", only_from=None):
-    """AI 狀態一律交給主核心 set_ai_state 轉（唯一轉換點：統一 log＋後台廣播），不再 setattr 硬改。"""
-    fn = _HOST.get("set_ai_state")
-    if callable(fn):
-        fn(new, reason, only_from=only_from)
+    """AI 狀態一律走 core.stage_state.set_ai_state（唯一轉換點：主程式登記的日誌、後台廣播照樣會發）。"""
+    stage.set_ai_state(new, reason, only_from=only_from)
 
 def stop_singing():
     """立即中斷當前 7L 翻唱演奏並恢復狀態"""

@@ -6,6 +6,8 @@ import asyncio
 import time
 import types
 
+import pytest
+
 from conftest import ROOT  # noqa: F401
 import services.auto_cover_pipeline as acp
 
@@ -29,10 +31,18 @@ def _make_core(state="IDLE", queued=False, last_tts_end=0.0, music_busy=False):
     ), music_busy
 
 
+@pytest.fixture(autouse=True)
+def _stage_state(monkeypatch):
+    import core.stage_state as stage
+    monkeypatch.setattr(stage, "AI_STATE", "IDLE")   # 每個測試自己設，跑完還原
+    return stage
+
+
 def _host(core):
-    """main() 用 bind_host 交進來的那幾樣（2026-10-25 起不再撈主程式模組）。"""
-    return {"get_ai_state": lambda: core.current_ai_state, "speech_queue": core.speech_queue,
-            "get_last_tts_end": lambda: core.LAST_TTS_END_TIME}
+    """main() 用 bind_host 交進來的那幾樣（2026-10-25 起不再撈主程式模組）；AI 狀態在 core.stage_state（2026-10-26）。"""
+    import core.stage_state as stage
+    stage.AI_STATE = core.current_ai_state
+    return {"speech_queue": core.speech_queue, "get_last_tts_end": lambda: core.LAST_TTS_END_TIME}
 
 
 def test_intro_wait_returns_when_idle(monkeypatch):

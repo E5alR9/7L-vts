@@ -15,6 +15,7 @@ import os
 import re
 import time
 
+import core.stage_state as stage
 from core.utils import log_print, get_silence_ticks, get_uptime_ticks, format_ticks_to_human, spawn
 
 _TAG_RE = re.compile(r"\[[A-Z_]+(?:[:：][^\]]*)?\]")   # 回給後台顯示前拿掉 [EXPRESSION: …] 這類標籤
@@ -24,7 +25,7 @@ CORE_ATTRS = (
     # 模組
     "pe", "yt_comp", "tk_listener", "live_timer_hub",
     # 狀態（讀）
-    "current_ai_state", "current_ai_status_str", "current_mic_action_str", "is_user_listening",
+    "current_ai_status_str", "current_mic_action_str", "is_user_listening",
     "CURRENT_SYSTEM_AUDIO_VOL_PERCENT", "CURRENT_MIC_VOL_PERCENT",
     "LATEST_SYSTEM_AUDIO_TEXT", "LATEST_SYSTEM_AUDIO_TEXT_TIME",
     "LATEST_SYSTEM_MUSIC_INFO", "LATEST_SYSTEM_MUSIC_TIME",
@@ -187,17 +188,17 @@ class DashboardBridge:
     def get_system_state(self):
         c = self.core
         #  鋼琴在線狀態即時動態核實 (若鋼琴被強制關機，秒級自動回歸 IDLE，絕不卡死)
-        if c.current_ai_state == "PIANO" and not c.pe.is_piano_active_and_alive():
+        if stage.ai_state() == "PIANO" and not c.pe.is_piano_active_and_alive():
             c.set_ai_state("IDLE", "後台核實：鋼琴已不在線", only_from="PIANO")
 
         yt = c.yt_comp
-        eff_status = " 正常運作中" if not c.IS_SLEEPING and c.current_ai_state == "IDLE" and "休眠" not in c.current_ai_status_str else c.current_ai_status_str
+        eff_status = " 正常運作中" if not c.IS_SLEEPING and stage.ai_state() == "IDLE" and "休眠" not in c.current_ai_status_str else c.current_ai_status_str
         stress_info = c.get_api_stress_metrics()
         silence_ticks = get_silence_ticks()
         uptime_ticks = get_uptime_ticks()
         return {
             "ai_status": eff_status,
-            "ai_state": "sleep" if c.IS_SLEEPING else c.current_ai_state.lower(),
+            "ai_state": "sleep" if c.IS_SLEEPING else stage.ai_state().lower(),
             "silence_ticks": silence_ticks,
             "silence_human": format_ticks_to_human(silence_ticks),
             "uptime_ticks": uptime_ticks,
