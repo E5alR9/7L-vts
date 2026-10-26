@@ -1303,8 +1303,6 @@ current_system_audio_context = "目前沒有播放特別的聲音。"
 tk_listener.current_tiktok_status_str = "[ TikTok: 待命中]"
 CURRENT_SPEAKING_TARGET = "none"
 
-current_system_notification = ""
-notification_expire_time = 0.0
 speech_queue = SpeechQueue()   # 老爸的話先講；可以挑掉某些話（core/speech_queue.py）
 stage.register_speech_pending_probe(lambda: not speech_queue.empty())
 LIVE_API_SYSTEM_PROMPT_QUEUE = asyncio.Queue()
@@ -1606,8 +1604,6 @@ def control_microphone(is_enabled: bool) -> str:
 
 LAST_TTS_END_TIME = 0.0
 MP3_ECHO_TRAILING_CHUNKS = 0
-CURRENT_TTS_ID = 0
-LAST_ECHO_FILTERED_TTS_ID = -1
 
 
 
@@ -1630,13 +1626,9 @@ def is_7l_voice_echo(stt_text: str, is_dad_verified: bool = False) -> bool:
     比對 STT 文字與 7L 剛說的話，精準過濾麥克風收錄之自身喇叭殘響。
      嚴格遵循「過濾只過濾一次就好」原則：每句發話最多只攔截一次回音，絕不重複誤殺。
     """
-    global LAST_ECHO_FILTERED_TTS_ID, MP3_ECHO_TRAILING_CHUNKS
+    global MP3_ECHO_TRAILING_CHUNKS
     clean_stt = normalize_text_for_echo(stt_text)
     if not clean_stt:
-        return False
-
-    #  0. 過濾只過濾一次就好：若當前這一次發話已經過濾過一次回音，後續一律放行！
-    if CURRENT_TTS_ID > 0 and LAST_ECHO_FILTERED_TTS_ID == CURRENT_TTS_ID:
         return False
 
     #  1. 老爸專屬呼喚 / 指令前綴豁免保護 (支援半形與全形同音詞)：
@@ -1675,9 +1667,8 @@ def is_7l_voice_echo(stt_text: str, is_dad_verified: bool = False) -> bool:
     if clean_stt in combined_recent or any(clean_stt in m for m in recent_pool):
         if stt_len >= 6 or any(clean_stt == m for m in recent_pool):
             if not is_dad_verified or stt_len >= 12:
-                LAST_ECHO_FILTERED_TTS_ID = CURRENT_TTS_ID
                 MP3_ECHO_TRAILING_CHUNKS = 0
-                log_print(f"🔇 [7L 喇叭回音過濾] 判定為 7L 自身發話喇叭回音 (精確包含): 「{stt_text}」 ➔ 已安全過濾 (僅過濾一次，後續解鎖放行)！")
+                log_print(f"🔇 [7L 喇叭回音過濾] 判定為 7L 自身發話喇叭回音 (精確包含): 「{stt_text}」 ➔ 已過濾")
                 return True
 
     # 2. 相似度與覆蓋率比對 (針對中長句回音與 ASR 串音)
@@ -1709,9 +1700,8 @@ def is_7l_voice_echo(stt_text: str, is_dad_verified: bool = False) -> bool:
         longest_ratio = longest_match.size / stt_len
         
         if longest_match.size >= min_longest_size and (coverage >= cov_threshold or longest_ratio >= longest_threshold):
-            LAST_ECHO_FILTERED_TTS_ID = CURRENT_TTS_ID
             MP3_ECHO_TRAILING_CHUNKS = 0
-            log_print(f"🔇 [7L 喇叭回音過濾] 判定為 7L 自身發話喇叭回音 (覆蓋率 {coverage:.2f}, 長度比 {longest_ratio:.2f}): 「{stt_text}」 ➔ 已安全過濾 (僅過濾一次，後續解鎖放行)！")
+            log_print(f"🔇 [7L 喇叭回音過濾] 判定為 7L 自身發話喇叭回音 (覆蓋率 {coverage:.2f}, 長度比 {longest_ratio:.2f}): 「{stt_text}」 ➔ 已過濾")
             return True
 
     return False
@@ -6535,9 +6525,10 @@ def _draw_status_bar(char: str):
     max_cols = max(30, term_cols - 1)  # 留 1 個 column 絕對防止 Windows 控制台自動換行
     
     # 依據是否有即時通知，動態組合尾端文字 (通知放在最後面，絕不佔用整行)
-    has_notif = time.time() < notification_expire_time
+    import core.utils as _u   # sys_notify 寫的是 core.utils 的這兩個（以前讀主檔自己另一份，永遠是空的）
+    has_notif = time.time() < _u.notification_expire_time
     if has_notif:
-        tail_str = f" {current_system_notification}"
+        tail_str = f" {_u.current_system_notification}"
         if tk_listener.current_tiktok_status_str and tk_listener.current_tiktok_status_str != "[ TikTok: 待命中]":
             tail_str = f"{tk_listener.current_tiktok_status_str} | {tail_str}"
     else:

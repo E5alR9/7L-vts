@@ -81,7 +81,6 @@ STREAMER_MIND_BOARD: deque = deque(maxlen=200)
 DEFAULT_CHANNEL_ID = f"vts_{MODE}_user"
 
 RECENT_BOT_MESSAGES: List[str] = []
-CURRENT_TTS_ID: int = 0
 
 
 def _load_viewer_profiles() -> dict:
@@ -394,10 +393,9 @@ async def clear_all_memories() -> str:
     return "已成功清空所有雲端與本地對話記憶！"
 
 def record_bot_message(msg: str):
-    global RECENT_BOT_MESSAGES, CURRENT_TTS_ID
+    global RECENT_BOT_MESSAGES
     clean = re.sub(r'[^\w\u4e00-\u9fa5]', '', msg).strip()
     if clean:
-        CURRENT_TTS_ID += 1
         RECENT_BOT_MESSAGES.append(clean)
         if len(RECENT_BOT_MESSAGES) > 30:
             RECENT_BOT_MESSAGES.pop(0)
@@ -717,18 +715,18 @@ def init_unified_memory():
             with open(UNIFIED_MEMORY_FILE, "r", encoding="utf-8") as f:
                 u_data = json.load(f)
                 if isinstance(u_data, list):
+                    recover_dialogues = not loaded_dialogues   # 對話檔也沒有才從這裡救（以前條件每圈重算，只救回第一句）
                     for it in u_data:
                         r = it.get("role", "")
                         tgt = it.get("target", "")
                         src = it.get("source", "")
                         if r == "thought" or tgt == "內心流動" or src == "thought":
                             loaded_thoughts.append(it)
-                        elif not loaded_dialogues:
+                        elif recover_dialogues:
                             loaded_dialogues.append(it)
                     loaded_thoughts = loaded_thoughts[-150:]
-                    if not loaded_dialogues:
-                        if DIALOGUE_MEMORY_CAPACITY > 0:
-                            loaded_dialogues = loaded_dialogues[-DIALOGUE_MEMORY_CAPACITY:]
+                    if recover_dialogues and DIALOGUE_MEMORY_CAPACITY > 0:
+                        loaded_dialogues = loaded_dialogues[-DIALOGUE_MEMORY_CAPACITY:]
         except Exception:
             log_swallowed()
 
@@ -1027,8 +1025,7 @@ async def save_cloud_knowledge(knowledge: dict):
             if status == 429:
                 log_print("⚠️ [雲端大腦同步] Firestore 配額不足，已轉交離線備用佇列。")
             elif status not in (200, 201):
-                raise Exception(f"Firestore API returned status {status}")
+                log_print(f"⚠️ [雲端大腦同步] Firestore 回 {status}，本機已存好，雲端備份這次沒推上去。")
         except Exception as e:
-            log_print(f"⚠️ [雲端記憶寫入異常]: {e}")
-            raise Exception(f"雲端大腦同步失敗，請檢查網路 ({e})")
-        pass
+            # 本機是正本、Firestore 只當備份：推不上去記一行就好（以前 raise，後台顯示存檔失敗但其實已經存了）
+            log_print(f"⚠️ [雲端記憶寫入異常]: {e}（本機已存好）")

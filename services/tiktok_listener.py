@@ -2,7 +2,7 @@ import os
 import time
 import asyncio
 import re
-from core.utils import log_print, sys_notify
+from core.utils import log_print, log_swallowed, sys_notify
 from services import chat_source as cs
 import services.piano_engine as pe
 
@@ -46,7 +46,7 @@ def get_tiktok_live_telemetry() -> str:
 
 async def tiktok_live_worker(input_queue):
     """📱 TikTok 直播聊天室實時監聽協程 (支援雙/多帳號自動巡檢，哪個開播就秒連哪個)"""
-    global IS_STREAMING, ACTIVE_TIKTOK_ID
+    global IS_STREAMING, ACTIVE_TIKTOK_ID, current_tiktok_status_str
     try:
         import urllib.parse
         from TikTokLive import TikTokLiveClient
@@ -213,8 +213,7 @@ async def tiktok_live_worker(input_queue):
                         TIKTOK_VIEWER_COUNT = int(cnt)
                         current_tiktok_status_str = f"[📱 {tid} 🟢 在線 ({TIKTOK_VIEWER_COUNT}人)]"
                 except Exception:
-                    pass
-                sys_notify(f"✅ TikTok 直播間連線成功 ({tid})")
+                    log_swallowed()
 
             @client.on(DisconnectEvent)
             async def on_disconnect(event: DisconnectEvent):
@@ -357,10 +356,12 @@ async def tiktok_live_worker(input_queue):
             @client.on(LikeEvent)
             async def on_like(event: LikeEvent):
                 nonlocal last_like_milestone_notified, last_ambient_notify_time
-                global current_tiktok_status_str
+                global current_tiktok_status_str, TIKTOK_LIKE_COUNT
                 try:
                     user_name = event.user.nickname or event.user.unique_id or "觀眾"
                     total_l = getattr(event, 'total_likes', None) or getattr(event, 'likes', None)
+                    if total_l:
+                        TIKTOK_LIKE_COUNT = int(total_l)   # 以前沒寫入，情報和後台永遠 0 讚
                     current_tiktok_status_str = f"[❤️ {user_name} 點讚 ({total_l})]" if total_l else f"[❤️ {user_name} 點讚]"
                     # 🛑 【點讚徹底脫敏與靜默】：零碎點讚絕不推送進對話佇列，完全不打擾彈琴與對話！
                     # 僅當累積破千大關 (如滿 1000、2000 讚) 且冷卻超過 180 秒時才做低頻率更新

@@ -298,6 +298,7 @@ async def youtube_live_worker(input_queue):
                         log_print("ℹ️ [YouTube] continuation 結束（直播可能已結束），20 秒後重抓")
                         cs.report_chat_status("youtube", "connecting", "continuation 結束")
                         cont = None
+                        live_reported = False
                         await asyncio.sleep(20)
                         break
                     cont = next_cont
@@ -308,4 +309,5 @@ async def youtube_live_worker(input_queue):
                 log_print(f"⚠️ [YouTube] 輪詢異常：{type(e).__name__}: {e}，{delay:.0f} 秒後重試")
                 cs.report_chat_status("youtube", "error", f"{type(e).__name__}: {e}")
                 cont = None
+                live_reported = False   # 重連後收到留言要再報一次 live（以前狀態永遠停在 connecting）
                 await asyncio.sleep(delay)
