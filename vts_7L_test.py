@@ -4123,10 +4123,9 @@ async def peripheral_vision_worker():
                     record_vision_history_entry(detailed_desc, "畫面動態")
                     LAST_VISION_LOOK_TIME = time.time()
                     
-                    try:
-                        send_brain_slip(f"[環境動態] 電腦畫面剛剛發生變化：{detailed_desc}")
-                    except Exception:
-                        log_swallowed()
+                    # 只讓她知道、不請她開口（老爸 2026-10-26 決定）：以前遞紙條，畫面一變她就評論一次
+                    if add_brain_context(f"[環境動態] 電腦畫面剛剛發生變化（只是讓妳知道，不用開口評論）：{detailed_desc}"):
+                        log_print("👁️ [餘光視覺] 畫面變化已放進主腦的背景資料（不請她開口）")
         except Exception:
             log_swallowed()
 
