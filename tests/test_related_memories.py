@@ -152,7 +152,7 @@ def test_regular_viewers_own_lines_are_searched_with_a_lower_bar(monkeypatch):
 
     async def search(q, top_k=3, where=None):
         calls.append(where)
-        if where == {"viewer": "小明"}:
+        if where == rag.viewer_where("小明"):
             return [_vhit("小明", "7L 以後叫我明哥好不好，我是妳的頭號粉絲喔", 0.58, 6 * 3600),
                     _vhit("小明", "7L 晚安", 0.52, 6 * 3600)]
         return []
@@ -162,7 +162,7 @@ def test_regular_viewers_own_lines_are_searched_with_a_lower_bar(monkeypatch):
     block = asyncio.run(rag.related_memories_block("7L 妳還記得我是妳的什麼粉絲嗎", viewers=["小明"]))
     assert "小明對7L說: 7L 以後叫我明哥好不好，我是妳的頭號粉絲喔" in block
     assert "7L 晚安" not in block                  # 招呼這種沒內容的記憶照樣不給
-    assert calls == [{"viewer": "小明"}]          # 這句實字不到 3 個：一般的查法不查，只查小明自己的
+    assert calls == [rag.viewer_where("小明")]          # 這句實字不到 3 個：一般的查法不查，只查小明自己的
 
     # 找不到相關的：給他最近說過的兩句（一小時內的不算、跟這句一樣的不算）
     async def nothing(q, top_k=3, where=None):
@@ -170,7 +170,7 @@ def test_regular_viewers_own_lines_are_searched_with_a_lower_bar(monkeypatch):
     rows = [_vhit("小明", "7L 晚安", 0, 2 * 3600), _vhit("小明", "7L 主播有彈過匈牙利狂想曲嗎", 0, 3 * 3600),
             _vhit("小明", "7L 以後叫我明哥", 0, 9 * 3600), _vhit("小明", "剛剛才說的", 0, 60)]
     monkeypatch.setattr(rag, "search_rag_memory", nothing)
-    monkeypatch.setattr(rag.rag_store, "get_where", lambda where, limit=50: rows if where == {"viewer": "小明"} else [])
+    monkeypatch.setattr(rag.rag_store, "get_where", lambda where, limit=50: rows if where == rag.viewer_where("小明") else [])
     block = asyncio.run(rag.related_memories_block("7L 晚安", viewers=["小明"]))
     assert "匈牙利狂想曲" in block and "以後叫我明哥" in block
     assert "剛剛才說的" not in block and "7L 晚安" not in block           # 一小時內的、跟這句一樣的招呼不算

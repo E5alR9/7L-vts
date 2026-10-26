@@ -154,7 +154,7 @@ def test_host_interject_is_labeled_as_host_and_always_answered():
     board = ast.get_source_segment(MAIN_SRC, next(x for x in ast.walk(tree) if isinstance(x, ast.FunctionDef)
                                                   and x.name == "_format_board_batch"))
     assert "_format_board_batch(batch_to_process)" in src
-    ns = {"is_operator": lambda s: False}
+    ns = {"is_operator": lambda s: False, "_PLATFORM_LABEL": {}}
     exec(compile(ast.Module(body=[next(x for x in tree.body if isinstance(x, ast.FunctionDef)
                                         and x.name == "_format_board_batch")], type_ignores=[]), "x", "exec"), ns)
     text, viewers, has_dad = ns["_format_board_batch"]([

@@ -9,7 +9,7 @@ import os
 import re
 
 from core.llm_engine import GROQ_CLIENTS
-from core.utils import log_swallowed
+from core.utils import log_print, log_swallowed
 
 try:
     from tavily import TavilyClient
@@ -115,7 +115,10 @@ def search_google(query: str) -> str:
                     snippets.append(f"- {title}: {content}")
                 if snippets:
                     return "\n".join(snippets)
-            return str(res)
+            else:
+                # 金鑰全失敗（額度爆、401）：記一行、改走 DuckDuckGo（以前把錯誤字典當結果回給大腦）
+                err = res.get("error") if isinstance(res, dict) else res
+                log_print(f"⚠️ [網路搜尋] Tavily 失敗，改用 DuckDuckGo：{str(err)[:120]}")
         
         try:
             from duckduckgo_search import DDGS

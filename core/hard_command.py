@@ -414,6 +414,7 @@ PLAY_TOOLS = frozenset({"pe.play_virtual_piano", "play_virtual_piano", "auto_sin
 _MUSIC_INTENT_RE = re.compile(r"彈|弹|唱|歌|琴|曲|音樂|音乐|演奏|表演|才藝|才艺|來一首|来一首|再來|再来|安可|想聽|想听"
                               r"|piano|sing|song|music|encore", re.I)
 _AGREE_RE = re.compile(r"好|可以|要|嗯|對|对|來|来|行|沒問題|没问题|當然|当然|隨便|随便|你決定|妳決定|ok|yes|sure|go", re.I)
+_REFUSE_RE = re.compile(r"(?:不|別|别|免|沒|没)(?:要|用|行|可以|想|必|了|彈|弹|唱)|算了|下次|改天|\bno\b|\bnope\b", re.I)
 
 
 def stage_request_unasked(said: str, songs=(), her_last: str = "") -> bool:
@@ -428,8 +429,8 @@ def stage_request_unasked(said: str, songs=(), her_last: str = "") -> bool:
     ns = _norm_name(s)
     if any(_norm_name(t) and _norm_name(t) in ns for t in songs or ()):
         return False
-    if len(s) <= 15 and _AGREE_RE.search(s) and _MUSIC_INTENT_RE.search(her_last or ""):
-        return False
+    if len(s) <= 15 and _AGREE_RE.search(s) and not _REFUSE_RE.search(s) and _MUSIC_INTENT_RE.search(her_last or ""):
+        return False   # 她提議、這句答應了（「不要」「不用了」「算了」是拒絕，2026-10-27 以前會被當成答應）
     return True
 
 

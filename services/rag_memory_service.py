@@ -182,12 +182,17 @@ VIEWER_MIN_SCORE = 0.50     # 只在熟客自己的話裡找：本來就是他�
 VIEWER_LATEST = 2           # 找不到相關的，就給他最近說過的兩句
 
 
+def viewer_where(viewer: str) -> dict:
+    """向量庫裡「這位熟客說過的話」：他的留言（source=user）。觀眾檔片段（ingest_rag）也標了 viewer，不算。"""
+    return {"$and": [{"viewer": viewer}, {"source": "user"}]}
+
+
 def latest_viewer_lines(viewer: str, query: str = "", now=None, n=VIEWER_LATEST, skip_recent_sec=RELATED_SKIP_RECENT_SEC):
     """熟客最近說過的幾句（一小時內的、跟這句一樣的、招呼這種沒內容的、重複的都不算），新的在前。"""
     now = time.time() if now is None else now
     qn = _norm(query)[:80]
     rows = []
-    for h in rag_store.get_where({"viewer": viewer}, limit=200):
+    for h in rag_store.get_where(viewer_where(viewer), limit=200):
         ts = _parse_ts((h.get("metadata") or {}).get("timestamp"))
         if ts and now - ts < skip_recent_sec:
             continue
@@ -206,28 +211,35 @@ def latest_viewer_lines(viewer: str, query: str = "", now=None, n=VIEWER_LATEST,
 
 
 async def related_memories_block(query: str, k: int = RELATED_MAX, timeout: float = 1.5, viewers=()) -> str:
-    """回話前查一次：search → pick → format。查不到、超時、RAG 沒起來都回空字串，絕不擋住回話。
+    """回話前查一次：search → pick → format。查不到、整段超過 timeout 秒、RAG 沒起來都回空字串，絕不擋住回話。
     viewers：這批留言裡的熟客，另外只在他們自己說過的話裡找（找不到相關的就給最近說過的兩句）。
     向量模型預載過的話一次約 5～10 毫秒（第一次要載模型，1 秒多，所以設時限）。"""
     query = (query or "").strip()[:300]
-    picked = []
-    try:
+
+    async def _collect():
+        got = []
         if query and len(content_chars(query)) >= MIN_CONTENT:
-            hits = await asyncio.wait_for(search_rag_memory(query, top_k=max(k * 3, 8)), timeout)
-            picked += pick_related(hits, query, k=k)
+            hits = await search_rag_memory(query, top_k=max(k * 3, 8))
+            got += pick_related(hits, query, k=k)
         for v in list(viewers or [])[:2]:
             mine = []
             if query and content_chars(query):
-                vh = await asyncio.wait_for(search_rag_memory(query, top_k=6, where={"viewer": v}), timeout)
+                vh = await search_rag_memory(query, top_k=6, where=viewer_where(v))
                 mine = pick_related(vh, query, k=VIEWER_LATEST, min_score=VIEWER_MIN_SCORE,
                                     min_query_content=1, need_overlap=False)
             if not mine:
-                mine = await asyncio.wait_for(asyncio.to_thread(latest_viewer_lines, v, query), timeout)
-            picked += mine
+                mine = await asyncio.to_thread(latest_viewer_lines, v, query)
+            got += mine
+        return got
+
+    try:
+        picked = await asyncio.wait_for(_collect(), timeout)   # 整段一個時限（以前每次查各算 1.5 秒）
     except asyncio.TimeoutError:
         print("⚠️ [RAG 檢索] 超過時限，這次不附舊記憶")
+        return ""
     except Exception as e:
         print(f"⚠️ [RAG 檢索失敗]: {e}")
+        return ""
     seen, uniq = set(), []
     for p in picked:
         key = _norm(p["text"])[:80]

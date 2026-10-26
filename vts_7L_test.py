@@ -2897,7 +2897,7 @@ async def live_search_tool_task(query):
         log_print(f"🌐 [搜網專家啟動] 正在背景搜尋關鍵字：{query}...")
         if 'tavily_client' in globals() and tavily_client:
             # 同步 HTTP 必須扔線程池：在 event loop 裡直打會凍住麥克風/紙條幾秒
-            res = await asyncio.to_thread(tavily_client.search, query, "general", "basic")
+            res = await asyncio.to_thread(tavily_client.search, query, search_depth="basic", topic="general")
             if res and isinstance(res, dict):
                 results_text = "\n".join([f"- {r.get('title', '')}: {r.get('content', '')}" for r in res.get('results', [])[:3]])
                 log_print(f"🌐 [搜網專家回報] 找到 {len(res.get('results', []))} 筆結果。")
@@ -4302,7 +4302,7 @@ async def autonomous_wander_worker():
             
             #  7L 休眠中自主甦醒邏輯（已拔除音樂喚醒，但若偵測到老爸在操作畫面，則會自主醒來）
             if IS_SLEEPING:
-                if CURRENT_VISION_CHANGE_LEVEL in ["medium", "high"]:
+                if CURRENT_VISION_CHANGE_LEVEL in ("med", "high"):   # 等級只有 none／low／med／high（以前寫成 medium 永遠不中）
                     log_print("☀️ [7L 自主甦醒] 偵測到老爸電腦畫面切換活躍，7L 自主醒來！")
                     await set_sleep_mode(False)
                     # 醒來不一定說話：靜靜睜眼即可，老爸說話哨兵自然會接
@@ -4594,6 +4594,9 @@ def is_piano_song_request(user_input: str) -> bool:
 #  11.1 看板與哨兵、閒聊
 # ────────────────────────────────────────────────────────
 # 這些來源的使用者名稱與內容是觀眾（或外部網站）提供的，進看板前要中和
+_PLATFORM_LABEL = {"twitch": "Twitch", "youtube": "YouTube"}   # 其他（tiktok、tiktok_gift…）都算 TikTok
+
+
 def add_to_streamer_mind_board(user_display: str, unique_id: str, content: str, source: str = "tiktok",
                                handled: bool = False):
     """將接收到的彈幕/留言/事件寫入 7L 記憶腦袋，一排一排排列記錄，由主播自主排程讀取與發話。
@@ -4631,8 +4634,7 @@ def add_to_streamer_mind_board(user_display: str, unique_id: str, content: str, 
             speaker = "主持"
         mem_target = "觀眾"
     else:
-        _platform = {"twitch": "Twitch", "youtube": "YouTube", "owner_interject": "主持"}.get(source, "TikTok")
-        speaker = f"{_platform} 觀眾「{user_display}」" if source != "owner_interject" else f"主持「{user_display}」"
+        speaker = f"{_PLATFORM_LABEL.get(source, 'TikTok')} 觀眾「{user_display}」"
         lower_c = (content or "").lower()
         try:
             from core.identity import get_character_name as _gcn
@@ -4883,7 +4885,7 @@ def _format_board_batch(batch_to_process: list):
         elif u_source == "video_watch":
             board_lines.append(f"- [{m['time_str']}] 【點播看片筆記（{u_name}）】：{m['content']}")
         else:
-            board_lines.append(f"- [{m['time_str']}] 【TikTok 直播觀眾「{u_name}」】：{m['content']}")
+            board_lines.append(f"- [{m['time_str']}] 【{_PLATFORM_LABEL.get(u_source, 'TikTok')} 直播觀眾「{u_name}」】：{m['content']}")
             if u_name not in users_involved:
                 users_involved.append(u_name)
 
@@ -6106,12 +6108,8 @@ async def execute_punish_action(reason: str = "", is_severe: bool = None):
         # 1. 0 秒立即尖叫（即刻張嘴對嘴 + 臉紅微顫）
         spawn(play_instant_sound_clip(scream_sound, subtitle=scream_sub))
         
-        # 2. 同步啟動大腦思考，生成尖叫完畢後接續說的即時回應台詞
-        await input_queue.put({
-            "text": event_prompt,
-            "timestamp": time.time(),
-            "source": "web_console"
-        })
+        # 2. 遞紙條請她接著講（以前假裝老爸打字丟進輸入佇列：記成老爸說的、被桌機代答攔走、VTuber 模式整則丟掉）
+        send_brain_slip(f"[系統底層：{event_prompt}請妳尖叫完自然接一句反應。]", origin="dad")
 
         return {"status": "success", "message": f"已成功對 7L 實施{log_type}：{reason}"}
     except Exception as e:
@@ -6198,12 +6196,8 @@ async def execute_reward_action(reason: str = "", level: int = None):
             "timestamp": time.time()
         })
 
-        # 送入大腦佇列
-        await input_queue.put({
-            "text": event_prompt,
-            "timestamp": time.time(),
-            "source": "web_console"
-        })
+        # 遞紙條請她回應（以前假裝老爸打字丟進輸入佇列，見電擊那邊）
+        send_brain_slip(f"[系統底層：{event_prompt}]", origin="dad")
 
         return {"status": "success", "level": level, "message": resp_msg}
     except Exception as e:

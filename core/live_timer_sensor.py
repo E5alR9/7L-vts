@@ -8,6 +8,24 @@ CN_NUM = {
     '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10
 }
 
+def cn_number(s: str):
+    """中文數字（一～九百九十九，含「兩」）→ 整數；看不懂回 None。
+    以前只查單字表，「十五」「二十」「一百」查不到就當 1。"""
+    if not s or any(ch not in CN_NUM and ch != "百" for ch in s):
+        return None
+    total, cur = 0, 0
+    for ch in s:
+        if ch == "百":
+            total += (cur or 1) * 100
+            cur = 0
+        elif ch == "十":
+            total += (cur or 1) * 10
+            cur = 0
+        else:
+            cur = CN_NUM[ch]
+    return total + cur
+
+
 class LiveTimerSensorHub:
     """⏱️ 7L API Live 持續時間感測哨兵中樞 (Live Timer & Countdown Sensor)
     - 以 1 Tick (1 秒) 精度持續感測倒數時間與環境動態
@@ -129,7 +147,10 @@ class LiveTimerSensorHub:
             elif num_str.isdigit():
                 val = float(num_str)
             else:
-                val = float(CN_NUM.get(num_str, 1))
+                n = cn_number(num_str)
+                if n is None:
+                    return None   # 看不懂的數字交還主腦，不要偷偷變成 1
+                val = float(n)
 
             sec = 0
             if '小時半' in unit:
