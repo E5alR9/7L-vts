@@ -1,0 +1,2 @@
+# shell 腳本一律 LF（Windows 簽出成 CRLF 時 bash 會跑不動）
+*.sh text eol=lf
