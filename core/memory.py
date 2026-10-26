@@ -74,6 +74,9 @@ UNIFIED_THOUGHT_MEMORY: deque = deque(maxlen=150)
 # 🌐 全景時序綜合隊列（向後相容、Web 儀表板全景檢視與修改）：支援無上限或對話+心流
 UNIFIED_LIVE_MEMORY: deque = deque(maxlen=None if DIALOGUE_MEMORY_CAPACITY <= 0 else (DIALOGUE_MEMORY_CAPACITY + 200))
 _LAST_UNIFIED_SAVE_TIME = 0.0
+# 記憶推雲端（Firestore 只當備份）：以前每存一次檔（最快 2 秒一次）就推一次最新 150 句，改成最多 60 秒一次
+_CLOUD_PUSH_INTERVAL = 60.0
+_LAST_CLOUD_PUSH_TIME = 0.0
 
 STREAMER_MIND_BOARD: deque = deque(maxlen=200)
 
@@ -83,26 +86,50 @@ RECENT_BOT_MESSAGES: List[str] = []
 CURRENT_TTS_ID: int = 0
 
 
+def _load_viewer_profiles() -> dict:
+    if not os.path.exists(VIEWER_PROFILES_FILE):
+        return {}
+    try:
+        with open(VIEWER_PROFILES_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        log_swallowed()
+        return {}
+
+
+def _store_viewer_profile_local(tiktok_name: str, profile: dict) -> None:
+    try:
+        all_profiles = _load_viewer_profiles()
+        all_profiles[tiktok_name] = profile
+        with open(VIEWER_PROFILES_FILE, "w", encoding="utf-8") as f:
+            json.dump(all_profiles, f, ensure_ascii=False, indent=2)
+    except Exception:
+        log_swallowed()
+
+
+_CLOUD_PROFILE_MISSES = set()   # 這次開機問過雲端、雲端也沒有的觀眾（新觀眾每則留言不再各問一次）
+
+
 async def get_viewer_profile(tiktok_name: str) -> dict:
-    """取得 TikTok 觀眾個人資料（Firebase 優先，本地 viewer_profiles_local.json 備援）"""
+    """取得觀眾資料：本機 viewer_profiles_local_<模式>.json 優先（2026-10-26：Firestore 只當備份）。
+    本機沒有這個人才問一次雲端，問到就存回本機。以前每則留言都先等一次 Firestore，本機的再蓋過去。"""
     default = {"tiktok_name": tiktok_name, "call": None, "relationship": None, "impression": None}
-    prof = dict(default)
-    if db_module.db is not None:
-        try:
-            doc = await db_module.db.collection("viewer_profiles").document(tiktok_name).get()
-            if doc.exists:
-                prof = {**default, **doc.to_dict()}
-        except Exception:
-            pass
-    local_path = VIEWER_PROFILES_FILE
-    if os.path.exists(local_path):
-        try:
-            with open(local_path, "r", encoding="utf-8") as f:
-                all_profiles = json.load(f)
-            if tiktok_name in all_profiles:
-                prof = {**default, **all_profiles[tiktok_name]}
-        except Exception:
-            pass
+    local = _load_viewer_profiles()
+    if tiktok_name in local:
+        prof = {**default, **local[tiktok_name]}
+    else:
+        prof = dict(default)
+        if db_module.db is not None and tiktok_name not in _CLOUD_PROFILE_MISSES:
+            try:
+                doc = await db_module.db.collection("viewer_profiles").document(tiktok_name).get()
+                if doc.exists:
+                    prof = {**default, **doc.to_dict()}
+                    _store_viewer_profile_local(tiktok_name, prof)
+                else:
+                    _CLOUD_PROFILE_MISSES.add(tiktok_name)
+            except Exception:
+                log_swallowed()
     # 🛡️ 清理佔位符防護 (避免將「稱呼」、「關係」等字詞當作真名)
     if prof.get("call") in ["稱呼", "名字", "暱稱", "CALL", "none", "null", "None", "Null", ""]:
         prof["call"] = tiktok_name
@@ -131,46 +158,75 @@ async def save_viewer_profile(tiktok_name: str, call: str = None, relationship: 
         if clean_i and clean_i not in ["印象", "IMP", "none", "null", "None", "Null"]:
             profile["impression"] = clean_i
     profile["last_seen"] = datetime.now(ZoneInfo("Asia/Taipei")).strftime("%Y-%m-%d %H:%M")
+    _store_viewer_profile_local(tiktok_name, profile)
     if db_module.db is not None:
         try:
             await db_module.db.collection("viewer_profiles").document(tiktok_name).set(profile, merge=True)
         except Exception:
-            pass
-    local_path = VIEWER_PROFILES_FILE
+            log_swallowed()
+
+def _read_local_knowledge() -> Optional[dict]:
+    if not os.path.exists(CLOUD_KNOWLEDGE_FILE):
+        return None
     try:
-        all_profiles = {}
-        if os.path.exists(local_path):
-            with open(local_path, "r", encoding="utf-8") as f:
-                all_profiles = json.load(f)
-        all_profiles[tiktok_name] = profile
-        with open(local_path, "w", encoding="utf-8") as f:
-            json.dump(all_profiles, f, ensure_ascii=False, indent=2)
+        with open(CLOUD_KNOWLEDGE_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) and data else None
     except Exception:
-        pass
+        log_swallowed()
+        return None
+
+
+def _write_local_knowledge(knowledge: dict) -> None:
+    try:
+        with open(CLOUD_KNOWLEDGE_FILE, "w", encoding="utf-8") as f:
+            json.dump(knowledge, f, ensure_ascii=False, indent=2)
+    except Exception:
+        log_swallowed()
+
+
+async def _fetch_cloud_knowledge() -> Optional[dict]:
+    try:
+        doc = await db_module.db.collection("cloud_mind_knowledge").document("core_knowledge").get()
+        return doc.to_dict() if doc.exists else None
+    except Exception:
+        log_swallowed()
+        return None
+
+
+_KNOWLEDGE_CLOUD_CHECK = {"task": None}
+
+
+async def _refresh_knowledge_from_cloud() -> None:
+    """背景去雲端看一眼：雲端比本機新（另一個模式或另一台改過）才更新本機。只看 last_updated，雲端不會蓋掉本機較新的。"""
+    global CLOUD_KNOWLEDGE_CACHE, CLOUD_KNOWLEDGE_CACHE_TIME
+    cloud = await _fetch_cloud_knowledge()
+    local = _read_local_knowledge() or {}
+    if cloud and str(cloud.get("last_updated", "")) > str(local.get("last_updated", "")):
+        _write_local_knowledge(cloud)
+        CLOUD_KNOWLEDGE_CACHE, CLOUD_KNOWLEDGE_CACHE_TIME = cloud, time.time()
+        log_print(f"📥 [知識庫] 雲端那份比較新（{cloud.get('last_updated')}，本機 {local.get('last_updated') or '沒有'}），已更新本機")
+
 
 async def get_cloud_knowledge() -> dict:
-    """取得 7L 雲端大腦認知庫（100% Firestore 雲端優先，本地 cloud_knowledge_local.json 快取備援）"""
+    """7L 的知識庫（人設、規則、梗、系統開關）：本機 cloud_knowledge_local_<模式>.json 優先（2026-10-26：Firestore 只當備份）。
+    開機不等雲端：本機有就直接用，程式啟動後第一次讀時背景去雲端看一眼，雲端比較新才更新本機；本機沒有才等雲端一次。
+    以前一律先等 Firestore，雲端慢開機就慢。"""
     global CLOUD_KNOWLEDGE_CACHE, CLOUD_KNOWLEDGE_CACHE_TIME
     now = time.time()
     if CLOUD_KNOWLEDGE_CACHE is not None and now - CLOUD_KNOWLEDGE_CACHE_TIME < 60.0:
         return CLOUD_KNOWLEDGE_CACHE
 
-    knowledge = None
+    knowledge = _read_local_knowledge()
     if db_module.db is not None:
-        try:
-            doc = await db_module.db.collection("cloud_mind_knowledge").document("core_knowledge").get()
-            if doc.exists:
-                knowledge = doc.to_dict()
-        except Exception:
-            pass
-
-    if not knowledge:
-        local_path = CLOUD_KNOWLEDGE_FILE
-        if os.path.exists(local_path):
+        if not knowledge:
+            knowledge = await _fetch_cloud_knowledge()
+            if knowledge:
+                _write_local_knowledge(knowledge)
+        elif _KNOWLEDGE_CLOUD_CHECK["task"] is None:
             try:
-                with open(local_path, "r", encoding="utf-8") as f:
-                    knowledge = json.load(f)
-            except Exception:
+                _KNOWLEDGE_CLOUD_CHECK["task"] = asyncio.get_running_loop().create_task(_refresh_knowledge_from_cloud())
+            except RuntimeError:
                 pass
 
     if not knowledge:
@@ -373,7 +429,7 @@ def _save_unified_memory_to_disk(loop=None, cloud: bool = True):
 
 
 def _save_unified_memory_to_disk_locked(loop, cloud):
-    global UNIFIED_LIVE_MEMORY, UNIFIED_DIALOGUE_MEMORY, UNIFIED_THOUGHT_MEMORY
+    global UNIFIED_LIVE_MEMORY, UNIFIED_DIALOGUE_MEMORY, UNIFIED_THOUGHT_MEMORY, _LAST_CLOUD_PUSH_TIME
     try:
         # 1. 儲存對話專屬記憶（保留最近 500 句，永不被心流稀釋）
         diag_file = DIALOGUE_MEMORY_FILE + ".tmp"
@@ -407,7 +463,9 @@ def _save_unified_memory_to_disk_locked(loop, cloud):
                 os.rename(temp_file, UNIFIED_MEMORY_FILE)
                 
         # ☁️ 同步備份最新全集中全景時序記憶至雲端 Firestore
-        if cloud and db_module.db is not None:
+        if cloud and db_module.db is not None and time.time() - _LAST_CLOUD_PUSH_TIME >= _CLOUD_PUSH_INTERVAL:
+            _LAST_CLOUD_PUSH_TIME = time.time()
+
             async def sync_unified_to_cloud(items, dialogues):
                 try:
                     await db_module.db.collection("unified_memory").document("live_stream_timeline").set({

@@ -6662,6 +6662,10 @@ async def main():
     spawn(streamer_mind_loop_worker(vts, input_queue))
     spawn(anti_watermark_worker(vts))
     spawn(cma_monitor_worker())
+    # 流水帳每 5 分鐘推一份到 Firestore 備份（看到的畫面不上傳；本機帳本才是正本）
+    from core.memory import mode_path as _mode_path, MODE as _MEM_MODE
+    spawn(eventlog.cloud_backup_worker(lambda: db_module.db, f"event_backup_{_MEM_MODE}",
+                                       _mode_path("events_backup_state.json")))
     spawn(speech_queue_worker(vts, input_queue))
     spawn(expression_keeper_worker(vts))
     spawn(busy_expression_worker())

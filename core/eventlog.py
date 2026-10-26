@@ -150,6 +150,59 @@ def set_default(log: Optional[EventLog]) -> None:
     _DEFAULT = log
 
 
+# 不上傳雲端的事件：看到的畫面描述（老爸不讓測試看螢幕；平常看到的也只留在本機）
+CLOUD_SKIP_KINDS = ("vision",)
+
+
+def _backup_state(path: str) -> int:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return int(json.load(f).get("last_id", 0))
+    except Exception:
+        return 0
+
+
+async def backup_once(log: EventLog, db, collection: str, state_path: str, batch: int = 400) -> int:
+    """把上次推完之後的新事件推上 Firestore（每 batch 筆一份文件），回推了幾筆。
+    推失敗就停在那裡，下次從同一筆接著推。Firestore 只當備份：本機帳本才是正本。"""
+    last_id, pushed = _backup_state(state_path), 0
+    while True:
+        with log._lock:
+            rows = [_row(r) for r in log._db.execute(
+                "SELECT * FROM events WHERE id > ? ORDER BY id LIMIT ?", (last_id, batch)).fetchall()]
+        if not rows:
+            return pushed
+        keep = [{"id": r["id"], "ts": r["ts"], "kind": r["kind"], "who": r["who"], "target": r["target"],
+                 "text": r["text"], "meta": json.dumps(r["meta"], ensure_ascii=False, default=str)}
+                for r in rows if r["kind"] not in CLOUD_SKIP_KINDS]
+        if keep:
+            status = await db.collection(collection).document(f"{rows[0]['id']:010d}").set(
+                {"rows": keep, "first_id": rows[0]["id"], "last_id": rows[-1]["id"], "pushed_at": time.time()})
+            if status not in (200, 201):
+                return pushed
+        last_id = rows[-1]["id"]
+        pushed += len(keep)
+        with open(state_path, "w", encoding="utf-8") as f:
+            json.dump({"last_id": last_id, "at": time.time()}, f)
+
+
+async def cloud_backup_worker(get_db, collection: str, state_path: str, interval: float = 300.0) -> None:
+    """每 interval 秒把新事件推上 Firestore 備份（get_db() 回 Firestore 用戶端，沒有就跳過這輪）。"""
+    import asyncio
+    from core.utils import log_print, log_swallowed
+    while True:
+        await asyncio.sleep(interval)
+        db = get_db()
+        if db is None:
+            continue
+        try:
+            n = await backup_once(get(), db, collection, state_path)
+            if n:
+                log_print(f"☁️ [流水帳備份] {n} 筆推上雲端（{collection}）")
+        except Exception:
+            log_swallowed()
+
+
 def memory_kind(speaker: str, role: str, target: str = "", source: str = "") -> str:
     """對話記憶的一筆算哪種事件：心想 thought、她講的 said、其他（老爸、觀眾、系統）heard。"""
     if role == "thought" or target == "內心流動" or source == "thought":
