@@ -63,7 +63,7 @@ def test_live_brain_transcribes_and_wakes_on_mic():
     assert "IS_SLEEPING and live_speech_wakes(to_tw(user_transcription_buffer), operator_input_enabled())" in recv
     assert "await set_sleep_mode(False)" in recv
     done = recv.index("if c.turn_complete or getattr(c, 'generation_complete', False):")
-    assert recv.index("_flush_user_speech()", done) < recv.index("if chunk_buffer.strip():", done)
+    assert recv.index("_flush_user_speech()", done) < recv.index("if turn_buffer.strip():", done)
     flush = fn("_flush_user_speech")
     assert 'source="mic"' in flush and "touch_interaction()" in flush
 

@@ -3195,22 +3195,31 @@ async def _handle_invoke_subagent(session, ws_send_lock, _fn_name, _fn_call_id, 
     await _run_subagent_task(_task_ins, _intent, _respond)
 
 
+async def _speak_brain_turn(vts, input_queue, text: str, who: str, reply_to: str, source: str, **item_extra) -> str:
+    """主腦（Live 或 REST）說完一段話的收尾：執行話裡的控制標籤、排進說話佇列、記觀眾資料、寫記憶。
+    who＝這輪是誰觸發的（標籤照誰的權限跑），reply_to＝這段話對誰講（dad 是私話）。回實際要念的字。
+    2026-10-27 以前兩邊各寫一份：Live 一律照老爸的權限跑標籤（觀眾那輪也是）、記憶對象寫 "dad"
+    （提示詞裡變成「對dad說」）；REST 不記觀眾資料。"""
+    to_dad = who == "dad"
+    spoken = (await execute_actions(vts, text, input_queue, caller_target="dad" if to_dad else "audience",
+                                    caller_user=_owner_name() if to_dad else _BRAIN_INPUT_ORIGIN.get("name", ""))).strip()
+    if spoken and not is_singing_active():
+        await speech_queue.put({"text": spoken, "target": reply_to, "raw_text": text, "private": reply_to == "dad",
+                                **item_extra})
+    _save_viewer_updates(text)
+    append_to_unified_memory(speaker="7L", target=_owner_name() if reply_to == "dad" else "直播間",
+                             content=_brain_text_for_memory(text), role="assistant", source=source)
+    return spoken
+
+
 async def _rest_speak(vts, input_queue, raw: str, origin: str) -> str:
-    """REST 大腦的一段回覆，照 Live 主腦說完一段話的方式處理：叫副腦、執行動作標籤、排進說話佇列、寫記憶。
-    回實際要念的字（她選擇不講就是空字串）。"""
+    """REST 大腦的一段回覆，跟 Live 主腦同一份收尾。回實際要念的字（她選擇不講就是空字串）。"""
     text = re.sub(r'\[PASS\]', '', normalize_silence_token(raw or ""), flags=re.IGNORECASE).strip()
     if not text:
         return ""
     text = _start_marker_tools(text)
-    owner = _owner_name()
-    to_dad = origin == "dad"
-    target = "dad" if to_dad else "audience"
-    spoken = (await execute_actions(vts, text, input_queue, caller_target=target,
-                                    caller_user=owner if to_dad else _BRAIN_INPUT_ORIGIN.get("name", ""))).strip()
-    if spoken and not is_singing_active():
-        await speech_queue.put({"text": spoken, "target": target, "raw_text": text, "private": to_dad})
-    append_to_unified_memory(speaker="7L", target=owner if to_dad else "直播間", content=_brain_text_for_memory(text),
-                             role="assistant", source="rest_brain")
+    who = "dad" if origin == "dad" else "audience"
+    spoken = await _speak_brain_turn(vts, input_queue, text, who, who, "rest_brain")
     log_print(f"💬 7L (REST 大腦): {spoken or text}")
     return spoken
 
@@ -3538,25 +3547,17 @@ async def continuous_live_worker(vts):
                                             
                                     if c.turn_complete or getattr(c, 'generation_complete', False):
                                         _flush_user_speech()   # 她這輪沒開口（例如只回 [SILENCE]），老爸的話也要記
-                                        if chunk_buffer.strip():
-                                            sentence = chunk_buffer.strip()
-                                            clean_sentence = await execute_actions(vts, sentence, input_queue, caller_target="dad", caller_user=owner)
-                                            if clean_sentence.strip() and not is_singing_active():
-                                                await speech_queue.put({"text": clean_sentence.strip(), "target": _live_reply_target(),
-                                                                         "raw_text": sentence, "from_live": True})
-                                            chunk_buffer = ""
-                                    
                                         if turn_buffer.strip():
                                             global LAST_BRAIN_TURN_TS
                                             LAST_BRAIN_TURN_TS = time.time()
                                             usage.note(live_m, True, role="主腦")
-                                            _save_viewer_updates(turn_buffer)
-                                            from core.memory import append_to_unified_memory
-                                            append_to_unified_memory(speaker="7L", target="dad" if _live_reply_target() == "dad" else "直播間",
-                                                                     content=_brain_text_for_memory(turn_buffer),
-                                                                     role="assistant", source="live_api")
+                                            # 跟 REST 大腦同一份收尾；標籤照觸發這輪的人的權限跑
+                                            _who = "audience" if _BRAIN_INPUT_ORIGIN.get("who") == "audience" else "dad"
+                                            await _speak_brain_turn(vts, input_queue, turn_buffer.strip(), _who,
+                                                                    _live_reply_target(), "live_api", from_live=True)
                                             log_print(f"📝 [黑板紀錄] 7L Live 大腦: {turn_buffer.strip()}")
-                                            turn_buffer = ""
+                                        turn_buffer = ""
+                                        chunk_buffer = ""
                                         if goaway_pending:
                                             raise ConnectionResetError("goaway：這輪講完了，主動換線續接")
                     except asyncio.CancelledError: pass

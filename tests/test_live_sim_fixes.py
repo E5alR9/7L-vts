@@ -221,7 +221,8 @@ def test_memory_drops_prosody_tags():
     exec(compile(ast.Module(body=[_fn("_brain_text_for_memory")], type_ignores=[]), "m", "exec"), ns)
     out = ns["_brain_text_for_memory"]("[EXPRESSION: 花花] [SPEED:+8%][PITCH:+2Hz] 好呀 [SPEED+8%]～[INTERRUPT_SELF]")
     assert out == "[EXPRESSION: 花花] 好呀 ～"
-    assert "_brain_text_for_memory(turn_buffer)" in _src("receive_from_live")
+    assert "_speak_brain_turn(" in _src("receive_from_live")
+    assert "_brain_text_for_memory(text)" in _src("_speak_brain_turn")
 
 
 def test_expression_aliases_and_action_only_tags():

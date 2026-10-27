@@ -47,7 +47,7 @@ MAIN_FUNCS = (
     "send_brain_slip", "_send_stage_slip", "_supersede_board_requests", "_unpack_slip", "_owner_text_slip", "_slip_is_dupe", "_record_slip",
     "_note_brain_origin", "_brain_requester", "_her_words_before", "_brain_replaying_old_request",
     "is_live_brain_active", "live_brain_down_for", "use_rest_brain",
-    "rest_slip_worker", "_rest_answer_slip", "_rest_speak", "_run_subagent_task",
+    "rest_slip_worker", "_rest_answer_slip", "_speak_brain_turn", "_rest_speak", "_run_subagent_task",
     "execute_actions", "normalize_silence_token", "_brain_text_for_memory", "_start_marker_tools",
     "_vision_report_recent", "_start_mirror", "_likely_needs_tools",
     "streamer_mind_loop_worker", "_format_board_batch", "_ping_short_circuit", "_is_bare_ping",

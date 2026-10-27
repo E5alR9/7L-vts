@@ -134,16 +134,18 @@ def test_rest_brain_asks_her_to_ack_when_she_called_the_tool_without_a_word():
     assert spoken == [("第2次", "dad")]
 
 
-def _speak(raw, origin, singing=False):
+def _speak(raw, origin, singing=False, calls=None):
     queued, memory = [], []
 
     async def execute_actions(vts, text, iq, **k):
+        if calls is not None:
+            calls.append(k)
         return re.sub(r"\[EXPRESSION:[^\]]*\]", "", text)
 
     async def put(item):
         queued.append(item)
 
-    ns = _load("_rest_speak", re=re, normalize_silence_token=lambda t: re.sub(r"\[SILENCE\]", "[PASS]", t),
+    ns = _load("_speak_brain_turn", "_rest_speak", re=re, _save_viewer_updates=lambda t: 0, normalize_silence_token=lambda t: re.sub(r"\[SILENCE\]", "[PASS]", t),
                _start_marker_tools=lambda t: t, _owner_name=lambda: "老爸", _BRAIN_INPUT_ORIGIN={"name": "小明"},
                execute_actions=execute_actions, is_singing_active=lambda: singing,
                speech_queue=pytypes.SimpleNamespace(put=put), _brain_text_for_memory=lambda t: t,
@@ -159,6 +161,16 @@ def test_rest_speech_goes_public_unless_it_answers_dad():
     assert memory[0]["source"] == "rest_brain" and memory[0]["target"] == "直播間"
     _, queued, memory = _speak("好喔", "dad")
     assert queued[0]["target"] == "dad" and queued[0]["private"] is True and memory[0]["target"] == "老爸"
+
+
+def test_brain_turn_runs_tags_with_the_triggering_persons_rights():
+    # 觀眾那輪的標籤照觀眾權限跑、計時器記觀眾名字（2026-10-27 以前 Live 一律照老爸的權限）
+    calls = []
+    _speak("[TIMER: 5|喝水] 好", "audience", calls=calls)
+    assert calls[0] == {"caller_target": "audience", "caller_user": "小明"}
+    calls.clear()
+    _speak("好", "dad", calls=calls)
+    assert calls[0] == {"caller_target": "dad", "caller_user": "老爸"}
 
 
 def test_rest_speech_respects_silence_and_singing():

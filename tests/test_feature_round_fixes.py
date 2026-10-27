@@ -34,7 +34,8 @@ def _coro():
 
 def test_live_brain_turn_saves_viewer_updates():
     src = ast.get_source_segment(MAIN, _node("continuous_live_worker"))
-    assert "_save_viewer_updates(turn_buffer)" in src
+    assert "_speak_brain_turn(" in src
+    assert "_save_viewer_updates(text)" in ast.get_source_segment(MAIN, _node("_speak_brain_turn"))
 
 
 def test_gemini_piano_intent_checks_the_piano_is_still_out():
