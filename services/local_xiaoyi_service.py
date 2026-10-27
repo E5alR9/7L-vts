@@ -515,12 +515,10 @@ def synthesize_xiaoyi_bytes(text: str) -> bytes:
             
             #  符號與專有名詞防卡頓處理：將數學字母/全形/特殊符號正規化為標準 ASCII (修復 KeyError)
             text = unicodedata.normalize('NFKC', text)
-            # 過濾非發音顏文字 (如 ⌒☆ )，波浪號/符號轉為元氣感嘆號「！」
-            text = re.sub(r'[∠・ω<>\-_]+', '', text) # 改為只針對特定顏文字常見特殊符號移除
-            text = re.sub(r'[⌒☆★♪♡✧✦๑•̀ㅂ•́و✧~～]+', '！', text)
-            text = text.replace("7L", "小七").replace("7l", "小七")
-            text = re.sub(r'[，,]{2,}', '，', text)
-            text = re.sub(r'[！!]{2,}', '！', text).strip(' ，,')
+            text = re.sub(r'[∠・ω<>\-_]+', '', text)   # 曉伊另外拿掉顏文字常見的零件（模型會 KeyError）
+            # 其餘跟其他引擎同一份清洗：標籤、括號、顏文字轉「！」、7L→小七、重複標點（以前這裡另抄一份，少了標籤和括號）
+            from services.tts_router import _clean_text
+            text = _clean_text(text, "ja" if is_real_japanese else "zh")
 
             inputs = {
                 "text": text,

@@ -188,3 +188,23 @@ def test_expression_action_words_have_one_source():
     stage_src = open(os.path.join(ROOT, "services", "stage_actions.py"), encoding="utf-8").read()
     assert "vc.action_kind(exp_tag)" in stage_src
     assert MAIN.count("vc.action_kind(exp_tag)") == 1
+
+
+def test_xiaoyi_uses_the_router_text_cleaning(monkeypatch):
+    """曉伊跟其他引擎同一份清洗：標籤、括號也要拿掉（以前曉伊另抄一份，會把 (笑) 念出來）。"""
+    import numpy as np
+    import types as pytypes
+    from services import local_xiaoyi_service as lx
+    calls = []
+
+    class FakePipe:
+        configs = pytypes.SimpleNamespace(max_sec=54)
+
+        def run(self, inputs):
+            calls.append(inputs["text"])
+            yield 32000, (np.sign(np.sin(np.arange(32000 * 2) * 0.05)) * 8000).astype(np.int16)
+
+    monkeypatch.setattr(lx, "_tts_pipeline", FakePipe())
+    monkeypatch.setattr(lx, "_REF_ZH", "ref.wav")
+    assert lx.synthesize_xiaoyi_bytes("[EXPRESSION: 開心]7L 收到(笑)～～")
+    assert calls[0] == "小七 收到！"
