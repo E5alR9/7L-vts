@@ -238,3 +238,10 @@ def test_core_does_not_import_services_or_plugins():
             bad += [f"{fn}: {m}" for m in re.findall(r"(?m)^\s*(?:from|import) (?:services|workers|mic_live_plugin)\b.*$", src)]
     assert bad == []
     assert "_memory_core.register_rag(rag_service)" in MAIN
+
+
+def test_brain_knows_voice_is_always_dad():
+    # 麥克風的聲音直送 Live、沒有標籤；以前規則只寫「觀眾＝其他所有人」，剛有觀眾留言時她把老爸的話算到觀眾頭上
+    #（10/26 實機兩次；Live A/B：舊提示詞 6 次錯 2 次，加這條 6 次全對）
+    from core import promptkit
+    assert "妳直接聽到的人聲（不是文字）一定是老爸本人" in promptkit.brain_system("老爸", "7L", {}, "", mode="companion")
