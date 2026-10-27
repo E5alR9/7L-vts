@@ -20,6 +20,7 @@ except (ImportError, Exception):
 
 import mido
 import imageio_ffmpeg
+from core.utils import log_print
 
 try:
     sys.stdout.reconfigure(encoding='utf-8')
@@ -49,7 +50,7 @@ def download_youtube_to_wav(video_url: str, output_wav: str) -> bool:
         elif os.path.exists(output_wav.replace(".wav", ".wav")):
             return True
     except Exception as e:
-        print(f"⚠️ [YouTube 音訊下載異常]: {e}")
+        log_print(f"⚠️ [YouTube 音訊下載異常]: {e}")
     return False
 
 def midi_to_freq(note: int) -> float:
@@ -62,7 +63,7 @@ def freq_to_midi(freq: float) -> int:
 def transcribe_wav_to_midi_advanced(wav_path: str, output_midi_path: str) -> bool:
     """進階頻譜基頻顯著性與泛音消除轉錄"""
     if not wavfile or not signal:
-        print("⚠️ [音訊轉錄] 系統環境缺少可用之 scipy 模組，跳過音訊轉錄。")
+        log_print("⚠️ [音訊轉錄] 系統環境缺少可用之 scipy 模組，跳過音訊轉錄。")
         return False
     try:
         sr, audio = wavfile.read(wav_path)
@@ -192,19 +193,19 @@ def transcribe_wav_to_midi_advanced(wav_path: str, output_midi_path: str) -> boo
         mid.save(output_midi_path)
         return True
     except Exception as e:
-        print(f"⚠️ [高精度 MIDI 轉錄異常]: {e}")
+        log_print(f"⚠️ [高精度 MIDI 轉錄異常]: {e}")
         return False
 
 def convert_youtube_to_piano_midi(video_url: str, output_midi_path: str) -> bool:
     """下載 YouTube 音訊並進行諧波過濾高精度轉錄"""
     temp_wav = output_midi_path.replace(".mid", "_temp.wav")
     try:
-        print(f"🎵 正在自 YouTube 下載原版鋼琴音訊: {video_url}...")
+        log_print(f"🎵 正在自 YouTube 下載原版鋼琴音訊: {video_url}...")
         if download_youtube_to_wav(video_url, temp_wav):
-            print(f"⚡ 音訊下載完成，正在進行【諧波泛音消除 + 基頻顯著性】高精度轉錄 ➔ MIDI...")
+            log_print(f"⚡ 音訊下載完成，正在進行【諧波泛音消除 + 基頻顯著性】高精度轉錄 ➔ MIDI...")
             success = transcribe_wav_to_midi_advanced(temp_wav, output_midi_path)
             if success:
-                print(f"🎉 [高精度轉錄完成] 成功產出無泛音雜音之 88 鍵 MIDI: {output_midi_path}！")
+                log_print(f"🎉 [高精度轉錄完成] 成功產出無泛音雜音之 88 鍵 MIDI: {output_midi_path}！")
                 return True
     finally:
         if os.path.exists(temp_wav):

@@ -19,7 +19,7 @@ import pygame
 from collections import deque
 
 import core.stage_state as stage
-from core.utils import log_swallowed, spawn
+from core.utils import log_print, log_swallowed, spawn
 from core.paths import ROOT_DIR, ffmpeg_exe
 
 if hasattr(sys.stdout, 'reconfigure'):
@@ -51,9 +51,9 @@ def download_youtube_audio(song_query: str, output_wav: str) -> bool:
     - 優先抓取真實優秀女歌手的翻唱版本，從根本上徹底根除男聲變調的花栗鼠怪音與神經破音
     - 保留 100% 真人歌手的換氣、轉音、顫音與細膩情感
     """
-    print(f"🔍 [YT-DLP 智慧搜歌中] 正在向 YouTube 搜尋《{song_query}》原版高音質音軌...")
+    log_print(f"🔍 [YT-DLP 智慧搜歌中] 正在向 YouTube 搜尋《{song_query}》原版高音質音軌...")
     if os.path.exists(output_wav) and os.path.getsize(output_wav) > 100000:
-        print(f"💾 [快取命中] 已存在高品質音訊: {output_wav}")
+        log_print(f"💾 [快取命中] 已存在高品質音訊: {output_wav}")
         return True
 
     clean_q = song_query.lower().strip().replace("-", " ").replace("_", " ")
@@ -86,7 +86,7 @@ def download_youtube_audio(song_query: str, output_wav: str) -> bool:
                 if f.startswith("temp_dl_") and f.endswith(".wav"):
                     src = os.path.join(CACHE_DIR, f)
                     shutil.move(src, output_wav)
-                    print(f"✅ [YT-DLP 下載成功] 成功獲取高音質母帶: {output_wav}")
+                    log_print(f"✅ [YT-DLP 下載成功] 成功獲取高音質母帶: {output_wav}")
                     return True
         except Exception:
             continue
@@ -97,15 +97,15 @@ def _convert_local_to_raw(src_mp3: str, output_wav: str) -> bool:
     已有合格 raw 直接沿用，不重轉。同步函數，調用方丟執行緒。"""
     try:
         if os.path.exists(output_wav) and os.path.getsize(output_wav) > 100000:
-            print(f"💾 [快取命中] 已存在自創曲音軌: {output_wav}")
+            log_print(f"💾 [快取命中] 已存在自創曲音軌: {output_wav}")
             return True
         cmd = [FFMPEG_EXE, "-y", "-i", src_mp3, "-ar", "44100", "-ac", "2", output_wav]
         ret = subprocess.run(cmd, capture_output=True, timeout=120)
         if ret.returncode == 0 and os.path.exists(output_wav) and os.path.getsize(output_wav) > 10000:
-            print(f"✅ [自創曲載入成功] 高音質母帶: {output_wav}")
+            log_print(f"✅ [自創曲載入成功] 高音質母帶: {output_wav}")
             return True
     except Exception as e:
-        print(f"⚠️ [自創曲轉檔異常]: {e}")
+        log_print(f"⚠️ [自創曲轉檔異常]: {e}")
     return False
 
 
@@ -131,10 +131,10 @@ def separate_stems_gpu(input_wav: str, song_name: str, tag: str = "") -> tuple[s
     inst_out = os.path.join(CACHE_DIR, f"{safe_name}_instrumental.wav")
 
     if os.path.exists(vocals_out) and os.path.exists(inst_out):
-        print(f"💾 [快取命中] 已存在人聲與伴奏分軌檔案！")
+        log_print(f"💾 [快取命中] 已存在人聲與伴奏分軌檔案！")
         return vocals_out, inst_out
 
-    print("⚡ [AI 人聲分離] Tier-1 Roformer GPU 分離（分鐘級，有進度＋心跳，不空轉）...")
+    log_print("⚡ [AI 人聲分離] Tier-1 Roformer GPU 分離（分鐘級，有進度＋心跳，不空轉）...")
     
     # Tier-1: Mel-Roformer（品質最好；失敗自動降級，絕不卡住管線）
     def _sep_progress(pct: int):
@@ -151,9 +151,9 @@ def separate_stems_gpu(input_wav: str, song_name: str, tag: str = "") -> tuple[s
         if separate_roformer(input_wav, vocals_out, inst_out,
                              song_name=song_name, progress_cb=_sep_progress):
             return vocals_out, inst_out
-        print("🔄 [Roformer 未成功，降級 Demucs]...")
+        log_print("🔄 [Roformer 未成功，降級 Demucs]...")
     except Exception as e:
-        print(f"⚠️ [Roformer 模組異常，降級 Demucs]: {e}")
+        log_print(f"⚠️ [Roformer 模組異常，降級 Demucs]: {e}")
 
     # Tier-2: demucs 命令
     demucs_cmd = [
@@ -176,13 +176,13 @@ def separate_stems_gpu(input_wav: str, song_name: str, tag: str = "") -> tuple[s
             if os.path.exists(d_voc) and os.path.exists(d_inst):
                 shutil.copy2(d_voc, vocals_out)
                 shutil.copy2(d_inst, inst_out)
-                print(f"✨ [AI 人聲分離成功] 伴奏與原唱已精準獨立拆解！")
+                log_print(f"✨ [AI 人聲分離成功] 伴奏與原唱已精準獨立拆解！")
                 return vocals_out, inst_out
     except Exception as e:
-        print(f"⚠️ [Demucs 執行異常，切換至備用人聲分離模式]: {e}")
+        log_print(f"⚠️ [Demucs 執行異常，切換至備用人聲分離模式]: {e}")
 
     # 備用方案：使用 ffmpeg 立體聲相位抵消分離 (Center Channel Extraction)
-    print(f"🔄 [備用分離] 使用專業立體聲中置通道演算法提取人聲與伴奏...")
+    log_print(f"🔄 [備用分離] 使用專業立體聲中置通道演算法提取人聲與伴奏...")
     cmd_inst = [
         FFMPEG_EXE, "-y", "-i", input_wav,
         "-af", "stereotools=mlev=0.015625:slev=1.0",
@@ -224,16 +224,16 @@ def pitch_shift_vocal_to_female(vocal_in: str, vocal_out: str, semitones: float 
                 index_rate=0.88, auto_pitch=_auto)
 
         mode_str = "整首統一音域判決" if auto_pitch else f"固定 key={semitones:+0.1f}"
-        print(f"👑 [7L 專屬曉伊原聲音色轉換] 啟用曉伊原生歌聲神經轉換 ({mode_str})...")
+        log_print(f"👑 [7L 專屬曉伊原聲音色轉換] 啟用曉伊原生歌聲神經轉換 ({mode_str})...")
         ok = _run_convert(vocal_in, vocal_out, semitones, auto_pitch)
         if ok and _valid(vocal_out):
-            print("🎉 [7L 曉伊原聲翻唱成功] 成功統一 7L 專屬甜妹歌聲！")
+            log_print("🎉 [7L 曉伊原聲翻唱成功] 成功統一 7L 專屬甜妹歌聲！")
             return True
         else:
-            print("❌ [RVC 神經轉換失敗] 未產出有效 RVC 音訊，拒絕回退直出原唱！")
+            log_print("❌ [RVC 神經轉換失敗] 未產出有效 RVC 音訊，拒絕回退直出原唱！")
             return False
     except Exception as e:
-        print(f"⚠️ [RVC 神經轉換異常]: {e}")
+        log_print(f"⚠️ [RVC 神經轉換異常]: {e}")
         return False
 
 
@@ -285,7 +285,7 @@ def stop_singing():
     _ACTIVE_TITLES.clear()
     _MIXED_RENDEZVOUS.clear()
     if n_q or n_r:
-        print(f"🧹 [翻唱隊列] 已清空待播 {n_q} 首＋備好待播 {n_r} 首。")
+        log_print(f"🧹 [翻唱隊列] 已清空待播 {n_q} 首＋備好待播 {n_r} 首。")
     try:
         if pygame.mixer.get_init():
             pygame.mixer.Channel(6).stop()
@@ -295,7 +295,7 @@ def stop_singing():
         pass
     stage.stop_playback()
     _core_set_ai_state("IDLE", "翻唱手動停止", only_from="SINGING")
-    print("🛑 [7L 翻唱] 已成功手動停止歌聲與伴奏播放。")
+    log_print("🛑 [7L 翻唱] 已成功手動停止歌聲與伴奏播放。")
 
 
 def stop_current_song() -> bool:
@@ -327,7 +327,7 @@ def stop_current_song() -> bool:
         pass
     stage.stop_playback()
     _core_set_ai_state("IDLE", "電擊打斷當首", only_from="SINGING")
-    print("🛑 [7L 翻唱] 電擊打斷：當首停止（排隊保留）。")
+    log_print("🛑 [7L 翻唱] 電擊打斷：當首停止（排隊保留）。")
     return True
 
 _REQUESTED_AT = {}   # 歌名鍵 → 點歌時間（剛點的歌開唱前等主腦的應答）
@@ -368,11 +368,11 @@ async def wait_for_intro_speech_complete(timeout: float = 15.0, reply_deadline: 
         if has_queued or is_talking or is_music or recent_speech:
             el = time.time() - t1
             if el >= timeout:
-                print(f"⏳ [開場白等待逾時] 背景聊太嗨不等了（{timeout:.0f}s），直接開唱！")
+                log_print(f"⏳ [開場白等待逾時] 背景聊太嗨不等了（{timeout:.0f}s），直接開唱！")
                 break
             if el - _last_log >= 10.0:
                 _last_log = el
-                print(f"⏳ [等開場白] 背景聊天中…{el:.0f}s（{timeout:.0f}s 後不等了直接唱）。")
+                log_print(f"⏳ [等開場白] 背景聊天中…{el:.0f}s（{timeout:.0f}s 後不等了直接唱）。")
             await stage.wait_change(0.3)
         else:
             break
@@ -415,25 +415,25 @@ async def _mixed_rendezvous_sing(rv, title, inst_path):
     if rv.get("want_sync"):
         from services.audio_to_score import instrumental_to_piano_midi
         midi_task = asyncio.create_task(asyncio.to_thread(instrumental_to_piano_midi, inst_path or ""))
-    print(f"🎤 [混用會合] 《{title}》麥克風就位，等鋼琴就位會合（最多 {_MIXED_SING_WAIT_SEC:.0f} 秒）...")
+    log_print(f"🎤 [混用會合] 《{title}》麥克風就位，等鋼琴就位會合（最多 {_MIXED_SING_WAIT_SEC:.0f} 秒）...")
     piano_ready = False
     try:
         await asyncio.wait_for(rv["piano"].wait(), timeout=_MIXED_SING_WAIT_SEC)
         piano_ready = True
     except asyncio.TimeoutError:
-        print("⚠️ [混用會合] 等鋼琴超時，先開唱，鋼琴隨後跟上。")
+        log_print("⚠️ [混用會合] 等鋼琴超時，先開唱，鋼琴隨後跟上。")
     if midi_task is not None:
         try:
             rv["midi"] = await midi_task or ""
         except Exception as e:
-            print(f"⚠️ [混用會合] 伴奏轉譜異常: {e}")
+            log_print(f"⚠️ [混用會合] 伴奏轉譜異常: {e}")
     start_at = None
     if piano_ready and rv.get("midi") and not rv.get("piano_gave_up"):
         start_at = time.time() + _MIXED_LEAD_SEC
         rv["start_at"] = start_at
-        print(f"🎤 [混用會合] 鋼琴就位＋伴奏譜到手，{_MIXED_LEAD_SEC:.0f} 秒後邊彈邊唱同步開演！")
+        log_print(f"🎤 [混用會合] 鋼琴就位＋伴奏譜到手，{_MIXED_LEAD_SEC:.0f} 秒後邊彈邊唱同步開演！")
     elif piano_ready:
-        print("🎤 [混用會合] 鋼琴就位，邊彈邊唱開演（沒有同步譜，鋼琴照曲名找譜）。")
+        log_print("🎤 [混用會合] 鋼琴就位，邊彈邊唱開演（沒有同步譜，鋼琴照曲名找譜）。")
     rv["sing"].set()
     return start_at
 
@@ -501,7 +501,7 @@ def _send_brain_slip(text: str) -> bool:
     try:
         return bool(fn and fn(text))
     except Exception as e:
-        print(f"⚠️ [翻唱引擎] 紙條傳送失敗 ({e})")
+        log_print(f"⚠️ [翻唱引擎] 紙條傳送失敗 ({e})")
         return False
 
 def _ensure_orchestrator():
@@ -544,13 +544,13 @@ async def scan_originals_once():
             log_swallowed()
         _ORIG_PREPARING.add(safe)
         try:
-            print(f"👀 [自創曲感測] 發現新檔《{f}》，背景自動 RVC（備好等點，不自動開唱）。")
+            log_print(f"👀 [自創曲感測] 發現新檔《{f}》，背景自動 RVC（備好等點，不自動開唱）。")
             vocal, _inst = await prepare_cover_song(
                 title, source_mp3=os.path.join(hc.ORIGINALS_DIR, f), origin="original")
             if vocal:
                 done.append(title)
         except Exception as e:
-            print(f"⚠️ [自創曲感測] 《{title}》背景準備失敗: {e}")
+            log_print(f"⚠️ [自創曲感測] 《{title}》背景準備失敗: {e}")
         finally:
             _ORIG_PREPARING.discard(safe)
     return done
@@ -565,7 +565,7 @@ async def originals_watch_worker():
         try:
             await scan_originals_once()
         except Exception as e:
-            print(f"⚠️ [自創曲感測異常]: {e}")
+            log_print(f"⚠️ [自創曲感測異常]: {e}")
         await asyncio.sleep(ORIGINAL_WATCH_SEC)
 
 def request_cover_song(song_name: str, requester: str = "", source_mp3: str = "", origin: str = "") -> str:
@@ -636,7 +636,7 @@ async def _run_with_heartbeat(awaitable_fn, label: str, song: str, interval: flo
             if done:
                 break
             el = int(_t.time() - t0)
-            print(f"⏳ [{label}進行中] 《{song}》…已跑 {el // 60}分{el % 60:02d}秒，還在跑（不是空轉）。")
+            log_print(f"⏳ [{label}進行中] 《{song}》…已跑 {el // 60}分{el % 60:02d}秒，還在跑（不是空轉）。")
             try:
                 import services.web_dashboard as web_dash
                 web_dash.broadcast_event("rvc_progress", {
@@ -667,12 +667,12 @@ async def _prepare_worker(item, gen: int):
         vocal, inst = await prepare_cover_song(title, source_mp3=item.get("source_mp3", ""),
                                                origin=item.get("origin", ""))
         if gen != _PIPELINE_GEN:
-            print(f"🛑 [翻唱隊列] 《{title}》準備完成但已被停止，丟棄不上台。")
+            log_print(f"🛑 [翻唱隊列] 《{title}》準備完成但已被停止，丟棄不上台。")
             return
         if vocal:
             READY_SONGS.append({"title": title, "vocal": vocal, "inst": inst,
                                 "requester": item.get("requester", ""), "gen": gen})
-            print(f"✅ [翻唱隊列] 《{title}》背景準備完成，已排入待播！")
+            log_print(f"✅ [翻唱隊列] 《{title}》背景準備完成，已排入待播！")
         else:
             _ACTIVE_TITLES.discard(_dedupe_key(title))
             try:
@@ -691,7 +691,7 @@ async def _prepare_worker(item, gen: int):
     except asyncio.CancelledError:
         raise
     except Exception as e:
-        print(f"❌ [翻唱準備異常] 《{title}》: {e}")
+        log_print(f"❌ [翻唱準備異常] 《{title}》: {e}")
         _ACTIVE_TITLES.discard(_dedupe_key(title))
         if gen == _PIPELINE_GEN:
             _send_brain_slip(f"[系統提示：剛才點的《{title}》背景準備失敗（下載／分離／轉換卡住），請自然地跟大家說這首先跳過、可以再點別首！]")
@@ -704,7 +704,7 @@ async def play_prepared_song(title: str, vocal_path: str, inst_path: str, gen: i
         _asked = _REQUESTED_AT.pop(key, 0.0)
         await wait_for_intro_speech_complete(reply_deadline=_asked + INTRO_REPLY_WAIT_SEC if _asked else 0.0)
         if gen != _PIPELINE_GEN:
-            print(f"🛑 [翻唱隊列] 《{title}》開唱前已被停止，跳過。")
+            log_print(f"🛑 [翻唱隊列] 《{title}》開唱前已被停止，跳過。")
             return f"《{title}》已停止，不開唱。"
         _NOW_PLAYING_TITLE = title
         # 混用會合：等鋼琴旗（300 秒不到就自己先唱，不綁架）；同一首歌排共同起點，開播後鋼琴照人聲校時
@@ -730,7 +730,7 @@ async def play_prepared_song(title: str, vocal_path: str, inst_path: str, gen: i
     except asyncio.CancelledError:
         raise
     except Exception as e:
-        print(f"❌ [翻唱開唱異常] 《{title}》: {e}")
+        log_print(f"❌ [翻唱開唱異常] 《{title}》: {e}")
         return f"《{title}》開唱失敗，跳過。"
     finally:
         _NOW_PLAYING_TITLE = ""
@@ -747,7 +747,7 @@ async def play_prepared_song(title: str, vocal_path: str, inst_path: str, gen: i
     depth = len(SONG_REQUEST_QUEUE) + len(READY_SONGS)
     tail = f"後面還有 {depth} 首在排隊，再接著唱！" if depth > 0 else ""
     _send_brain_slip(f"[系統提示：妳剛才演唱完畢了歌曲《{title}》，請自然地向老爸與觀眾謝幕，可以順便問問他們覺得好不好聽！{tail}]")
-    print(f"🚨 [翻唱引擎] 已將謝幕指示塞給 Live 主腦，由主腦動態接管發言！")
+    log_print(f"🚨 [翻唱引擎] 已將謝幕指示塞給 Live 主腦，由主腦動態接管發言！")
     return f"謝謝大家～剛才唱給大家的是 7L 的翻唱歌曲《{title}》！希望老爸喜歡～"
 
 _PREPARING = set()  # 正在背景準備的 (origin, 去重鍵)：同首併發只做一次
@@ -769,7 +769,7 @@ def _prepare_singleflight(fn):
                 break
             if el - _logged >= 30.0:
                 _logged = el
-                print(f"⏳ [準備併發等待] 《{song_name}》另一路正在準備，等它做完不重開 GPU（已等 {el:.0f}s）。")
+                log_print(f"⏳ [準備併發等待] 《{song_name}》另一路正在準備，等它做完不重開 GPU（已等 {el:.0f}s）。")
             await asyncio.sleep(3.0)
         _PREPARING.add(key)
         try:
@@ -813,7 +813,7 @@ async def prepare_cover_song(song_name: str, source_mp3: str = "", origin: str =
             except Exception:
                 log_swallowed()
             if is_fake:
-                print(f"🧹 [清除無效假快取] 檢測到《{song_name}》為未經 RVC 置換之舊版原唱快取，立即刪除！")
+                log_print(f"🧹 [清除無效假快取] 檢測到《{song_name}》為未經 RVC 置換之舊版原唱快取，立即刪除！")
                 try:
                     os.remove(cached_vocal)
                 except Exception:
@@ -825,7 +825,7 @@ async def prepare_cover_song(song_name: str, source_mp3: str = "", origin: str =
         if not play_vocal:
             vocal_raw = os.path.join(CACHE_DIR, f"{safe_name}_vocals.wav")
             if os.path.exists(vocal_raw) and os.path.exists(cached_inst) and os.path.getsize(vocal_raw) > 100000:
-                print(f"⚡ [人聲伴奏已分離] 直接啟動 7L 曉伊 RVC 少女歌聲置換 (整首統一音域判決): 《{song_name}》...")
+                log_print(f"⚡ [人聲伴奏已分離] 直接啟動 7L 曉伊 RVC 少女歌聲置換 (整首統一音域判決): 《{song_name}》...")
                 rvc_ok = await _run_with_heartbeat(
                     lambda: asyncio.to_thread(pitch_shift_vocal_to_female, vocal_raw, cached_vocal, 0.0),
                     "RVC 聲線置換", song_name)
@@ -835,7 +835,7 @@ async def prepare_cover_song(song_name: str, source_mp3: str = "", origin: str =
         # 若命中快取或已極速轉換完畢，直接回傳備好路徑（開唱由調度器執行）
         if play_vocal:
             play_inst = cached_inst if (os.path.exists(cached_inst) and os.path.getsize(cached_inst) > 100000) else None
-            print(f"💾 [7L 專屬翻唱庫] 命中已就緒之獨立人聲與伴奏: 《{song_name}》 (雙軌同步即時放音)")
+            log_print(f"💾 [7L 專屬翻唱庫] 命中已就緒之獨立人聲與伴奏: 《{song_name}》 (雙軌同步即時放音)")
             try:
                 import services.web_dashboard as web_dash
                 web_dash.broadcast_event("rvc_progress", {
@@ -845,7 +845,7 @@ async def prepare_cover_song(song_name: str, source_mp3: str = "", origin: str =
                 pass
             return play_vocal, play_inst
 
-        print(f"🚀 [7L 全自動翻唱引擎啟動] 目標曲目: 《{song_name}》")
+        log_print(f"🚀 [7L 全自動翻唱引擎啟動] 目標曲目: 《{song_name}》")
         try:
             import services.web_dashboard as web_dash
             web_dash.broadcast_event("rvc_progress", {
@@ -865,10 +865,10 @@ async def prepare_cover_song(song_name: str, source_mp3: str = "", origin: str =
             except Exception:
                 pass
             if not source_mp3 or not os.path.exists(source_mp3):
-                print(f"❌ [自創曲缺檔] 《{song_name}》的 MP3 還沒丟進 songs_library/originals。")
+                log_print(f"❌ [自創曲缺檔] 《{song_name}》的 MP3 還沒丟進 songs_library/originals。")
                 return None, None
             if not await asyncio.to_thread(_convert_local_to_raw, source_mp3, raw_wav):
-                print(f"❌ [自創曲轉檔失敗] 《{song_name}》")
+                log_print(f"❌ [自創曲轉檔失敗] 《{song_name}》")
                 return None, None
             success = True
         else:
@@ -878,7 +878,7 @@ async def prepare_cover_song(song_name: str, source_mp3: str = "", origin: str =
             try:
                 web_dash.broadcast_event("rvc_progress", {"active": False, "stage": "下載失敗", "percent": 0})
             except Exception: pass
-            print(f"❌ [翻唱準備失敗] 在 YouTube 找不到《{song_name}》可用的高音質音軌。")
+            log_print(f"❌ [翻唱準備失敗] 在 YouTube 找不到《{song_name}》可用的高音質音軌。")
             return None, None
 
         try:
@@ -890,7 +890,7 @@ async def prepare_cover_song(song_name: str, source_mp3: str = "", origin: str =
         # 步驟 2: 分離伴奏與人聲（幾分鐘級，掛心跳以免看起來空轉）
         _waited = await _let_her_finish_talking()
         if _waited >= 0.5:
-            print(f"⏳ [人聲分離] 先等她講完應答（{_waited:.1f} 秒）再開始分離，免得跟語音合成搶顯卡")
+            log_print(f"⏳ [人聲分離] 先等她講完應答（{_waited:.1f} 秒）再開始分離，免得跟語音合成搶顯卡")
         _tag = "orig_" if (origin or "") == "original" else ""
         vocal_wav, inst_wav = await _run_with_heartbeat(
             lambda: asyncio.to_thread(separate_stems_gpu, raw_wav, song_name, _tag),
@@ -908,12 +908,12 @@ async def prepare_cover_song(song_name: str, source_mp3: str = "", origin: str =
             lambda: asyncio.to_thread(pitch_shift_vocal_to_female, vocal_wav, trans_vocal, 0.0),
             "RVC 聲線置換", song_name)
         if not rvc_ok or not os.path.exists(trans_vocal) or os.path.getsize(trans_vocal) < 10000:
-            print("❌ [翻唱管線中斷] RVC 神經歌聲置換未成功，終止播放避免直出原唱！")
+            log_print("❌ [翻唱管線中斷] RVC 神經歌聲置換未成功，終止播放避免直出原唱！")
             return None, None
 
         return trans_vocal, inst_wav
     except Exception as e:
-        print(f"❌ [翻唱準備異常] 《{song_name}》: {e}")
+        log_print(f"❌ [翻唱準備異常] 《{song_name}》: {e}")
         return None, None
 
 async def play_cover_audio(vocal_path: str, song_name: str, inst_path: str = None, start_at: float = None, on_start=None):
@@ -957,9 +957,9 @@ async def play_cover_audio(vocal_path: str, song_name: str, inst_path: str = Non
             from services.audio_analysis import extract_audio_mouth_envelope
             stage.CURRENT_MOUTH_ENVELOPE = await asyncio.to_thread(extract_audio_mouth_envelope, snd_vocal, 25)
             stage.CURRENT_SMOOTH_MOUTH = 0.0
-            print("👄 [口型同步] 成功將【純人聲音軌】波形包絡同步至 Live2D 對嘴中樞（100% 精準對嘴，零伴奏雜音干擾）！")
+            log_print("👄 [口型同步] 成功將【純人聲音軌】波形包絡同步至 Live2D 對嘴中樞（100% 精準對嘴，零伴奏雜音干擾）！")
         except Exception as env_err:
-            print(f"⚠️ [口型波形提取警告]: {env_err}")
+            log_print(f"⚠️ [口型波形提取警告]: {env_err}")
 
         # 🎛️ 專業立體聲即時動態混音平衡：人聲清晰飽滿 (0.67)，伴奏音樂襯托 (0.55)
         ch_vocal.set_volume(0.67)
@@ -983,7 +983,7 @@ async def play_cover_audio(vocal_path: str, song_name: str, inst_path: str = Non
             try:
                 on_start(stage.CURRENT_SPEECH_START_TIME)
             except Exception as sync_err:
-                print(f"⚠️ [彈唱同步] 鋼琴校時失敗: {sync_err}")
+                log_print(f"⚠️ [彈唱同步] 鋼琴校時失敗: {sync_err}")
         if _HOST:
             _core_set_ai_state("SINGING", f"雙軌齊發《{song_name}》")
             
@@ -1000,7 +1000,7 @@ async def play_cover_audio(vocal_path: str, song_name: str, inst_path: str = Non
                 spawn(_toggle_mic(True))
 
         inst_info = " + 獨立伴奏雙軌同步" if snd_inst else " (純人聲清唱)"
-        print(f"🎤 [7L 舞台開唱] 正在演唱《{song_name}》（7L 甜妹主唱{inst_info}）！")
+        log_print(f"🎤 [7L 舞台開唱] 正在演唱《{song_name}》（7L 甜妹主唱{inst_info}）！")
         
         # 完整播放整首歌曲，雙軌皆播畢或被手動指令中斷
         while (ch_vocal.get_busy() or (snd_inst and ch_inst.get_busy())) and IS_SINGING_ACTIVE:
@@ -1009,9 +1009,9 @@ async def play_cover_audio(vocal_path: str, song_name: str, inst_path: str = Non
                 stage.clear_mouth()
             await asyncio.sleep(0.3)
             
-        print(f"✨ [7L 舞台開唱] 《{song_name}》演唱完畢！")
+        log_print(f"✨ [7L 舞台開唱] 《{song_name}》演唱完畢！")
     except Exception as e:
-        print(f"❌ [播放異常]: {e}")
+        log_print(f"❌ [播放異常]: {e}")
     finally:
         IS_SINGING_ACTIVE = False
         stage.notify_change()

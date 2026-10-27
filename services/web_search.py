@@ -100,7 +100,7 @@ def search_google(query: str) -> str:
     Args:
         query: 要搜尋的關鍵字或問題描述
     """
-    print(f"\n🔍 [Tool 調用] 7L 正在使用 Google / 網路搜尋: 「{query}」")
+    log_print(f"\n🔍 [Tool 調用] 7L 正在使用 Google / 網路搜尋: 「{query}」")
     try:
         is_news_query = any(k in query for k in ["新聞", "時事", "今天", "昨天", "最新", "發生什麼", "快訊", "熱搜", "熱門", "突發", "大事"])
         topic_mode = "news" if is_news_query else "general"
@@ -128,10 +128,10 @@ def search_google(query: str) -> str:
                     snippets = [f"- {r.get('title', '')}: {r.get('body', '')}" for r in results]
                     return "\n".join(snippets)
         except Exception as e_ddg:
-            print(f"\n⚠️ [DuckDuckGo 搜尋失敗]: {e_ddg}")
+            log_print(f"\n⚠️ [DuckDuckGo 搜尋失敗]: {e_ddg}")
         return "搜尋無結果。"
     except Exception as e:
-        print(f"\n❌ [搜尋 Tool 異常]: {e}")
+        log_print(f"\n❌ [搜尋 Tool 異常]: {e}")
         return f"搜尋時發生錯誤: {e}"
 
 async def summarize_search_to_speech(query: str, search_raw: str, user_role_name: str = "") -> str:

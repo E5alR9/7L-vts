@@ -28,6 +28,7 @@ from typing import Any, Dict, List, Optional
 
 from core import usage
 from core.env_config import load_project_env
+from core.utils import log_print
 
 load_project_env()   # 下面載入時就讀 GROQ 金鑰：誰先 import 本模組都一樣
 
@@ -162,10 +163,10 @@ _MODELS_RETRY = 120.0        # 抓取失敗後 2 分鐘才重試，避免每次�
 def _log(msg: str) -> None:
     """安全輸出（Windows cp950 主控台印不出部分字元時自動降級）"""
     try:
-        print(msg)
+        log_print(msg)
     except Exception:
         try:
-            print(msg.encode("utf-8", "replace").decode("ascii", "replace"))
+            log_print(msg.encode("utf-8", "replace").decode("ascii", "replace"))
         except Exception:
             pass
 

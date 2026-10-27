@@ -8,6 +8,7 @@ import uuid
 # Firebase DB integration
 import core.db as db_module
 import services.rag_store as rag_store
+from core.utils import log_print
 
 _initialized = False
 
@@ -17,7 +18,7 @@ def init_rag(api_key: str):
     # but we will just pass it to the environment in case embedder.py needs fallback.
     os.environ["GEMINI_API_KEY"] = api_key
     _initialized = True
-    print("🧠 [RAG 記憶中樞] 已準備完畢 (本地 ChromaDB + 雲端 Firestore 同步)")
+    log_print("🧠 [RAG 記憶中樞] 已準備完畢 (本地 ChromaDB + 雲端 Firestore 同步)")
 
 async def add_rag_memory(content: str, source: str = "dialogue", viewer: str = ""):
     """
@@ -49,7 +50,7 @@ async def add_rag_memory(content: str, source: str = "dialogue", viewer: str = "
     try:
         await asyncio.to_thread(_do_upsert)
     except Exception as e:
-        print(f"⚠️ [RAG 本地寫入失敗]: {e}")
+        log_print(f"⚠️ [RAG 本地寫入失敗]: {e}")
     
     # 2. Sync to Cloud Firestore (Without dense vectors to save space, just content & metadata)
     # We use firestore for exact match or general backup of RAG data.
@@ -60,7 +61,7 @@ async def add_rag_memory(content: str, source: str = "dialogue", viewer: str = "
             await db_module.db.collection("rag_memories").document(mem_id).set(cloud_record)
             # print(f"☁️ [RAG 雲端同步] 記憶已備份至 Firestore")
         except Exception as e:
-            print(f"⚠️ [RAG 雲端同步失敗]: {e}")
+            log_print(f"⚠️ [RAG 雲端同步失敗]: {e}")
 
 async def search_rag_memory(query: str, top_k: int = 3, where: dict = None) -> list:
     """
@@ -73,7 +74,7 @@ async def search_rag_memory(query: str, top_k: int = 3, where: dict = None) -> l
         results = await asyncio.to_thread(_do_search)
         return results
     except Exception as e:
-        print(f"⚠️ [RAG 檢索失敗]: {e}")
+        log_print(f"⚠️ [RAG 檢索失敗]: {e}")
         return []
 
 # ── 回話前查相關舊記憶（2026-10-26）：以前每句對話都存進向量庫，從來沒有人查 ──
@@ -230,10 +231,10 @@ async def related_memories_block(query: str, k: int = RELATED_MAX, timeout: floa
     try:
         picked = await asyncio.wait_for(_collect(), timeout)   # 整段一個時限（以前每次查各算 1.5 秒）
     except asyncio.TimeoutError:
-        print("⚠️ [RAG 檢索] 超過時限，這次不附舊記憶")
+        log_print("⚠️ [RAG 檢索] 超過時限，這次不附舊記憶")
         return ""
     except Exception as e:
-        print(f"⚠️ [RAG 檢索失敗]: {e}")
+        log_print(f"⚠️ [RAG 檢索失敗]: {e}")
         return ""
     seen, uniq = set(), []
     for p in picked:

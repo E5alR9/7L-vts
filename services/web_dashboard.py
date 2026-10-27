@@ -8,7 +8,7 @@ from aiohttp import web
 
 from datetime import datetime
 import logging
-from core.utils import record_interaction_tick, spawn
+from core.utils import log_print, record_interaction_tick, spawn
 from core.paths import ROOT_DIR
 
 # 🔇 關閉 aiohttp.access 日誌，避免輪詢視覺畫面或狀態時在終端洗版
@@ -554,7 +554,7 @@ async def ws_handler(request):
             }, ensure_ascii=False))
         except (TypeError, ValueError) as je:
             # 如果 initial_state 或 TOOL_HISTORY 仍有問題，發送一個最簡版 init
-            print(f"⚠️ [Web後台 init 序列化失敗，發送精簡版]: {je}")
+            log_print(f"⚠️ [Web後台 init 序列化失敗，發送精簡版]: {je}")
             await ws.send_str(json.dumps({
                 "type": "init",
                 "timestamp": time.time(),
@@ -636,7 +636,7 @@ async def ws_handler(request):
                             REJECT_YT_COMPANION_CALLBACK()
                             await ws.send_str(json.dumps({"type": "yt_companion_status", "data": {"ok": True, "status": "rejected"}}, ensure_ascii=False))
                 except Exception as ex:
-                    print(f"⚠️ [Web後台 WS處理異常]: {ex}")
+                    log_print(f"⚠️ [Web後台 WS處理異常]: {ex}")
     finally:
         CONNECTED_CLIENTS.discard(ws)
     return ws
@@ -1183,7 +1183,7 @@ async def perform_restart():
             if asyncio.iscoroutine(res):
                 await res
         except Exception as e:
-            print(f"⚠️ [Web後台] 執行 RESTART_CALLBACK 失敗: {e}")
+            log_print(f"⚠️ [Web後台] 執行 RESTART_CALLBACK 失敗: {e}")
     try:
         import services.piano_engine as pe
         if pe.current_piano_process and pe.current_piano_process.poll() is None:
@@ -1198,7 +1198,7 @@ async def perform_restart():
     try:
         subprocess.Popen([sys.executable] + sys.argv)
     except Exception as e:
-        print(f"⚠️ [Web後台] 重啟主進程失敗: {e}")
+        log_print(f"⚠️ [Web後台] 重啟主進程失敗: {e}")
     os._exit(0)
 
 async def api_restart(request):
@@ -1500,14 +1500,14 @@ async def start_web_dashboard(
         try:
             site = web.TCPSite(runner, BIND_HOST, bind_port)
             await site.start()
-            print(f"\n🌐 [7L Web 後台] 已成功在 http://127.0.0.1:{bind_port} 啟動！")
-            print(f"👉 本機瀏覽器請開啟：http://localhost:{bind_port}\n")
+            log_print(f"\n🌐 [7L Web 後台] 已成功在 http://127.0.0.1:{bind_port} 啟動！")
+            log_print(f"👉 本機瀏覽器請開啟：http://localhost:{bind_port}\n")
             spawn(telemetry_broadcast_worker())
             return
         except OSError as e:
             if getattr(e, 'errno', None) in (10048, 48, 98) or "10048" in str(e):
                 if attempt < 2:
-                    print(f"⚠️ [7L Web 後台] 連接埠 {bind_port} 正在釋放中，正在重試 ({attempt+1}/3)...")
+                    log_print(f"⚠️ [7L Web 後台] 連接埠 {bind_port} 正在釋放中，正在重試 ({attempt+1}/3)...")
                     await asyncio.sleep(1.2)
                     continue
                 else:
@@ -1516,14 +1516,14 @@ async def start_web_dashboard(
                     try:
                         site = web.TCPSite(runner, BIND_HOST, bind_port)
                         await site.start()
-                        print(f"\n🌐 [7L Web 後台] 連接埠 {port} 佔用，已自動切換至備援連接埠 http://127.0.0.1:{bind_port} 啟動！")
-                        print(f"👉 本機瀏覽器請開啟：http://localhost:{bind_port}\n")
+                        log_print(f"\n🌐 [7L Web 後台] 連接埠 {port} 佔用，已自動切換至備援連接埠 http://127.0.0.1:{bind_port} 啟動！")
+                        log_print(f"👉 本機瀏覽器請開啟：http://localhost:{bind_port}\n")
                         spawn(telemetry_broadcast_worker())
                         return
                     except Exception:
                         pass
-            print(f"⚠️ [7L Web 後台] 啟動失敗: {e}")
+            log_print(f"⚠️ [7L Web 後台] 啟動失敗: {e}")
             return
         except Exception as e:
-            print(f"⚠️ [7L Web 後台] 啟動失敗: {e}")
+            log_print(f"⚠️ [7L Web 後台] 啟動失敗: {e}")
             return

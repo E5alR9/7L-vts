@@ -40,6 +40,7 @@ except Exception:
 from infer.module.models import SynthesizerTrnMs768NSFsid
 from infer.hubert import load_hubert_model
 from infer.vc.pipeline import Pipeline
+from core.utils import log_print
 
 # 精度開關（2026-10-11：fp16 換 fp32 拉滿，慢幾秒無所謂；改 True 切回半精度）。
 _USE_HALF = False
@@ -60,14 +61,14 @@ _DEVICE = "cuda:0" if torch.cuda.is_available() else "cpu"
 def get_hubert():
     global _HUBERT_MODEL
     if _HUBERT_MODEL is None:
-        print(f"📦 [神經語音引擎] 載入 HuBERT 聲學特徵模型 ({_DEVICE}, {'FP16' if _USE_HALF else 'FP32'})...")
+        log_print(f"📦 [神經語音引擎] 載入 HuBERT 聲學特徵模型 ({_DEVICE}, {'FP16' if _USE_HALF else 'FP32'})...")
         _HUBERT_MODEL = load_hubert_model(_DEVICE, is_half=_USE_HALF)
     return _HUBERT_MODEL
 
 def get_net_g(model_pth: str):
     global _NET_G_CACHE
     if model_pth not in _NET_G_CACHE:
-        print(f"📦 [神經語音引擎] 載入合成器網絡權重: {os.path.basename(model_pth)}...")
+        log_print(f"📦 [神經語音引擎] 載入合成器網絡權重: {os.path.basename(model_pth)}...")
         cpt = torch.load(model_pth, map_location="cpu")
         config = cpt["config"]
         tgt_sr = config[-1]
@@ -116,7 +117,7 @@ def convert_vocal_to_xiaoyi(
                 index_file = idx_backup
 
     if not os.path.exists(model_pth):
-        print(f"⚠️ 找不到模型權重: {model_pth}，跳過神經轉換")
+        log_print(f"⚠️ 找不到模型權重: {model_pth}，跳過神經轉換")
         return False
 
     valid_index = ""
@@ -127,7 +128,7 @@ def convert_vocal_to_xiaoyi(
             if _idx.d == 768:
                 valid_index = index_file
         except Exception as e:
-            print(f"⚠️ [神經語音引擎] 特徵索引載入失敗，這次不帶索引轉換（音色會比較不像）：{e}")
+            log_print(f"⚠️ [神經語音引擎] 特徵索引載入失敗，這次不帶索引轉換（音色會比較不像）：{e}")
 
     t0 = time.time()
     try:
@@ -177,7 +178,7 @@ def convert_vocal_to_xiaoyi(
             rvc_key = key
             pitch_mode_str = f"固定 key={key:+0.1f}"
 
-        print(f"🎤 [7L 專屬聲線置換中] 正在透過 7L 專屬音色模型置換原唱 (模型={model_name}, 音高模式={pitch_mode_str}, rmvpe)...")
+        log_print(f"🎤 [7L 專屬聲線置換中] 正在透過 7L 專屬音色模型置換原唱 (模型={model_name}, 音高模式={pitch_mode_str}, rmvpe)...")
         
         try:
             import services.web_dashboard as web_dash
@@ -210,7 +211,7 @@ def convert_vocal_to_xiaoyi(
         )
         
         sf.write(output_wav, audio_opt, tgt_sr)
-        print(f"🎉 [7L 聲線置換完成] 已生成 7L 專屬翻唱歌聲音軌！(耗時: {time.time()-t0:.2f}s)")
+        log_print(f"🎉 [7L 聲線置換完成] 已生成 7L 專屬翻唱歌聲音軌！(耗時: {time.time()-t0:.2f}s)")
         
         try:
             import services.web_dashboard as web_dash
@@ -236,6 +237,6 @@ def convert_vocal_to_xiaoyi(
             })
         except Exception:
             pass
-        print(f"❌ [7L 聲線置換失敗]: {e}")
+        log_print(f"❌ [7L 聲線置換失敗]: {e}")
         traceback.print_exc()
         return False

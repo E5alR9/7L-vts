@@ -17,7 +17,7 @@ import re
 import shutil
 import threading
 import time
-from core.utils import log_swallowed
+from core.utils import log_print, log_swallowed
 from core.paths import ROOT_DIR
 
 MODEL_FILENAME = "model_bs_roformer_ep_317_sdr_12.9755.ckpt"
@@ -121,7 +121,7 @@ def _monitor(buf: _TqdmCapture, stop: threading.Event, song_name: str,
         if el - last_beat >= beat:
             last_beat = el
             tag = f" {pct}%" if pct is not None else ""
-            print(f"🎤 [Roformer 分離中] 《{song_name}》{tag}（已跑 {el:.0f}s，未空轉）")
+            log_print(f"🎤 [Roformer 分離中] 《{song_name}》{tag}（已跑 {el:.0f}s，未空轉）")
     pct = _parse_percent(buf.snapshot())
     if pct is not None and progress_cb and pct > last_pct:
         try:
@@ -137,10 +137,10 @@ def preload_roformer(work_dir: str) -> bool:
         os.makedirs(work_dir, exist_ok=True)
         t0 = time.time()
         _get_separator(work_dir)
-        print(f"✅ [Roformer 預載完成] 常駐 VRAM（{time.time() - t0:.1f}s），首歌不撞 TTS。")
+        log_print(f"✅ [Roformer 預載完成] 常駐 VRAM（{time.time() - t0:.1f}s），首歌不撞 TTS。")
         return True
     except Exception as e:
-        print(f"⚠️ [Roformer 預載失敗（首歌再載）]: {e}")
+        log_print(f"⚠️ [Roformer 預載失敗（首歌再載）]: {e}")
         return False
 
 
@@ -156,7 +156,7 @@ def separate_roformer(input_wav: str, vocals_out: str, inst_out: str,           
     try:
         sep = _get_separator(work_dir)
     except Exception as e:
-        print(f"⚠️ [Roformer 載入失敗，降級]: {e}")
+        log_print(f"⚠️ [Roformer 載入失敗，降級]: {e}")
         return False
     buf = _TqdmCapture()
     stop = threading.Event()
@@ -166,20 +166,20 @@ def separate_roformer(input_wav: str, vocals_out: str, inst_out: str,           
         with contextlib.redirect_stderr(buf):
             outs = sep.separate(input_wav)
     except Exception as e:
-        print(f"⚠️ [Roformer 分離異常，降級]: {e}")
+        log_print(f"⚠️ [Roformer 分離異常，降級]: {e}")
         return False
     finally:
         stop.set()
         mon.join(timeout=5)
     voc, ins = _pick_stems(outs or [], work_dir)
     if not voc or not ins:
-        print(f"⚠️ [Roformer 未產出雙 stems（outs={outs}），降級]")
+        log_print(f"⚠️ [Roformer 未產出雙 stems（outs={outs}），降級]")
         return False
     try:
         shutil.copy2(voc, vocals_out)
         shutil.copy2(ins, inst_out)
     except Exception as e:
-        print(f"⚠️ [Roformer 拷檔失敗，降級]: {e}")
+        log_print(f"⚠️ [Roformer 拷檔失敗，降級]: {e}")
         return False
-    print(f"✨ [Roformer 分離成功] 《{label}》耗時 {time.time() - t0:.0f}s")
+    log_print(f"✨ [Roformer 分離成功] 《{label}》耗時 {time.time() - t0:.0f}s")
     return True
