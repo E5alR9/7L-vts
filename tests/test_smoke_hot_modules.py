@@ -1,7 +1,7 @@
 """熱模組冒煙測試（2026-10-10 全庫審計第 9 項：六個零覆蓋模組）。
 
-這六個模組是直播命脈，但 100+ 條測試沒有一條碰過它們——改壞了單元測試
-不會紅、只有直播才會炸。這裡補最低限度的保險：
+這六個模組是直播命脈，當時沒有任何測試碰過（現在各自都有專門測試了），
+這裡留著最低限度的保險：
 
 1. import 得動（抓語法錯誤、缺依賴、模組層炸彈）
 2. 幾個「純函數」的輸入輸出（抓被順手改壞的邏輯）
@@ -16,7 +16,7 @@ import pytest
 HOT_MODULES = [
     "core.memory",            # 記憶讀寫（黑板/統一記憶/觀眾檔案）
     "core.prompts",           # prompt 組裝與文字清洗
-    "core.llm_engine",        # REST 主腦與 Live 金鑰調度
+    "core.llm_engine",        # 模型名稱、金鑰池、冷卻表
     "services.piano_engine",  # 鋼琴
     "services.vts_client",    # VTS API（表情/走位）
     "services.tiktok_listener",  # TikTok 彈幕

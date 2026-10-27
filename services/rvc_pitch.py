@@ -1,12 +1,10 @@
 # -*- coding: utf-8 -*-
-"""RVC 整首統一音域判決＋高音三明治（僅依賴 numpy/librosa/soundfile，均為專案既有依賴）。
+"""RVC 整首統一音域判決（僅依賴 numpy/librosa/soundfile，均為專案既有依賴）。
 
 背景：以前逐樂句各自判決（中位數 < 195Hz 的樂句 +12、其餘不動），
 混合音域的歌會在樂句邊界忽高忽低（2026-10-09 直播事故）。
 現在：先掃完全部樂句，以「發聲時長加權的低音占比」做整首統一判決——
 整體偏低就全曲 +12，否則全曲不動，同首歌內絕不跳變。
-原曲整體偏高時 RVC 硬轉高音會破音：改走三明治（先 -12 降中音域轉換，
-出來再 +12 拉回原調），神經合成全程待在最穩的中音域。
 """
 import os
 from typing import Iterable, Tuple
@@ -121,7 +119,7 @@ DSP_CEILING = 0.95
 
 def _shift_octave_librosa(work_in: str, out_path: str, semitones: float) -> bool:
     """librosa phase-vocoder 備援（慢但一定有；無共振峰保留）。
-    成功回 True；任何失敗直接拋給呼叫方轉 False。"""
+    成功就寫好 out_path；任何失敗直接拋給呼叫方轉 False。"""
     import numpy as np
     import librosa
     import soundfile as sf

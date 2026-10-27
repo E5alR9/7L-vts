@@ -595,7 +595,8 @@ VISION_TIME_BUDGET_SEC = 15.0   # 餘光視覺一次最多花這麼久（超過�
 
 @usage.role_scope("餘光視覺")
 async def get_lightweight_gemini_vision(image_base64: str, temporal_frames: list | None = None, prompt: str = "") -> str:
-    """PROVIDER: GEMINI-VISION（3.1-flash-lite→3.6-flash；見 docs/AI_SOURCES.md） 【3.1-flash-lite 深度視覺認真看】：受 Live API 哨兵喚醒時才精準啟動，支援傳入上次看到現在的所有時序影格，形成動態視覺感知。"""
+    """PROVIDER: GEMINI-VISION（GEMINI_MODELS 梯隊，模型名只在 core/llm_engine；見 docs/AI_SOURCES.md）
+    【深度視覺認真看】：受 Live API 哨兵喚醒時才啟動，可傳入上次看到現在的時序影格，形成動態視覺感知。"""
     if not image_base64:
         return ""
         
@@ -1590,7 +1591,7 @@ def is_7l_voice_echo(stt_text: str, is_dad_verified: bool = False) -> bool:
         return False
 
     #  1. 老爸專屬呼喚 / 指令前綴豁免保護 (支援半形與全形同音詞)：
-    # 7L 自身發話絕不可能以「7L」、「阿七」、「CL」、「謝龍」自稱下指令
+    # 7L 自身發話絕不可能以「7L」、「阿七」自稱下指令
     call_names = [
         "7l", "七l",
         "阿七", "小七", "七妹", "7妹", "7哥", "七哥"
@@ -2438,7 +2439,7 @@ async def check_screen_change_via_live_api(img_bytes: bytes, current_context: st
     """ 【Live API 餘光視覺哨兵】：
     利用 Live API 無限額度特性保持雙眼實時看著螢幕畫面，
     絕不輸出冗長描述，只負責極速判定畫面是否有重大全新變化/新事件/新視窗 ([NO_CHANGE] vs [LOOK_SERIOUS])，
-    徹底替老爸節省 3.1-flash-lite 主力發話金鑰額度！
+    省下深度視覺（REST 輕量模型）的金鑰額度。
     """
     if not img_bytes or len(img_bytes) < 1000:
         return False
@@ -2614,8 +2615,7 @@ def shutdown_7l(restart: bool = False) -> None:
 
 def check_immediate_shutdown(text: str) -> bool:
     """毫秒級即時關機 / 重開機攔截：
-    必須帶有 7L / 阿七 等明確目標前綴（如「7L關機」、「7L重開機」、「阿七關機」，
-    並包含中文語音辨識 ASR 常見同音詞如「謝龍重開機」、「CL重開機」、「西L重開機」），
+    必須帶有 7L／七L／阿七／小七 明確目標前綴（如「7L關機」、「7L重開機」、「阿七關機」），
     或終端單獨輸入 exit / quit / reboot / restart，避免日常對話提及「關機」「重開」時誤觸。
     """
     if not text:
@@ -2642,7 +2642,7 @@ def check_immediate_shutdown(text: str) -> bool:
     has_target = any(name in clean_compact for name in target_names)
 
     #  即時重開機指令 (0.001s 安全硬中斷並自動重啟主程序)
-    # 支援：7L重開機、謝龍重開機、CL重開機、7L重啟、阿七重開機，或終端純輸入 reboot / restart
+    # 支援：7L重開機、7L重啟、阿七重開機，或終端純輸入 reboot / restart
     is_exact_restart = clean_compact in ["reboot", "restart", "7lreboot", "7lrestart"]
     restart_keywords = ["重開機", "重開", "重啟", "重新啟動", "重啟系統", "重新開機", "restart", "reboot"]
     has_restart_cmd = has_target and any(k in clean_compact for k in restart_keywords)
@@ -2653,7 +2653,7 @@ def check_immediate_shutdown(text: str) -> bool:
         return True
 
     #  即時安全退出 / 關機指令 (0.001s 安全硬終止)
-    # 支援：7L關機、謝龍關機、CL關機、7L強制關機、7L關閉系統、阿七關機，或終端純輸入 exit / quit / shutdown
+    # 支援：7L關機、7L強制關機、7L關閉系統、阿七關機，或終端純輸入 exit / quit / shutdown
     is_exact_shutdown = clean_compact in ["exit", "quit", "shutdown", "7lexit", "7lquit", "7lshutdown"]
     shutdown_keywords = [
         "關機", "強制關機", "強制關閉", "強制退出",
@@ -2985,7 +2985,7 @@ async def _slip_watchdog(prompt: str, sent_ts: float, timeout: float = 20.0, sli
     2026-10-11 擴大＋精準化：
     - 所有紙條都盯（聊天紙條裸奔會靜默丟失——「收到請回答」連啞兩次）；
     - 自主閒聊不盯（[SILENCE] 是合法答案，盯了只會狼來了＋催命連發）；
-    - 安靜判定＝工具＋說話＋服務端回包三無（舊碼只看工具，說話了也報警）。
+    - 安靜判定＝沒叫工具、這輪也沒說完（見 _slip_needs_rescue；服務端有回包不算，額度用完時照樣有回包）。
     - 真安靜：警告＋憑 rescue 賬本撿回一次（防循環）；演唱/睡覺中不打擾。
     例外：紙條裡的歌 CPU 已經在唱／排隊＝活幹完了，直接收工。
     """
@@ -3979,8 +3979,8 @@ async def peripheral_vision_worker():
     """ 【背景餘光雙層感知協程】：
     - 頂層哨兵：採用 Gemini Live API (3.8-live) 實時注視螢幕畫面（0 額度消耗、0 描述輸出），
       只極速判定 [NO_CHANGE] 還是 [LOOK_SERIOUS]。
-    - 深度眼睛：唯有 Live 哨兵判定出現全新重大視窗/報錯/事件時，才喚醒 3.1-flash-lite 認真細看一次！
-    - 徹底告別每 20 秒無謂消耗 3.1-flash-lite 說話額度的浪費行為。
+    - 深度眼睛：唯有 Live 哨兵判定出現全新重大視窗/報錯/事件時，才喚醒 get_lightweight_gemini_vision 認真細看一次，
+      不再每 20 秒白白消耗 REST 額度。
     """
     global HAS_INITIAL_VISION_LOOK, LAST_VISION_LOOK_TIME
     
@@ -4605,9 +4605,6 @@ def add_to_streamer_mind_board(user_display: str, unique_id: str, content: str, 
                 log_swallowed()
         spawn(evaluate_and_queue_with_gemini(content))
 
-# 8 大大腦優先順序梯隊 (頂配高智商旗艦大腦優先)
-
-
 # 2026-10-26 改兩處：以前「任何請求提問→老爸(請示)」，Groq 照字面把「7L 妳晚餐吃什麼」也轉給老爸（8 題對 5）；
 # 改成跟看板 REST 提示詞同一條規則（問她、找她就回觀眾，要老爸決定或承諾的才轉老爸），老爸那行寫明只認【老爸】。
 # 新版 Groq 跑三輪都 8/8、Live 8/8（舊版 Live 7/8）。
@@ -4933,7 +4930,7 @@ async def streamer_mind_loop_worker(vts, input_queue):
     """ 7L 主播記憶腦袋持續讀取與自由意志發話協程：
     1. 背景保持最新 100 句記憶上下文
     2. 透過無限額度 Live API 潛意識哨兵極速做發言時機判斷
-    3. 判定該開口時，喚醒 7 大主力大腦梯隊 (3.1 Flash Lite ➔ 3.5 ➔ 3.7) 讀取 100 句記憶精準開口！
+    3. 判定該開口時：Live 主腦在就遞紙條給它說，不在才用 rest_chat 讓 REST 大腦接手
     """
     global last_interaction_time
     log_print("🧠 [主播記憶腦袋]協程已就緒")
@@ -6120,7 +6117,7 @@ async def execute_reward_action(reason: str = "", level: int = None):
         return {"status": "error", "message": str(e)}
 
 async def chat_processor_worker(vts, input_queue):
-    """非同步雙核心對話派發器：老爸直連全能主腦，觀眾分流專屬 Live 管道，雙軌非阻塞異步平行思考！"""
+    """對話派發器：老爸的話直送主腦；直播間留言（TikTok／Twitch／YouTube）進記憶腦袋的看板，由哨兵決定要不要回。"""
     global current_dad_task, CURRENT_PROCESSING_USER_INPUT
 
     while True:
@@ -6224,7 +6221,7 @@ async def chat_processor_worker(vts, input_queue):
                 )
 
             # -------------------------------------------------------------
-            #  軌道 2：TikTok 直播專屬「記憶腦袋」滾動黑板 (tiktok / tiktok_gift)
+            #  軌道 2：直播間留言（TikTok／Twitch／YouTube）進「記憶腦袋」滾動黑板
             # -------------------------------------------------------------
             elif route == "audience":
                 # 誰、說了什麼：監聽器直接給（2026-10-26 起）。以前從「【TikTok 直播觀眾 X 留言】：…」用正則拆回來，

@@ -7,7 +7,8 @@ from services.youtube_live_listener import (
     parse_live_chat_response, build_queue_item as yt_item,
 )
 
-# ⚠️ 必須與 vts_7L_test.py 軌道2 的正則一致（那邊負責拆出暱稱/ID/內容）
+# 日誌／後台看的那一行格式。主程式 2026-10-26 起不再從這行拆暱稱和內容（直接用 viewer／content，
+# 見 test_queue_items_carry_who_and_what_separately），這裡只確認顯示格式沒跑掉
 TRACK2_RE = __import__("re").compile(
     r"【\w+ (?:直播觀眾|官方提問箱|直播動態)\s*([^\】]*?)\s*(?:留言|送禮|動態|提問)?】[：:]\s*(.*)"
 )
@@ -46,7 +47,7 @@ def test_twitch_parse_channels():
     assert parse_channels(None) == []
 
 
-def test_twitch_queue_item_matches_track2_regex():
+def test_twitch_queue_item_display_line():
     item = tw_item("someuser", "小夏子", "彈一首卡農！")
     m = TRACK2_RE.search(item["text"])
     assert m, f"軌道2 正則解析失敗: {item['text']}"
@@ -179,7 +180,7 @@ def test_parse_live_chat_response_empty_and_flat_shape():
     assert msgs[0]["message"] == "哈囉" and cont == "FLAT_CONT" and wait == 12.0
 
 
-def test_youtube_queue_item_matches_track2_regex():
+def test_youtube_queue_item_display_line():
     item = yt_item("路人甲", "早啊")
     m = TRACK2_RE.search(item["text"])
     assert m, f"軌道2 正則解析失敗: {item['text']}"

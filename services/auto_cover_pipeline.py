@@ -1,11 +1,10 @@
 """
-🎤 7L 全自動 AI 翻唱與伴奏混音管線 (7L Auto AI-Cover Pipeline)
+🎤 7L 全自動 AI 翻唱管線 (7L Auto AI-Cover Pipeline)
 流程：
-1. yt-dlp 向 YouTube 抓取高音質音訊
-2. Demucs / UVR5 AI 人聲伴奏分離 (RTX 3080 Ti 顯卡加速)
-3. 歌唱旋律保持 + 男聲轉少女音高 (+12 半音) 與音色濾波
-4. ffmpeg 專業伴奏 + 歌聲立體聲混音
-5. 存入 songs_library/ 本地曲庫秒播 + Live2D 舞台開唱
+1. yt-dlp 向 YouTube 抓音訊（先放一段原曲讓大家聽）
+2. Roformer 人聲／伴奏分離（等她講完應答再開始，跟語音合成搶顯卡）
+3. RVC 把人聲換成 7L 的聲音（整首統一判斷要不要升八度，見 rvc_pitch）
+4. 人聲、伴奏兩軌一起播，Live2D 嘴型跟著人聲動；成品留在 songs_library/cover_cache 下次秒播
 """
 
 import os

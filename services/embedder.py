@@ -11,8 +11,7 @@ r"""
     embed_texts(["...", "..."])  ->  List[List[float]]   (同步，內部有執行緒鎖)
     dim()                        ->  int                 (向量維度)
 
-注意：查詢端與文件端必須使用同一個 embedder，維度才能對得上；
-      rag_store 會把目前使用的 model 名稱寫進 collection metadata。
+注意：查詢端與文件端必須使用同一個 embedder，維度才能對得上（換嵌入模型要重建向量庫）。
 PROVIDER: LOCAL-fastembed為主／GEMINI為備援（EMBED_BACKEND 可切；見 docs/AI_SOURCES.md）
 """
 

@@ -713,7 +713,8 @@ async def get_tts_audio_bytes(text: str) -> bytes:
     chain = ([_active_engine] if _active_engine in _ENGINES else []) + \
             [e for e in ENGINE_CHAIN if e != _active_engine]
 
-    # 自動升級：當前引擎不是鏈首時（例：啟動時 cosyvoice 服務還沒載入完、先落在
+    # 自動升級：當前引擎不是鏈首時（例：啟動時 cosyvoice 服務還沒載入完、先落在後面的引擎），
+    # 每 120 秒試一次鏈首，好了就切回去
 
     top = ENGINE_CHAIN[0] if ENGINE_CHAIN else None
     if top and top != _active_engine and top in _ENGINES:

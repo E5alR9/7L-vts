@@ -28,8 +28,8 @@ def cn_number(s: str):
 
 class LiveTimerSensorHub:
     """⏱️ 7L API Live 持續時間感測哨兵中樞 (Live Timer & Countdown Sensor)
-    - 以 1 Tick (1 秒) 精度持續感測倒數時間與環境動態
-    - 到期後自動呼叫 Gemini 3.8 / 3.1 Flash / 主力多模態模型自主發言提醒
+    - 只記帳（新增／取消／列出計時器），本身不計時也不發言
+    - 到點提醒由主程式的計時迴圈發（Groq 寫提醒句，失敗用固定句）
     """
     def __init__(self):
         self.timers: Dict[str, Dict[str, Any]] = {}

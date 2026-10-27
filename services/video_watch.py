@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
 """
 📺 觀眾點播看全片（Video Watch）：點播隊列＋後台消化＋筆記播報
-PROVIDER: LOCAL（yt-dlp＋faster-whisper＋opencv）＋GEMINI-VISION（抽幀看圖）＋GROQ（分段摘要）
+PROVIDER: LOCAL（yt-dlp＋faster-whisper＋opencv）＋GEMINI-VISION（抽幀看圖）＋GROQ（摘要）
 見 docs/AI_SOURCES.md。
 
-流程：觀眾貼 URL → /api 或工具 request_watch 入隊 → worker 依序消化：
+流程：觀眾貼 URL → 硬指令或主腦工具 video.request_watch 入隊 → worker 依序消化：
   1. captions 優先（--write-auto-sub，零成本）
   2. 無字幕 → 音軌 faster-whisper 本地轉錄
   3. 抽幀（每 N 秒一幀，Gemini 視覺看圖；長片降採樣）
-  4. Groq 分段摘要 → 筆記寫入統一記憶＋心智看板（source="video_watch"）→ 7L 播報
+  4. Groq 摘要（rag_store.fold_summary）→ 心得貼上心智看板（source="video_watch"）→ 7L 播報
 
 全程非同步，不擋直播。單片上限 VIDEO_WATCH_MAX_MIN 分鐘（模組常數）。
 """
@@ -188,7 +188,7 @@ def extract_frames(video_id: str, video_path: str, every_sec: int = None):
 
 async def digest_video(video_id: str, requester: str) -> dict:
     """消化單片：字幕→音軌轉錄→抽幀看圖→Groq 摘要→記憶＋看板。回報摘要。"""
-    from services import rag_store as _rag  # noqa (digest 內 lazy，避免循環)
+    from services import rag_store as _rag  # noqa (用到才載入向量庫)
     log_print(f"📺 [消化] 開始看片 https://youtu.be/{video_id}（{requester} 點播）")
     text = await asyncio.to_thread(fetch_captions, video_id)
     src_note = "字幕"

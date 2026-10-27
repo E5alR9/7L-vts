@@ -26,7 +26,7 @@ def test_no_module_fork_alias_locked():
 
 
 def test_real_vocal_envelope_moves():
-    """拿 cover_cache 裡最新的 RVC 成品跑包絡：最大值必須能張嘴（>0.1）。
+    """拿 cover_cache 裡最新的 RVC 成品跑包絡：最大值必須能張嘴（>0.3）。
     證偽『歌聲檔本身是靜音』的另一種死法。無成品時跳過。"""
     os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
     import glob
