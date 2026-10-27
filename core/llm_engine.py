@@ -36,6 +36,13 @@ GEMINI_MODELS = [                                 # REST 主梯隊：前鋒輕�
 # REST 大腦（沒有 Live 主腦時）要不要叫子智能體由模型決定：2026-10-26 實測查資料／計時／點歌 3 句，
 # 3.6-flash 3/3 有叫、聊天不亂叫；3.5-flash-lite 0/3（嘴上說「我去查」卻沒叫）。輕量版只當最後備援
 REST_BRAIN_MODELS = ["gemini-3.6-flash", "gemini-3.8-flash", "gemini-3.5-flash-lite"]
+HIGH_IQ_GEMINI_MODELS = [                         # 鋼琴意圖／作曲：聰明的先試
+    "gemini-3.8-flash",
+    "gemini-3.6-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
+]
+STREAMER_MIND_MODELS = GEMINI_MODELS              # 記憶腦袋 REST 備援：跟主梯隊同一份
 IMAGE_GEN_MODELS = ["gemini-3.1-flash-lite-image", "gemini-3.1-flash-image", "gemini-3-pro-image"]   # 生圖（Nano Banana）
 EMBED_MODEL = "gemini-embedding-001"              # RAG 向量的 Gemini 備援
 
@@ -328,18 +335,5 @@ def sort_keys_by_load(keys: List[str]) -> List[str]:
     只排序、不阻擋：全忙時照樣打，不餓死。"""
     return sorted(keys, key=lambda k: _KEY_INFLIGHT.get(k or "", 0))
 
-STREAMER_MIND_MODELS = [
-    "gemini-3.5-flash-lite",
-    "gemini-3.1-flash-lite",
-    "gemini-3.6-flash",
-    "gemini-3.8-flash"
-]
-
 KEYS_VISION        = GEMINI_KEYS[12:18] if len(GEMINI_KEYS) >= 18 else GEMINI_KEYS
 
-HIGH_IQ_GEMINI_MODELS = [ 
-    "gemini-3.8-flash",
-    "gemini-3.6-flash",
-    "gemini-3.5-flash-lite",
-    "gemini-3.1-flash-lite"
-]

@@ -71,6 +71,10 @@ class TextCleanEngine:
     RE_MULTIPLE_NEWLINES = re.compile(r'\n{3,}')
     RE_TAG_BRACKETS = re.compile(r'\[[A-Z_]+(?::\s*[^\]]+)?\]')
     RE_AT_MENTION = re.compile(r'@[\w\u4e00-\u9fa5_.-]+')
+    # Live API／函數執行殘留的 token（get_output、tool_output…）：句首前綴、句中單字
+    RE_TOOL_PREFIX = re.compile(r'^(?:get_outputs?|tool_outputs?|function_calls?|tool_responses?)[：:\s_]*', flags=re.IGNORECASE)
+    RE_TOOL_PREFIX_WIDE = re.compile(r'^(?:get_outputs?|tool_outputs?|function_calls?|function_responses?|tool_responses?|had_tool_calls?|call|output)[：:\s_]*', flags=re.IGNORECASE)   # 念出來前多擋 call／output 開頭
+    RE_TOOL_WORD = re.compile(r'\b(?:get_outputs?|tool_outputs?)\b', flags=re.IGNORECASE)
     RE_RAW_JSON = re.compile(r'\{[^{}]*(?:"song_name"|"function"|"tool_call"|"name")[^{}]*\}', flags=re.DOTALL)
 
     @classmethod
@@ -122,8 +126,8 @@ class TextCleanEngine:
         thoughts = []
         t = text.strip()
         #  徹底去除 Live API / 函數執行殘留之 token 前綴 (如 get_output, tool_output 等)
-        t = re.sub(r'^(?:get_outputs?|tool_outputs?|function_calls?|tool_responses?)[：:\s_]*', '', t, flags=re.IGNORECASE).strip()
-        t = re.sub(r'\b(?:get_outputs?|tool_outputs?)\b', '', t, flags=re.IGNORECASE).strip()
+        t = cls.RE_TOOL_PREFIX.sub('', t).strip()
+        t = cls.RE_TOOL_WORD.sub('', t).strip()
 
         # 1. 巢狀平衡標籤提取 [THOUGHT: ...] / [心想: ...]，徹底解決巢狀標籤提前閉合問題
         nested_ths, t = cls.extract_nested_bracket_tags(t, ("THOUGHT", "THINK", "心想", "內心", "腦內思緒", "腦內想法"))
@@ -170,8 +174,8 @@ class TextCleanEngine:
 
         # 去重並保留次序
         combined_thought = "；".join(dict.fromkeys([x for x in thoughts if x])).strip()
-        clean_remaining = re.sub(r'^(?:get_outputs?|tool_outputs?|function_calls?|tool_responses?)[：:\s_]*', '', t, flags=re.IGNORECASE).strip()
-        clean_remaining = re.sub(r'\b(?:get_outputs?|tool_outputs?)\b', '', clean_remaining, flags=re.IGNORECASE).strip()
+        clean_remaining = cls.RE_TOOL_PREFIX.sub('', t).strip()
+        clean_remaining = cls.RE_TOOL_WORD.sub('', clean_remaining).strip()
         return combined_thought, clean_remaining
 
     @classmethod
@@ -330,9 +334,8 @@ class TextCleanEngine:
         t = re.sub(r'^#+\s+.*$', '', t, flags=re.MULTILINE)
         t = re.sub(r'^[-\*•]\s+', '', t, flags=re.MULTILINE)
         t = re.sub(r'^(?:thought|thinking|心想|動作|說話)[：:\s]*', '', t, flags=re.IGNORECASE)
-        #  徹底防禦 Gemini Live / 函數調用內部 token (如 get_output, tool_output 等)
-        t = re.sub(r'^(?:get_outputs?|tool_outputs?|function_calls?|function_responses?|tool_responses?|had_tool_calls?|call|output)[：:\s_]*', '', t, flags=re.IGNORECASE)
-        t = re.sub(r'\b(?:get_outputs?|tool_outputs?)\b', '', t, flags=re.IGNORECASE)
+        t = cls.RE_TOOL_PREFIX_WIDE.sub('', t)
+        t = cls.RE_TOOL_WORD.sub('', t)
         t = t.replace('[', '').replace(']', '').replace('*', '')
         t = cls.strip_emojis(t)
         #  去除單次回應內因模型口吃/複誦而產生的連續重複句子 (徹底杜絕複誦跳針)
@@ -687,9 +690,8 @@ class TextCleanEngine:
         t = cls.RE_TAG_BRACKETS.sub('', t)
         t = cls.RE_SPEAKER_PREFIX.sub('', t)
         t = re.sub(r'^(?:回應|回覆|動作顯示|主播|說道|回答)[：:\s]+', '', t, flags=re.IGNORECASE)
-        #  徹底防禦 Gemini Live / 函數調用內部 token (如 get_output, tool_output 等)
-        t = re.sub(r'^(?:get_outputs?|tool_outputs?|function_calls?|function_responses?|tool_responses?|had_tool_calls?|call|output)[：:\s_]*', '', t, flags=re.IGNORECASE)
-        t = re.sub(r'\b(?:get_outputs?|tool_outputs?)\b', '', t, flags=re.IGNORECASE)
+        t = cls.RE_TOOL_PREFIX_WIDE.sub('', t)
+        t = cls.RE_TOOL_WORD.sub('', t)
         t = cls.RE_AT_MENTION.sub(lambda m: m.group(0)[1:], t)
         t = t.replace('@', '').replace('*', '').strip()
         t = cls.strip_emojis(t)

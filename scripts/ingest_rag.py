@@ -41,9 +41,7 @@ except Exception:
 DATA_DIR = os.path.join(BASE_DIR, "data")
 KNOW_DIR = os.path.join(BASE_DIR, "knowledge")
 
-def _mode() -> str:
-    m = (os.getenv("MODE") or "vtuber").strip().lower()
-    return m if m in ("companion", "vtuber") else "vtuber"
+from core.identity import get_mode as _mode   # noqa: E402（讀過 .env 才 import）
 
 
 MEM_FILES = {

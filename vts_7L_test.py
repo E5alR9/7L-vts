@@ -206,7 +206,7 @@ from core.llm_engine import (
     report_gemini_key_error, live_one_shot, KEYS_MIC_LIVE, KEYS_PROACTIVE, KEYS_DAD_MAIN,
     UNRESTRICTED_SAFETY_SETTINGS,
 )
-from core.input_sources import (parse_input_item, classify, sleep_wake_decision, live_speech_wakes, is_operator,
+from core.input_sources import (parse_input_item, classify, sleep_wake_decision, live_speech_wakes, is_operator, has_wake_word,
                                 VIEWER_SOURCES, WAKE_WORDS)
 from core.memory import (
     init_unified_memory, flush_unified_memory, fetch_from_long_term_memory,
@@ -6174,7 +6174,7 @@ async def chat_processor_worker(vts, input_queue):
                     await set_sleep_mode(False)
                     # 不 task_done、不 continue：掉下去走正常觀眾軌道
                 elif wake == "wake_operator":
-                    typed_only = not any(w in user_input for w in WAKE_WORDS)
+                    typed_only = not has_wake_word(user_input)
                     log_print(f"☀️ [語音喚醒] 收到老爸{'訊息' if typed_only else '喚醒指令'}：「{user_input}」，7L 睜眼！")
                     await set_sleep_mode(False)
                     # 不強制招呼、不 continue：讓主腦直接回老爸的話

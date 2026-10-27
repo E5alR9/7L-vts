@@ -14,7 +14,8 @@ import sys
 from dataclasses import dataclass
 from typing import Optional
 
-MODES = ("companion", "vtuber")
+from core.identity import MODES, get_mode
+
 
 
 @dataclass(frozen=True)
@@ -51,8 +52,7 @@ def saved_mode_switch(data_dir: str, env_mode: str) -> Optional[str]:
 
 def boot(data_dir: str) -> Settings:
     """開機一次：.env 的 MODE，後台存過模式開關就照開關。要在 import core.memory 之前呼叫。"""
-    env_mode = (os.getenv("MODE") or "vtuber").strip().lower()
-    env_mode = env_mode if env_mode in MODES else "vtuber"
+    env_mode = get_mode()
     saved = saved_mode_switch(data_dir, env_mode)
     if saved:
         mode, source = apply_mode(saved), "後台開關"

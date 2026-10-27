@@ -319,7 +319,7 @@ async def _synth_edge(text: str) -> bytes:
 
 async def _synth_xiaoyi(text: str) -> bytes:
     """原 GPT-SoVITS 曉伊（需本機有 GPT-SoVITS 安裝，否則拋錯讓鏈降級）"""
-    svc_path = os.getenv("GPT_SOVITS_DIR") or os.path.join(os.path.expanduser("~"), "GPT-SoVITS")
+    from core.paths import GPT_SOVITS_DIR as svc_path
     if not os.path.isdir(svc_path):
         raise RuntimeError(f"GPT-SoVITS 不存在: {svc_path}")
     from services import local_xiaoyi_service

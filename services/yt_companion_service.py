@@ -25,8 +25,7 @@ from datetime import datetime
 import numpy as np
 from PIL import ImageGrab
 
-# 徹底過濾底層音訊警告
-warnings.filterwarnings("ignore")
+# 過濾 soundcard 的音訊警告（全程序的警告由主程式決定要不要關）
 try:
     from soundcard.mediafoundation import SoundcardRuntimeWarning
     warnings.filterwarnings("ignore", category=SoundcardRuntimeWarning)

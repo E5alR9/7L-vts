@@ -24,12 +24,10 @@ BASE_DIR = ROOT_DIR
 PERSIST_DIR = os.path.join(BASE_DIR, "data", "rag", "chroma")
 
 
-def _mode() -> str:
-    m = (os.getenv("MODE") or "vtuber").strip().lower()
-    return m if m in ("companion", "vtuber") else "vtuber"
+from core.identity import get_mode   # noqa: E402
 
 
-COLLECTION = f"knowledge_{_mode()}"
+COLLECTION = f"knowledge_{get_mode()}"
 LEGACY_COLLECTIONS = ["knowledge"]  # 舊混合庫：重建不相容，reset 時一併清除
 
 _lock = threading.Lock()

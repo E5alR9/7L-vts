@@ -41,14 +41,20 @@ MEMORY_CONFIG_FILE = os.path.join(DATA_DIR, "memory_config.json")  # 容量設�
 CLOUD_KNOWLEDGE_CACHE = None
 CLOUD_KNOWLEDGE_CACHE_TIME = 0.0
 
-UNIFIED_MEMORY_FILE = mode_path("unified_memory.json")
-DIALOGUE_MEMORY_FILE = mode_path("dialogue_memory.json")
-THOUGHT_MEMORY_FILE = mode_path("thought_memory.json")
-VIEWER_PROFILES_FILE = mode_path("viewer_profiles_local.json")
-CLOUD_KNOWLEDGE_FILE = mode_path("cloud_knowledge_local.json")
-USER_PROFILE_FILE = mode_path("user_profile_local.json")
-MEMORY_CONFIG_FILE = os.path.join(DATA_DIR, "memory_config.json")  # 容量設定兩模式共用
 # 舊無後綴檔（unified_memory.json 等）已廢棄：重建不相容，不再讀寫，留置磁碟僅供人工查閱。
+
+def _is_thought(role: str, target: str = "", source: str = "") -> bool:
+    """這筆是不是她的心想（不是說出口的話）。"""
+    return role == "thought" or target == "內心流動" or source == "thought"
+
+
+def _dump_json_atomic(path: str, data) -> None:
+    """先寫 .tmp 再換上去：寫到一半當機也不會留下半個檔（os.replace 檔案在不在都能用）。"""
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
+
 
 def load_memory_capacity_setting() -> int:
     """載入記憶池容量設定（0 = 無上限，預設 500 句）"""
@@ -297,7 +303,7 @@ async def fetch_from_long_term_memory(channel_id, current_user_msg="", limit: in
             r = it.get("role", "user")
             spk = it.get("speaker", "")
             cnt = it.get("content", "")
-            if r in ["system", "thought"] or it.get("target") == "內心流動" or it.get("source") == "thought":
+            if r == "system" or _is_thought(r, it.get("target", ""), it.get("source", "")):
                 continue
             if r == "assistant" or spk == "7L":
                 history.append({"role": "assistant", "content": cnt})
@@ -427,36 +433,10 @@ def _save_unified_memory_to_disk(loop=None, cloud: bool = True):
 def _save_unified_memory_to_disk_locked(loop, cloud):
     global UNIFIED_LIVE_MEMORY, UNIFIED_DIALOGUE_MEMORY, UNIFIED_THOUGHT_MEMORY, _LAST_CLOUD_PUSH_TIME
     try:
-        # 1. 儲存對話專屬記憶（保留最近 500 句，永不被心流稀釋）
-        diag_file = DIALOGUE_MEMORY_FILE + ".tmp"
-        with open(diag_file, "w", encoding="utf-8") as f:
-            json.dump(list(UNIFIED_DIALOGUE_MEMORY), f, ensure_ascii=False, indent=2)
-        if os.path.exists(diag_file):
-            if os.path.exists(DIALOGUE_MEMORY_FILE):
-                os.replace(diag_file, DIALOGUE_MEMORY_FILE)
-            else:
-                os.rename(diag_file, DIALOGUE_MEMORY_FILE)
-
-        # 2. 儲存心流專屬記憶（保留最近 150 筆）
-        th_file = THOUGHT_MEMORY_FILE + ".tmp"
-        with open(th_file, "w", encoding="utf-8") as f:
-            json.dump(list(UNIFIED_THOUGHT_MEMORY), f, ensure_ascii=False, indent=2)
-        if os.path.exists(th_file):
-            if os.path.exists(THOUGHT_MEMORY_FILE):
-                os.replace(th_file, THOUGHT_MEMORY_FILE)
-            else:
-                os.rename(th_file, THOUGHT_MEMORY_FILE)
-
-        # 3. 儲存全景時序綜合記憶
+        _dump_json_atomic(DIALOGUE_MEMORY_FILE, list(UNIFIED_DIALOGUE_MEMORY))   # 對話（永不被心流稀釋）
+        _dump_json_atomic(THOUGHT_MEMORY_FILE, list(UNIFIED_THOUGHT_MEMORY))     # 心流
         data_to_save = list(UNIFIED_LIVE_MEMORY)
-        temp_file = UNIFIED_MEMORY_FILE + ".tmp"
-        with open(temp_file, "w", encoding="utf-8") as f:
-            json.dump(data_to_save, f, ensure_ascii=False, indent=2)
-        if os.path.exists(temp_file):
-            if os.path.exists(UNIFIED_MEMORY_FILE):
-                os.replace(temp_file, UNIFIED_MEMORY_FILE)
-            else:
-                os.rename(temp_file, UNIFIED_MEMORY_FILE)
+        _dump_json_atomic(UNIFIED_MEMORY_FILE, data_to_save)                     # 全景時序綜合記憶
                 
         # ☁️ 同步備份最新全集中全景時序記憶至雲端 Firestore
         if cloud and db_module.db is not None and time.time() - _LAST_CLOUD_PUSH_TIME >= _CLOUD_PUSH_INTERVAL:
@@ -531,7 +511,7 @@ def flush_unified_memory() -> None:
 
 # ── 哪些話要進向量記憶庫（回話前會查：services/rag_memory_service.related_memories_block）──
 _RAG_DAD_SOURCES = frozenset({"text", "voice", "mic", "text_file", "console", "web_console", "owner_interject", "tiktok_dad"})
-_RAG_VIEWER_SOURCES = frozenset({"tiktok", "tiktok_gift", "twitch", "youtube"})
+from core.input_sources import AUDIENCE_CHAT_SOURCES as _RAG_VIEWER_SOURCES   # noqa: E402（直播間觀眾留言）
 _RAG_TAG_RE = re.compile(r"\[[A-Z_]+(?:[:：][^\]]*)?\]")   # [EXPRESSION: 正常]、[WINK]、[SILENCE]、[LOOK: LEFT]、[VIEWER_UPDATE:…]
 _VIEWER_NAME_RE = re.compile(r"「(.+?)」")                 # 記憶裡觀眾的 speaker 長「TikTok 觀眾「小明」」
 
@@ -583,7 +563,7 @@ def append_to_unified_memory(speaker: str, target: str, content: str, role: str 
     if not clean_c:
         return
 
-    is_thought = (role == "thought" or target == "內心流動" or source == "thought")
+    is_thought = _is_thought(role, target, source)
 
     # 防重疊去重：
     if is_thought:
@@ -720,7 +700,7 @@ def init_unified_memory():
                         r = it.get("role", "")
                         tgt = it.get("target", "")
                         src = it.get("source", "")
-                        if r == "thought" or tgt == "內心流動" or src == "thought":
+                        if _is_thought(r, tgt, src):
                             loaded_thoughts.append(it)
                         elif recover_dialogues:
                             loaded_dialogues.append(it)
@@ -827,7 +807,7 @@ def _sync_deques_from_live_memory():
         r = it.get("role", "")
         tgt = it.get("target", "")
         src = it.get("source", "")
-        if r == "thought" or tgt == "內心流動" or src == "thought":
+        if _is_thought(r, tgt, src):
             t_list.append(it)
         else:
             d_list.append(it)
