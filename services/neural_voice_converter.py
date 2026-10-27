@@ -126,8 +126,8 @@ def convert_vocal_to_xiaoyi(
             _idx = faiss.read_index(index_file)
             if _idx.d == 768:
                 valid_index = index_file
-        except:
-            pass
+        except Exception as e:
+            print(f"⚠️ [神經語音引擎] 特徵索引載入失敗，這次不帶索引轉換（音色會比較不像）：{e}")
 
     t0 = time.time()
     try:

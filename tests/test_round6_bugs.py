@@ -148,3 +148,28 @@ def test_tts_capture_never_swaps_stdout_back(monkeypatch):
     t.join(5)
     assert "狀態列" in real.getvalue()
     assert lx._CAPTURES == {}
+
+
+def test_spatial_move_reports_failure_and_lets_conscious_moves_win(monkeypatch):
+    """VTS 沒連線不能回「已成功」；本能走位跟表情一樣讓意識優先 6 秒。"""
+    import services.vts_client as vc
+    moves = []
+
+    async def fake_move(**kw):
+        moves.append(kw["target_pos"])
+        return fake_move.ok
+    monkeypatch.setattr(vc, "move_vts_spatial", fake_move)
+    monkeypatch.setattr(vc, "log_print", lambda *a, **k: None)
+    fake_move.ok = False
+    assert "沒移成" in asyncio.run(vc.apply_spatial_position("左邊"))
+    fake_move.ok = True
+    assert "已成功" in asyncio.run(vc.apply_spatial_position("右邊"))              # 主腦叫的
+    assert "本能走位先不動" in asyncio.run(vc.apply_spatial_position("中間", is_instinct=True))
+    assert moves == ["左邊", "右邊"]
+    monkeypatch.setattr(vc, "LAST_CONSCIOUS_ACTION_TIME", 0.0)
+    assert "已成功" in asyncio.run(vc.apply_spatial_position("中間", is_instinct=True))
+
+
+def test_temp_reply_cleanup_covers_wav_segments():
+    src = ast.get_source_segment(MAIN, _fn("_remove_temp_mp3"))
+    assert '"temp_reply_*"' in src and "GPT-SoVITS" not in src

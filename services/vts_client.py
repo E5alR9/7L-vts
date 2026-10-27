@@ -760,17 +760,22 @@ async def apply_spatial_position(
     delta_w: int = None, delta_h: int = None,
     scale_factor: float = None,
     duration: float = 2.0,
-    *args, **kwargs
+    *args, is_instinct: bool = False, **kwargs
 ) -> str:
-    """統一 Live2D 模型走位與縮放控制器（支援絕對位置、預設位置與全向相對數值微調）"""
-    global CURRENT_SPATIAL_LOCATION
+    """統一 Live2D 模型走位與縮放控制器（支援絕對位置、預設位置與全向相對數值微調）
+    is_instinct：本能腦的走位，跟表情一樣讓「意識優先 6 秒」（剛被主腦叫去走位就先別亂動）。"""
+    global CURRENT_SPATIAL_LOCATION, LAST_CONSCIOUS_ACTION_TIME
+    if not is_instinct:
+        LAST_CONSCIOUS_ACTION_TIME = time.time()
+    elif time.time() - LAST_CONSCIOUS_ACTION_TIME < 6.0:
+        return "意識動作剛做完，本能走位先不動"
     clean_pos = str(position_name).strip()
     
     d_size = delta_size
     if d_size is None and (delta_w is not None or delta_h is not None):
         d_size = ((delta_w or 0) + (delta_h or 0)) / 25.0
         
-    await move_vts_spatial(
+    ok = await move_vts_spatial(
         target_pos=clean_pos,
         target_x=target_x, target_y=target_y,
         delta_x=delta_x, delta_y=delta_y,
@@ -779,6 +784,9 @@ async def apply_spatial_position(
         scale_factor=scale_factor,
         duration=duration
     )
+    if ok is False:
+        log_print(f"⚠️ [模型走位] 沒移成「{clean_pos}」（VTS 沒連線或拒絕）")
+        return f"沒移成「{clean_pos}」：VTube Studio 沒連線或拒絕了移動"
     CURRENT_SPATIAL_LOCATION = clean_pos
     log_print(f"🚀 [模型走位] 7L 模型平滑位移至: 「{clean_pos}」 (dx={delta_x}, dy={delta_y}, d_sz={d_size})")
     return f"已成功平滑移動模型至「{clean_pos}」！"

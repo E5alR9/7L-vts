@@ -172,8 +172,8 @@ class AudioLoopbackStreamer:
                     pcm_int16 = (data * 32767.0).clip(-32768, 32767).astype(np.int16).tobytes()
                     if not self.audio_queue.full():
                         self.audio_queue.put_nowait(pcm_int16)
-        except Exception:
-            pass
+        except Exception as e:
+            log_print(f"⚠️ [YT 眼耳] 系統音錄音中斷，這次伴看聽不到影片聲音：{type(e).__name__} {str(e)[:80]}")
 
 EYE_EAR_SYSTEM_INSTRUCTION = """
 你是 7L 的「眼與耳感官神經中樞 (Visual & Auditory Sensory Nerve)」。

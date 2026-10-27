@@ -114,11 +114,21 @@ def test_listen_once_fast_gives_up_after_the_wait_when_nobody_speaks():
             waits.append(timeout)
             raise TimeoutError("沒人開口")   # speech_recognition 的 WaitTimeoutError
 
-    ns = _load("listen_once_fast", sr=pytypes.SimpleNamespace(Microphone=_Mic), os=os, time=_Clock(0.0),
-               MIC_PHRASE_TIME_LIMIT=30.0, MIC_MIN_RMS_THRESHOLD=250.0)
+    swallowed = []
+    ns = _load("listen_once_fast", sr=pytypes.SimpleNamespace(Microphone=_Mic, WaitTimeoutError=TimeoutError), os=os,
+               time=_Clock(0.0), MIC_PHRASE_TIME_LIMIT=30.0, MIC_MIN_RMS_THRESHOLD=250.0,
+               log_swallowed=lambda *a, **k: swallowed.append(1))
     assert ns["listen_once_fast"](_Rec(), wait_sec=3.0) == ("", None)
     assert waits == [3.0]
     assert ns["is_user_listening"] is False
+    assert swallowed == []                      # 沒人開口是正常的，不記
+
+    class _BrokenMic(_Mic):
+        def __enter__(self):
+            raise OSError("裝置被占用")
+    ns["sr"] = pytypes.SimpleNamespace(Microphone=_BrokenMic, WaitTimeoutError=TimeoutError)
+    assert ns["listen_once_fast"](_Rec(), wait_sec=3.0) == ("", None)
+    assert swallowed == [1]                     # 麥克風開不起來要留紀錄（以前整個吞掉）
 
 
 def test_main_starts_the_stt_fallback_with_the_live_brain():

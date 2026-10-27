@@ -189,10 +189,8 @@ def parse_live_chat_response(data):
                 break
     if not cont:                                  # 最後手段：整包深度搜第一個長 token
         for m in re.finditer(r'"continuation":"([A-Za-z0-9_%\-\.]{40,})"', json.dumps(lc)):
-            t = m.group(1)
-            if t not in ("", None):
-                cont = t
-                break
+            cont = m.group(1)   # {40,} 保證非空
+            break
     timeout_ms = lc.get("timeoutMs") or 8000
     wait = max(5.0, min(15.0, float(timeout_ms) / 1000.0))   # 官方給幾秒就等幾秒（上下限 5~15s）
     return messages, cont, wait
@@ -231,6 +229,7 @@ async def youtube_live_worker(input_queue):
                 page = await cli.get(f"https://www.youtube.com/{channel}/live")
                 return extract_live_from_html(page.text)
             except Exception as e:
+                log_print(f"⚠️ [YouTube] 打開頻道 {channel} 的直播頁失敗：{type(e).__name__} {str(e)[:80]}")
                 return None, False, "", False
 
         if channel and not vid:

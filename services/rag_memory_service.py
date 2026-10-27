@@ -55,12 +55,7 @@ async def add_rag_memory(content: str, source: str = "dialogue", viewer: str = "
     # We use firestore for exact match or general backup of RAG data.
     if db_module.db:
         try:
-            cloud_record = {
-                "id": mem_id,
-                "content": content,
-                "source": source,
-                "timestamp": timestamp
-            }
+            cloud_record = dict(metadata, id=mem_id, content=content)   # 帶 viewer，還原才分得出熟客說的
             # Add to firestore collection
             await db_module.db.collection("rag_memories").document(mem_id).set(cloud_record)
             # print(f"☁️ [RAG 雲端同步] 記憶已備份至 Firestore")

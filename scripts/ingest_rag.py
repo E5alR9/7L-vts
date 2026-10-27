@@ -32,6 +32,11 @@ for _s in (sys.stdout, sys.stderr):
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, BASE_DIR)
+try:
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(BASE_DIR, ".env"))   # MODE 在 .env；從一般終端機跑也要讀到
+except Exception:
+    pass
 
 DATA_DIR = os.path.join(BASE_DIR, "data")
 KNOW_DIR = os.path.join(BASE_DIR, "knowledge")

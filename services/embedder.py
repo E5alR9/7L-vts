@@ -73,7 +73,8 @@ def _embed_local(texts: List[str]) -> List[List[float]]:
 def _embed_gemini(texts: List[str]) -> List[List[float]]:
     from dotenv import load_dotenv
     load_dotenv()
-    key = os.getenv("GEMINI_API_KEY") or os.getenv("GEMINI_KEYS", "").split(",")[0].strip()
+    from core.llm_engine import GEMINI_KEYS   # 跟其他地方同一套解析（.env 可放多把，逗號／空白分隔）
+    key = GEMINI_KEYS[0] if GEMINI_KEYS else ""
     if not key:
         raise RuntimeError("缺少 GEMINI_API_KEY，無法使用 Gemini embedding")
     from google import genai

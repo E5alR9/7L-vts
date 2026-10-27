@@ -239,8 +239,8 @@ async def digest_video(video_id: str, requester: str) -> dict:
                     if d:
                         descs.append(d)
                 frames_desc = "\n".join(f"【畫面{i+1}】{d}" for i, d in enumerate(descs))
-            except Exception:
-                pass
+            except Exception as e:
+                log_print(f"⚠️ [看片] 關鍵畫面描述失敗，只用字幕／音軌：{type(e).__name__} {str(e)[:80]}")
     material = (text[:12000] + ("\n\n【關鍵畫面】\n" + frames_desc[:3000] if frames_desc else "")).strip()
     if not material:
         return {"ok": False, "error": "抓不到字幕/音軌/畫面（可能地區限制或需登入）"}
@@ -251,8 +251,8 @@ async def digest_video(video_id: str, requester: str) -> dict:
     note = f"📺 看完《https://youtu.be/{video_id}》（{requester} 點播，來源：{src_note}）：{summary or material[:400]}"
     try:
         _HOST["post_note"](f"{requester} 點播的片", f"video:{video_id}", note, "video_watch")
-    except Exception:
-        pass
+    except Exception as e:
+        log_print(f"⚠️ [看片] 看完的心得沒送進主腦（main() 沒 bind_host？）：{type(e).__name__} {str(e)[:80]}")
     log_print(f"📺 [看完] {video_id}：{(summary or '')[:80]}")
     return {"ok": True, "video_id": video_id, "summary": summary or material[:400]}
 

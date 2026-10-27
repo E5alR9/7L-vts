@@ -1668,14 +1668,14 @@ def is_7l_voice_echo(stt_text: str, is_dad_verified: bool = False) -> bool:
 
 
 def _remove_temp_mp3():
-    try:
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-        for p in [base_dir, os.path.join(base_dir, "GPT-SoVITS")]:
-            for f in glob.glob(os.path.join(p, "temp_reply_*.mp3")):
-                try: os.remove(f)
-                except Exception: pass
-    except Exception:
-        pass
+    """清掉上一句留下的語音暫存（拿著 SPEECH_PLAYBACK_LOCK 時呼叫，上一句已經念完）。
+    分段暫存依引擎是 .wav 或 .mp3，以前只掃 .mp3，根目錄積了一堆 .wav（2026-10-27）。"""
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    for f in glob.glob(os.path.join(base_dir, "temp_reply_*")):
+        try:
+            os.remove(f)
+        except Exception:
+            pass   # 還有人開著就下次再清
 
 
 def update_subtitle(text):
@@ -2580,7 +2580,9 @@ def listen_once_fast(recognizer, wait_sec=None):
             pass
             
         return (text.strip() if text else "", audio_b64)
-    except Exception:
+    except Exception as e:
+        if not isinstance(e, getattr(sr, "WaitTimeoutError", ())):   # 等太久沒人開口是正常的
+            log_swallowed()
         is_user_listening = False
         current_mic_action_str = "待命"
         return ("", None)

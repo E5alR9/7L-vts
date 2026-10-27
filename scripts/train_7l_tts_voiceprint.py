@@ -41,7 +41,7 @@ def train_7l_voiceprint(synthesize_new: bool = False):
     if synthesize_new:
         try:
             safe_print("✨ 正在調用本地 GPT-SoVITS 進行多語句發音練習...")
-            from services.local_xiaoyi_service import init_gpt_sovits, run as run_tts
+            from services.local_xiaoyi_service import init_gpt_sovits, synthesize_xiaoyi_bytes
             init_gpt_sovits()
             practice_texts = [
                 "哈囉老爸，我是小依，今天過得開心嗎？",
@@ -52,9 +52,12 @@ def train_7l_voiceprint(synthesize_new: bool = False):
             os.makedirs(out_dir, exist_ok=True)
             for i, text in enumerate(practice_texts):
                 safe_print(f"  [TTS 練習 {i+1}/{len(practice_texts)}] 合成台詞: 「{text}」")
-                wav_path = os.path.join(out_dir, f"7l_practice_{i+1}.wav")
                 try:
-                    run_tts(text, "zh", "happy", wav_path)
+                    audio = synthesize_xiaoyi_bytes(text)   # lameenc 在就回 MP3，否則 WAV
+                    wav_path = os.path.join(out_dir, f"7l_practice_{i+1}" + (".wav" if audio[:4] == b"RIFF" else ".mp3"))
+                    if audio:
+                        with open(wav_path, "wb") as fh:
+                            fh.write(audio)
                     if os.path.exists(wav_path):
                         sample_files.append(wav_path)
                 except Exception as e:
