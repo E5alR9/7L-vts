@@ -63,7 +63,7 @@ flowchart TD
 | 模組 | 內容 |
 |---|---|
 | `rest_brain.py` | REST 大腦的那一次呼叫 `rest_chat`：純文字先 Groq，不行輪 Gemini (key, model)；可帶工具、聲音、圖片，整段限時。看板 REST 回覆、紙條 REST 大腦、看畫面／照鏡子（`describe_images`）共用 |
-| `llm_engine.py` | 模型名稱登記（`LIVE_MODEL`、`FAST_TEXT_MODEL`、`REST_BRAIN_MODELS`…，換模型只改這裡）、Gemini 金鑰池分工（觀眾哨兵／麥克風／視覺／Proactive／主腦）、(key, model) 冷卻表、通道與模型熔斷鎖（存 `data/api_locks_cache.json`）、限流回報 `report_gemini_key_error`、Live 單次呼叫 `live_one_shot`、模型梯隊 |
+| `llm_engine.py` | 模型名稱登記（`LIVE_MODEL`、`FAST_TEXT_MODEL`、`REST_BRAIN_MODELS`…，換模型只改這裡）、Gemini 金鑰池分工（觀眾哨兵／麥克風／視覺／Proactive／主腦）、(key, model) 冷卻表（鋼琴挑模型 `model_cooling`、金鑰面板 `cooldown_left` 也看它；舊的熔斷鎖 10-27 刪了）、限流回報 `report_gemini_key_error`、Live 單次呼叫 `live_one_shot`、模型梯隊 |
 | `memory.py` | 統一記憶（對話＋思考雙軌，JSON；同時記進流水帳）、長期記憶、觀眾檔案、看板。本機是正本：觀眾檔、知識庫先讀本機，開機不等 Firestore |
 | `eventlog.py` | 流水帳（SQLite，只增不改）：查詢、去重用的 `seen`／`last`、每 5 分鐘推一份到 Firestore 備份（畫面描述不上傳） |
 | `promptkit.py` | 各角色的提示詞，一個角色一個函式（主腦、子智能體、看板哨兵、畫面哨兵、神態導演、本能腦）；`tests/test_prompt_snapshots.py` 守著 |

@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
-"""金鑰健康面板：每分鐘盤點 Gemini 金鑰／模型的冷卻與鎖定（CMA），寫狀態列、給 Discord 指令看。
+"""金鑰健康面板：盤點 Gemini 金鑰／模型的冷卻（CMA），寫狀態列、給 Discord 指令看。
+冷卻資料來自 core.llm_engine 的共用冷卻表（以前讀的熔斷鎖 10-26 起沒人寫，面板永遠全綠）。
 
 主程式的狀態經 host.<名稱> 即時讀寫（host＝主程式模組，主程式 import 本檔後 bind()）。
 用到的名稱列在 HOST_ATTRS，tests/test_workers_host.py 核對主程式真的都有定義。
@@ -13,7 +14,7 @@ from zoneinfo import ZoneInfo
 
 import psutil
 
-from core.llm_engine import API_LOCKS, GEMINI_KEYS, GEMINI_MODELS, is_locked, save_api_locks
+from core.llm_engine import GEMINI_KEYS, GEMINI_MODELS, cooldown_left
 from core.utils import get_current_time_string, log_swallowed
 
 HOST_ATTRS = (
@@ -42,13 +43,6 @@ async def cma_monitor_worker():
 
     while True:
         try:
-            now = time.time()
-            expired_keys = [k for k, lock_time in API_LOCKS.items() if now >= lock_time]
-            if expired_keys:
-                for k in expired_keys:
-                    del API_LOCKS[k]
-                save_api_locks()
-
             cma_lines = []
             cma_lines.append("==================================================")
             cma_lines.append(f"  7L CMA (Console Monitor Area) - {get_current_time_string()}")
@@ -57,12 +51,13 @@ async def cma_monitor_worker():
             
             cma_lines.append("--- 【Gemini 模型通道清單】 ---")
             avail_gemini = 0
+            locks = {}
             for g_model in GEMINI_MODELS:
                 short_m = g_model.replace("gemini-", "")
                 for idx, g_key in enumerate(GEMINI_KEYS):
-                    target_id = f"G{idx}_{short_m}"
-                    if is_locked(target_id):
-                        rem = int(API_LOCKS[target_id] - now)
+                    rem = int(cooldown_left(g_key, g_model))
+                    if rem > 0:
+                        locks[f"G{idx}_{short_m}"] = rem
                         mins = rem // 60
                         secs = rem % 60
                         cma_lines.append(f"  [G{idx}] {short_m:<22} :  封印中 (剩餘 {mins}m {secs}s)")
@@ -75,7 +70,7 @@ async def cma_monitor_worker():
             status_data = {
                 "timestamp": time.time(),
                 "gemini_available": avail_gemini,
-                "locks": {k: int(v - now) for k, v in API_LOCKS.items()}
+                "locks": locks
             }
             
             try:
@@ -100,7 +95,6 @@ async def cma_monitor_worker():
 
 async def show_cma_panel(ctx, mode: str = "brief"):
     """ CMA (Console Monitor Area) - 顯示全線 API 健康狀態（支援 brief 精簡 / full 詳細）"""
-    current_time = time.time()
     now_str = datetime.now(ZoneInfo('Asia/Taipei')).strftime('%Y-%m-%d %H:%M:%S')
     
     total_gemini = len(GEMINI_MODELS) * len(GEMINI_KEYS)
@@ -112,8 +106,8 @@ async def show_cma_panel(ctx, mode: str = "brief"):
         short_m = g_model.replace("gemini-", "")
         for idx, g_key in enumerate(GEMINI_KEYS):
             target_id = f"G{idx}_{short_m}"
-            if target_id in API_LOCKS and current_time < API_LOCKS[target_id]:
-                rem = int(API_LOCKS[target_id] - current_time)
+            rem = int(cooldown_left(g_key, g_model))
+            if rem > 0:
                 mins, secs = rem // 60, rem % 60
                 locked_gemini.append(f"`{target_id}`:  封印中 ({mins}m {secs}s)")
                 gemini_details.append(f"[{target_id:<20}] :  封印中 ({mins}m {secs}s)")

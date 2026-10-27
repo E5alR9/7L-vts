@@ -80,38 +80,16 @@ def test_cooldown_helpers_only_in_llm_engine():
     assert "_KEY_LIMIT_MARKERS = " not in main
 
 
-def test_channel_locks_live_in_llm_engine(tmp_path, monkeypatch):
-    """通道／模型熔斷鎖 2026-10-25 從主程式搬進來：存檔讀檔原地換內容（主程式 import 的是同一個 dict）。"""
-    monkeypatch.setattr(le, "API_LOCKS_FILE", str(tmp_path / "locks.json"))
-    monkeypatch.setattr(le, "log_print", lambda *a, **k: None)
-    monkeypatch.setattr(le, "sys_notify", lambda *a, **k: None)
-    same = le.API_LOCKS
-    saved = dict(same)
-    try:
-        same.clear()
-        le.lock_entire_model("gemini-3.6-flash", duration=60, reason="測試")
-        assert le.is_model_locked("gemini-3.6-flash") and not le.is_model_locked("gemini-3.8-flash")
-        le.lock_target("G3_3.8-flash", "429 rate limit", key="K9", model="gemini-3.8-flash")
-        assert le.is_locked("G3_3.8-flash") and le.key_cooling("K9", "gemini-3.8-flash")
-        same["G1_old"] = time.time() - 5                                   # 過期的讀回來要清掉
-        le.save_api_locks()
-        same.clear()
-        le.load_api_locks()
-        assert le.API_LOCKS is same and "MODEL_3.6-flash" in same and "G1_old" not in same
-    finally:
-        same.clear()
-        same.update(saved)
-
-
-def test_record_model_failure_locks_after_every_key_failed(monkeypatch):
-    monkeypatch.setattr(le, "GEMINI_KEYS", ["K1", "K2"])
-    monkeypatch.setattr(le, "lock_entire_model", lambda m, duration, reason: locked.append((m, duration)))
-    locked = []
-    le.MODEL_FAIL_COUNT.pop("gemini-x", None)
-    le.record_model_failure("gemini-x", "503 unavailable")
-    assert locked == []                                                   # 一把失敗還不熔斷
-    le.record_model_failure("gemini-x", "503 unavailable")
-    assert locked == [("gemini-x", 180.0)] and le.MODEL_FAIL_COUNT["gemini-x"] == 0
+def test_dead_channel_locks_removed_and_model_cooling_reads_shared_table():
+    """熔斷鎖 2026-10-27 刪掉（寫入端 10-26 就沒了，鋼琴和金鑰面板讀到的永遠是沒鎖）；改看共用冷卻表。"""
+    for name in ("API_LOCKS", "lock_target", "is_locked", "is_model_locked", "record_model_failure"):
+        assert not hasattr(le, name)
+    le.cool_key("K1", 60, "gemini-x")
+    assert not le.model_cooling("gemini-x", ["K1", "K2"])      # 還有一把能用
+    le.cool_key("K2", 60)                                       # 整把冷卻也算
+    assert le.model_cooling("gemini-x", ["K1", "K2"]) and not le.model_cooling("gemini-y", ["K1"])
+    assert not le.model_cooling("gemini-x", [])
+    assert 55 < le.cooldown_left("K2", "gemini-y") <= 60 and le.cooldown_left("K3") == 0
 
 
 def test_key_pools_and_locks_not_left_in_main():
