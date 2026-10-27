@@ -138,13 +138,21 @@ async def tiktok_live_worker(input_queue):
     else:
         log_print("📱 [TikTok 直播] 正在準備背景監聽直播間 (使用公共簽名伺服器)...")
 
-    # 🌟 採用 msg_id 雙重去重池 (deque + set)，容量 1000 筆，確保絕不重複處理亦不漏接訊息
-    import collections
-    seen_msg_ids = collections.deque(maxlen=1000)
-    seen_msg_set = set()
-    # 🛡️ Fallback 去重池：msg_id 不可用時改用 (user+text) 近 5 秒時間窗防重
+    # msg_id 去重（跟 Twitch／YouTube 同一個 DedupTracker，留最近 1000 筆）
+    seen_ids = cs.DedupTracker(1000)
+    # msg_id 不可用時改用 (user+text) 近 5 秒時間窗防重（BarrageEvent 可能跟 CommentEvent 帶同一則）
     seen_text_cache: dict[str, float] = {}  # key -> timestamp
     DEDUP_TEXT_WINDOW = 5.0  # 秒
+
+    def _text_dup(user: str, text: str) -> bool:
+        now = time.time()
+        for k in [k for k, v in seen_text_cache.items() if now - v >= DEDUP_TEXT_WINDOW]:
+            del seen_text_cache[k]
+        fk = f"{user}|{text}"
+        if fk in seen_text_cache:
+            return True
+        seen_text_cache[fk] = now
+        return False
 
     last_offline_notify = False
     last_like_milestone_notified = 0
@@ -241,26 +249,15 @@ async def tiktok_live_worker(input_queue):
                         return
 
                 msg_id = getattr(getattr(event, 'common', None), 'msg_id', None)
-                if msg_id:
-                    if msg_id in seen_msg_set:
-                        return
-                    if len(seen_msg_ids) >= 1000:
-                        oldest = seen_msg_ids.popleft()
-                        seen_msg_set.discard(oldest)
-                    seen_msg_set.add(msg_id)
-                    seen_msg_ids.append(msg_id)
+                if seen_ids.seen(msg_id):
+                    return
 
                 user_name = event.user.nickname or event.user.unique_id or "觀眾"
                 comment_text = event.comment.strip() if event.comment else ""
                 if comment_text:
                     # 🛡️ Fallback 去重：msg_id 不可用時用 user+text 近 5 秒時間窗
-                    if not msg_id:
-                        now = time.time()
-                        fk = f"{user_name}|{comment_text}"
-                        seen_text_cache.update({k: v for k, v in seen_text_cache.items() if now - v < DEDUP_TEXT_WINDOW})
-                        if fk in seen_text_cache:
-                            return
-                        seen_text_cache[fk] = now
+                    if not msg_id and _text_dup(user_name, comment_text):
+                        return
                     current_tiktok_status_str = f"[💬 {user_name}: {comment_text[:12]}]"
                     log_print(f"💬 [TikTok 彈幕] {user_name}: {comment_text}")
                     sys_notify(f"💬 [TikTok] {user_name}: {comment_text}")
@@ -277,14 +274,8 @@ async def tiktok_live_worker(input_queue):
             async def on_barrage(event: BarrageEvent):
                 global current_tiktok_status_str
                 msg_id = getattr(getattr(event, 'common', None), 'msg_id', None)
-                if msg_id:
-                    if msg_id in seen_msg_set:
-                        return
-                    if len(seen_msg_ids) >= 1000:
-                        oldest = seen_msg_ids.popleft()
-                        seen_msg_set.discard(oldest)
-                    seen_msg_set.add(msg_id)
-                    seen_msg_ids.append(msg_id)
+                if seen_ids.seen(msg_id):
+                    return
 
                 user_name = getattr(event, 'user', None)
                 u_name = (user_name.nickname or user_name.unique_id) if user_name else "觀眾"
@@ -292,13 +283,8 @@ async def tiktok_live_worker(input_queue):
                 b_text = str(b_text).strip()
                 if b_text and not b_text.startswith("Text(key="):
                     # 🛡️ Fallback 去重：BarrageEvent 可能與 CommentEvent 攜帶同一則訊息，5 秒內不重複入 queue
-                    if not msg_id:
-                        now = time.time()
-                        fk = f"{u_name}|{b_text}"
-                        seen_text_cache.update({k: v for k, v in seen_text_cache.items() if now - v < DEDUP_TEXT_WINDOW})
-                        if fk in seen_text_cache:
-                            return
-                        seen_text_cache[fk] = now
+                    if not msg_id and _text_dup(u_name, b_text):
+                        return
                     current_tiktok_status_str = f"[💬 {u_name}: {b_text[:12]}]"
                     log_print(f"💬 [TikTok 飄屏彈幕] {u_name}: {b_text}")
                     await input_queue.put(cs.make_chat_item(
@@ -309,14 +295,8 @@ async def tiktok_live_worker(input_queue):
             async def on_emote_chat(event: EmoteChatEvent):
                 global current_tiktok_status_str
                 msg_id = getattr(getattr(event, 'common', None), 'msg_id', None)
-                if msg_id:
-                    if msg_id in seen_msg_set:
-                        return
-                    if len(seen_msg_ids) >= 1000:
-                        oldest = seen_msg_ids.popleft()
-                        seen_msg_set.discard(oldest)
-                    seen_msg_set.add(msg_id)
-                    seen_msg_ids.append(msg_id)
+                if seen_ids.seen(msg_id):
+                    return
 
                 user_name = getattr(event, 'user', None)
                 u_name = (user_name.nickname or user_name.unique_id) if user_name else "觀眾"
@@ -452,14 +432,8 @@ async def tiktok_live_worker(input_queue):
                             return
 
                     msg_id = getattr(getattr(event, 'common', None), 'msg_id', None)
-                    if msg_id:
-                        if msg_id in seen_msg_set:
-                            return
-                        if len(seen_msg_ids) >= 1000:
-                            oldest = seen_msg_ids.popleft()
-                            seen_msg_set.discard(oldest)
-                        seen_msg_set.add(msg_id)
-                        seen_msg_ids.append(msg_id)
+                    if seen_ids.seen(msg_id):
+                        return
 
                     user_name = "觀眾"
                     if hasattr(event, 'user') and event.user:
