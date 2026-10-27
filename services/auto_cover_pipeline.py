@@ -779,6 +779,56 @@ def _prepare_singleflight(fn):
     return _wrapper
 
 
+_CACHE_SUFFIXES = ("_7l_vocal.wav", "_vocals.wav", "_raw.wav")
+_AI_CACHE_MATCH = {}   # 歌名 → 快取檔名（""＝AI 說沒有）；這次開機內不重問
+
+
+def _has_cache(safe_name: str) -> bool:
+    return any(os.path.exists(os.path.join(CACHE_DIR, safe_name + suf)) for suf in _CACHE_SUFFIXES)
+
+
+def cached_song_names() -> list:
+    """本機有的翻唱（做好的、分離好的、下載好的）的快取檔名；自創曲（orig_）和下載中的暫存不算。"""
+    names = set()
+    try:
+        for f in os.listdir(CACHE_DIR):
+            for suf in _CACHE_SUFFIXES:
+                if f.endswith(suf) and not f.startswith(("orig_", "temp_")):
+                    names.add(f[:-len(suf)])
+    except Exception:
+        log_swallowed()
+    return sorted(names)
+
+
+async def ai_match_cached_song(song_name: str) -> str:
+    """歌名＋本機歌單丟給 AI：回同一首的快取檔名，沒有回 ""（2026-10-27 老爸：判斷交給 AI，不靠歌名一字不差）。
+    AI 回清單以外的字一律當沒有；AI 掛了也當沒有（照舊去下載）、不記下來，下次再問。"""
+    key = (song_name or "").strip()
+    if not key:
+        return ""
+    if key in _AI_CACHE_MATCH:
+        return _AI_CACHE_MATCH[key]
+    names = cached_song_names()
+    if not names:
+        return ""
+    prompt = (f"有人點歌：「{key}」\n"
+              "本機已經有的歌（檔名，底線是空白或標點）：\n" + "\n".join(names) + "\n\n"
+              "這首如果就是清單裡的某一首（換了寫法、加了歌手名、大小寫、簡繁、錯字都算同一首），只回那一行檔名，一字不改；"
+              "清單裡沒有這首就只回 NONE。不同的歌不要硬配。")
+    try:
+        from core.groq_router import groq_chat
+        resp = await groq_chat([{"role": "user", "content": prompt}], temperature=0.0, max_tokens=80, timeout=6.0)
+    except Exception:
+        log_swallowed()
+        return ""
+    if resp is None:
+        return ""
+    lines = [ln.strip().strip("`「」\"' ") for ln in (resp.text or "").strip().splitlines() if ln.strip()]
+    hit = lines[-1] if lines and lines[-1] in names else ""
+    _AI_CACHE_MATCH[key] = hit
+    return hit
+
+
 @_prepare_singleflight
 async def prepare_cover_song(song_name: str, source_mp3: str = "", origin: str = ""):
     """背景準備一首歌（查快取→下載/本地載入→分離→RVC），成功回 (vocal, inst)，失敗回 (None, None)。
@@ -794,6 +844,12 @@ async def prepare_cover_song(song_name: str, source_mp3: str = "", origin: str =
 
         _tag = "orig_" if (origin or "") == "original" else ""
         safe_name = _tag + get_safe_filename(song_name)
+        if not _tag and not _has_cache(safe_name):
+            # 歌名不是一字不差：歌名跟本機有的歌一起丟給 AI，挑同一首或回沒有（「周杰倫的晴天」＝晴天）
+            _hit = await ai_match_cached_song(song_name)
+            if _hit:
+                log_print(f"🧠 [翻唱快取 AI 比對] 《{song_name}》＝本機已有的《{_hit}》，直接用")
+                safe_name = _hit
         cached_vocal = os.path.join(CACHE_DIR, f"{safe_name}_7l_vocal.wav")
         cached_inst = os.path.join(CACHE_DIR, f"{safe_name}_instrumental.wav")
 

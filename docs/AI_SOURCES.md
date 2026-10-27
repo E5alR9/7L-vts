@@ -39,6 +39,7 @@
 | 聯網搜尋 | TAVILY／LOCAL-SCRAPE | `tavily`×10 key（⚠️ 額度已爆）／`search_google` 無 API 爬蟲 | Tavily 爆時自動退爬蟲 |
 | 每日日記濃縮 | GROQ | 只剩舊 `7L.py` 機器人有（主程式那份從沒被呼叫，2026-10-25 刪除） | 2026-10-25 |
 | 點歌意圖 JSON 解析 | GROQ-primary | `pe.resolve_piano_intent_by_ai` 走 `groq_chat`（temp 0.1）；Gemini 高 IQ 梯隊僅 Groq 全滅時兜底 | 2026-10-09 |
+| 本機有沒有這首（MIDI、翻唱快取） | GROQ | 歌名＋檔名清單丟給 AI 挑一個或回沒有：MIDI 走 `resolve_piano_intent_by_ai`（挑的在清單裡就信，不再過字串比對）；翻唱走 `ac.ai_match_cached_song`（temp 0，回清單外的字當沒有，AI 掛了照舊下載） | 2026-10-27 |
 | 雲同步（刪除候選） | FIRESTORE | `core/db.py`，全呼叫點 `if db is not None`＋本地 JSON 備援 | 拔掉只失多機同步；且 db.py 吃 google-auth |
 
 ## 直播輸入（零 AI，純通道）

@@ -1685,6 +1685,7 @@ async def resolve_piano_intent_by_ai(
    - 若使用者點播的歌曲本地曲庫根本沒有（例如點《未完成婚姻論》，但本地只有《前前前世(未完成)》，兩者核心曲名完全不同，括號內的『未完成』只是編曲狀態標籤），【請直接填入 [] 空陣列，不要強行填入】！
    - 若使用者點的歌本地無收錄、或指定特定演奏家而本地無此版本，matched_files 務必留空 []，並在 search_online_query 填寫真實精確曲名（如 "未完成婚姻論"），引導系統自動走線上/YouTube 抓譜！
    - 只有當本地確實有同名或完全相符之樂曲時，才將最吻合的檔案放入 matched_files（若要求換版本，必須為另一個版本的檔名）。
+   - 同一首歌換了語言、譯名、加了作曲家或演奏者、大小寫或錯字都算同一首（例如「月光奏鳴曲」＝ Beethoven Moonlight Sonata、「小星星」＝ Twinkle Twinkle Little Star）。
 
 【請輸出純 JSON】：
 {{
@@ -1839,14 +1840,20 @@ def _fetch_validated_midi(song_query: str, title: str = "") -> Optional[str]:
         song_query, MIDI_SHEETS_DIR,
         validate=lambda t: is_midi_match_valid(want, t))
 
+def _ai_pick_in_list(cand: str, available_files) -> bool:
+    """AI 從檔名清單挑的：只要真的是清單裡的檔就信它（2026-10-27 老爸：歌名跟檔案列表丟給 AI，回傳要哪個或沒有）。
+    以前還要再過 is_midi_match_valid 字串比對，跨語言全被擋（月光奏鳴曲→Beethoven Moonlight Sonata、
+    小星星→twinkle twinkle little star），明明有檔還跑去線上抓。字串比對留給精準別名和線上下載。"""
+    c = (cand or "").strip().lower()
+    return bool(c) and any(c == (f or "").lower() for f in available_files or ())
+
+
 async def match_midi_with_ai(song_query: str, available_files: list) -> str:
     """相容保留：透過 resolve_piano_intent_by_ai 取得匹配檔名"""
     res = await resolve_piano_intent_by_ai(song_query, available_files)
     matched = res.get("matched_files", [])
-    if matched:
-        cand = matched[0]
-        if is_midi_match_valid(song_query, cand):
-            return cand
+    if matched and _ai_pick_in_list(matched[0], available_files):
+        return matched[0]
     return "NONE"
 
 async def resolve_local_midi_file(song_query: str) -> Tuple[Optional[str], str]:
@@ -1862,7 +1869,7 @@ async def resolve_local_midi_file(song_query: str) -> Tuple[Optional[str], str]:
     # 1. 檢查記憶快取 (0 延遲秒開，且通過防呆校驗)
     if clean_q in MIDI_AI_MATCH_CACHE:
         cached_p = MIDI_AI_MATCH_CACHE[clean_q]
-        if os.path.exists(cached_p) and is_midi_match_valid(clean_q, os.path.basename(cached_p)):
+        if os.path.exists(cached_p):   # 這次開機精準比對或 AI 挑過的，不再過字串比對
             return cached_p, os.path.splitext(os.path.basename(cached_p))[0]
         else:
             MIDI_AI_MATCH_CACHE.pop(clean_q, None)
@@ -1899,13 +1906,12 @@ async def resolve_local_midi_file(song_query: str) -> Tuple[Optional[str], str]:
             ai_matched_filename = await match_midi_with_ai(song_query, local_files)
             if ai_matched_filename and ai_matched_filename != "NONE":
                 for f in local_files:
-                    if f.lower() == ai_matched_filename.lower() or os.path.splitext(f)[0].lower() == os.path.splitext(ai_matched_filename)[0].lower():
-                        if is_midi_match_valid(clean_q, f):
-                            target_path = os.path.join(MIDI_SHEETS_DIR, f)
-                            log_print(f"🧠 [AI 曲庫神經匹配] 成功將『{song_query}』語意匹配至本地: 《{f}》！")
-                            MIDI_AI_MATCH_CACHE[clean_q] = target_path
-                            save_midi_catalog_entry(song_query, target_path)
-                            return target_path, os.path.splitext(f)[0]
+                    if f.lower() == ai_matched_filename.lower():   # AI 從清單挑的就信（_ai_pick_in_list）
+                        target_path = os.path.join(MIDI_SHEETS_DIR, f)
+                        log_print(f"🧠 [AI 曲庫神經匹配] 成功將『{song_query}』語意匹配至本地: 《{f}》！")
+                        MIDI_AI_MATCH_CACHE[clean_q] = target_path
+                        save_midi_catalog_entry(song_query, target_path)
+                        return target_path, os.path.splitext(f)[0]
 
     return None, ""
 
@@ -2464,7 +2470,7 @@ async def play_virtual_piano(song_name: str = "", custom_sheet: str = "", auto_r
             target_title = ai_intent.get("song_title")
         if ai_intent.get("matched_files"):
             cand_f = ai_intent["matched_files"][0]
-            if is_midi_match_valid(clean_q, cand_f):
+            if _ai_pick_in_list(cand_f, available_files):
                 target_midi = os.path.join(MIDI_SHEETS_DIR, cand_f)
             else:
                 target_midi = None
@@ -2519,13 +2525,13 @@ async def play_virtual_piano(song_name: str = "", custom_sheet: str = "", auto_r
             
             if not req_midi and ai_intent.get("matched_files"):
                 cand_f = os.path.join(MIDI_SHEETS_DIR, ai_intent["matched_files"][0])
-                if os.path.exists(cand_f) and is_midi_match_valid(clean_target_song, ai_intent["matched_files"][0]):
+                if os.path.exists(cand_f) and _ai_pick_in_list(ai_intent["matched_files"][0], available_files):
                     req_midi = cand_f
                     req_title = clean_song_title_for_speech(ai_intent.get("song_title") or os.path.splitext(ai_intent["matched_files"][0])[0])
 
             if not req_midi:
                 local_p, matched_t = await resolve_local_midi_file(clean_target_song)
-                if local_p and is_midi_match_valid(clean_target_song, os.path.basename(local_p)):
+                if local_p:   # resolve_local_midi_file 自己比對過了（含 AI 挑的）
                     req_midi = local_p
                     req_title = clean_song_title_for_speech(matched_t or clean_target_song)
 
@@ -2582,7 +2588,7 @@ async def play_virtual_piano(song_name: str = "", custom_sheet: str = "", auto_r
                 log_print(f"🎹 [本地精準命中] 命中已收錄曲目: 《{target_title}》 ({target_midi})")
             else:
                 local_p, matched_t = await resolve_local_midi_file(clean_q)
-                if local_p and os.path.exists(local_p) and is_midi_match_valid(clean_q, os.path.basename(local_p)):
+                if local_p and os.path.exists(local_p):   # resolve_local_midi_file 自己比對過了（含 AI 挑的）
                     target_midi = local_p
                     target_title = matched_t or os.path.splitext(os.path.basename(local_p))[0]
                     log_print(f"🎹 [本地智慧命中] 命中曲目: 《{target_title}》 ({target_midi})")

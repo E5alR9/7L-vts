@@ -32,7 +32,8 @@ _TRAIL_MODAL = re.compile(r'(?:嗎|嘛|啊|吧|呢|喔|哦|呀|啦|嘿|哟|哈|�
 # 例外只有「給我聽」這種聽眾補語（2026-10-24：「彈一首小星星給我聽」→ 應答念成「小星星給我聽交給我」）：
 # 點歌句幾乎都這樣講；剝完不合格就退回原文，《唱歌給你聽》剝成「唱歌」是停用詞，照樣保留原名。
 _TRAIL_LISTENER = re.compile(r'給(?:我|你|妳|您|大家|老爸|我們|你們|妳們)聽(?:聽|一下)?$')
-_LEAD_QUANTITY = re.compile(r'^(?:一首|兩首|三首|點一首|來一首)')
+# 「首《晴天》」：首後面接書名號才剝（2026-10-27 實機：她說「唱首《晴天》」，抽成「首《晴天」去 YouTube 下載）
+_LEAD_QUANTITY = re.compile(r'^(?:一首|兩首|三首|點一首|來一首|首(?=[《〈「『"“]))')
 _LEAD_MEASURE = re.compile(r'^[:：\s]+')
 
 # 關鍵字前允許夾雜的分隔符（空白/標點），不含錨點以便嵌進 _LEAD_OK
@@ -444,6 +445,48 @@ def stage_request_unasked(said: str, songs=(), her_last: str = "") -> bool:
     if len(s) <= 15 and _AGREE_RE.search(s) and not _REFUSE_RE.search(s) and _MUSIC_INTENT_RE.search(her_last or ""):
         return False   # 她提議、這句答應了（「不要」「不用了」「算了」是拒絕，2026-10-27 以前會被當成答應）
     return True
+
+
+# —— 她提議、對方答應：程式直接照她提議的那首去唱／彈（2026-10-27 老爸）——
+# 她問「要不要我唱《晴天》？」，下一句說「要」，主腦常只說「好呀」不叫工具、或子智能體拿「唱剛剛那首」解讀失敗
+_OFFER_ASK_RE = re.compile(r"要不要|想不想|想聽|要聽|好不好|可以嗎|嗎|呢|[？?]")
+_OFFER_CHOICE_RE = re.compile(r"哪|還是|或是")
+_OFFER_QUOTED_RE = re.compile(r"[《〈「『]([^》〉」』]+)[》〉」』]")   # 她給了好幾首讓人挑，一句「要」不知道是哪首
+# 整句只有答應（「今天好累」有「好」不算）：去掉語助詞、標點、稱呼後只剩這些字
+_OFFER_YES_RE = re.compile(r"(?:好|要|嗯|恩|對|可以|行|來|當然|沒問題|拜託|麻煩|請|想|聽|唱|彈|弹|吧|ok|okay|yes|sure|go)+", re.I)
+_OFFER_FILLER_RE = re.compile(r"[\s,，.。!！~～…、?？]|啊|呀|喔|哦|啦|耶|欸|唷|哇|阿|的|嘛|囉|咯|7l|七|妳|你|老爸|寶", re.I)
+_OFFER_VERB_RE = re.compile(r"(唱|彈|弹)([^？?。！!，,；;]*)")
+_OFFER_TAIL_RE = re.compile(r"(?:給(?:你|妳|您|大家|老爸|爸)聽|聽聽|好不好|好嗎|可以嗎|如何|怎麼樣|嗎|呢|吧|呀|啊|喔|哦|～|~|\s)+$")
+
+
+def offer_accept_command(said: str, her_last: str):
+    """她剛提議唱／彈某首，這句是答應 → [(工具, 參數)]；不是就回 []。
+    只認短句答應（「不要」「算了」是拒絕）；她那句要像在問（要不要／嗎／？），歌名照現成的點歌規則抽。"""
+    s = (said or "").strip()
+    h = (her_last or "").strip()
+    if not s or not h or len(s) > 15 or _REFUSE_RE.search(s):
+        return []
+    if not _OFFER_YES_RE.fullmatch(_OFFER_FILLER_RE.sub("", s)):
+        return []
+    if not _OFFER_ASK_RE.search(h) or _OFFER_CHOICE_RE.search(h):
+        return []
+    for m in reversed(list(_OFFER_VERB_RE.finditer(h))):
+        rest = _OFFER_TAIL_RE.sub("", m.group(2)).strip()
+        if not rest:
+            continue
+        quoted = _OFFER_QUOTED_RE.search(rest)
+        if quoted:
+            rest = quoted.group(1)   # 她講了書名號就只拿書名號裡的（「唱首《晴天》」）
+        if m.group(1) == "唱":
+            song = extract_sing_song("唱" + rest)
+            tool = "auto_sing_song"
+        else:
+            song = extract_piano_song("彈" + rest)
+            tool = "pe.play_virtual_piano"
+        song = (song or "").strip().strip("《》「」『』〈〉\"'")
+        if song:
+            return [(tool, {"song_name": song})]
+    return []
 
 
 def parse_hard_command(text: Optional[str]) -> Tuple[Optional[str], Dict]:

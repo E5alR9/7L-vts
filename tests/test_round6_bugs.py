@@ -66,7 +66,7 @@ def test_live_search_uses_the_shared_search_with_ddg_fallback():
 
 
 def test_medium_screen_change_wakes_her():
-    src = ast.get_source_segment(MAIN, _fn("autonomous_wander_worker"))
+    src = ast.get_source_segment(MAIN, _fn("_should_wake_from_screen"))
     assert '"medium"' not in src and '("med", "high")' in src
 
 

@@ -45,7 +45,7 @@ MAIN_FUNCS = (
     "chat_processor_worker", "process_chat_message", "add_to_streamer_mind_board", "is_piano_song_request",
     "background_tool_executor", "run_stage_commands", "_hard_cmd_seen_recently", "_dispatch_in_background",
     "send_brain_slip", "_send_stage_slip", "_supersede_board_requests", "_unpack_slip", "_take_slip", "_owner_text_slip", "_slip_is_dupe", "_record_slip",
-    "_note_brain_origin", "_brain_requester", "_her_words_before", "_brain_replaying_old_request",
+    "_note_brain_origin", "_brain_requester", "_her_words_before", "_brain_replaying_old_request", "_offer_accept_cmds",
     "is_live_brain_active", "live_brain_down_for", "use_rest_brain",
     "rest_slip_worker", "_rest_answer_slip", "_speak_brain_turn", "_rest_speak", "_run_subagent_task",
     "execute_actions", "normalize_silence_token", "_brain_text_for_memory", "_start_marker_tools",
@@ -180,7 +180,7 @@ class DryRun:
             "sleep_wake_decision": ins.sleep_wake_decision, "VIEWER_SOURCES": ins.VIEWER_SOURCES,
             "WAKE_WORDS": ins.WAKE_WORDS,
             **{n: getattr(hc, n) for n in ("parse_hard_command", "build_slip_text", "structured_stage_command",
-                                            "stage_request_unasked", "is_stage_control", "PLAY_TOOLS",
+                                            "stage_request_unasked", "offer_accept_command", "is_stage_control", "PLAY_TOOLS",
                                             "PIANO_CONTROL_TOOLS", "split_original_request", "display_requester",
                                             "asks_to_remember_model_position", "strip_blob_noise",
                                             "sanitize_search_query")},
@@ -194,7 +194,7 @@ class DryRun:
             "_DESKTOP_DOWN_UNTIL": float("inf"),   # 桌機代答關掉
             "STREAMER_MIND_BOARD": [], "STREAMER_MIND_MODELS": ["m"], "REST_BRAIN_MODELS": ["m"],
             "REST_BRAIN_TOOLS": ["invoke_subagent"],
-            "speech_queue": SpeechQueue(), "LIVE_API_SYSTEM_PROMPT_QUEUE": asyncio.Queue(),
+            "speech_queue": SpeechQueue(), "LIVE_API_SYSTEM_PROMPT_QUEUE": asyncio.Queue(), "LIVE_SILENT_CONTEXT_QUEUE": asyncio.Queue(),
             # 假零件
             "log_print": lambda m, *a, **k: d.logs.append(str(m)), "log_swallowed": log_swallowed, "spawn": spawn,
             "pe": pe, "execute_tool_dispatch": execute_tool_dispatch, "_mixed_piano_run": mixed_piano_run,

@@ -190,7 +190,7 @@ from core.hard_command import (
     asks_to_remember_model_position, parse_hard_command, build_slip_text, display_requester,
     parse_slip_for_song, strip_blob_noise, sanitize_search_query, rescue_claim,
     split_original_request, PIANO_CONTROL_TOOLS, is_stage_control, structured_stage_command,
-    PLAY_TOOLS, stage_request_unasked,
+    PLAY_TOOLS, stage_request_unasked, offer_accept_command,
 )
 from core.subagent_router import resolve_subagent_chain
 from core.live_timer_sensor import live_timer_hub
@@ -291,6 +291,35 @@ def _her_words_before(ts: float) -> str:
     except Exception:
         log_swallowed()
     return ""
+
+
+def _offer_accept_cmds(said: str, target: str = "dad", requester_name: str = "") -> list:
+    """她剛提議唱／彈某首、這句答應了 → 那首的舞台指令；觀眾要是她剛在回的那位才算（不然老爸被問、觀眾說好也會點到）。"""
+    if target == "audience":
+        o = _BRAIN_INPUT_ORIGIN
+        mine = re.sub(r"\s*\(@[^)]*\)$", "", requester_name or "").strip()
+        theirs = re.sub(r"\s*\(@[^)]*\)$", "", o.get("name", "") or "").strip()
+        if o.get("who") != "audience" or not mine or not theirs or (mine not in theirs and theirs not in mine):
+            return []
+    try:
+        return offer_accept_command(said, _her_words_before(time.time()))
+    except Exception:
+        log_swallowed()
+        return []
+
+
+async def _accept_offer_by_voice(said: str, requester_name: str) -> None:
+    """老爸用講的答應她的提議：主腦已經在回這句了，這裡只排歌、悄悄告訴主腦已經排了（不另外遞紙條，免得她答應兩次）。"""
+    cmds = _offer_accept_cmds(said, "dad", requester_name)
+    if not cmds:
+        return
+    log_print(f"🎤 [答應提議] 老爸說「{said[:15]}」＝答應她剛才的提議，照排：{cmds}")
+    hit, fn, args = await run_stage_commands(cmds, target="dad", requester_name=requester_name, said=said, slip=False)
+    if hit:
+        try:
+            LIVE_SILENT_CONTEXT_QUEUE.put_nowait(f"[系統提示：{_owner_name()}答應了，系統已經在背景排《{(args or {}).get('song_name', '')}》，妳口頭答應就好，不用再叫工具]")
+        except Exception:
+            log_swallowed()
 
 
 def _brain_replaying_old_request(songs) -> bool:
@@ -1193,6 +1222,40 @@ async def _wait_speech_done(timeout_sec: float = 30.0):
         await stage.wait_change(0.5)   # 她開始／講完、狀態一變就回頭看，不用等滿 0.5 秒
 
 
+# 自主醒來：老爸離開電腦過、又回來操作才醒（2026-10-27）。睡前在用電腦（老爸叫她去睡）不算，
+# 要先看到他離開 SCREEN_WAKE_AWAY_SEC 秒，之後滑鼠鍵盤剛動過、畫面也在變才醒
+SCREEN_WAKE_AWAY_SEC = 180.0
+SCREEN_WAKE_INPUT_SEC = 10.0
+_SLEEP_WAKE = {"away_seen": False}
+
+
+def _input_idle_sec():
+    """滑鼠鍵盤多久沒動（秒）；拿不到回 None。"""
+    try:
+        import ctypes
+
+        class _LII(ctypes.Structure):
+            _fields_ = [("cbSize", ctypes.c_uint), ("dwTime", ctypes.c_uint)]
+        lii = _LII()
+        lii.cbSize = ctypes.sizeof(_LII)
+        if not ctypes.windll.user32.GetLastInputInfo(ctypes.byref(lii)):
+            return None
+        return ((ctypes.windll.kernel32.GetTickCount() - lii.dwTime) & 0xFFFFFFFF) / 1000.0
+    except Exception:
+        return None
+
+
+def _should_wake_from_screen(input_idle, change_level, state=None) -> bool:
+    """純函數：老爸先離開過（輸入閒置夠久），之後又回來操作（剛動過）且畫面在變 → 醒。"""
+    state = _SLEEP_WAKE if state is None else state
+    if input_idle is None:
+        return False
+    if input_idle >= SCREEN_WAKE_AWAY_SEC:
+        state["away_seen"] = True
+        return False
+    return bool(state.get("away_seen")) and input_idle <= SCREEN_WAKE_INPUT_SEC and change_level in ("med", "high")
+
+
 async def set_sleep_mode(enable: bool):
     global IS_SLEEPING, current_ai_status_str
     if enable:
@@ -1204,6 +1267,7 @@ async def set_sleep_mode(enable: bool):
         except Exception:
             log_swallowed()
     IS_SLEEPING = bool(enable)
+    _SLEEP_WAKE["away_seen"] = False
     if IS_SLEEPING:
         current_ai_status_str = " 閉眼沉睡中 (0 API 消耗)"
         set_ai_state("SLEEP", "進入休眠")
@@ -2039,9 +2103,9 @@ async def play_voice_complete(text, target: str = "dad", raw_actions_text: str =
 
             # (已移除舊版 60 秒等待邏輯，若 7L 選擇在唱歌時說話，將直接疊加於伴奏之上，實現演唱會中途說話互動效果)
 
-            #  若當前正在播放觸電即時叫聲，等待叫聲播放完畢再接著說話 (至多等 2 秒防卡死)
+            #  若當前正在播放觸電即時叫聲，等待叫聲播放完畢再接著說話（重度尖叫最長 3.6 秒，至多等 5 秒防卡死）
             shock_wait_start = time.time()
-            while IS_SHOCK_SCREAMING and (time.time() - shock_wait_start < 2.0):
+            while IS_SHOCK_SCREAMING and (time.time() - shock_wait_start < 5.0):
                 await asyncio.sleep(0.05)
 
             try:
@@ -2287,6 +2351,45 @@ def get_realistic_cursor_icon():
 
 PREV_SCREEN_THUMB = None
 
+
+def _update_screen_change(screenshot):
+    """全螢幕縮成 64x36 跟上一張比，更新畫面變化等級（耗時約 1.5ms）。"""
+    global PREV_SCREEN_THUMB, CURRENT_VISION_CHANGE_LEVEL, CURRENT_VISION_CHANGE_SCORE
+    try:
+        from PIL import Image, ImageChops, ImageStat
+        curr_thumb = screenshot.convert("RGB").resize((64, 36), Image.Resampling.BILINEAR)
+        if PREV_SCREEN_THUMB is not None:
+            diff = ImageChops.difference(curr_thumb, PREV_SCREEN_THUMB)
+            stat = ImageStat.Stat(diff)
+            raw_diff = sum(stat.mean) / (3.0 * 255.0) * 100.0  # 0.0 ~ 100.0%
+            if raw_diff < 0.01:
+                CURRENT_VISION_CHANGE_LEVEL = "none"
+                CURRENT_VISION_CHANGE_SCORE = 0
+            elif raw_diff < 0.2:
+                CURRENT_VISION_CHANGE_LEVEL = "low"
+                CURRENT_VISION_CHANGE_SCORE = max(5, min(25, int(raw_diff * 100)))
+            elif raw_diff < 2.0:
+                CURRENT_VISION_CHANGE_LEVEL = "med"
+                CURRENT_VISION_CHANGE_SCORE = min(65, int(25 + raw_diff * 20))
+            else:
+                CURRENT_VISION_CHANGE_LEVEL = "high"
+                CURRENT_VISION_CHANGE_SCORE = min(100, int(65 + raw_diff * 2))
+        PREV_SCREEN_THUMB = curr_thumb
+    except Exception:
+        log_swallowed()
+
+
+def _sleep_screen_probe():
+    """睡著時只算畫面變化（不存檔、不留快取、不送出去），給自主醒來用。"""
+    try:
+        from services.screen_capture import grab_screen
+        shot = grab_screen()
+        if shot is not None:
+            _update_screen_change(shot)
+    except Exception:
+        log_swallowed()
+
+
 def capture_screen_multi_view():
     """
     五方多視角超高清螢幕感知系統（截圖本身見 services.screen_capture）：
@@ -2333,30 +2436,7 @@ def capture_screen_multi_view():
         except Exception:
             pass
 
-        #  即時計算真實畫面動態差分 (全螢幕縮圖均勻採樣，耗時僅約 1.5ms)
-        global PREV_SCREEN_THUMB, CURRENT_VISION_CHANGE_LEVEL, CURRENT_VISION_CHANGE_SCORE
-        try:
-            from PIL import ImageChops, ImageStat
-            curr_thumb = screenshot.resize((64, 36), Image.Resampling.BILINEAR)
-            if PREV_SCREEN_THUMB is not None:
-                diff = ImageChops.difference(curr_thumb, PREV_SCREEN_THUMB)
-                stat = ImageStat.Stat(diff)
-                raw_diff = sum(stat.mean) / (3.0 * 255.0) * 100.0  # 0.0 ~ 100.0%
-                if raw_diff < 0.01:
-                    CURRENT_VISION_CHANGE_LEVEL = "none"
-                    CURRENT_VISION_CHANGE_SCORE = 0
-                elif raw_diff < 0.2:
-                    CURRENT_VISION_CHANGE_LEVEL = "low"
-                    CURRENT_VISION_CHANGE_SCORE = max(5, min(25, int(raw_diff * 100)))
-                elif raw_diff < 2.0:
-                    CURRENT_VISION_CHANGE_LEVEL = "med"
-                    CURRENT_VISION_CHANGE_SCORE = min(65, int(25 + raw_diff * 20))
-                else:
-                    CURRENT_VISION_CHANGE_LEVEL = "high"
-                    CURRENT_VISION_CHANGE_SCORE = min(100, int(65 + raw_diff * 2))
-            PREV_SCREEN_THUMB = curr_thumb
-        except Exception:
-            log_swallowed()
+        _update_screen_change(screenshot)
 
         # 1. 全螢幕全景總覽圖 (高畫質 Lanczos 縮圖至 1920 寬度，品質 88，兼顧 Gemini 思考速度與全景清晰度)
         buf_full = io.BytesIO()
@@ -3630,6 +3710,7 @@ async def continuous_live_worker(vts):
                         from core.memory import append_to_unified_memory
                         append_to_unified_memory(speaker=owner, target=char_name, content=user_spoken, role="user", source="mic")
                         log_print(f"🎤 [老爸說話 (Live STT)] {user_spoken}")
+                        spawn(_accept_offer_by_voice(user_spoken, owner))   # 她剛問要不要唱、老爸說「要」（2026-10-27）
                         spawn(_related_context_for_speech(user_spoken))   # 查舊對話，有就當背景資料給主腦（2026-10-26）
                         try:
                             import services.web_dashboard as _wd
@@ -4125,7 +4206,12 @@ async def console_keyboard_input_worker(input_queue):
 async def screen_capture_worker():
     global latest_screen_cache
     while True:
-        if IS_SLEEPING or not IS_PERIPHERAL_VISION_ENABLED:
+        if IS_SLEEPING and IS_PERIPHERAL_VISION_ENABLED:
+            # 睡著也要知道畫面有沒有在動（自主醒來）；以前整個跳過，等級停在睡前那一刻
+            await asyncio.to_thread(_sleep_screen_probe)
+            await asyncio.sleep(3.0)
+            continue
+        if not IS_PERIPHERAL_VISION_ENABLED:
             await asyncio.sleep(2.0)
             continue
         try:
@@ -4381,6 +4467,9 @@ async def busy_expression_worker():
             log_swallowed()
 
 
+AUTO_PIANO_GAP_SEC = 300.0   # 自主彈琴：上一首彈完後至少隔這麼久
+
+
 async def autonomous_wander_worker():
     """7L 背景非同步自主漫遊走位與自主彈琴協程（在老爸閒置時由 7L 自主漫步或自主彈奏鋼琴）"""
     global LAST_WANDER_TIME
@@ -4391,16 +4480,18 @@ async def autonomous_wander_worker():
             await asyncio.sleep(12.0)
             idle_ticks = get_silence_ticks()
             
-            #  7L 休眠中自主甦醒邏輯（已拔除音樂喚醒，但若偵測到老爸在操作畫面，則會自主醒來）
+            #  7L 休眠中自主甦醒：老爸離開電腦過、又回來操作（滑鼠鍵盤剛動、畫面在變）才醒
             if IS_SLEEPING:
-                if CURRENT_VISION_CHANGE_LEVEL in ("med", "high"):   # 等級只有 none／low／med／high（以前寫成 medium 永遠不中）
-                    log_print("☀️ [7L 自主甦醒] 偵測到老爸電腦畫面切換活躍，7L 自主醒來！")
+                if _should_wake_from_screen(_input_idle_sec(), CURRENT_VISION_CHANGE_LEVEL):
+                    log_print("☀️ [7L 自主甦醒] 老爸回到電腦前操作，7L 自主醒來！")
                     await set_sleep_mode(False)
                     # 醒來不一定說話：靜靜睜眼即可，老爸說話哨兵自然會接
                 continue
 
             # 只看「正在彈」：彈完後鋼琴留在台上待命，舊碼看 is_piano_active，待命時連自動睡覺都一起跳過
             if pe.is_piano_performing() or stage.singing() or stage.ai_state() in ["TALKING", "THINKING", "PIANO", "SINGING"]:
+                if pe.is_piano_performing():
+                    LAST_AUTO_PIANO_TIME = time.time()   # 自主彈琴的間隔從彈完算（以前從開始算，長曲彈完馬上接下一首）
                 continue
 
             #  7L 自主作息小憩邏輯（深夜15分鐘或白天60分鐘無人對話且環境完全安靜時，7L 自主決定小憩入睡）
@@ -4434,17 +4525,15 @@ async def autonomous_wander_worker():
             # 漫遊和自主彈琴從匯入那天起就沒跑過（2026-10-25 實機發現）
             idle_seconds = idle_ticks  # get_silence_ticks() 一格一秒
             now = time.time()
-            if IS_AUTO_WANDER_ENABLED and stage.ai_state() == "IDLE" and idle_seconds > 60.0:
-                #  自主彈琴邏輯：預設關閉（IS_AUTO_PIANO_ENABLED = False），避免未經指示自作主張彈琴打斷老爸或與背景音樂打架
-                if IS_AUTO_PIANO_ENABLED and (now - LAST_AUTO_PIANO_TIME > 300.0):
+            if stage.ai_state() == "IDLE" and idle_seconds > 60.0:
+                #  自主彈琴：後台開關（預設關），只看自己的開關（以前包在漫遊開關裡，漫遊關了就永遠不彈）
+                if IS_AUTO_PIANO_ENABLED and (now - LAST_AUTO_PIANO_TIME > AUTO_PIANO_GAP_SEC):
                     # 嚴防干擾：若電腦正在播放音樂/音訊，絕不彈琴搶聲音
-                    is_noisy = bool(LATEST_SYSTEM_MUSIC_INFO)
-                    if not is_noisy:
+                    if not LATEST_SYSTEM_MUSIC_INFO:
                         LAST_AUTO_PIANO_TIME = now
                         LAST_WANDER_TIME = now
-                        local_seeds = pe.get_local_piano_seeds()
-                        if local_seeds:
-                            song_seed = random.choice(local_seeds)
+                        song_seed = random.choice(pe.get_local_piano_seeds() or [""])
+                        if song_seed:
                             log_print(f"🎹 [7L 自主彈琴] 7L 決定自主坐到鋼琴前為老爸演奏《{song_seed}》！")
                             ai_intro = await pe.generate_dynamic_piano_chatter(song_seed, is_radio=False)
                             if ai_intro:
@@ -4452,10 +4541,16 @@ async def autonomous_wander_worker():
                                 await speech_queue.put({"text": ai_intro, "target": "dad", "private": False})
                             else:
                                 log_print("🎹 [自主彈琴 AI 自由意志] 7L 決定優雅安靜入座，全神貫注為老爸演奏。")
-                            await pe.play_virtual_piano(song_seed)
+                            try:   # 主腦知道自己在彈（不用她講）
+                                LIVE_SILENT_CONTEXT_QUEUE.put_nowait(f"[系統提示：妳閒著沒事，自己坐到鋼琴前彈《{pe.clean_song_title_for_speech(song_seed)}》]")
+                            except Exception:
+                                log_swallowed()
+                            # 直接給本機 MIDI：拿曲名去走 AI 點歌判斷會多一次 API，還可能被判成聊天
+                            await pe.play_virtual_piano(song_seed, midi_file=os.path.join(pe.MIDI_SHEETS_DIR, song_seed + ".mid"),
+                                                        target="dad", is_direct_song_name=True)
                             continue
 
-                if now - LAST_WANDER_TIME > 60.0 and not pe.is_piano_active:  # 坐在鋼琴前待命時不走位
+                if IS_AUTO_WANDER_ENABLED and now - LAST_WANDER_TIME > 60.0 and not pe.is_piano_active:  # 坐在鋼琴前待命時不走位
                     LAST_WANDER_TIME = now
                     log_print(f"🚶 [自主漫遊] 閒置 {int(idle_seconds)} 秒，隨機換個位置")
                     await move_vts_spatial(target_pos="random", duration=3.0)
@@ -5164,6 +5259,16 @@ async def streamer_mind_loop_worker(vts, input_queue):
                     if _ping_focus:
                         _PING_LAST_TS[_pkey] = _pnow
                         log_print(f"📍 [哨兵點名應答] {_pm.get('user', '?')} 光桿點名，安靜＋冷卻通過，直接應一聲。")
+                    elif _is_bare_ping(_pm.get("content", "")):
+                        # 剛講過話／剛應過他：不審也不叫她講，但讓她知道有人喊她（以前交哨兵審，多半 PASS，她根本不知道）
+                        _pm["status"] = "read"
+                        _who = neutralize_viewer_text(_pm.get("user", "") or "觀眾")[:20]
+                        try:
+                            LIVE_SILENT_CONTEXT_QUEUE.put_nowait(f"[系統提示：直播間的{_who}剛喊了妳一聲名字（剛應過或妳正在講，不用特地回）]")
+                        except Exception:
+                            log_swallowed()
+                        log_print(f"📍 [哨兵點名] {_pm.get('user', '?')} 光桿點名（剛講過話或剛應過），悄悄告訴主腦。")
+                        continue
                 except Exception:
                     _ping_focus = ""
 
@@ -5831,6 +5936,9 @@ def _hard_cmd_seen_recently(fn_name: str, fn_args, now: float) -> bool:
     舊碼主腦的工具呼叫全被漏接所以沒事，修好之後就重複了。沒看過就記進流水帳（kind=stage_cmd）並回 False。
     鋼琴的停止／暫停／繼續只跟「上一個鋼琴控制」比：「暫停→繼續→暫停」20 秒內換了指令照樣執行。"""
     import json as _json
+    if (fn_args or {}).get("song_name"):
+        # 《晴天》跟晴天是同一首（程式照她的提議排、主腦又叫一次工具，歌名寫法常不一樣）
+        fn_args = dict(fn_args, song_name="".join(str(fn_args["song_name"]).split()).strip("《》「」『』〈〉\"'").casefold())
     try:
         key = f"{fn_name}|{_json.dumps(fn_args or {}, ensure_ascii=False, sort_keys=True)}"
     except Exception:
@@ -5870,6 +5978,11 @@ async def background_tool_executor(user_text: str, target: str = "dad", requeste
         if not cmds:
             fn_name, fn_args = parse_hard_command(user_text)
             cmds = [(fn_name, fn_args)] if fn_name else []
+        if not cmds and not from_brain:
+            # 她剛問「要不要我唱《晴天》？」這句是「要」：照她提議的那首排（主腦常只說好不叫工具）
+            cmds = _offer_accept_cmds(user_text, target, requester_name)
+            if cmds:
+                log_print(f"🤖 [CPU 拆解] 答應她剛才的提議：{cmds}")
         if not cmds:
             # CPU 沒命中就交還；AI 解讀一律走 A 架構（invoke_subagent → nv_interpret_task），這裡不燒 API
             log_print("🤖 [CPU 拆解] 無硬指令，交還主腦處理。")
@@ -5921,7 +6034,7 @@ def _send_stage_slip(slip_text: str, target: str, said: str, requester_name: str
 
 
 async def run_stage_commands(cmds: list, target: str = "dad", requester_name: str = "", from_brain: bool = False,
-                             said: str = ""):
+                             said: str = "", slip: bool = True):
     """執行解析好的舞台指令 [(工具, 參數)]：兩個＝彈加唱（混用），一個＝單句。
     權限（觀眾不能停鋼琴／停歌）、去重、紙條、應答都在這裡，文字解析和主腦的結構化動作共用。
     回傳 (是否執行, 工具名, 參數)；主腦翻舊點歌回 (False, "unasked", …)，觀眾停鋼琴回 (False, "audience_denied", {})。"""
@@ -5987,7 +6100,7 @@ async def run_stage_commands(cmds: list, target: str = "dad", requester_name: st
     # ⚠️ 紙條必須寫明「唱歌的是 7L 本人」，否則主腦會把點歌的人當成演唱者
     # （經加鎖紙條佇列投遞，避免跟麥克風音訊流搶通道）
     slip_text = build_slip_text(fn_name, fn_args, requester_name)
-    if slip_text and is_live_brain_active() and not from_brain:
+    if slip and slip_text and is_live_brain_active() and not from_brain:
         _send_stage_slip(slip_text, target, said, requester_name)
         log_print(f"📥 [黑板同步] 透過紙條傳送給 Live 大腦: {slip_text[:60]}...")
     return True, fn_name, fn_args
@@ -6173,6 +6286,21 @@ async def process_chat_message(vts, input_queue, user_input: str, user_audio_b64
         log_print(f"❌ [老爸訊息處理異常]: {e!r}")
 
 
+async def _wake_for_dad_touch(what: str) -> None:
+    """睡著時被老爸電、被摸：先叫醒（以前紙條照遞，但她在睡，沒反應）。"""
+    if IS_SLEEPING:
+        log_print(f"☀️ [系統] 睡著時收到老爸的{what}，7L 醒來")
+        await set_sleep_mode(False)
+
+
+def _record_dad_touch(text: str) -> None:
+    """獎懲記進對話記憶當系統事件（以前寫進防跳針清單，那不是記憶，還被當成她說過的話）。"""
+    try:
+        append_to_unified_memory(speaker="系統", target="7L", content=text, role="system", source="dashboard")
+    except Exception:
+        log_swallowed()
+
+
 async def execute_punish_action(reason: str = "", is_severe: bool = None):
     """
      7L 電擊與微電流刺激中樞 (支援分級：微電刺激 vs 強力電擊處分)：
@@ -6189,6 +6317,7 @@ async def execute_punish_action(reason: str = "", is_severe: bool = None):
         log_type = "強力電擊處分" if is_severe_punish else "微電刺激"
         log_detail = f" 原因: 『{reason}』" if reason else ""
         log_print(f"⚡ [{log_type}中樞] 老爸對 7L 實施了{log_type}！{log_detail}")
+        await _wake_for_dad_touch("電擊")
         
         #  0 秒即時強制掐斷當前正在播出的任何長語音，清空排隊，讓位給秒級觸電反應！
         await interrupt_current_speech(clear_queue=True, reason="老爸電擊即時打斷")
@@ -6213,12 +6342,12 @@ async def execute_punish_action(reason: str = "", is_severe: bool = None):
         vc.shock_timer = time.time() + 4.5
         vc.frown_timer = time.time() + 6.0
 
-        # 銘刻記憶（純粹事件記錄，拒絕預設干擾詞）
+        # 記進對話記憶（純粹事件記錄，拒絕預設干擾詞）
         if is_severe_punish:
-            punish_memory = " 【老爸電擊訓誡】：老爸對 7L 實施了強力電擊處分" + (f"（原因：『{reason}』）。" if reason else "。")
+            punish_memory = "老爸對 7L 實施了強力電擊處分" + (f"（原因：『{reason}』）" if reason else "")
         else:
-            punish_memory = " 【老爸微電刺激】：老爸突然電了 7L 一下" + (f"（原因：『{reason}』）。" if reason else "。")
-        record_bot_message(punish_memory)
+            punish_memory = "老爸突然電了 7L 一下" + (f"（原因：『{reason}』）" if reason else "")
+        _record_dad_touch(punish_memory)
 
         # 廣播事件至前端
         web_dash.broadcast_event("ai_punished", {
@@ -6276,7 +6405,8 @@ async def execute_reward_action(reason: str = "", level: int = None):
             level = max(1, min(3, int(level)))
 
         target_vts = vc.GLOBAL_VTS
-        
+        await _wake_for_dad_touch("獎勵")
+
         #  0 秒即時掐斷當前舊語音，清空排隊，秒級享受摸頭擁抱！
         await interrupt_current_speech(clear_queue=True, reason="老爸獎勵即時打斷")
         
@@ -6292,7 +6422,7 @@ async def execute_reward_action(reason: str = "", level: int = None):
             vc.wink_timer = time.time() + 0.85
             vc.wink_side = "left"
             
-            reward_memory = " 【老爸深情擁抱 (Lv.3)】：老爸把 7L 緊緊抱進懷裡" + (f"（原因：『{reason}』）。" if reason else "。")
+            reward_memory = "老爸把 7L 緊緊抱進懷裡" + (f"（原因：『{reason}』）" if reason else "")
             event_prompt = f"【 系統事件：老爸在控制台親自給予妳深情緊緊擁抱！（原因：{reason}）】" if reason else "【 系統事件：老爸在控制台親自給予妳深情緊緊擁抱！】"
             resp_msg = "已成功給予 7L 終極深情擁抱 (Lv.3)" + (f"：{reason}" if reason else "")
 
@@ -6307,7 +6437,7 @@ async def execute_reward_action(reason: str = "", level: int = None):
             vc.wink_timer = time.time() + 0.65
             vc.wink_side = random.choice(["left", "right"])
 
-            reward_memory = " 【老爸揉頭大獎 (Lv.2)】：老爸把 7L 頭髮揉得亂蓬蓬並熱烈誇獎" + (f"（原因：『{reason}』）。" if reason else "。")
+            reward_memory = "老爸把 7L 頭髮揉得亂蓬蓬並熱烈誇獎" + (f"（原因：『{reason}』）" if reason else "")
             event_prompt = f"【 系統事件：老爸在控制台用力揉了揉妳的頭頂、誇獎妳！（原因：{reason}）】" if reason else "【 系統事件：老爸在控制台用力揉了揉妳的頭頂、誇獎妳！】"
             resp_msg = "已成功給予 7L 狂揉頭髮大獎勵 (Lv.2)" + (f"：{reason}" if reason else "")
 
@@ -6322,12 +6452,11 @@ async def execute_reward_action(reason: str = "", level: int = None):
             vc.wink_timer = time.time() + 0.55
             vc.wink_side = random.choice(["left", "right"])
 
-            reward_memory = " 【老爸日常摸頭誇獎 (Lv.1)】：老爸親自溫柔摸了摸 7L 的頭" + (f"（原因：『{reason}』）。" if reason else "。")
+            reward_memory = "老爸親自溫柔摸了摸 7L 的頭" + (f"（原因：『{reason}』）" if reason else "")
             event_prompt = f"【 系統事件：老爸在控制台溫柔摸了摸妳的頭頂、誇獎妳！（原因：{reason}）】" if reason else "【 系統事件：老爸在控制台溫柔摸了摸妳的頭頂、誇獎妳！】"
             resp_msg = "已成功給予 7L 溫柔摸頭獎勵 (Lv.1)" + (f"：{reason}" if reason else "")
 
-        # 銘刻記憶
-        record_bot_message(reward_memory)
+        _record_dad_touch(reward_memory)
 
         # 廣播獎勵事件至前端
         web_dash.broadcast_event("ai_rewarded", {
@@ -6530,7 +6659,7 @@ async def chat_processor_worker(vts, input_queue):
 # ────────────────────────────────────────────────────────
 #  12. Discord 指令、模型預熱、終端狀態列、main()
 # ────────────────────────────────────────────────────────
-#  金鑰健康面板本體在 workers/cma_panel；Discord 讓老爸用手機看狀態、開關麥克風。
+#  金鑰健康面板本體在 workers/cma_panel；Discord 讓老爸用手機看金鑰狀態（開關麥克風用講的或後台）。
 
 import workers.cma_panel as cma_panel  # 金鑰健康面板（搬出主檔）
 cma_panel.bind(sys.modules[__name__])
@@ -6555,30 +6684,6 @@ async def show_cma_short(ctx):
 @discord_bot.command(name="vapi", help="顯示當前系統 CMA 監控面板（預設精簡，支援 *vapi full）")
 async def show_cma_full(ctx, mode: str = "brief"):
     await show_cma_panel(ctx, mode=mode)
-
-@discord_bot.command(name="mic", help="控制麥克風開啟或關閉 (用法: *mic on / *mic off / *mic 開 / *mic 關)")
-async def control_mic(ctx, action: str = ""):
-    global IS_MIC_ENABLED
-    action_lower = action.lower()
-    if action_lower in ["on", "開", "open", "enable"]:
-        IS_MIC_ENABLED = True
-        log_print("🎙️ [Discord] 收到開麥指令，已開啟麥克風。")
-        await ctx.send(" **麥克風已開啟**！已恢復語音收音。")
-    elif action_lower in ["off", "關", "close", "disable", "mute"]:
-        IS_MIC_ENABLED = False
-        log_print("🎙️ [Discord] 收到關麥指令，已關閉麥克風。")
-        await ctx.send(" **麥克風已關閉**！已暫停語音收音。")
-    else:
-        status = " 開啟中" if IS_MIC_ENABLED else " 關閉中"
-        await ctx.send(f" 目前麥克風狀態：{status}\n使用方式：`*mic on` (開麥) 或 `*mic off` (關麥)")
-
-@discord_bot.command(name="開麥", help="開啟麥克風收音")
-async def discord_mic_on(ctx):
-    await control_mic(ctx, "on")
-
-@discord_bot.command(name="關麥", help="關閉麥克風收音")
-async def discord_mic_off(ctx):
-    await control_mic(ctx, "off")
 
 def _prewarm_embedder():
     """知識庫向量模型背景預載（2026-10-24）：第一次 search_knowledge 不用在對話當下載入／下載。"""
