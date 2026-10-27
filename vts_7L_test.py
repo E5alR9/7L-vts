@@ -4561,7 +4561,8 @@ async def autonomous_wander_worker():
                             else:
                                 log_print("🎹 [自主彈琴 AI 自由意志] 7L 決定優雅安靜入座，全神貫注為老爸演奏。")
                             try:   # 主腦知道自己在彈（不用她講）
-                                LIVE_SILENT_CONTEXT_QUEUE.put_nowait(f"[系統提示：妳閒著沒事，自己坐到鋼琴前彈《{pe.clean_song_title_for_speech(song_seed)}》]")
+                                LIVE_SILENT_CONTEXT_QUEUE.put_nowait(f"[系統提示：妳閒著沒事，自己坐到鋼琴前彈起《{pe.clean_song_title_for_speech(song_seed)}》，"
+                                                                     "系統已經在彈了，不用叫工具、不用回話]")
                             except Exception:
                                 log_swallowed()
                             # 直接給本機 MIDI：拿曲名去走 AI 點歌判斷會多一次 API，還可能被判成聊天
@@ -5973,7 +5974,7 @@ def _hard_cmd_seen_recently(fn_name: str, fn_args, now: float, from_brain: bool 
     收琴／停歌／暫停／繼續只跟「上一個舞台指令」比：「暫停→繼續→暫停」「收琴→點歌→收琴」20 秒內照樣執行。
     老爸（不是主腦）停掉之後重點同一首照樣執行；主腦晚到的同一首照擋，免得停掉又被舊的叫回來。"""
     import json as _json
-    if (fn_args or {}).get("song_name"):
+    if isinstance(fn_args, dict) and fn_args.get("song_name"):   # 混用（彈加唱）傳的是清單
         # 《晴天》跟晴天是同一首（程式照她的提議排、主腦又叫一次工具，歌名寫法常不一樣）
         fn_args = dict(fn_args, song_name="".join(str(fn_args["song_name"]).split()).strip("《》「」『』〈〉\"'").casefold())
     try:

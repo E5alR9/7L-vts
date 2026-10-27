@@ -1845,6 +1845,27 @@ def _fetch_validated_midi(song_query: str, title: str = "") -> Optional[str]:
         song_query, MIDI_SHEETS_DIR,
         validate=lambda t: is_midi_match_valid(want, t))
 
+def _local_match_by_title(title: str, available_files) -> Optional[str]:
+    """用正式曲名找本機檔：檔名的核心曲名整個詞都在曲名裡（或反過來），核心曲名至少 6 個字，挑重疊最多、能彈的。
+    「Liszt La Campanella」→ campanella.mid；「Star」這種短檔名不配。"""
+    want = extract_core_title(title or "").lower()
+    if len(want.replace(" ", "")) < 6:
+        return None
+    want_words = set(want.split())
+    best, best_n = None, 0
+    for f in available_files or ():
+        core = extract_core_title(f).lower()
+        words = set(core.split())
+        if len(core.replace(" ", "")) < 6 or not words:
+            continue
+        if words <= want_words or want_words <= words:
+            n = len(words & want_words)
+            path = os.path.join(MIDI_SHEETS_DIR, f)
+            if n > best_n and is_midi_playable(path):
+                best, best_n = path, n
+    return best
+
+
 def _first_playable_pick(matched_files, available_files) -> Optional[str]:
     """AI 列的同曲版本裡第一個在清單裡、又能彈的（2026-10-27 實機：月光奏鳴曲 AI 挑到的那份太短被拒收，
     本機明明還有另外兩個版本，卻直接上網抓）。都不能彈就回第一個在清單裡的，讓後面照舊拒收、轉線上。"""
@@ -2658,6 +2679,14 @@ async def play_virtual_piano(song_name: str = "", custom_sheet: str = "", auto_r
             return "（系統回報：這份樂譜太短或是空的，沒辦法彈，請跟對方說這次沒寫好。）"
         log_print(f"🛡️ [樂譜質檢拒收] 《{os.path.basename(target_midi)}》時長/音符不足，不播，轉線上搜譜！")
         target_midi = None
+    if not target_midi and not is_explicit_yt and not IS_PIANO_AUTO_RADIO_MODE and ai_intent:
+        # 上網前拿 AI 給的正式曲名再找一次本機（2026-10-27 實測：「李斯特的鐘」AI 沒認出 campanella.mid，就上網抓了一份新的）
+        for _alt in dict.fromkeys(t for t in (ai_intent.get("search_online_query"), ai_intent.get("song_title")) if t):
+            _p = _local_match_by_title(_alt, available_files)
+            if _p:
+                target_midi, target_title = _p, os.path.splitext(os.path.basename(_p))[0]
+                log_print(f"🎹 [本地曲名命中] 《{clean_q}》的正式曲名《{_alt}》本機就有：{os.path.basename(_p)}，不上網抓")
+                break
     if _PIANO_STOPS["n"] != stops_at_request:
         # 判斷意圖這一兩秒老爸收了琴（2026-10-27 實測：彈卡農後 0.5 秒收琴，AI 判完卡農照樣開彈）
         log_print(f"🛑 [鋼琴] 《{target_title}》還在判斷時鋼琴被收了，不開彈。")

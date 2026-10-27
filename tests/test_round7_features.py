@@ -313,3 +313,33 @@ def test_piano_start_aborts_if_stopped_during_intent():
 def test_shock_stops_song_waiting_to_go_on_stage():
     src = ast.get_source_segment(MAIN, main_def("execute_punish_action"))
     assert "if ac.stop_current_song():" in src and "if is_singing_active():" not in src
+
+
+def test_dedupe_accepts_mixed_command_list():
+    # 2026-10-27 全功能實測：彈加唱傳清單進來，歌名正規化當字典用就 AttributeError，整個彈加唱沒執行
+    from core import eventlog
+    from core.hard_command import is_stage_control
+    log = eventlog.EventLog(":memory:")
+    ns = load_main("_hard_cmd_seen_recently", eventlog=type("E", (), {"get": staticmethod(lambda: log)}),
+                   is_stage_control=is_stage_control, _HARD_CMD_DEDUPE_SEC=20.0)
+    mixed = [["pe.play_virtual_piano", {"song_name": "Faded"}], ["auto_sing_song", {"song_name": "Faded"}]]
+    t = time.time()
+    assert ns["_hard_cmd_seen_recently"]("mixed", mixed, t) is False
+    assert ns["_hard_cmd_seen_recently"]("mixed", mixed, t + 1, from_brain=True) is True
+
+
+def test_local_match_by_canonical_title(monkeypatch):
+    # 2026-10-27 全功能實測：「李斯特的鐘」AI 沒從清單認出 campanella.mid，只給正式曲名，就上網抓了一份新的
+    import services.piano_engine as pe
+    monkeypatch.setattr(pe, "is_midi_playable", lambda p: True)
+    files = ["campanella.mid", "Star.mid", "Canon in D.mid", "小星星.mid"]
+    assert pe._local_match_by_title("Liszt La Campanella", files).endswith("campanella.mid")
+    assert pe._local_match_by_title("Twinkle Twinkle Little Star", files) is None     # 「Star」太短不配
+    assert pe._local_match_by_title("Canon", files) is None                           # 曲名太短不找
+    src = __import__("inspect").getsource(pe.play_virtual_piano)
+    assert "_local_match_by_title(_alt, available_files)" in src
+
+
+def test_auto_piano_note_says_no_tool_needed():
+    src = ast.get_source_segment(MAIN, main_def("autonomous_wander_worker"))
+    assert "不用叫工具" in src
