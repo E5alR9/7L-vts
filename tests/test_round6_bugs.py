@@ -179,3 +179,12 @@ def test_speech_cleanup_is_one_helper_and_never_stops_shared_music():
     assert src.count("_release_playback()") == 4   # 定義一次＋三條路各叫一次
     assert "in locals() and" not in src and "in locals():" not in src   # 不再一個個猜變數有沒有建好
     assert "mixer.music.stop()" not in src.split("except asyncio.CancelledError")[1]   # 取消、出錯不再掐共用的 music
+
+
+def test_expression_action_words_have_one_source():
+    """眨眼／驚訝／皺眉／白眼：舞台動作、本能腦、set_vts_expression 都用 vts_client.action_kind（以前三份、還不一樣）。"""
+    import services.vts_client as vc
+    assert [vc.action_kind(t) for t in ("WINK", "SURPRISE", "難過眉", "鄙視", "開心")] ==         ["wink", "shock", "frown", "eye_roll", None]
+    stage_src = open(os.path.join(ROOT, "services", "stage_actions.py"), encoding="utf-8").read()
+    assert "vc.action_kind(exp_tag)" in stage_src and '"SHOCK"' not in stage_src
+    assert MAIN.count("vc.action_kind(exp_tag)") == 1

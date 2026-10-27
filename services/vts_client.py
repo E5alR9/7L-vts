@@ -814,7 +814,7 @@ async def set_vts_expression(vts, exp_tag, is_instinct=False):
 
     try:
         clean_tag = str(exp_tag).strip().replace("[", "").replace("]", "").replace("EXPRESSION:", "").replace("EXPRESSION：", "").strip().lower()
-        if clean_tag in ["_reset_", "_reset", "預設", "重置", "關閉", "正常", "恢復", "無", "取消", "reset", "default", "none", "close", "off", "0"]:
+        if clean_tag in _RESET_WORDS:
             # 先問 VTS 要 ground truth（2026-10-11：小本本不同步／重啟殘留／超時靜吞都會讓
             # reset 發個寂寞還撒謊說關掉了。直接問誰在臉上，逐個關，失敗大聲講。）
             to_close = {f for f in CURRENT_ACTIVE_EXPS if not _is_protected_exp(f)}
@@ -881,20 +881,20 @@ async def set_vts_expression(vts, exp_tag, is_instinct=False):
             if not t: continue
             
             # 處理特殊動作 (Wink, Shock, Frown)
-            if any(k in t for k in ["wink", "眨眼", "單眼", "眨單眼", "单眼", "眨单眼"]):
+            if any(k in t for k in _WINK_WORDS):
                 wink_timer = time.time() + 0.55
                 wink_side = random.choice(["left", "right"])
                 action_hit = True
                 log_print(f"😉 [Live2D 動作] 觸發 Wink 單邊眨一下眼放電 ({wink_side})")
-            if any(k in t for k in ["shock", "surprise", "驚訝", "惊讶", "震驚", "震惊", "驚", "惊", "瞳孔", "縮小", "缩小", "嚇到", "吓到", "恐懼", "害怕"]):
+            if any(k in t for k in _SHOCK_WORDS):
                 shock_timer = time.time() + 4.0
                 action_hit = True
                 log_print("😱 [Live2D 動作] 觸發驚訝縮瞳瞪大雙眼與物理顫抖")
-            if any(k in t for k in ["frown", "皺眉", "皱眉", "八字眉", "困擾", "困扰", "委屈"]):
+            if any(k in t for k in _FROWN_WORDS):
                 frown_timer = time.time() + 4.0
                 action_hit = True
                 log_print("🥺 [Live2D 動作] 觸發傲嬌八字皺眉/委屈表情")
-            if any(k in t for k in ["eye_roll", "白眼", "翻白眼", "鄙視", "不屑", "無語"]):
+            if any(k in t for k in _EYEROLL_WORDS):
                 eye_roll_timer = time.time() + 3.0
                 is_tracking_mouse = False
                 action_hit = True
@@ -975,7 +975,7 @@ async def trigger_vts_expression(expression_name: str, is_instinct: bool = False
     if not is_instinct:
         print(f"\n🎭 [Tool 調用] 7L 正在切換表情至: 「{clean_name}」")
     if GLOBAL_VTS:
-        if clean_name in ["預設", "重置", "reset", "default", "_RESET_", "關閉", "正常", "恢復", "無", "取消", "none", "close", "off"]:
+        if clean_name.lower() in _RESET_WORDS:
             await set_vts_expression(GLOBAL_VTS, "_RESET_", is_instinct=is_instinct)
             return "已成功關閉表情，恢復預設狀態。"
         else:
@@ -1023,10 +1023,22 @@ EXPRESSION_MENU_TEXT = "；".join(f"{ctx}→{'、'.join(names)}" for ctx, names 
 # 2026-10-17 起同檔再下一次＝維持開啟（不再 toggle 關掉）；NV 動手前查臉仍可省掉重複請求。
 _RESET_WORDS = {"_reset_", "_reset", "預設", "重置", "關閉", "正常",
                 "恢復", "無", "取消", "reset", "default", "none", "close", "off", "0"}
+# 眨眼／驚訝／皺眉／白眼是「動作」（計時器驅動），不是表情檔。舞台動作、本能腦、set_vts_expression、查臉
+# 全用這一份（2026-10-27 以前三份、內容還不一樣）；比對前先轉小寫
 _WINK_WORDS = ("wink", "眨眼", "單眼", "眨單眼", "单眼", "眨单眼")
-_SHOCK_WORDS = ("shock", "surprise", "驚訝", "惊讶", "震驚", "震惊", "瞳孔", "縮小", "缩小", "嚇到", "吓到", "恐懼", "害怕")
-_FROWN_WORDS = ("frown", "皺眉", "皱眉", "八字眉", "困擾", "困扰", "委屈")
+_SHOCK_WORDS = ("shock", "surprise", "驚訝", "惊讶", "震驚", "震惊", "驚", "惊", "瞳孔", "縮小", "缩小", "嚇到", "吓到", "恐懼", "害怕")
+_FROWN_WORDS = ("frown", "皺眉", "皱眉", "八字眉", "難過眉", "困擾", "困扰", "委屈")
 _EYEROLL_WORDS = ("eye_roll", "白眼", "翻白眼", "鄙視", "不屑", "無語")
+_ACTION_WORDS = (("wink", _WINK_WORDS), ("shock", _SHOCK_WORDS), ("frown", _FROWN_WORDS), ("eye_roll", _EYEROLL_WORDS))
+
+
+def action_kind(tag: str):
+    """[EXPRESSION] 標籤是不是眨眼／驚訝／皺眉／白眼這類動作：回 "wink"／"shock"／"frown"／"eye_roll"，不是就 None。"""
+    t = str(tag or "").lower()
+    for kind, words in _ACTION_WORDS:
+        if any(k in t for k in words):
+            return kind
+    return None
 
 
 def _expression_targets(expression_name: str):
@@ -1037,10 +1049,9 @@ def _expression_targets(expression_name: str):
         return set(), None, False
     if clean in _RESET_WORDS:
         return set(), None, True
-    for kind, words in (("wink", _WINK_WORDS), ("shock", _SHOCK_WORDS),
-                        ("frown", _FROWN_WORDS), ("eye_roll", _EYEROLL_WORDS)):
-        if any(k in clean for k in words):
-            return set(), kind, False
+    kind = action_kind(clean)
+    if kind:
+        return set(), kind, False
     found = VTS_EXPRESSION_MAP.get(clean)
     if not found:
         for k, v in VTS_EXPRESSION_MAP.items():

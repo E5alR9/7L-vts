@@ -2925,11 +2925,12 @@ async def instinct_live_worker():
                             exp_match = re.search(r'\[EXPRESSION[：:]\s*([^\]\[]+)\]', text, re.IGNORECASE)
                             if exp_match:
                                 exp_tag = exp_match.group(1).strip()
-                                if any(k in exp_tag.upper() for k in ["WINK", "眨眼", "單眼", "眨單眼"]):
+                                kind = vc.action_kind(exp_tag)   # 跟舞台動作、vts_client 同一份關鍵字
+                                if kind == "wink":
                                     spawn(vc.trigger_wink(is_instinct=True))
-                                elif any(k in exp_tag for k in ["驚訝", "惊", "震驚", "SHOCK"]):
+                                elif kind == "shock":
                                     spawn(vc.trigger_shock(is_instinct=True))
-                                elif any(k in exp_tag for k in ["皺眉", "困擾", "委屈", "FROWN"]):
+                                elif kind == "frown":
                                     spawn(vc.trigger_frown(is_instinct=True))
                                 else:
                                     spawn(vc.trigger_vts_expression(exp_tag, is_instinct=True))

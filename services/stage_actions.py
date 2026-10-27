@@ -138,13 +138,14 @@ async def execute_speech_visual_actions(vts, text: str):
     exp_match = re.search(r'\[EXPRESSION[：:]\s*([^\]\[]+)\]', text, re.IGNORECASE)
     if exp_match:
         exp_tag = exp_match.group(1).strip()
-        if any(k in exp_tag.upper() for k in ["WINK", "眨眼", "單眼", "眨單眼"]):
+        kind = vc.action_kind(exp_tag)   # 眨眼／驚訝／皺眉的關鍵字跟 vts_client 同一份
+        if kind == "wink":
             spawn(vc.trigger_wink())
             log_print("😉 [Live2D 動作] 標籤觸發 Wink 單眼眨一下眼")
-        elif any(k in exp_tag for k in ["驚訝", "惊讶", "驚", "惊", "震驚", "震惊", "瞳孔", "嚇到", "SHOCK", "SURPRISE"]):
+        elif kind == "shock":
             spawn(vc.trigger_shock())
             log_print("😱 [Live2D 動作] 標籤觸發驚訝縮瞳與瞪大雙眼微顫")
-        elif any(k in exp_tag for k in ["皺眉", "皱眉", "八字眉", "困擾", "困扰", "委屈", "傲嬌皺眉", "難過眉", "生氣皺眉", "FROWN"]):
+        elif kind == "frown":
             spawn(vc.trigger_frown())
             log_print("🥺 [Live2D 動作] 標籤觸發八字皺眉/委屈表情")
         else:
