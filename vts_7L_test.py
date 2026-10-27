@@ -2068,11 +2068,8 @@ async def play_voice_complete(text, target: str = "dad", raw_actions_text: str =
                     part_file = item["file"]
                     snd_obj, part_dur, part_env = load_sound_with_envelope(part_file, item["text"])
 
-                    stage.CURRENT_MOUTH_ENVELOPE = part_env
-                    stage.CURRENT_SMOOTH_MOUTH = 0.0
-                    stage.CURRENT_SPEECH_START_TIME = time.time()
+                    stage.start_playback(envelope=part_env)
                     set_ai_state("TALKING", "語音開播")
-                    stage.IS_MP3_PLAYING = True
 
                     # 若第一句剛開始播，掛載神態時間軸
                     if first_chunk:
@@ -2206,17 +2203,15 @@ async def play_instant_sound_clip(audio_path: str, subtitle: str = ""):
 
         # 逐幀分析音訊包絡，帶動 7L VTS 模型即時張嘴叫喊！
         snd = None
+        envelope = []
         try:
             snd = pygame.mixer.Sound(audio_path)
-            stage.CURRENT_MOUTH_ENVELOPE = extract_audio_mouth_envelope(snd, fps=25)
-            stage.CURRENT_SMOOTH_MOUTH = 0.0
+            envelope = extract_audio_mouth_envelope(snd, fps=25)
         except Exception as e:
             log_print(f"⚠️ [即時尖叫包絡異常]: {e}")
-            stage.clear_mouth()
 
         set_ai_state("TALKING", "觸電尖叫")
-        stage.IS_MP3_PLAYING = True
-        stage.CURRENT_SPEECH_START_TIME = time.time()
+        stage.start_playback(envelope=envelope)
         
         #  採用專屬 SFX 獨立通道 (Channel 5)，音量拉滿，絕不與 TTS 語音串流 (pygame.mixer.music) 衝突打架！
         channel = pygame.mixer.Channel(5)
@@ -2239,10 +2234,8 @@ async def play_instant_sound_clip(audio_path: str, subtitle: str = ""):
     except Exception as e:
         log_print(f"⚠️ [即時尖叫音效異常]: {e}")
     finally:
-        stage.clear_mouth()
-        stage.CURRENT_SPEECH_START_TIME = 0.0
         IS_SHOCK_SCREAMING = False
-        stage.IS_MP3_PLAYING = False
+        stage.stop_playback()
         set_ai_state("IDLE", "尖叫播完", only_from="TALKING")
         log_print("⚡ [即時尖叫完畢] 觸電叫聲播放結束，無縫移交大腦後續即時回應！")
 
