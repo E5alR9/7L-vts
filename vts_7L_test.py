@@ -2706,11 +2706,16 @@ _SUBAGENT_MIRROR_TASK_RE = re.compile(r"鏡子|照鏡")
 _VISION_ASK_RE = re.compile(r"螢幕|屏幕|畫面|截圖|桌面|視窗|看一下|看看|看得到|在幹嘛|在幹麻|在做什麼|在忙什麼|在玩什麼|在看什麼")
 
 
-def _vision_wanted() -> bool:
-    """她話裡帶 [TOOL:VISION] 時要不要真的去看：老爸或觀眾觸發的這輪，那句話要跟畫面有關；
-    系統通知、自主閒聊觸發的照舊（她自己想看看老爸在幹嘛）。"""
+VISION_ASK_WINDOW_SEC = 90.0
+
+
+def _vision_wanted(now: float = None) -> bool:
+    """她話裡帶 [TOOL:VISION] 時要不要真的去看：最近 VISION_ASK_WINDOW_SEC 秒內有人說話，那句話就要跟畫面有關。
+    系統紙條（說完又想到、子智能體回報、斷線後接著講完）觸發的那輪也照這句判斷：2026-10-27 斷線實測，
+    接著講完的那輪她又順手看了老爸螢幕。很久沒人說話（自主閒聊）就照舊，她自己想看看老爸在幹嘛。"""
     origin = _BRAIN_INPUT_ORIGIN
-    if not origin.get("human"):
+    now = time.time() if now is None else now
+    if not origin.get("said") or now - (origin.get("ts") or 0.0) > VISION_ASK_WINDOW_SEC:
         return True
     return bool(_VISION_ASK_RE.search(origin.get("said") or ""))
 
@@ -3239,6 +3244,40 @@ async def _run_subagent_task(_task_ins, _intent, _respond):
         log_print(f"⚠️ [子智能體任務異常]: {_e}")
 
 
+def _subagent_result_by_slip(task_ins: str, text: str, sched, err) -> None:
+    """子智能體辦完時，叫它的那條 Live 連線已經斷了（辦到一半換線）：結果改用紙條交回，新連線收、
+    還沒連上就由 REST 大腦接。以前送回舊連線失敗只留一行「回報失敗」，結果丟掉（2026-10-27）。
+    不用她講的（SILENT：做完記著就好）改當背景資料悄悄放進主腦的對話。"""
+    if not text:
+        return
+    log_print(f"🔌 [子智能體回報] 原本那條 Live 連線不在了（{str(err)[:40]}），改用紙條交回：{text[:50]}")
+    note = f"[系統提示：剛才交辦的事（{(task_ins or '')[:40]}）辦好了，中途連線換過，改用紙條交回] {text}"
+    if sched == types.FunctionResponseScheduling.SILENT:
+        try:
+            LIVE_SILENT_CONTEXT_QUEUE.put_nowait(note)
+        except Exception:
+            log_swallowed()
+        return
+    send_brain_slip(note)
+
+
+# 收話迴圈斷掉時這輪沒做完：老爸剛說的還沒回、她說到一半（2026-10-27）
+def _salvage_unfinished_turn(dad_said: str, partial: str) -> None:
+    """Live 斷線時這輪沒做完：換線後遞紙條請她接著講（7L 要等一段話說完才念，說到一半的一個字都沒念到）。"""
+    dad_said = to_tw((dad_said or "").strip())
+    partial = _brain_text_for_memory(partial or "").strip() if (partial or "").strip() else ""
+    if not dad_said and not partial:
+        return
+    parts = []
+    if dad_said:
+        parts.append(f"{_owner_name()}剛說「{dad_said[-200:]}」妳還沒回到")
+    if partial:
+        parts.append(f"妳話說到一半：「{partial[-200:]}」")
+    log_print(f"🔌 [Live 斷線] 這輪沒做完（{'；'.join(parts)[:80]}），換線後請她接著講")
+    send_brain_slip("[系統提示：剛才連線中斷，" + "，".join(parts) + "。換線好了，請自然地接著講完（說過的不要整段重講）。]",
+                    origin="dad" if dad_said else "", said=dad_said)
+
+
 async def _handle_invoke_subagent(session, ws_send_lock, _fn_name, _fn_call_id, _task_ins, _intent=None):
     """Live 主腦呼叫 invoke_subagent：每通獨立背景跑 _run_subagent_task，結果用工具回應交回去。"""
     async def _respond(_text, _sched, _more=False):
@@ -3248,10 +3287,14 @@ async def _handle_invoke_subagent(session, ws_send_lock, _fn_name, _fn_call_id, 
         if _fn_call_id:
             _fr["id"] = _fn_call_id
         try:
+            if session is not GLOBAL_LIVE_SESSION:
+                raise ConnectionError("叫子智能體的那條 Live 連線已經換掉了")
             async with ws_send_lock:
                 await session.send_tool_response(function_responses=[types.FunctionResponse(**_fr)])
         except Exception as _se:
-            log_print(f"⚠️ [子智能體回報失敗]: {_se}")
+            if _more:
+                return   # 「先答應一聲」換線後不用補（正式結果還會再來）
+            _subagent_result_by_slip(_task_ins, _text, _sched, _se)
 
     await _run_subagent_task(_task_ins, _intent, _respond)
 
@@ -3524,7 +3567,11 @@ async def continuous_live_worker(vts):
                             if INSTINCT_LIVE_SESSION:
                                 send_tasks.append(_send_instinct())
                                 
-                            await asyncio.gather(*send_tasks, return_exceptions=True)
+                            _sent = await asyncio.gather(*send_tasks, return_exceptions=True)
+                            if isinstance(_sent[0], Exception):
+                                # 送主腦失敗＝這條連線壞了：拋出去讓整組重連（以前跟本能腦一起被吞掉，半死連線
+                                # 送不出去、收的一端還在等，不會自己重連；本能腦失敗照舊不管，它有自己的重連）
+                                raise _sent[0]
                             
                             if rms > 150:
                                 current_mic_action_str = "🎤 收音辨識中..."
@@ -3685,6 +3732,14 @@ async def continuous_live_worker(vts):
                         else:
                             log_print(f"⚠️ [接收串流錯誤] {e}")
                         raise e
+                    finally:
+                        # 斷線時這輪沒做完：老爸剛說的先記下，換線後請她接著講（正常換線會等她說完才換，這裡是空的）
+                        _said = user_transcription_buffer
+                        try:
+                            _flush_user_speech()
+                            _salvage_unfinished_turn(_said, turn_buffer)
+                        except Exception:
+                            log_swallowed()
 
                 async def send_system_prompts_to_live():
                     try:

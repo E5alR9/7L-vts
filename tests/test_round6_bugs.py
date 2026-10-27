@@ -523,9 +523,62 @@ def test_she_only_looks_at_the_screen_when_someone_asks():
     exec(compile(ast.Module(body=[n for n in TREE.body if isinstance(n, ast.Assign)
                                   and getattr(n.targets[0], "id", "") == "_VISION_ASK_RE"] + [_fn("_vision_wanted")],
                             type_ignores=[]), "v", "exec"), ns)
+    import time as _t
+    ns["time"] = _t
+    ns["VISION_ASK_WINDOW_SEC"] = 90.0
+    now = _t.time()
     for said, want in (("7L 幫我認真想一下：光要跑幾分鐘？", False), ("機率是多少？", False),
                        ("7L 看一下我的螢幕", True), ("老爸在幹嘛", True)):
-        ns["_BRAIN_INPUT_ORIGIN"] = {"human": True, "said": said}
-        assert ns["_vision_wanted"]() is want, said
-    ns["_BRAIN_INPUT_ORIGIN"] = {"human": False, "said": ""}
-    assert ns["_vision_wanted"]() is True                    # 系統通知、自主閒聊：她自己想看照舊
+        ns["_BRAIN_INPUT_ORIGIN"] = {"human": True, "said": said, "ts": now - 5}
+        assert ns["_vision_wanted"](now) is want, said
+    # 系統紙條（接著講完、說完又想到）觸發的那輪：還是照最近那句人話（斷線實測她又順手看了螢幕）
+    ns["_BRAIN_INPUT_ORIGIN"] = {"human": False, "said": "7L 幫我認真想一下：一年有幾秒？", "ts": now - 10}
+    assert ns["_vision_wanted"](now) is False
+    ns["_BRAIN_INPUT_ORIGIN"] = {"human": False, "said": "算一年有幾秒", "ts": now - 300}
+    assert ns["_vision_wanted"](now) is True                 # 很久沒人說話（自主閒聊）：她自己想看照舊
+
+
+def test_subagent_result_survives_a_live_reconnect():
+    # 子智能體辦到一半 Live 換線：以前結果送回舊連線失敗、只留一行「回報失敗」，結果丟掉（2026-10-27）
+    from types import SimpleNamespace as NS
+    slips, silent, logs = [], [], []
+    Sched = NS(SILENT="silent", WHEN_IDLE="idle")
+
+    class Q:
+        def put_nowait(self, x):
+            silent.append(x)
+    ns = {"types": NS(FunctionResponseScheduling=Sched, FunctionResponse=lambda **k: k), "log_print": logs.append,
+          "send_brain_slip": slips.append, "LIVE_SILENT_CONTEXT_QUEUE": Q(), "log_swallowed": lambda *a: None}
+    for n in ("_subagent_result_by_slip", "_handle_invoke_subagent"):
+        exec(compile(ast.Module(body=[_fn(n)], type_ignores=[]), n, "exec"), ns)
+    old, new = object(), object()
+    ns["GLOBAL_LIVE_SESSION"] = new                                    # 辦完時已經換成新連線
+
+    async def run(task):
+        await task(None, Sched.WHEN_IDLE, True)                         # 先答應一聲：換線後不用補
+        await task("1 美元約 159 日圓", Sched.WHEN_IDLE)               # 正式結果：改用紙條交回
+        await task("記著就好", Sched.SILENT)                            # 不用她講：悄悄放進對話
+
+    async def fake_run(task_ins, intent, respond):
+        await run(respond)
+    ns["_run_subagent_task"] = fake_run
+    asyncio.run(ns["_handle_invoke_subagent"](old, asyncio.Lock(), "invoke_subagent", "c1", "查日圓匯率"))
+    assert len(slips) == 1 and "查日圓匯率" in slips[0] and slips[0].endswith("1 美元約 159 日圓")
+    assert len(silent) == 1 and silent[0].endswith("記著就好")
+
+
+def test_unfinished_turn_is_salvaged_after_a_disconnect():
+    # 收話迴圈斷掉時，老爸剛說的、她說到一半的以前整段丟掉（2026-10-27）
+    slips = []
+    ns = {"to_tw": lambda t: t, "_brain_text_for_memory": lambda t: t.strip(), "_owner_name": lambda: "E5",
+          "log_print": lambda *a: None, "send_brain_slip": lambda *a, **k: slips.append((a, k))}
+    exec(compile(ast.Module(body=[_fn("_salvage_unfinished_turn")], type_ignores=[]), "s", "exec"), ns)
+    ns["_salvage_unfinished_turn"]("", "")
+    assert slips == []                                                    # 正常換線：沒東西要補
+    ns["_salvage_unfinished_turn"]("今天晚餐吃什麼", "我覺得可以吃")
+    (text,), kw = slips[0]
+    assert "E5剛說「今天晚餐吃什麼」" in text and "說到一半：「我覺得可以吃」" in text
+    assert kw == {"origin": "dad", "said": "今天晚餐吃什麼"}
+    recv = next(n for n in ast.walk(TREE) if isinstance(n, ast.AsyncFunctionDef) and n.name == "receive_from_live")
+    assert "_salvage_unfinished_turn(_said, turn_buffer)" in ast.get_source_segment(MAIN, recv)
+    assert "if isinstance(_sent[0], Exception):" in MAIN                # 送主腦失敗要觸發重連
