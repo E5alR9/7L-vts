@@ -208,3 +208,12 @@ def test_xiaoyi_uses_the_router_text_cleaning(monkeypatch):
     monkeypatch.setattr(lx, "_REF_ZH", "ref.wav")
     assert lx.synthesize_xiaoyi_bytes("[EXPRESSION: 開心]7L 收到(笑)～～")
     assert calls[0] == "小七 收到！"
+
+
+def test_live_disconnect_forgets_the_dead_session():
+    # 斷線後 GLOBAL_LIVE_SESSION 還留著舊連線：看門狗照樣記「不回話」立 rotate，下一次正常換線被當額度用完冷卻金鑰
+    src = ast.get_source_segment(MAIN, _fn("continuous_live_worker"))
+    down = src.index("_set_live_active(False)")
+    assert "GLOBAL_LIVE_SESSION = None" in src[down:down + 200]
+    up = src.index("GLOBAL_LIVE_SESSION = session")
+    assert '_LIVE_MUTE.update(strikes=0, rotate="")' in src[up:up + 500]

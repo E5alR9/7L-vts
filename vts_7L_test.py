@@ -3340,7 +3340,7 @@ async def continuous_live_worker(vts):
                 _set_live_active(True)
                 log_print(f"✅ 已成功連線至 Live API！模型: {live_m} (通道 G{current_k_idx}) 麥克風持續收音中...")
                 clean_fail_count = 0  # 連上即歸零：上輪是健康連線。
-                _LIVE_MUTE["strikes"] = 0  # 新連線重新算「沒回應」次數
+                _LIVE_MUTE.update(strikes=0, rotate="")  # 新連線重新算「沒回應」次數
                 if _resume_handle:
                     log_print("🔗 [Live 續接] 已接回上一段對話（換線不失憶）。")
                 if recent_ctx and recent_ctx.strip():
@@ -3668,6 +3668,8 @@ async def continuous_live_worker(vts):
                     raise Exception("Live Session exited normally (possible graceful close or disconnect)")
         except Exception as e:
             _set_live_active(False)
+            # 舊連線清掉：留著的話 Live 不在時看門狗還會對它記「不回話」、立 rotate 旗標（2026-10-27）
+            GLOBAL_LIVE_SESSION = None
             err_str = str(e).lower()
             _quota_hit = any(w in err_str for w in ["limit", "exceed", "quota", "403", "429"])
             if _LIVE_MUTE["rotate"]:
