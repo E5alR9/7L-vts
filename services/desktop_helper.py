@@ -180,9 +180,28 @@ def _ensure_model(c) -> bool:
         return False
 
 
-def restart_gemini_app(wait: float = 25.0) -> bool:
-    """關掉桌面版 Gemini 再開（老爸同意：分頁亂掉、自己修不回來就重開）。用 explorer 開，免得被沙盒虛擬化。"""
+def _launch_gemini_app(wait: float = 25.0) -> bool:
+    """打開桌面版 Gemini，等視窗出來、頁面載入。用 explorer 開，免得被沙盒虛擬化。"""
     import subprocess
+    import time as _t
+    exe = os.path.join(GEMINI_APP_DIR, "Gemini.exe")
+    if not os.path.exists(exe):
+        return False
+    subprocess.Popen(["explorer.exe", exe])
+    deadline = _t.time() + wait
+    while _t.time() < deadline:
+        _t.sleep(1.0)
+        try:
+            if _controller().find_window():
+                _t.sleep(4.0)       # 等頁面載入
+                return True
+        except Exception:
+            pass
+    return False
+
+
+def restart_gemini_app(wait: float = 25.0) -> bool:
+    """關掉桌面版 Gemini 再開（老爸同意：分頁亂掉、自己修不回來就重開）。"""
     import time as _t
     try:
         import psutil
@@ -195,21 +214,31 @@ def restart_gemini_app(wait: float = 25.0) -> bool:
     except Exception:
         return False
     _t.sleep(2.0)
-    exe = os.path.join(GEMINI_APP_DIR, "Gemini.exe")
-    if not os.path.exists(exe):
-        return False
-    subprocess.Popen(["explorer.exe", exe])
-    deadline = _t.time() + wait
-    while _t.time() < deadline:
-        _t.sleep(1.0)
-        try:
-            if _controller().find_window():
-                _t.sleep(4.0)       # 等頁面載入
-                print("🔄 [桌機助手] 桌面版 Gemini 已重開")
-                return True
-        except Exception:
-            pass
-    return False
+    ok = _launch_gemini_app(wait)
+    if ok:
+        print("🔄 [桌機助手] 桌面版 Gemini 已重開")
+    return ok
+
+
+def _connect():
+    """要用桌面版前先看桌面上有沒有（老爸指定 2026-10-27）：沒開就自動打開；最小化就還原（不搶焦點）。
+    打不開才拋「找不到」（調用方 5 分鐘內走 Live／API）。"""
+    c = _controller()
+    try:
+        c.ensure_connected()
+    except RuntimeError:
+        print("📱 [桌機助手] 桌面上沒有桌面版 Gemini，自動打開")
+        if not _launch_gemini_app():
+            raise RuntimeError("找不到桌面版 Gemini，也打不開")
+        c = _controller()
+        c.ensure_connected()
+    try:
+        import ctypes
+        if ctypes.windll.user32.IsIconic(c.hwnd):
+            ctypes.windll.user32.ShowWindow(c.hwnd, 4)   # SW_SHOWNOACTIVATE：還原但不搶焦點
+    except Exception:
+        pass
+    return c
 
 
 def _ensure_chat_view(c):
@@ -422,8 +451,7 @@ def prewarm() -> bool:
     _uninit = _com_init()
     try:
         with _lock:
-            c = _controller()
-            c.ensure_connected()
+            c = _connect()
             c = _ensure_chat_view(c)
             if not _in_helper_chat(c):
                 _chat_ready = False
@@ -452,8 +480,7 @@ def get_answer(question: str, timeout: float = ASK_TIMEOUT_SEC) -> str:
     _uninit = _com_init()
     try:
         with _lock:
-            c = _controller()
-            c.ensure_connected()
+            c = _connect()
             c = _ensure_chat_view(c)
             if not _in_helper_chat(c):
                 # 指紋不在：先開側欄認領舊串，認不到才建新（免空串垃圾）。

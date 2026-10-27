@@ -5947,12 +5947,8 @@ def _note_desktop_error(e) -> None:
 def _desktop_prewarm() -> None:
     """開機時在背景先開好桌面版的助手串、切好模型；沒開就記下，5 分鐘內不試。"""
     from services import desktop_helper as _dh
-    try:
-        _dh._controller().ensure_connected()
-    except Exception as e:
-        _note_desktop_error(e)
-        return
-    _dh.prewarm()
+    if not _dh.prewarm():   # 沒開會自動打開；打不開才記下，5 分鐘內不試
+        _note_desktop_error(RuntimeError("找不到桌面版 Gemini"))
 
 
 async def _desktop_dad_reply(vts, input_queue, user_input: str, owner: str = "老爸"):
