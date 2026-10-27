@@ -206,7 +206,7 @@ from core.llm_engine import (
     KEYS_VISION, STREAMER_MIND_MODELS, REST_BRAIN_MODELS, HIGH_IQ_GEMINI_MODELS, GROQ_CLIENTS,
     get_dynamic_live_key_candidates, track_key, sort_keys_by_load, key_cooling,
     report_gemini_key_error, live_one_shot, KEYS_MIC_LIVE, KEYS_PROACTIVE, KEYS_DAD_MAIN,
-    UNRESTRICTED_SAFETY_SETTINGS,
+    UNRESTRICTED_SAFETY_SETTINGS, thinking_config,
 )
 from core.input_sources import (parse_input_item, classify, sleep_wake_decision, live_speech_wakes, is_operator, has_wake_word,
                                 VIEWER_SOURCES, WAKE_WORDS)
@@ -681,7 +681,8 @@ async def get_lightweight_gemini_vision(image_base64: str, temporal_frames: list
                                     contents=[types.Content(role="user", parts=all_parts)],
                                 config=types.GenerateContentConfig(
                                     temperature=0.2,
-                                    safety_settings=UNRESTRICTED_SAFETY_SETTINGS
+                                    safety_settings=UNRESTRICTED_SAFETY_SETTINGS,
+                                    thinking_config=thinking_config(model_name),
                                 )
                             ),
                             timeout=min(6.0, remaining)
@@ -5325,6 +5326,7 @@ async def _gemini_tool_pass(task_ins, target, requester_name, system_instruction
                 temperature=0.0,
                 tools=GENAI_TOOLS,
                 safety_settings=UNRESTRICTED_SAFETY_SETTINGS,
+                thinking_config=thinking_config(gmodel),
                 system_instruction=system_instruction_text,
             )
             with usage.timed(gmodel, role="子智能體"):
@@ -5366,6 +5368,7 @@ async def _gemini_think_pass(task_ins, target, requester_name, system_instructio
             cfg = types.GenerateContentConfig(
                 temperature=0.8,
                 safety_settings=UNRESTRICTED_SAFETY_SETTINGS,
+                thinking_config=thinking_config(gmodel, deep=True),
                 system_instruction=system_instruction_text + _SUBAGENT_THINK_SUFFIX,
             )
             with usage.timed(gmodel, role="子智能體"):

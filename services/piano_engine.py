@@ -30,7 +30,7 @@ from core.hard_command import display_requester
 from core.utils import log_print, to_tw, log_swallowed, spawn
 from core.identity import get_owner_name
 from core.paths import ROOT_DIR
-from core.llm_engine import (GEMINI_KEYS, HIGH_IQ_GEMINI_MODELS, UNRESTRICTED_SAFETY_SETTINGS, model_cooling,
+from core.llm_engine import (GEMINI_KEYS, HIGH_IQ_GEMINI_MODELS, UNRESTRICTED_SAFETY_SETTINGS, model_cooling, thinking_config,
                              get_pingpong_alternating_index, get_pingpong_ring_indices)
 
 # —— 主程式交進來的東西（2026-10-25）——
@@ -1743,7 +1743,8 @@ async def resolve_piano_intent_by_ai(
                             model=m,
                             contents=prompt,
                             config=types.GenerateContentConfig(temperature=0.1, response_mime_type="application/json",
-                                                              safety_settings=UNRESTRICTED_SAFETY_SETTINGS)
+                                                              safety_settings=UNRESTRICTED_SAFETY_SETTINGS,
+                                                              thinking_config=thinking_config(m))
                         ),
                         timeout=min(4.0, remaining)
                     )

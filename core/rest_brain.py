@@ -15,7 +15,7 @@ from google import genai
 from google.genai import types
 
 from core import groq_router, usage
-from core.llm_engine import (GEMINI_KEYS, UNRESTRICTED_SAFETY_SETTINGS, key_cooling, report_gemini_key_error,
+from core.llm_engine import (GEMINI_KEYS, UNRESTRICTED_SAFETY_SETTINGS, key_cooling, report_gemini_key_error, thinking_config,
                              sort_keys_by_load, track_key)
 from core.utils import log_print
 
@@ -97,7 +97,8 @@ async def rest_chat(system_text: str, user_text: str, *, models, keys=None, tool
                                               safety_settings=UNRESTRICTED_SAFETY_SETTINGS, tools=tools or None)
             for key, model in gemini_pairs(models, attempts, keys):
                 try:
-                    r = _reply_from(await _gemini_once(key, model, parts, cfg, timeout), model)
+                    m_cfg = cfg.model_copy(update={"thinking_config": thinking_config(model)})
+                    r = _reply_from(await _gemini_once(key, model, parts, m_cfg, timeout), model)
                     if r.text or r.calls:
                         return r
                 except Exception as e:

@@ -307,3 +307,23 @@ def test_gemini_calls_use_block_none_but_live_must_not():
                 if n.func.attr == "generate_content" and "config" not in kws:
                     missing.append(f"{rel}:{n.lineno}（沒有 config）")
     assert missing == [] and live_bad == []
+
+
+def test_gemini_36_flash_thinks_minimal_and_deep_think_low(monkeypatch):
+    # 3.6-flash 預設帶工具一次 11～22 秒；minimal 約 3.5 秒、叫工具 4/4 照樣對（2026-10-27 實測，老爸指定調低）
+    from core.llm_engine import thinking_config
+    import core.rest_brain as rb
+    assert thinking_config("gemini-3.6-flash").thinking_level.value.lower() == "minimal"
+    assert thinking_config("gemini-3.6-flash", deep=True).thinking_level.value.lower() == "low"
+    assert thinking_config("gemini-3.5-flash-lite") is None
+    seen = []
+
+    async def once(key, model, parts, cfg, timeout):
+        seen.append((model, cfg.thinking_config))
+        raise RuntimeError("換下一個")
+    monkeypatch.setattr(rb, "_gemini_once", once)
+    monkeypatch.setattr(rb, "gemini_pairs", lambda models, attempts, keys=None: [("k1", m) for m in models])
+    monkeypatch.setattr(rb, "report_gemini_key_error", lambda *a, **k: None)
+    asyncio.run(rb.rest_chat("", "hi", models=["gemini-3.6-flash", "gemini-3.5-flash-lite"], tools=["t"], attempts=2))
+    assert seen[0][0] == "gemini-3.6-flash" and seen[0][1].thinking_level.value.lower() == "minimal"
+    assert seen[1] == ("gemini-3.5-flash-lite", None)

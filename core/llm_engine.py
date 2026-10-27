@@ -43,6 +43,21 @@ HIGH_IQ_GEMINI_MODELS = [                         # 鋼琴意圖／作曲：聰�
     "gemini-3.1-flash-lite",
 ]
 STREAMER_MIND_MODELS = GEMINI_MODELS              # 記憶腦袋 REST 備援：跟主梯隊同一份
+# 會思考的模型預設想很久：3.6-flash 帶工具一次 11～22 秒，調到 minimal 約 3.5 秒、該不該叫工具照樣 4/4 對
+#（2026-10-27 實測，老爸指定調低）。沒列的模型照預設。
+THINKING_LEVELS = {"gemini-3.6-flash": "minimal"}
+
+
+def thinking_config(model: str, deep: bool = False):
+    """這個模型要帶的思考設定；沒列的回 None（照模型預設）。deep＝子代理深度思考，至少 low。"""
+    level = THINKING_LEVELS.get(model)
+    if level is None:
+        return None
+    if deep and level == "minimal":
+        level = "low"
+    return types.ThinkingConfig(thinking_level=level)
+
+
 IMAGE_GEN_MODELS = ["gemini-3.1-flash-lite-image", "gemini-3.1-flash-image", "gemini-3-pro-image"]   # 生圖（Nano Banana）
 EMBED_MODEL = "gemini-embedding-001"              # RAG 向量的 Gemini 備援
 
