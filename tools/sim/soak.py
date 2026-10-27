@@ -20,6 +20,7 @@ import ft  # noqa: E402
 STRESS = '''
 import threading, time as _t, numpy as _np
 from core import barge_in as _bi
+from mic_live_plugin.voiceprint_verifier import dad_and_her_scores as _score
 _cnt = {"n": 0, "err": 0}
 def _stress():
     while True:
@@ -27,7 +28,7 @@ def _stress():
             task = m.CURRENT_PLAYING_VOICE_TASK
             if task and not task.done():
                 pcm = (_np.random.randn(24000) * 3000).astype(_np.int16).tobytes()
-                _bi.voiceprint_scores(_bi._wav(pcm, 16000))
+                _score(_bi._wav(pcm, 16000))
                 _cnt["n"] += 1
         except Exception:
             _cnt["err"] += 1
