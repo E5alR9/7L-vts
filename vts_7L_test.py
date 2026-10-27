@@ -205,7 +205,7 @@ from core.llm_engine import (
     GEMINI_KEYS, GEMINI_MODELS, IMAGE_GEN_MODELS, LIVE_MODEL, LIVE_MAIN_MODELS, KEYS_AUDIENCE_LIVE,
     KEYS_VISION, STREAMER_MIND_MODELS, REST_BRAIN_MODELS, HIGH_IQ_GEMINI_MODELS, GROQ_CLIENTS,
     get_dynamic_live_key_candidates, track_key, sort_keys_by_load, key_cooling,
-    report_gemini_key_error, live_one_shot, KEYS_MIC_LIVE, KEYS_PROACTIVE, KEYS_DAD_MAIN,
+    report_gemini_key_error, live_one_shot, KEYS_MIC_LIVE, KEYS_PROACTIVE, KEYS_DAD_MAIN, DEEP_THINK_LIVE_MODEL,
     UNRESTRICTED_SAFETY_SETTINGS, thinking_config,
 )
 from core.input_sources import (parse_input_item, classify, sleep_wake_decision, live_speech_wakes, is_operator, has_wake_word,
@@ -3243,6 +3243,55 @@ async def _speak_brain_turn(vts, input_queue, text: str, who: str, reply_to: str
     return spoken
 
 
+# 說完又想到（2026-10-27，老爸點的）：主腦（Live）回完一段人話（老爸或觀眾）後，另開一條長思考 Live 單次連線
+# 用低思考在背後再想；她答錯、漏了重要的、或有更有意思的補充，就遞紙條讓她「啊對了」補一句。
+# 實測（低思考）：機率答錯 6.6 秒後補正、閒聊 1 秒回 [SILENCE]；高思考想 46 秒還是空的。
+# 單次連線想完就關：常駐的 Live 沒聲音會被斷。
+AFTERTHOUGHT_ENABLED = True
+AFTERTHOUGHT_TIMEOUT_SEC = 25.0
+AFTERTHOUGHT_MAX_AGE_SEC = 60.0     # 觸發的那句人話超過這麼久就不想了
+_AFTERTHOUGHT = {"origin_ts": 0.0}  # 每句人話只想一次（她為同一句話講好幾段時不重想）
+
+
+def _afterthought_wanted(origin: dict, now: float) -> bool:
+    """這輪值不值得在背後再想一次：是人說的（老爸或觀眾；系統通知、工具回報不算）、這句還沒想過、
+    沒有太舊、沒在睡覺唱歌彈琴。"""
+    if not AFTERTHOUGHT_ENABLED or not origin.get("human") or not (origin.get("said") or "").strip():
+        return False
+    ts = origin.get("ts") or 0.0
+    if ts == _AFTERTHOUGHT["origin_ts"] or now - ts > AFTERTHOUGHT_MAX_AGE_SEC:
+        return False
+    return not (IS_SLEEPING or is_singing_active() or pe.is_piano_active)
+
+
+async def _afterthought(reply: str) -> None:
+    """背景再想一次她剛才的回答；有補充、而且這段時間沒人再講話，就遞紙條讓主腦補一句。"""
+    origin = dict(_BRAIN_INPUT_ORIGIN)
+    if not reply or not _afterthought_wanted(origin, time.time()):
+        return
+    _AFTERTHOUGHT["origin_ts"] = origin["ts"]
+    owner = _owner_name()
+    who = owner if origin.get("who") == "dad" else f"觀眾「{origin.get('name') or '觀眾'}」"
+    prompt = f"{who}說：{origin['said'][-600:]}\n7L 剛才回答：{reply[-600:]}"
+    try:
+        with usage.as_role("說完又想到"):
+            text = await live_one_shot(promptkit.afterthought_system(owner), prompt, GEMINI_KEYS,
+                                       timeout=AFTERTHOUGHT_TIMEOUT_SEC, max_keys=2,
+                                       model=DEEP_THINK_LIVE_MODEL, thinking_level="low")
+    except Exception:
+        log_swallowed()
+        return
+    text = re.sub(r'\[(?:SILENCE|PASS|SKIP)\]', '', text or "", flags=re.IGNORECASE).strip()
+    if not text:
+        return
+    if _BRAIN_INPUT_ORIGIN.get("ts") != origin["ts"]:
+        log_print(f"💭 [說完又想到] 想到了但已經有人講下一句，不補：{text[:40]}")
+        return
+    log_print(f"💭 [說完又想到] 補一句：{text[:60]}")
+    send_brain_slip(f"[系統提示：妳的深度思考副腦剛想到，關於妳剛才回{who}的那段，可以補一句。"
+                    f"用妳自己的口吻自然地補，像說完話又想到什麼，一兩句講完，不要重複剛才講過的：] {text}")
+
+
 async def _rest_speak(vts, input_queue, raw: str, origin: str) -> str:
     """REST 大腦的一段回覆，跟 Live 主腦同一份收尾。回實際要念的字（她選擇不講就是空字串）。"""
     text = re.sub(r'\[PASS\]', '', normalize_silence_token(raw or ""), flags=re.IGNORECASE).strip()
@@ -3579,8 +3628,10 @@ async def continuous_live_worker(vts):
                                             usage.note(live_m, True, role="主腦")
                                             # 跟 REST 大腦同一份收尾；標籤照觸發這輪的人的權限跑
                                             _who = "audience" if _BRAIN_INPUT_ORIGIN.get("who") == "audience" else "dad"
-                                            await _speak_brain_turn(vts, input_queue, turn_buffer.strip(), _who,
-                                                                    _live_reply_target(), "live_api", from_live=True)
+                                            _spoken = await _speak_brain_turn(vts, input_queue, turn_buffer.strip(), _who,
+                                                                              _live_reply_target(), "live_api", from_live=True)
+                                            if _spoken:
+                                                spawn(_afterthought(_spoken))   # 背後再想一次，有補充就補一句
                                             log_print(f"📝 [黑板紀錄] 7L Live 大腦: {turn_buffer.strip()}")
                                         turn_buffer = ""
                                         chunk_buffer = ""

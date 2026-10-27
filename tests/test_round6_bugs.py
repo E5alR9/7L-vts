@@ -327,3 +327,73 @@ def test_gemini_36_flash_thinks_minimal_and_deep_think_low(monkeypatch):
     asyncio.run(rb.rest_chat("", "hi", models=["gemini-3.6-flash", "gemini-3.5-flash-lite"], tools=["t"], attempts=2))
     assert seen[0][0] == "gemini-3.6-flash" and seen[0][1].thinking_level.value.lower() == "minimal"
     assert seen[1] == ("gemini-3.5-flash-lite", None)
+
+
+def _afterthought_ns(reply_text, origin, later_origin=None, singing=False):
+    import re as _re
+    import time as _t
+    slips, asked = [], []
+
+    async def live_one_shot(system, prompt, pool, **k):
+        asked.append((prompt, k))
+        if later_origin:
+            ns["_BRAIN_INPUT_ORIGIN"].update(later_origin)   # 想的時候又有人講話
+        return reply_text
+
+    class _Role:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+    ns = {"re": _re, "time": _t, "AFTERTHOUGHT_ENABLED": True, "AFTERTHOUGHT_TIMEOUT_SEC": 25.0,
+          "AFTERTHOUGHT_MAX_AGE_SEC": 60.0, "_AFTERTHOUGHT": {"origin_ts": 0.0}, "_BRAIN_INPUT_ORIGIN": dict(origin),
+          "IS_SLEEPING": False, "is_singing_active": lambda: singing, "pe": type("P", (), {"is_piano_active": False}),
+          "_owner_name": lambda: "E5", "usage": type("U", (), {"as_role": staticmethod(lambda r: _Role())}),
+          "live_one_shot": live_one_shot, "promptkit": type("K", (), {"afterthought_system": staticmethod(lambda o: "sys")}),
+          "GEMINI_KEYS": ["k"], "DEEP_THINK_LIVE_MODEL": "deep", "send_brain_slip": slips.append,
+          "log_print": lambda *a: None, "log_swallowed": lambda *a: None}
+    for n in ("_afterthought_wanted", "_afterthought"):
+        exec(compile(ast.Module(body=[_fn(n)], type_ignores=[]), n, "exec"), ns)
+    return ns, slips, asked
+
+
+def test_afterthought_adds_a_line_after_she_answers():
+    # 說完又想到（老爸點的）：主腦回完人話後，長思考 Live 在背後再想，有補充就遞紙條
+    import time as _t
+    o = {"who": "dad", "said": "3 紅 2 藍拿 2 顆都紅的機率？", "human": True, "ts": _t.time(), "name": ""}
+    ns, slips, asked = _afterthought_ns("啊對了，正確是 30% 才對！", o)
+    asyncio.run(ns["_afterthought"]("大概 50% 吧"))
+    assert asked[0][1]["model"] == "deep" and asked[0][1]["thinking_level"] == "low"
+    assert "E5說：3 紅 2 藍" in asked[0][0] and "7L 剛才回答：大概 50% 吧" in asked[0][0]
+    assert len(slips) == 1 and slips[0].endswith("啊對了，正確是 30% 才對！")
+    asyncio.run(ns["_afterthought"]("又講了一段"))            # 同一句人話只想一次
+    assert len(asked) == 1
+    # 觀眾也觸發，稱呼帶名字
+    o2 = {"who": "audience", "said": "7L 會唱晴天嗎", "human": True, "ts": _t.time(), "name": "小美"}
+    ns, slips, asked = _afterthought_ns("欸我剛想到，晴天副歌我最喜歡", o2)
+    asyncio.run(ns["_afterthought"]("會呀！"))
+    assert "觀眾「小美」說" in asked[0][0] and "觀眾「小美」" in slips[0]
+
+
+def test_afterthought_stays_quiet_when_nothing_to_add_or_stale():
+    import time as _t
+    o = {"who": "dad", "said": "妳開心嗎", "human": True, "ts": _t.time(), "name": ""}
+    ns, slips, _ = _afterthought_ns("[SILENCE]", o)
+    asyncio.run(ns["_afterthought"]("超開心"))
+    assert slips == []
+    ns, slips, _ = _afterthought_ns("啊對了", o, later_origin={"ts": _t.time() + 5, "said": "下一句"})
+    asyncio.run(ns["_afterthought"]("超開心"))
+    assert slips == []                                          # 想的時候已經有人講下一句：過時不補
+    for bad in ({**o, "human": False}, {**o, "ts": _t.time() - 120}):   # 系統通知、太舊
+        ns, slips, asked = _afterthought_ns("啊對了", bad)
+        asyncio.run(ns["_afterthought"]("好"))
+        assert asked == [] and slips == []
+    ns, slips, asked = _afterthought_ns("啊對了", o, singing=True)        # 唱歌中不想
+    asyncio.run(ns["_afterthought"]("好"))
+    assert asked == []
+
+
+def test_live_brain_turn_spawns_the_afterthought():
+    recv = next(n for n in ast.walk(TREE) if isinstance(n, ast.AsyncFunctionDef) and n.name == "receive_from_live")
+    assert "spawn(_afterthought(_spoken))" in ast.get_source_segment(MAIN, recv)

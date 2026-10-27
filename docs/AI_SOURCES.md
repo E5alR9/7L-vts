@@ -12,6 +12,7 @@
 | 主腦深度推理 | GEMINI | REST 梯隊 3.5-flash-lite → 3.1-flash-lite → 3.6-flash → 3.8-flash；高 IQ 梯隊 3.8 → 3.6 → lite 系（`core/llm_engine.py`；3.5-flash／3.7-flash 已棄用、自動導向 3.6／3.8，不直接打；pro 系列、gemini-4-argon 額度 0；2.5 系列已下架，2026-10-27 實測） | `GEMINI_API_KEYS`×35，分池（觀眾／心流／視覺／主腦） | 旗艦 RPD 20／天／key；lite RPM 15／RPD 500 | 高頻一律 lite |
 | Live 全雙工（觀眾回覆／心流串流） | GEMINI-LIVE | **gemini-3.8-live**（舊 3.1-preview 已遷移，表上消失） | 同上（動態跨池備援） | RPM／RPD Unlimited，TPM 65K | 7x24 成立 |
 | Live 子智能體（工具判定＋深度思考） | GEMINI＋NVIDIA | 兩棒都 Gemini 先、NV 備援（`core/subagent_router.SUBAGENT_BRAIN`=auto 預設；可改 nv／gemini）；NV 模型 Nemotron-3-Ultra-550B（`_NV_SUBAGENT_MODEL`），回 404 停用 10 分鐘 | `NV_API_KEYS`×3／GEMINI keys | NV 推理模型深思要 60 秒，只當備援；舊的 Super-120B 已 404 | 2026-10-24 |
+| 說完又想到（深度思考副腦） | GEMINI-LIVE | **gemini-3.8-live-extended-thinking**，thinking_level=low，單次連線（`vts_7L_test._afterthought`） | GEMINI keys | Live 不吃 REST 額度 | 主腦回完人話（老爸或觀眾）後背後再想，有錯或有補充就遞紙條讓她補一句；high 實測 46 秒還空的 |
 | 視覺看圖（餘光／截圖／抽幀） | GEMINI-VISION | 3.1-flash-lite → 3.6-flash（`get_lightweight_gemini_vision`） | KEYS_VISION（keys 12:18） | lite RPD 500 | 黑屏檢測防幻覺 |
 | 生圖 | GEMINI-IMAGE | Nano Banana 系（2.5-image → 3.1-image → pro-image） | 同上 | ⚠️ 全系 0／0／0，現降級中 | 有配額前不可用 |
 | 本地第四條腿（規劃） | GEMMA | Ollama gemma3:4b（視覺＋128K）／3n E4B（影音圖文， transformers 路） | 無 key，本地 GPU | 無 | 伴侶隱私模式＋視覺初篩 |

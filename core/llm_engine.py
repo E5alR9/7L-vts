@@ -241,16 +241,19 @@ def report_gemini_key_error(key: str, err, model: str = "") -> bool:
 # 哨兵類二元判斷（畫面有沒有大變化、該不該開口）走 Live：不吃 REST 額度。
 # 以前畫面哨兵、發言哨兵各抄一份「挑 key → 連線 → 送 → 收轉寫 → 限流記冷卻」。
 LIVE_ONE_SHOT_MODEL = LIVE_MODEL
+# 說完又想到（深度思考副腦）：Live 版長思考，要帶 thinking_level 才連得上；low 實測 6～10 秒想完，high 46 秒還空的
+DEEP_THINK_LIVE_MODEL = "gemini-3.8-live-extended-thinking"
 
 
 async def live_one_shot(system_text: str, prompt: str, pool: List[str], image_jpeg: bytes = b"",
-                        timeout: float = 3.8, max_keys: int = 4, accept=None) -> str:
+                        timeout: float = 3.8, max_keys: int = 4, accept=None,
+                        model: str = LIVE_ONE_SHOT_MODEL, thinking_level: str = "") -> str:
     """依序試 pool（不夠從全部 key 補，冷卻中的排後面）前 max_keys 把沒冷卻的 key，每把限時 timeout 秒。
     有圖先送圖再送 prompt；回這一回合的轉寫文字。accept 不認的回覆（答非所問）換下一把再問；
     限流的 key 記冷卻。全部失敗回 ""。"""
     from core import usage
     for g_key in get_dynamic_live_key_candidates(pool)[:max_keys]:
-        if key_cooling(g_key, LIVE_ONE_SHOT_MODEL):
+        if key_cooling(g_key, model):
             continue
         t0 = time.perf_counter()
         try:
@@ -260,9 +263,11 @@ async def live_one_shot(system_text: str, prompt: str, pool: List[str], image_jp
                 output_audio_transcription=types.AudioTranscriptionConfig(),
                 system_instruction=types.Content(parts=[types.Part(text=system_text)]),
             )
+            if thinking_level:
+                cfg.thinking_config = types.ThinkingConfig(thinking_level=thinking_level)
             text = ""
             async with asyncio.timeout(timeout):
-                async with client.aio.live.connect(model=LIVE_ONE_SHOT_MODEL, config=cfg) as session:
+                async with client.aio.live.connect(model=model, config=cfg) as session:
                     if image_jpeg:
                         await session.send_realtime_input(video={"data": image_jpeg, "mime_type": "image/jpeg"})
                     await session.send_realtime_input(text=prompt)
@@ -275,13 +280,13 @@ async def live_one_shot(system_text: str, prompt: str, pool: List[str], image_jp
                                 break
             text = text.strip()
             good = bool(text) and (accept is None or accept(text))
-            usage.note(LIVE_ONE_SHOT_MODEL, good, default_role="Live 單次", ms=(time.perf_counter() - t0) * 1000)
+            usage.note(model, good, default_role="Live 單次", ms=(time.perf_counter() - t0) * 1000)
             if good:
                 return text
         except Exception as e:
-            usage.note(LIVE_ONE_SHOT_MODEL, False, default_role="Live 單次", rate_limited=usage.is_rate_limited(e),
+            usage.note(model, False, default_role="Live 單次", rate_limited=usage.is_rate_limited(e),
                        ms=(time.perf_counter() - t0) * 1000)
-            report_gemini_key_error(g_key, e, LIVE_ONE_SHOT_MODEL)
+            report_gemini_key_error(g_key, e, model)
     return ""
 
 
