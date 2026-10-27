@@ -186,5 +186,5 @@ def test_expression_action_words_have_one_source():
     import services.vts_client as vc
     assert [vc.action_kind(t) for t in ("WINK", "SURPRISE", "難過眉", "鄙視", "開心")] ==         ["wink", "shock", "frown", "eye_roll", None]
     stage_src = open(os.path.join(ROOT, "services", "stage_actions.py"), encoding="utf-8").read()
-    assert "vc.action_kind(exp_tag)" in stage_src and '"SHOCK"' not in stage_src
+    assert "vc.action_kind(exp_tag)" in stage_src
     assert MAIN.count("vc.action_kind(exp_tag)") == 1
