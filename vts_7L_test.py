@@ -2701,6 +2701,20 @@ _SUBAGENT_VISION_TASK_RE = re.compile(r"螢幕|屏幕|畫面|截圖|桌面上")
 _SUBAGENT_MIRROR_TASK_RE = re.compile(r"鏡子|照鏡")
 
 
+# 人觸發的這輪，那句話要跟畫面有關，她話裡的 [TOOL:VISION] 才算數（2026-10-27 實機：觀眾叫她「認真想一下」算光速、
+# 老爸問機率，她都順手看了老爸螢幕還講出來；提示詞加「算數、想問題不用看」A/B 沒用，1/3 → 1/3）
+_VISION_ASK_RE = re.compile(r"螢幕|屏幕|畫面|截圖|桌面|視窗|看一下|看看|看得到|在幹嘛|在幹麻|在做什麼|在忙什麼|在玩什麼|在看什麼")
+
+
+def _vision_wanted() -> bool:
+    """她話裡帶 [TOOL:VISION] 時要不要真的去看：老爸或觀眾觸發的這輪，那句話要跟畫面有關；
+    系統通知、自主閒聊觸發的照舊（她自己想看看老爸在幹嘛）。"""
+    origin = _BRAIN_INPUT_ORIGIN
+    if not origin.get("human"):
+        return True
+    return bool(_VISION_ASK_RE.search(origin.get("said") or ""))
+
+
 def _start_vision() -> bool:
     """看畫面：正在看、剛看完（15 秒內）或剛看失敗（90 秒內）就不重看，回 False。標籤和子智能體兩條路都走這裡。"""
     now = time.time()
@@ -2751,7 +2765,9 @@ def _start_marker_tools(text: str) -> str:
             log_print("⚠️ [攔截暗號] 搜尋關鍵字全是雜訊，跳過不搜。")
     if "[TOOL:VISION]" in text:
         text = text.replace("[TOOL:VISION]", "").strip()
-        if _start_vision():
+        if not _vision_wanted():
+            log_print("👁️ [視覺] 這輪沒人叫她看畫面，她自己帶的 [TOOL:VISION] 不理")
+        elif _start_vision():
             log_print("⚡ [攔截暗號] 啟動平行代理人：視覺大腦！")
         else:
             log_print("👁️ [視覺] 正在看、剛看完或剛看失敗，這次的 [TOOL:VISION] 不重看（防看完又看的迴圈）")

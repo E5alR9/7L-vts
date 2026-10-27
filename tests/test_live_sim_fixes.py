@@ -588,7 +588,9 @@ def test_mirror_report_does_not_retrigger_the_mirror():
           "VISION_REPORT_QUIET_SEC": 15.0, "VISION_FAIL_QUIET_SEC": 90.0, "strip_blob_noise": lambda t: t, "sanitize_search_query": lambda q: q,
           "spawn": lambda c: started.append(c), "live_mirror_tool_task": lambda: "mirror",
           "live_vision_tool_task": lambda: "vision", "live_search_tool_task": lambda q: "search"}
-    for n in ("_vision_report_recent", "_start_vision", "_start_mirror", "_start_marker_tools"):
+    ns["_BRAIN_INPUT_ORIGIN"] = {"human": False}
+    ns["_VISION_ASK_RE"] = re.compile(r"螢幕|畫面")
+    for n in ("_vision_report_recent", "_vision_wanted", "_start_vision", "_start_mirror", "_start_marker_tools"):
         exec(compile(ast.Module(body=[_fn(n)], type_ignores=[]), n, "exec"), ns)
     assert ns["_start_marker_tools"]("我照照看～[TOOL:MIRROR]") == "我照照看～" and started == ["mirror"]
     ns["_VISION_STATE"]["mirror_ts"] = time.time()

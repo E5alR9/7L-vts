@@ -514,3 +514,18 @@ def test_search_falls_back_to_the_desktop_gemini_before_ddg(monkeypatch):
             return [{"title": "天氣", "body": "台北明天晴"}]
     monkeypatch.setitem(sys.modules, "duckduckgo_search", types.SimpleNamespace(DDGS=FakeDDGS))
     assert ws.search_google("台北明天天氣") == "- 天氣: 台北明天晴"
+
+
+def test_she_only_looks_at_the_screen_when_someone_asks():
+    # 2026-10-27 實機：觀眾叫她「認真想一下」算光速、老爸問機率，她都順手看了老爸螢幕還講出來
+    import re as _re
+    ns = {"re": _re}
+    exec(compile(ast.Module(body=[n for n in TREE.body if isinstance(n, ast.Assign)
+                                  and getattr(n.targets[0], "id", "") == "_VISION_ASK_RE"] + [_fn("_vision_wanted")],
+                            type_ignores=[]), "v", "exec"), ns)
+    for said, want in (("7L 幫我認真想一下：光要跑幾分鐘？", False), ("機率是多少？", False),
+                       ("7L 看一下我的螢幕", True), ("老爸在幹嘛", True)):
+        ns["_BRAIN_INPUT_ORIGIN"] = {"human": True, "said": said}
+        assert ns["_vision_wanted"]() is want, said
+    ns["_BRAIN_INPUT_ORIGIN"] = {"human": False, "said": ""}
+    assert ns["_vision_wanted"]() is True                    # 系統通知、自主閒聊：她自己想看照舊
