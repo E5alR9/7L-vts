@@ -9,7 +9,7 @@ import os
 import pytest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-MAIN_SRC = open(os.path.join(ROOT, "vts_7L_test.py"), encoding="utf-8").read()
+from conftest import MAIN_SRC  # noqa: E402
 WORKERS = sorted(os.path.basename(p)[:-3] for p in glob.glob(os.path.join(ROOT, "workers", "*.py"))
                  if not p.endswith("__init__.py"))
 

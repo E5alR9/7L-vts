@@ -17,7 +17,7 @@ from services.twitch_listener import build_queue_item as tw_item
 from services.youtube_live_listener import build_queue_item as yt_item, parse_live_chat_response
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-MAIN_SRC = open(os.path.join(ROOT, "vts_7L_test.py"), encoding="utf-8").read()
+from conftest import MAIN_SRC  # noqa: E402
 
 
 # ── 擁有者認證 ──

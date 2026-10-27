@@ -7,7 +7,26 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 
+import ast  # noqa: E402
+
 import pytest  # noqa: E402
+
+# 主檔原始碼：測試要抽主檔的函式出來單獨跑（主檔一 import 就會開機），全部共用這一份，只讀一次、parse 一次
+MAIN_SRC = open(os.path.join(ROOT, "vts_7L_test.py"), encoding="utf-8").read()
+MAIN_TREE = ast.parse(MAIN_SRC)
+
+
+def main_def(name):
+    """主檔頂層的 def／async def 節點（找不到就 StopIteration，測試直接紅）。"""
+    return next(n for n in MAIN_TREE.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == name)
+
+
+def load_main(*names, **ns):
+    """把主檔幾個頂層函式 exec 進 ns 回傳；函式用到的全域由呼叫端用關鍵字塞進來。log_print 預設不印。"""
+    ns.setdefault("log_print", lambda *a, **k: None)
+    for name in names:
+        exec(compile(ast.Module(body=[main_def(name)], type_ignores=[]), name, "exec"), ns)
+    return ns
 
 _MEMORY_FILES = ("UNIFIED_MEMORY_FILE", "DIALOGUE_MEMORY_FILE", "THOUGHT_MEMORY_FILE", "VIEWER_PROFILES_FILE",
                  "CLOUD_KNOWLEDGE_FILE", "USER_PROFILE_FILE", "MEMORY_CONFIG_FILE")

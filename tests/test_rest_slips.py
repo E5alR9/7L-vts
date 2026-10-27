@@ -9,17 +9,12 @@ from collections import deque
 from google.genai import types
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-MAIN = open(os.path.join(ROOT, "vts_7L_test.py"), encoding="utf-8").read()
-TREE = ast.parse(MAIN)
+from conftest import MAIN_SRC as MAIN, MAIN_TREE as TREE, load_main  # noqa: E402
 
 
 def _load(*names, **ns):
-    ns.setdefault("log_print", lambda *a, **k: None)
     ns.setdefault("usage", __import__("core.usage", fromlist=["usage"]))   # 主程式函式掛著 @usage.role_scope
-    for name in names:
-        fn = next(n for n in TREE.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == name)
-        exec(compile(ast.Module(body=[fn], type_ignores=[]), name, "exec"), ns)
-    return ns
+    return load_main(*names, **ns)
 
 
 def test_slip_unpacking_handles_people_and_system_slips():

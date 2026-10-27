@@ -12,8 +12,7 @@ from google.genai import types
 from core.tool_schema import resolve_tool_name
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-MAIN = open(os.path.join(ROOT, "vts_7L_test.py"), encoding="utf-8").read()
-TREE = ast.parse(MAIN)
+from conftest import MAIN_SRC as MAIN, MAIN_TREE as TREE  # noqa: E402
 
 
 def _fn(name):

@@ -8,7 +8,7 @@ import os
 from dryrun import DryRun
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-MAIN = open(os.path.join(ROOT, "vts_7L_test.py"), encoding="utf-8").read()
+from conftest import MAIN_SRC as MAIN  # noqa: E402
 
 
 def test_typing_mic_on_off_flips_the_mic_switch():

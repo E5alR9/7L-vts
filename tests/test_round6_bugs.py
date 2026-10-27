@@ -12,12 +12,10 @@ from core.live_timer_sensor import LiveTimerSensorHub, cn_number
 from core.hard_command import stage_request_unasked
 import services.web_search as ws
 
-MAIN = open(os.path.join(ROOT, "vts_7L_test.py"), encoding="utf-8").read()
-TREE = ast.parse(MAIN)
+from conftest import MAIN_SRC as MAIN, MAIN_TREE as TREE, main_def  # noqa: E402
 
 
-def _fn(name):
-    return next(n for n in TREE.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == name)
+_fn = main_def
 
 
 def test_timer_understands_multi_char_chinese_numbers():

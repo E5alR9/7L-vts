@@ -9,8 +9,7 @@ from core.hard_command import PIANO_CONTROL_TOOLS as _PIANO_CONTROL
 from core.prompts import TextCleanEngine as T
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-MAIN = open(os.path.join(ROOT, "vts_7L_test.py"), encoding="utf-8").read()
-TREE = ast.parse(MAIN)
+from conftest import MAIN_SRC as MAIN, MAIN_TREE as TREE  # noqa: E402
 
 
 def _fn(name):

@@ -13,7 +13,7 @@ import services.rag_memory_service as rag
 from dryrun import DryRun
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-MAIN = open(os.path.join(ROOT, "vts_7L_test.py"), encoding="utf-8").read()
+from conftest import MAIN_SRC as MAIN  # noqa: E402
 Q_CAT = "7L 我之前有問過妳貓跟狗哪個比較可愛，妳還記得我問過嗎？"
 
 

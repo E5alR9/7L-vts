@@ -6,7 +6,7 @@ import sys
 import threading
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-MAIN = open(os.path.join(ROOT, "vts_7L_test.py"), encoding="utf-8").read()
+from conftest import MAIN_SRC as MAIN  # noqa: E402
 
 
 def test_speech_text_and_subtitle_wait_for_the_first_audio():
