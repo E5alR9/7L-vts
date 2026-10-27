@@ -14,7 +14,15 @@ from typing import List, Dict, Any, Optional
 from core.utils import log_print, log_swallowed, spawn
 from core.identity import get_mode, get_owner_name, get_character_name, claims_owner_identity
 import core.db as db_module
-import services.rag_memory_service as rag_service
+# 長期向量庫（services.rag_memory_service）由主程式開機時登記進來：core 不往上 import services。
+# 沒登記（只載 core 的離線腳本）就不寫、不清向量庫。
+_RAG = None
+
+
+def register_rag(service) -> None:
+    """主程式開機時呼叫：之後的對話照 rag_memory_entry 的規則寫進向量庫，清記憶時一起清。"""
+    global _RAG
+    _RAG = service
 from core import eventlog
 
 from core.paths import DATA_DIR   # 執行時資料夾 data/：記憶、聲紋、音訊快取都在這（唯一出處）
@@ -388,8 +396,8 @@ async def clear_all_memories() -> str:
             UNIFIED_LIVE_MEMORY.clear()
             
         try:
-            from services.rag_store import reset as reset_rag_store
-            reset_rag_store()
+            if _RAG is not None:
+                _RAG.rag_store.reset()
         except Exception:
             pass
             
@@ -613,8 +621,8 @@ def append_to_unified_memory(speaker: str, target: str, content: str, role: str 
 
     # 向量記憶庫（老爸的話、她的回覆、熟客的留言；規則在 rag_memory_entry）
     rag_entry = rag_memory_entry(speaker, target, clean_c, role, source, t_str)
-    if rag_entry:
-        _schedule_on_loop(rag_service.add_rag_memory(rag_entry[0], source=role, viewer=rag_entry[1].get("viewer", "")))
+    if rag_entry and _RAG is not None:
+        _schedule_on_loop(_RAG.add_rag_memory(rag_entry[0], source=role, viewer=rag_entry[1].get("viewer", "")))
 
 def init_unified_memory():
     """啟動時載入歷史雙軌記憶：

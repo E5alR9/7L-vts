@@ -83,6 +83,8 @@ import asyncio
 import aiohttp
 import core.websocket_patch  # noqa: F401  副作用：修補 websockets 與 google-genai Live 的相容性
 import services.rag_memory_service as rag_service
+import core.memory as _memory_core
+_memory_core.register_rag(rag_service)   # 對話寫進向量庫（core 不往上 import services，由這裡接上）
 import pygame
 import time
 import json
@@ -3373,7 +3375,8 @@ async def continuous_live_worker(vts):
                 
                 async def send_mic_audio():
                     global current_mic_action_str, LATEST_REALWORLD_SPEECH_TIME
-                    barge = BargeInDetector()
+                    from mic_live_plugin.voiceprint_verifier import dad_and_her_scores
+                    barge = BargeInDetector(score_fn=dad_and_her_scores)
                     try:
                         while True:
                             data = await asyncio.to_thread(_read_mic_chunk)

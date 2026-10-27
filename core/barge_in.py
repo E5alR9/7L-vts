@@ -37,16 +37,9 @@ def _wav(pcm: bytes, sr: int) -> bytes:
     return buf.getvalue()
 
 
-def voiceprint_scores(wav_bytes: bytes) -> Tuple[float, float]:
-    """(像老爸, 像她)：mic_live_plugin 的聲紋模型。"""
-    from mic_live_plugin.voiceprint_verifier import voiceprint_verifier as vp
-    _, dad = vp.verify_is_dad(wav_bytes)
-    _, her = vp.verify_is_7l(wav_bytes)
-    return float(dad), float(her)
-
-
 class BargeInDetector:
-    def __init__(self, score_fn: Callable[[bytes], Tuple[float, float]] = voiceprint_scores, sr: int = 16000):
+    def __init__(self, score_fn: Callable[[bytes], Tuple[float, float]], sr: int = 16000):
+        """score_fn(wav) → (像老爸, 像她)：主程式傳 mic_live_plugin 的 dad_and_her_scores（core 不往上 import 插件）。"""
         self.score_fn = score_fn
         self.sr = sr
         self.max_bytes = int(WINDOW_SEC * sr) * 2

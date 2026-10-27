@@ -439,3 +439,10 @@ class VoiceprintVerifier:
 
 # 全域單例
 voiceprint_verifier = VoiceprintVerifier()
+
+
+def dad_and_her_scores(wav_bytes: bytes) -> tuple:
+    """(像老爸, 像她) 兩個分數：她講話時聽老爸插話（core.barge_in.BargeInDetector）用。"""
+    _, dad = voiceprint_verifier.verify_is_dad(wav_bytes)
+    _, her = voiceprint_verifier.verify_is_7l(wav_bytes)
+    return float(dad), float(her)

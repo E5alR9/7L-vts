@@ -226,3 +226,15 @@ def test_remember_position_words_are_one_list():
     assert asks("記住基準") and asks("記住模型") and asks("SAVE_POSITION") and not asks("往左一點")
     src = open(os.path.join(ROOT, "services", "vts_client.py"), encoding="utf-8").read()
     assert "asks_to_remember_model_position(clean_pos)" in src and '"save_position"]' not in src
+
+
+def test_core_does_not_import_services_or_plugins():
+    # core 是最底層：向量庫由主程式 register_rag 接上，插話的聲紋評分由主程式傳進 BargeInDetector
+    import re
+    bad = []
+    for fn in os.listdir(os.path.join(ROOT, "core")):
+        if fn.endswith(".py"):
+            src = open(os.path.join(ROOT, "core", fn), encoding="utf-8").read()
+            bad += [f"{fn}: {m}" for m in re.findall(r"(?m)^\s*(?:from|import) (?:services|workers|mic_live_plugin)\b.*$", src)]
+    assert bad == []
+    assert "_memory_core.register_rag(rag_service)" in MAIN

@@ -40,6 +40,7 @@ def _memory_files_in_tmp(tmp_path_factory):
     import core.db as db
     import core.memory as mem
     import services.rag_memory_service as rag_service
+    mem.register_rag(rag_service)   # 跟主程式一樣接上向量庫（下面再把寫入換成假的）
 
     async def _no_rag(*a, **k):
         return None   # 2026-10-26 起她的回覆也會進向量庫：測試裡有事件迴圈時不能真的寫 data/rag/
