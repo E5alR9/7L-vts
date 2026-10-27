@@ -397,3 +397,39 @@ def test_afterthought_stays_quiet_when_nothing_to_add_or_stale():
 def test_live_brain_turn_spawns_the_afterthought():
     recv = next(n for n in ast.walk(TREE) if isinstance(n, ast.AsyncFunctionDef) and n.name == "receive_from_live")
     assert "spawn(_afterthought(_spoken))" in ast.get_source_segment(MAIN, recv)
+
+
+def test_she_does_not_describe_the_screen_before_seeing_it():
+    # 2026-10-27 老爸同意的實測：還沒看就說「老爸在看《晴天》鋼琴教學」，4 秒後看完才改口講對
+    import re as _re
+    ns = {"re": _re}
+    exec(compile(ast.Module(body=[n for n in TREE.body if isinstance(n, ast.Assign)
+                                  and getattr(n.targets[0], "id", "") == "_CLAUSE_END_RE"] + [_fn("_vision_wait_text")],
+                            type_ignores=[]), "v", "exec"), ns)
+    f = ns["_vision_wait_text"]
+    assert f("[EXPRESSION: 正常] 我看看～ [EXPRESSION: 驚訝] 哇！老爸你在看 YouTube 晴天教學耶！") == "[EXPRESSION: 正常] 我看看～"
+    assert f("等我看一下喔！老爸在寫程式吧") == "等我看一下喔！"
+    assert f("[EXPRESSION: 思考]～我瞧瞧。") == "[EXPRESSION: 思考]～我瞧瞧。"
+    assert f("我看看") == "我看看"
+    recv = next(n for n in ast.walk(TREE) if isinstance(n, ast.AsyncFunctionDef) and n.name == "receive_from_live")
+    src = ast.get_source_segment(MAIN, recv)
+    assert 'turn_vision = turn_vision or "[TOOL:VISION]" in text_chunk' in src
+    assert 'if turn_vision and _VISION_STATE.get("busy"):' in src and src.count("turn_vision = False") == 3
+
+
+def test_rest_brain_waits_for_the_screen_only_while_a_look_is_running():
+    import re as _re
+    said = []
+
+    async def speak(vts, iq, text, who, reply_to, source, **k):
+        said.append(text)
+        return text
+    for busy, want in ((True, "我看看～"), (False, "我看看～老爸在用 Gemini")):
+        said.clear()
+        ns = {"re": _re, "normalize_silence_token": lambda t: t, "_start_marker_tools": lambda t: t.replace("[TOOL:VISION]", ""),
+              "_VISION_STATE": {"busy": busy}, "_speak_brain_turn": speak, "log_print": lambda *a: None}
+        exec(compile(ast.Module(body=[n for n in TREE.body if isinstance(n, ast.Assign)
+                                      and getattr(n.targets[0], "id", "") == "_CLAUSE_END_RE"]
+                                + [_fn("_vision_wait_text"), _fn("_rest_speak")], type_ignores=[]), "v", "exec"), ns)
+        asyncio.run(ns["_rest_speak"](None, None, "我看看～[TOOL:VISION]老爸在用 Gemini", "dad"))
+        assert said == [want]                 # 看完回報後她順手又帶標籤（沒在看）：描述照念

@@ -2712,6 +2712,20 @@ def _start_vision() -> bool:
     return True
 
 
+_CLAUSE_END_RE = re.compile(r'[～~！!。？?…]+')
+
+
+def _vision_wait_text(text: str) -> str:
+    """她叫了看畫面的那段話只留第一句（「我看看～」）：看到畫面前她常順口編畫面內容
+    （2026-10-27 實測：還沒看就說「老爸在看《晴天》鋼琴教學」，4 秒後看完才改口）。前面的表情標籤留著。"""
+    t = (text or "").strip()
+    for m in _CLAUSE_END_RE.finditer(t):
+        head = t[:m.end()]
+        if re.sub(r'\[[^\]]*\]', '', head).strip(" ～~！!。？?…"):
+            return head.strip()
+    return t
+
+
 def _start_mirror() -> bool:
     """照鏡子：剛開始照或剛照完（15 秒內）就不重照，回 False。標籤和子智能體兩條路都走這裡。"""
     now = time.time()
@@ -3297,7 +3311,10 @@ async def _rest_speak(vts, input_queue, raw: str, origin: str) -> str:
     text = re.sub(r'\[PASS\]', '', normalize_silence_token(raw or ""), flags=re.IGNORECASE).strip()
     if not text:
         return ""
+    wants_vision = "[TOOL:VISION]" in text
     text = _start_marker_tools(text)
+    if wants_vision and _VISION_STATE.get("busy"):
+        text = _vision_wait_text(text)   # 還沒看到畫面：只念「我看看～」，不要先編
     who = "dad" if origin == "dad" else "audience"
     spoken = await _speak_brain_turn(vts, input_queue, text, who, who, "rest_brain")
     log_print(f"💬 7L (REST 大腦): {spoken or text}")
@@ -3508,6 +3525,7 @@ async def continuous_live_worker(vts):
                 async def receive_from_live():
                     chunk_buffer = ""
                     turn_buffer = ""
+                    turn_vision = False   # 這輪叫了看畫面：看到前只念第一句，不要先編畫面
                     user_transcription_buffer = ""
 
                     def _flush_user_speech():
@@ -3597,6 +3615,7 @@ async def continuous_live_worker(vts):
                                                 log_print(f"🗑️ [Live 記憶修正] 移除未播報完畢的殘留記憶: {removed.get('content')}")
                                         turn_buffer = ""
                                         chunk_buffer = ""
+                                        turn_vision = False
                                     
                                     if c.input_transcription and c.input_transcription.text:
                                         user_transcription_buffer += c.input_transcription.text
@@ -3614,6 +3633,7 @@ async def continuous_live_worker(vts):
                                     
                                         # 先拔 blob（腦偶爾會吐幾 MB 的 base64 音訊；不先清，正則橫跨、
                                         # 日誌刷屏、搜尋燒額度、TTS 會去唸亂碼——一律視為雜訊）
+                                        turn_vision = turn_vision or "[TOOL:VISION]" in text_chunk
                                         text_chunk = _start_marker_tools(text_chunk)
                                         
                                         if text_chunk:
@@ -3628,13 +3648,17 @@ async def continuous_live_worker(vts):
                                             usage.note(live_m, True, role="主腦")
                                             # 跟 REST 大腦同一份收尾；標籤照觸發這輪的人的權限跑
                                             _who = "audience" if _BRAIN_INPUT_ORIGIN.get("who") == "audience" else "dad"
-                                            _spoken = await _speak_brain_turn(vts, input_queue, turn_buffer.strip(), _who,
+                                            _turn_text = turn_buffer.strip()
+                                            if turn_vision and _VISION_STATE.get("busy"):
+                                                _turn_text = _vision_wait_text(_turn_text)   # 還沒看到畫面：只念「我看看～」
+                                            _spoken = await _speak_brain_turn(vts, input_queue, _turn_text, _who,
                                                                               _live_reply_target(), "live_api", from_live=True)
                                             if _spoken:
                                                 spawn(_afterthought(_spoken))   # 背後再想一次，有補充就補一句
                                             log_print(f"📝 [黑板紀錄] 7L Live 大腦: {turn_buffer.strip()}")
                                         turn_buffer = ""
                                         chunk_buffer = ""
+                                        turn_vision = False
                                         if goaway_pending:
                                             raise ConnectionResetError("goaway：這輪講完了，主動換線續接")
                     except asyncio.CancelledError: pass
