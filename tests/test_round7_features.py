@@ -283,3 +283,33 @@ def test_cover_dedupe_by_vocal_file(monkeypatch):
     monkeypatch.setattr(ac, "_NOW_PLAYING_TITLE", "")
     assert ac._same_song_queued("Alan Walker - faded", "C:/x/Faded_7l_vocal.wav")   # 正要上台的同一個檔
     assert not ac._same_song_queued("晴天", "C:/x/晴天_7l_vocal.wav")
+
+
+# ── 排列組合實測抓到的（2026-10-27）──
+def test_dad_can_rerequest_same_song_after_stop_but_brain_cannot():
+    from core import eventlog
+    from core.hard_command import is_stage_control
+    log = eventlog.EventLog(":memory:")
+    ns = load_main("_hard_cmd_seen_recently", eventlog=type("E", (), {"get": staticmethod(lambda: log)}),
+                   is_stage_control=is_stage_control, _HARD_CMD_DEDUPE_SEC=20.0)
+    seen = ns["_hard_cmd_seen_recently"]
+    t = time.time()
+    assert seen("auto_sing_song", {"song_name": "花海"}, t) is False
+    assert seen("auto_sing_song", {"song_name": "花海"}, t + 2, from_brain=True) is True     # 主腦重叫：擋
+    assert seen("stop_singing", {}, t + 10) is False
+    assert seen("auto_sing_song", {"song_name": "花海"}, t + 12, from_brain=True) is True    # 主腦晚到的舊點歌：照擋
+    assert seen("auto_sing_song", {"song_name": "花海"}, t + 13) is False                    # 老爸停掉後重點：要唱
+    assert seen("auto_sing_song", {"song_name": "花海"}, t + 14) is True                     # 再來一次就是重複
+
+
+def test_piano_start_aborts_if_stopped_during_intent():
+    import inspect
+    import services.piano_engine as pe
+    src = inspect.getsource(pe.play_virtual_piano)
+    assert "stops_at_request = _PIANO_STOPS[\"n\"]" in src and "_PIANO_STOPS[\"n\"] != stops_at_request" in src
+    assert "_PIANO_STOPS[\"n\"] += 1" in inspect.getsource(pe.stop_virtual_piano)
+
+
+def test_shock_stops_song_waiting_to_go_on_stage():
+    src = ast.get_source_segment(MAIN, main_def("execute_punish_action"))
+    assert "if ac.stop_current_song():" in src and "if is_singing_active():" not in src

@@ -388,7 +388,7 @@ def test_stage_runner_declines_replays_before_doing_anything():
     from core.hard_command import PLAY_TOOLS
     done = []
     ns = _load("run_stage_commands", PLAY_TOOLS=PLAY_TOOLS, _brain_replaying_old_request=lambda songs: True,
-               _BRAIN_INPUT_ORIGIN={"said": "7L 醒醒"}, _hard_cmd_seen_recently=lambda *a: done.append(a) or False)
+               _BRAIN_INPUT_ORIGIN={"said": "7L 醒醒"}, _hard_cmd_seen_recently=lambda *a, **k: done.append(a) or False)
     r = asyncio.run(ns["run_stage_commands"]([("pe.play_virtual_piano", {"song_name": "小星星"})], from_brain=True))
     assert r == (False, "unasked", {"song_name": "小星星"}) and done == []
     # 停鋼琴、停歌不是點歌，不對照

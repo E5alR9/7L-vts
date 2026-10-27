@@ -1457,6 +1457,9 @@ async def resume_virtual_piano() -> str:
     return "（系統回報：已從暫停處繼續鋼琴演奏）"
 
 
+_PIANO_STOPS = {"n": 0}   # 收琴次數
+
+
 async def stop_virtual_piano(force: bool = False) -> str:
     """收起鋼琴（停止演奏、關閉桌面鋼琴介面並讓 7L 回到原本位置）。
     force：老爸親口說的或後台按的。3.5 秒防護是擋主腦剛開琴又自己收；老爸的指令不擋
@@ -1467,6 +1470,7 @@ async def stop_virtual_piano(force: bool = False) -> str:
         return ""
         
     PIANO_SESSION_ID += 1  # 註銷所有先前或進行中的鋼琴 Session
+    _PIANO_STOPS["n"] += 1   # 還在判斷意圖的點曲看到這個就不開彈（play_virtual_piano）
     IS_PIANO_AUTO_RADIO_MODE = False  # 關閉無限隨機電台模式
     globals()["IS_PIANO_PAUSED"] = False
     globals()["LAST_PIANO_HEARTBEAT_TIME"] = 0.0  # 舊視窗的心跳不算數，下一首從頭等新視窗的心跳
@@ -2397,6 +2401,7 @@ async def play_virtual_piano(song_name: str = "", custom_sheet: str = "", auto_r
     global _PLAY_REQ_SEQ, _PLAY_STARTED_SEQ
     _PLAY_REQ_SEQ += 1
     my_seq = _PLAY_REQ_SEQ
+    stops_at_request = _PIANO_STOPS["n"]
     LAST_PIANO_PLAY_START_TIME = time.time()
     LAST_PIANO_OPEN_TIME = time.time()
     init_piano_synthesizer()
@@ -2653,6 +2658,10 @@ async def play_virtual_piano(song_name: str = "", custom_sheet: str = "", auto_r
             return "（系統回報：這份樂譜太短或是空的，沒辦法彈，請跟對方說這次沒寫好。）"
         log_print(f"🛡️ [樂譜質檢拒收] 《{os.path.basename(target_midi)}》時長/音符不足，不播，轉線上搜譜！")
         target_midi = None
+    if _PIANO_STOPS["n"] != stops_at_request:
+        # 判斷意圖這一兩秒老爸收了琴（2026-10-27 實測：彈卡農後 0.5 秒收琴，AI 判完卡農照樣開彈）
+        log_print(f"🛑 [鋼琴] 《{target_title}》還在判斷時鋼琴被收了，不開彈。")
+        return "（系統回報：鋼琴剛被收起來，這首不彈了）"
     # 查曲庫這段（可能又問了一次 AI）後點的已經開彈：一樣排在它後面，不開新場次把它蓋掉
     if not is_explicit_yt and _PLAY_STARTED_SEQ > my_seq and current_piano_song_title:
         _queued = await _queue_request()

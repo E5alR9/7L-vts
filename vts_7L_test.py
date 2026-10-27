@@ -5965,11 +5965,12 @@ async def _rescue_missed_song_requests():
 _HARD_CMD_DEDUPE_SEC = 20.0
 
 
-def _hard_cmd_seen_recently(fn_name: str, fn_args, now: float) -> bool:
+def _hard_cmd_seen_recently(fn_name: str, fn_args, now: float, from_brain: bool = False) -> bool:
     """同一個硬指令 20 秒內只執行一次（2026-10-24 實機：一則「彈小星星」被執行 4 次）。
     老爸訊息先被 CPU 攔截執行一次，主腦接著呼叫 invoke_subagent 又是同一句；
     舊碼主腦的工具呼叫全被漏接所以沒事，修好之後就重複了。沒看過就記進流水帳（kind=stage_cmd）並回 False。
-    收琴／停歌／暫停／繼續只跟「上一個舞台指令」比：「暫停→繼續→暫停」「收琴→點歌→收琴」20 秒內照樣執行。"""
+    收琴／停歌／暫停／繼續只跟「上一個舞台指令」比：「暫停→繼續→暫停」「收琴→點歌→收琴」20 秒內照樣執行。
+    老爸（不是主腦）停掉之後重點同一首照樣執行；主腦晚到的同一首照擋，免得停掉又被舊的叫回來。"""
     import json as _json
     if (fn_args or {}).get("song_name"):
         # 《晴天》跟晴天是同一首（程式照她的提議排、主腦又叫一次工具，歌名寫法常不一樣）
@@ -5986,6 +5987,11 @@ def _hard_cmd_seen_recently(fn_name: str, fn_args, now: float) -> bool:
         dup = last is not None and last["text"] == key
     else:
         dup = log.seen("stage_cmd", key, _HARD_CMD_DEDUPE_SEC, now)
+        if dup and not from_brain:
+            # 2026-10-27 實測：唱花海→停止唱歌→唱花海，第二次被當重複擋掉
+            prev = log.last("stage_cmd", since=now - _HARD_CMD_DEDUPE_SEC, prefixes=[key])
+            later = log.recent("stage_cmd", since=prev["ts"] + 1e-6, limit=50) if prev else []
+            dup = not any(is_stage_control((e.get("text") or "").split("|")[0]) for e in later)
     if not dup:
         log.record("stage_cmd", key, ts=now, tool=fn_name)
     return dup
@@ -6083,7 +6089,7 @@ async def run_stage_commands(cmds: list, target: str = "dad", requester_name: st
             return False, "unasked", {"song_name": "＋".join(_songs)}
     if len(cmds) > 1:
         _mixed = cmds
-        if _hard_cmd_seen_recently("mixed", [list(x) for x in _mixed], time.time()):
+        if _hard_cmd_seen_recently("mixed", [list(x) for x in _mixed], time.time(), from_brain=from_brain):
             log_print("⏭️ [CPU 硬體直連] 同一組混用指令剛剛已在處理，不重複執行")
             return True, "mixed_play_sing", {"desc": "＋".join(a.get("song_name", "") for _, a in _mixed)}
         # 鋼琴走會合（先開等翻唱），唱歌走正常管線；兩張紙條照發
@@ -6107,7 +6113,7 @@ async def run_stage_commands(cmds: list, target: str = "dad", requester_name: st
         # 觀眾留言也會進 CPU：鋼琴的停止／暫停／繼續、停止唱歌只聽老爸的，不然一句「別彈了」就能把鋼琴收掉
         log_print(f"🛑 [CPU 硬體直連] 觀眾不能控制鋼琴／唱歌，不執行：{(said or fn_name)[:30]}")
         return False, "audience_denied", {}
-    if _hard_cmd_seen_recently(fn_name, fn_args, time.time()):
+    if _hard_cmd_seen_recently(fn_name, fn_args, time.time(), from_brain=from_brain):
         log_print(f"⏭️ [CPU 硬體直連] {fn_name}({fn_args}) 剛剛已在處理，不重複執行")
         return True, fn_name, fn_args
     log_print(f"⚡ [CPU 硬體直連] 成功攔截指令: {fn_name}({fn_args})")
@@ -6359,11 +6365,11 @@ async def execute_punish_action(reason: str = "", is_severe: bool = None):
         #  0 秒即時強制掐斷當前正在播出的任何長語音，清空排隊，讓位給秒級觸電反應！
         await interrupt_current_speech(clear_queue=True, reason="老爸電擊即時打斷")
 
-        #  唱歌中被電：當首停掉（被電到唱不下去），排隊保留；口型同步歸位給尖叫
+        #  唱歌中被電：當首停掉（被電到唱不下去），排隊保留；口型同步歸位給尖叫。
+        #  正要上台（等開場白）的那首也算：以前只看在唱，被電完歌照樣開唱（2026-10-27 實測）
         try:
             import services.auto_cover_pipeline as ac
-            if is_singing_active():
-                ac.stop_current_song()
+            if ac.stop_current_song():
                 log_print("🛑 [電擊中斷] 演唱中被電擊，當首停止（排隊保留）。")
         except Exception:
             log_swallowed()
