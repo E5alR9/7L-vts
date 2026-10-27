@@ -7,7 +7,7 @@
 
 | 用途 | PROVIDER | 模型／後端 | key／env | 配額 | 備註 |
 |---|---|---|---|---|---|
-| 純文字快線（秒回／哨兵／審查／提煉／摘要） | GROQ | qwen3.8-27b → gpt-oss-120b → gpt-oss-20b → allam-2-7b（`core/groq_router.py` 梯隊） | `GROQ_API_KEYS`×30，`GROQ_REQUESTS_PER_MINUTE=20` | ITPM ~7000／org／model | 第一梯隊；`fetch_fast_text_reply` 主力 |
+| 純文字快線（秒回／哨兵／審查／提煉／摘要） | GROQ | qwen3.8-27b → gpt-oss-120b → gpt-oss-20b（`core/groq_router.py` 梯隊；gpt-oss 帶 reasoning_effort=low，allam-2-7b 2026-10-27 拿掉） | `GROQ_API_KEYS`×30，`GROQ_REQUESTS_PER_MINUTE=20` | ITPM ~7000／org／model | 第一梯隊；`fetch_fast_text_reply` 主力 |
 | 背景純文字（定時提醒／搜尋提煉／鋼琴過場碎念） | GROQ | 同上梯隊（一律 `groq_chat`） | 同上 | 同上 | **2026-10-09 起全程零 Gemini**；失敗走本地離線摘要器／固定備援句／安靜不說話 |
 | 主腦深度推理 | GEMINI | 3.8-flash → 3.7 → 3.6 → 3.5 → 3-flash-preview → lite 系（`core/llm_engine.py`，pro-preview 已因 0 配額踢除） | `GEMINI_API_KEYS`×35，分池（觀眾／心流／視覺／主腦） | 旗艦 RPD 20／天／key；lite RPM 15／RPD 500 | 高頻一律 lite |
 | Live 全雙工（觀眾回覆／心流串流） | GEMINI-LIVE | **gemini-3.8-live**（舊 3.1-preview 已遷移，表上消失） | 同上（動態跨池備援） | RPM／RPD Unlimited，TPM 65K | 7x24 成立 |

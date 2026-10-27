@@ -41,8 +41,16 @@ DEFAULT_MODEL_LADDER = [
     "qwen/qwen3.8-27b",        # 極速主力（原專案第一順位，實測 0.4s 級）
     "openai/gpt-oss-120b",     # 高智商旗艦（120B 最強推理）
     "openai/gpt-oss-20b",      # 輕量保底（20B 快答）
-    "allam-2-7b",              # 最終防線（7B；阿拉伯語系為主，中文較弱，僅墊底）
 ]
+# allam-2-7b 2026-10-27 拿掉：實測記憶濃縮整段重複亂寫，哨兵格式也不對，墊底只會講錯話
+
+# gpt-oss 是推理模型：先想再答，想的部分也算 max_tokens。不設的話想太久、內容回空字串（2026-10-27 實測三題空兩題半）
+REASONING_EFFORT = "low"
+REASONING_EXTRA_TOKENS = 512
+
+
+def _is_reasoning_model(model: str) -> bool:
+    return model.startswith("openai/gpt-oss")
 
 
 def _load_keys() -> List[str]:
@@ -441,6 +449,9 @@ async def groq_chat(
                     "temperature": temperature,
                     "max_tokens": max_tokens,
                 }
+                if _is_reasoning_model(m_name):
+                    kwargs["max_tokens"] = max_tokens + REASONING_EXTRA_TOKENS
+                    kwargs["extra_body"] = {"reasoning_effort": REASONING_EFFORT}
                 if wire_tools:
                     kwargs["tools"] = wire_tools
 
@@ -481,7 +492,7 @@ async def groq_chat(
                     ))
 
                 if not text and not fcs:
-                    continue
+                    break   # 這個模型回空的：換下一個模型（以前換下一把金鑰、同一個模型，全空時把金鑰輪完才換）
                 return GroqResponse(text=text, function_calls=fcs, raw=raw, model=m_name)
 
             except asyncio.TimeoutError:

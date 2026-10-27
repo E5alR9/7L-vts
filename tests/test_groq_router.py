@@ -194,3 +194,35 @@ def test_clients_share_one_connection_pool():
     assert len(cs) == 3
     assert cs[0]._client is cs[1]._client is cs[2]._client
     assert [c.api_key for c in cs] == ["k1", "k2", "k3"]
+
+
+def test_empty_reply_moves_to_the_next_model_and_gpt_oss_gets_low_reasoning(monkeypatch):
+    """gpt-oss 不設 reasoning_effort 會想到 max_tokens 用完、回空字串；空回覆以前換下一把金鑰打同一個模型，
+    把金鑰輪完才換模型（2026-10-27 實測）。"""
+    import asyncio
+    from types import SimpleNamespace
+    calls = []
+
+    class _Client:
+        class chat:
+            class completions:
+                @staticmethod
+                async def create(**kw):
+                    calls.append(kw)
+                    text = "" if kw["model"].startswith("openai/gpt-oss") else "好喔"
+                    return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=text, tool_calls=None))],
+                                           usage=SimpleNamespace(total_tokens=1))
+
+    monkeypatch.setattr(gr, "_get_clients", lambda: [_Client() for _ in range(5)])
+    monkeypatch.setattr(gr, "GROQ_KEYS", [f"k{i}" for i in range(5)])
+
+    async def keep(ladder):
+        return ladder
+    monkeypatch.setattr(gr, "_filter_unavailable", keep)
+    monkeypatch.setattr(gr, "_log", lambda *a: None)
+    r = asyncio.run(gr.groq_chat([{"role": "user", "content": "hi"}], models=["openai/gpt-oss-120b", "qwen/qwen3.8-27b"],
+                                 max_tokens=100))
+    assert r.text == "好喔" and [c["model"] for c in calls] == ["openai/gpt-oss-120b", "qwen/qwen3.8-27b"]
+    assert calls[0]["extra_body"] == {"reasoning_effort": "low"} and calls[0]["max_tokens"] == 100 + gr.REASONING_EXTRA_TOKENS
+    assert "extra_body" not in calls[1] and calls[1]["max_tokens"] == 100
+    assert "allam-2-7b" not in gr.DEFAULT_MODEL_LADDER
