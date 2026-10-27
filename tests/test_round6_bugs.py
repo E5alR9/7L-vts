@@ -245,3 +245,46 @@ def test_brain_knows_voice_is_always_dad():
     #（10/26 實機兩次；Live A/B：舊提示詞 6 次錯 2 次，加這條 6 次全對）
     from core import promptkit
     assert "妳直接聽到的人聲（不是文字）一定是老爸本人" in promptkit.brain_system("老爸", "7L", {}, "", mode="companion")
+
+
+def _vision_ns(history, describe):
+    slips, started = [], []
+    ns = {"log_print": lambda *a: None, "describe_images": describe, "get_combined_temporal_screen_snapshot": lambda: ["x"],
+          "_VISION_STATE": {"report_ts": 0.0, "mirror_ts": 0.0, "fail_ts": 0.0, "busy": False}, "time": __import__("time"),
+          "send_brain_slip": slips.append, "_clean_result_for_brain": lambda t: t, "asyncio": asyncio,
+          "VISION_TOOL_TIMEOUT_SEC": 45.0, "VISION_REPORT_QUIET_SEC": 15.0, "VISION_FAIL_QUIET_SEC": 90.0,
+          "VISION_FALLBACK_MAX_AGE": 180.0, "VISION_HISTORY_STREAM": history}
+    ns["spawn"] = lambda c: started.append(c)
+    for n in ("_vision_report_recent", "_start_vision", "live_vision_tool_task"):
+        exec(compile(ast.Module(body=[_fn(n)], type_ignores=[]), n, "exec"), ns)
+    return ns, slips, started
+
+
+def test_failed_vision_does_not_retry_or_complain_again():
+    # 10/26 22:37～22:41：看畫面一直失敗、她每 45 秒抱怨一次「看不清楚」，還有兩個同時在看
+    import time as _t
+
+    async def fail(prompt, images):
+        return ""
+    ns, slips, started = _vision_ns([], fail)
+    assert ns["_start_vision"]() is True and ns["_start_vision"]() is False   # 正在看：不再開一個
+    started[0].close()
+    asyncio.run(ns["live_vision_tool_task"]())
+    assert len(slips) == 1 and "沒看清楚畫面" in slips[0] and ns["_VISION_STATE"]["busy"] is False
+    assert ns["_start_vision"]() is False                                     # 剛失敗：90 秒內不重看
+    ns["_VISION_STATE"]["fail_ts"] = _t.time() - 100
+    assert ns["_start_vision"]() is True
+    started[-1].close()
+
+
+def test_failed_vision_falls_back_to_what_peripheral_vision_saw():
+    import time as _t
+
+    async def fail(prompt, images):
+        return ""
+    ns, slips, _ = _vision_ns([{"time": _t.time() - 30, "text": "老爸在看鋼琴影片"}], fail)
+    asyncio.run(ns["live_vision_tool_task"]())
+    assert len(slips) == 1 and "餘光看到" in slips[0] and slips[0].endswith("老爸在看鋼琴影片")
+    ns, slips, _ = _vision_ns([{"time": _t.time() - 600, "text": "很久以前的畫面"}], fail)
+    asyncio.run(ns["live_vision_tool_task"]())
+    assert "沒看清楚畫面" in slips[0]                                          # 太舊的不拿來講

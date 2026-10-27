@@ -268,15 +268,12 @@ def test_screen_task_is_handed_to_the_vision_brain():
 
     looked = []
 
-    async def live_vision_tool_task():
-        looked.append(True)
-
     def run(recent):
         sess = _FakeSession()
         ns = _load("_run_subagent_task", "_handle_invoke_subagent", types=types, asyncio=asyncio, time=time,
                    background_tool_executor=never, nv_interpret_task=never, build_slip_text=build_slip_text,
                    _SUBAGENT_TOTAL_TIMEOUT=45.0, _SUBAGENT_VISION_TASK_RE=_re.compile(_const_pattern("_SUBAGENT_VISION_TASK_RE")),
-                   _vision_report_recent=lambda now: recent, live_vision_tool_task=live_vision_tool_task,
+                   _start_vision=lambda: not recent and (looked.append(True) or True),   # 剛看過／正在看就回 False
                    vc=pytypes.SimpleNamespace(GLOBAL_VTS=None))
 
         async def go():

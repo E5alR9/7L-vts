@@ -2681,7 +2681,12 @@ VISION_TOOL_TIMEOUT_SEC = 45.0   # 她說了「我看看」之後最多等這麼
 # 看完畫面送回報後，她回答時常順手又寫 [TOOL:VISION]，於是看完又看、每 10 秒循環一次
 # （2026-10-25 實機：視覺修好、幾秒就回來之後才冒出來）。回報後這段時間內的 [TOOL:VISION] 不觸發。
 VISION_REPORT_QUIET_SEC = 15.0
-_VISION_STATE = {"report_ts": 0.0, "mirror_ts": 0.0}
+# 看畫面失敗後這段時間內不重看：以前失敗了她說「看不清楚」又帶 [TOOL:VISION]，每 45 秒失敗一次、抱怨一次
+# （2026-10-26 22:37～22:41 送了 6 張「沒看清楚畫面」，有兩個同時在看）
+VISION_FAIL_QUIET_SEC = 90.0
+# 看不成時，餘光這麼久以內看到的畫面還拿來講
+VISION_FALLBACK_MAX_AGE = 180.0
+_VISION_STATE = {"report_ts": 0.0, "mirror_ts": 0.0, "fail_ts": 0.0, "busy": False}
 
 
 def _vision_report_recent(now: float, kind: str = "report_ts") -> bool:
@@ -2692,6 +2697,17 @@ def _vision_report_recent(now: float, kind: str = "report_ts") -> bool:
 # 主腦有時把「看螢幕」也丟給子智能體；子智能體看不到畫面，交給 [TOOL:VISION] 處理
 _SUBAGENT_VISION_TASK_RE = re.compile(r"螢幕|屏幕|畫面|截圖|桌面上")
 _SUBAGENT_MIRROR_TASK_RE = re.compile(r"鏡子|照鏡")
+
+
+def _start_vision() -> bool:
+    """看畫面：正在看、剛看完（15 秒內）或剛看失敗（90 秒內）就不重看，回 False。標籤和子智能體兩條路都走這裡。"""
+    now = time.time()
+    if (_VISION_STATE.get("busy") or _vision_report_recent(now)
+            or now - _VISION_STATE.get("fail_ts", 0.0) < VISION_FAIL_QUIET_SEC):
+        return False
+    _VISION_STATE["busy"] = True
+    spawn(live_vision_tool_task())
+    return True
 
 
 def _start_mirror() -> bool:
@@ -2719,11 +2735,10 @@ def _start_marker_tools(text: str) -> str:
             log_print("⚠️ [攔截暗號] 搜尋關鍵字全是雜訊，跳過不搜。")
     if "[TOOL:VISION]" in text:
         text = text.replace("[TOOL:VISION]", "").strip()
-        if _vision_report_recent(time.time()):
-            log_print("👁️ [視覺] 她正在回答剛看到的畫面，這次的 [TOOL:VISION] 不重看（防看完又看的迴圈）")
-        else:
+        if _start_vision():
             log_print("⚡ [攔截暗號] 啟動平行代理人：視覺大腦！")
-            spawn(live_vision_tool_task())
+        else:
+            log_print("👁️ [視覺] 正在看、剛看完或剛看失敗，這次的 [TOOL:VISION] 不重看（防看完又看的迴圈）")
 
     if "[TOOL:MIRROR]" in text:
         text = text.replace("[TOOL:MIRROR]", "").strip()
@@ -2763,11 +2778,19 @@ async def live_vision_tool_task():
         send_brain_slip(f"[系統提示：視覺大腦回報畫面內容（已經看完了，直接用這段回答，不要再輸出 [TOOL:VISION]）。挑一兩個最有意思的點，一兩句話講完（40 字內），不要把畫面上的東西全念一遍] {_clean_result_for_brain(reply_text)}")
     except Exception as e:
         log_print(f"❌ [視覺大腦錯誤] {'超過 %.0f 秒沒看完' % VISION_TOOL_TIMEOUT_SEC if isinstance(e, asyncio.TimeoutError) else e}")
-        fallback_prompt = "[系統提示：這次沒看清楚畫面（看太久或遇到 API 限流）。請發揮傲嬌本性抱怨暫時看不到畫面，並叫老爸直接把畫面內容唸給妳聽！請發揮創意，用不同的說法。]"
-        try:
-            send_brain_slip(fallback_prompt)
-        except Exception as inner_e:
-            log_print(f"⚠️ [視覺大腦] 無法傳送 fallback: {inner_e}")
+        _VISION_STATE["fail_ts"] = time.time()
+        # 看不成：餘光剛才看到的拿來講（10/26 實機同一段時間餘光照樣看得到，她卻一直抱怨看不清楚）
+        last = VISION_HISTORY_STREAM[-1] if VISION_HISTORY_STREAM else None
+        age = time.time() - last["time"] if last else None
+        if last and age < VISION_FALLBACK_MAX_AGE:
+            _VISION_STATE["report_ts"] = time.time()
+            send_brain_slip(f"[系統提示：這次沒看成，這是 {age:.0f} 秒前餘光看到的畫面（可能不是最新），照這個講，"
+                            f"一兩句話講完（40 字內），不要再輸出 [TOOL:VISION]] {_clean_result_for_brain(last['text'])}")
+        else:
+            send_brain_slip("[系統提示：這次沒看清楚畫面（看太久或遇到 API 限流）。請發揮傲嬌本性抱怨暫時看不到畫面，"
+                            "並叫老爸直接把畫面內容唸給妳聽！請發揮創意，用不同的說法。不要再輸出 [TOOL:VISION]，等一下再看。]")
+    finally:
+        _VISION_STATE["busy"] = False
 
 async def live_mirror_tool_task():
     """鏡子代理人：讓她看看自己的圖片"""
@@ -3108,11 +3131,10 @@ async def _run_subagent_task(_task_ins, _intent, _respond):
             # 子智能體看不到畫面：照舊流程會回「沒結果，請妳自己回答」，她就自己編畫面內容
             # （2026-10-25 實機：視覺結果還沒回來，她先說「螢幕上滿滿的都是舊照片」）。
             # 直接請視覺大腦去看：以前只回「視覺大腦會回報」卻沒人去叫，她就一直不講話（2026-10-26 實機）
-            if _vision_report_recent(time.time()):
-                await _respond("[系統底層：剛剛才看過畫面，照剛才的視覺回報回答就好，不要再看一次。]", _quiet)
+            if not _start_vision():
+                await _respond("[系統底層：畫面剛看過或正在看，照剛才的視覺回報回答就好，不要再叫。]", _quiet)
             else:
                 log_print("⚡ [子智能體] 看畫面交給視覺大腦")
-                spawn(live_vision_tool_task())
                 await _respond("[系統底層：已經請視覺大腦去看畫面，幾秒後回報。在那之前不要描述畫面內容，"
                                "可以先說一句「我看看～」。]", _speak)
             return

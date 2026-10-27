@@ -256,7 +256,7 @@ def test_vision_reply_uses_whole_text_not_first_char():
     async def describe_images(prompt, images):
         return "這是鋼琴影片和 Minecraft"
     ns = {"log_print": lambda *a: None, "describe_images": describe_images, "get_combined_temporal_screen_snapshot": lambda: ["x"],
-          "_VISION_STATE": {"report_ts": 0.0}, "time": time, "send_brain_slip": slips.append,
+          "_VISION_STATE": {"report_ts": 0.0}, "time": time, "send_brain_slip": slips.append, "VISION_HISTORY_STREAM": [],
           "_clean_result_for_brain": lambda t: t, "asyncio": asyncio, "VISION_TOOL_TIMEOUT_SEC": 45.0}
     exec(compile(ast.Module(body=[_fn("live_vision_tool_task")], type_ignores=[]), "v", "exec"), ns)
     asyncio.run(ns["live_vision_tool_task"]())
@@ -272,7 +272,7 @@ def test_vision_without_a_screen_does_not_ask_the_model():
         asked.append(images)
         return "畫面中開著 main.py"
     ns = {"log_print": lambda *a: None, "describe_images": describe_images, "get_combined_temporal_screen_snapshot": lambda: None,
-          "_VISION_STATE": {"report_ts": 0.0}, "time": time, "send_brain_slip": slips.append,
+          "_VISION_STATE": {"report_ts": 0.0}, "time": time, "send_brain_slip": slips.append, "VISION_HISTORY_STREAM": [],
           "_clean_result_for_brain": lambda t: t, "asyncio": asyncio, "VISION_TOOL_TIMEOUT_SEC": 45.0}
     exec(compile(ast.Module(body=[_fn("live_vision_tool_task")], type_ignores=[]), "v", "exec"), ns)
     asyncio.run(ns["live_vision_tool_task"]())
@@ -288,7 +288,7 @@ def test_vision_report_does_not_retrigger_vision():
     assert ns["_vision_report_recent"](now + 5)          # 她在回答剛看到的畫面：不重看
     assert not ns["_vision_report_recent"](now + 20)     # 之後老爸再叫她看：照看
     assert '_VISION_STATE["report_ts"] = time.time()' in _src("live_vision_tool_task")
-    assert "_vision_report_recent(time.time())" in _src("_start_marker_tools")
+    assert "_start_vision()" in _src("_start_marker_tools")
     assert "_start_marker_tools(text_chunk)" in _src("receive_from_live")
 
 
@@ -585,10 +585,10 @@ def test_mirror_report_does_not_retrigger_the_mirror():
     import re
     started = []
     ns = {"re": re, "time": time, "log_print": lambda *a: None, "_VISION_STATE": {"report_ts": 0.0, "mirror_ts": 0.0},
-          "VISION_REPORT_QUIET_SEC": 15.0, "strip_blob_noise": lambda t: t, "sanitize_search_query": lambda q: q,
+          "VISION_REPORT_QUIET_SEC": 15.0, "VISION_FAIL_QUIET_SEC": 90.0, "strip_blob_noise": lambda t: t, "sanitize_search_query": lambda q: q,
           "spawn": lambda c: started.append(c), "live_mirror_tool_task": lambda: "mirror",
           "live_vision_tool_task": lambda: "vision", "live_search_tool_task": lambda q: "search"}
-    for n in ("_vision_report_recent", "_start_mirror", "_start_marker_tools"):
+    for n in ("_vision_report_recent", "_start_vision", "_start_mirror", "_start_marker_tools"):
         exec(compile(ast.Module(body=[_fn(n)], type_ignores=[]), n, "exec"), ns)
     assert ns["_start_marker_tools"]("我照照看～[TOOL:MIRROR]") == "我照照看～" and started == ["mirror"]
     ns["_VISION_STATE"]["mirror_ts"] = time.time()
