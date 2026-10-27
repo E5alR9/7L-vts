@@ -5,7 +5,7 @@ import os
 import time
 
 from core import eventlog
-from core.hard_command import PIANO_CONTROL_TOOLS as _PIANO_CONTROL
+from core.hard_command import is_stage_control
 from core.prompts import TextCleanEngine as T
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -49,7 +49,7 @@ def test_main_brain_reads_tool_call_messages():
 
 
 def test_hard_command_dedupe_window():
-    ns = {"eventlog": eventlog, "PIANO_CONTROL_TOOLS": _PIANO_CONTROL, "_HARD_CMD_DEDUPE_SEC": 20.0}
+    ns = {"eventlog": eventlog, "is_stage_control": is_stage_control, "_HARD_CMD_DEDUPE_SEC": 20.0}
     exec(compile(ast.Module(body=[_fn("_hard_cmd_seen_recently")], type_ignores=[]), "x", "exec"), ns)
     f = ns["_hard_cmd_seen_recently"]
     now = time.time()

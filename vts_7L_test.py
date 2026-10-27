@@ -339,10 +339,25 @@ def send_brain_slip(text: str, origin: str = "", said: str = "", name: str = "")
     said：觸發的那句人話（不含紙條包裝），主腦自己要彈唱時對照用；name：觀眾留言是誰講的。"""
     try:
         LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait((text, origin, said, name) if origin else text)
+        if origin and said:
+            _LAST_HUMAN_SLIP_TS[(origin, name or "")] = time.time()
         return True
     except Exception:
         log_swallowed()
         return False
+
+
+# 每個人最近一次說話遞紙條的時間：(origin, name) → ts。看門狗重送舊紙條前對照，他之後又講了就不重送
+_LAST_HUMAN_SLIP_TS = {}
+
+
+def _slip_superseded(slip, sent_ts: float) -> bool:
+    """這張是某人的話，他在這張之後又講了新的：舊的不用撿回（2026-10-27 實機：老爸「彈夜曲」那張 20 秒沒回，
+    看門狗重送時老爸已經說了「收起鋼琴」，主腦收到舊紙條又把夜曲彈起來）。"""
+    _t, origin, said, name = _unpack_slip(slip)
+    if not origin or not said:
+        return False
+    return _LAST_HUMAN_SLIP_TS.get((origin, name or ""), 0.0) > sent_ts + 0.5
 
 
 def _unpack_slip(item) -> tuple:
@@ -3143,8 +3158,11 @@ async def _slip_watchdog(prompt: str, sent_ts: float, timeout: float = 20.0, sli
                                   globals().get("LAST_BRAIN_TURN_TS", 0.0),
                                   globals().get("LAST_BRAIN_OUTPUT_TS", 0.0), timeout):
             return  # 腦有動靜（調工具、說完一段），收工
-        log_print(f"⚠️ [紙條無回應] 主腦 {timeout:.0f} 秒沒理會紙條（{(prompt or '')[:40]}…），撿回一次。")
         slip = slip or prompt
+        if _slip_superseded(slip, sent_ts):
+            log_print(f"📎 [紙條備註] 主腦 {timeout:.0f} 秒沒理會紙條（{(prompt or '')[:30]}…），但同一個人之後又講了新的，不撿回舊的。")
+            return
+        log_print(f"⚠️ [紙條無回應] 主腦 {timeout:.0f} 秒沒理會紙條（{(prompt or '')[:40]}…），撿回一次。")
         if _note_live_mute(slip):
             return  # 換連線了，紙條已排給新連線
         import hashlib as _hl
@@ -5843,6 +5861,21 @@ async def nv_interpret_task(task_ins: str, target: str = "dad", requester_name: 
 # ────────────────────────────────────────────────────────
 #  11.3 舞台指令、對話處理、懲罰與獎勵
 # ────────────────────────────────────────────────────────
+def _song_dispatched_since(song: str, since: float) -> bool:
+    """這首歌在 since 之後已經真的排過（舞台指令流水帳裡有）。2026-10-27 實機：老爸點的歌唱了、被他停掉，
+    Live 換金鑰重連時斷線救援把「已經排好」的通知紙條當成沒人認領，又排一次重唱。"""
+    want = "".join(str(song or "").split()).strip("《》「」『』〈〉\"'").casefold()
+    if not want:
+        return False
+    try:
+        for e in eventlog.get().recent("stage_cmd", since=since, limit=50):
+            if want in (e.get("text") or "").casefold():
+                return True
+    except Exception:
+        log_swallowed()
+    return False
+
+
 async def _rescue_missed_song_requests():
     """斷線重連後，把最近送達、但沒人認領的點歌撿回來（只救點歌）。
 
@@ -5907,6 +5940,8 @@ async def _rescue_missed_song_requests():
                     continue
             except Exception:
                 log_swallowed()
+            if _song_dispatched_since(song, ev["ts"] - 5.0):
+                continue   # 程式已經排過（可能唱完、被老爸停了），不是沒人認領
             if not rescue_claim(song, now):
                 continue
             log_print(f"🛟 [斷線救援] 撿回無人認領的點歌《{song}》，直接排入隊列。")
@@ -5934,7 +5969,7 @@ def _hard_cmd_seen_recently(fn_name: str, fn_args, now: float) -> bool:
     """同一個硬指令 20 秒內只執行一次（2026-10-24 實機：一則「彈小星星」被執行 4 次）。
     老爸訊息先被 CPU 攔截執行一次，主腦接著呼叫 invoke_subagent 又是同一句；
     舊碼主腦的工具呼叫全被漏接所以沒事，修好之後就重複了。沒看過就記進流水帳（kind=stage_cmd）並回 False。
-    鋼琴的停止／暫停／繼續只跟「上一個鋼琴控制」比：「暫停→繼續→暫停」20 秒內換了指令照樣執行。"""
+    收琴／停歌／暫停／繼續只跟「上一個舞台指令」比：「暫停→繼續→暫停」「收琴→點歌→收琴」20 秒內照樣執行。"""
     import json as _json
     if (fn_args or {}).get("song_name"):
         # 《晴天》跟晴天是同一首（程式照她的提議排、主腦又叫一次工具，歌名寫法常不一樣）
@@ -5944,8 +5979,10 @@ def _hard_cmd_seen_recently(fn_name: str, fn_args, now: float) -> bool:
     except Exception:
         key = f"{fn_name}|{fn_args}"
     log = eventlog.get()
-    if fn_name in PIANO_CONTROL_TOOLS:
-        last = log.last("stage_cmd", since=now - _HARD_CMD_DEDUPE_SEC, prefixes=[f"{t}|" for t in PIANO_CONTROL_TOOLS])
+    if is_stage_control(fn_name):
+        # 收琴／停歌／暫停／繼續只跟「上一個舞台指令」比：中間點過歌就不算重複
+        # （2026-10-27 實機：收琴→彈夜曲→收琴，第二次收琴被當重複擋掉，夜曲一直彈；停歌也一樣）
+        last = log.last("stage_cmd", since=now - _HARD_CMD_DEDUPE_SEC)
         dup = last is not None and last["text"] == key
     else:
         dup = log.seen("stage_cmd", key, _HARD_CMD_DEDUPE_SEC, now)

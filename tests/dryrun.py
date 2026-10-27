@@ -190,7 +190,7 @@ class DryRun:
             "LIVE_SESSION_ACTIVE": self.live, "_LIVE_DOWN_SINCE": time.time() - (0 if self.live else 3600),
             "_BRAIN_INPUT_ORIGIN": {"who": "dad", "ts": 0.0, "said": "", "human": False, "name": ""},
             "eventlog": eventlog, "usage": usage, "_LIVE_SLIP_RETRY": collections.deque(),
-            "_VISION_STATE": {"report_ts": 0.0, "mirror_ts": 0.0}, "_PING_LAST_TS": {},
+            "_VISION_STATE": {"report_ts": 0.0, "mirror_ts": 0.0}, "_PING_LAST_TS": {}, "_LAST_HUMAN_SLIP_TS": {},
             "_DESKTOP_DOWN_UNTIL": float("inf"),   # 桌機代答關掉
             "STREAMER_MIND_BOARD": [], "STREAMER_MIND_MODELS": ["m"], "REST_BRAIN_MODELS": ["m"],
             "REST_BRAIN_TOOLS": ["invoke_subagent"],

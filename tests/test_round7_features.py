@@ -193,3 +193,93 @@ def test_midi_ai_pick_trusted_when_in_list():
     assert not is_midi_match_valid("月光奏鳴曲", files[0])     # 字串比對擋跨語言，所以 AI 挑的不再過它
     assert _ai_pick_in_list("beethoven moonlight sonata.mid", files)
     assert not _ai_pick_in_list("Clair de Lune.mid", files) and not _ai_pick_in_list("", files)
+
+
+# ── 實機歌名測試抓到的（2026-10-27）──
+def test_stop_after_another_song_is_not_a_duplicate():
+    from core import eventlog
+    from core.hard_command import is_stage_control
+    log = eventlog.EventLog(":memory:")
+    ns = load_main("_hard_cmd_seen_recently", eventlog=type("E", (), {"get": staticmethod(lambda: log)}),
+                   is_stage_control=is_stage_control, _HARD_CMD_DEDUPE_SEC=20.0)
+    seen = ns["_hard_cmd_seen_recently"]
+    t = time.time()
+    assert seen("pe.stop_virtual_piano", {}, t) is False
+    assert seen("pe.stop_virtual_piano", {}, t + 1) is True            # 主腦又叫一次收琴：重複
+    assert seen("pe.play_virtual_piano", {"song_name": "夜曲"}, t + 5) is False
+    assert seen("pe.stop_virtual_piano", {}, t + 8) is False           # 中間點過歌：要收
+    assert seen("stop_singing", {}, t + 9) is False
+    assert seen("auto_sing_song", {"song_name": "晴天"}, t + 10) is False
+    assert seen("stop_singing", {}, t + 12) is False
+
+
+def test_cover_alias_makes_brain_retitle_a_duplicate(monkeypatch):
+    import services.auto_cover_pipeline as ac
+    monkeypatch.setattr(ac, "_TITLE_ALIAS", {})
+    monkeypatch.setattr(ac, "_ACTIVE_TITLES", {ac._dedupe_key("周杰倫的晴天")})
+    monkeypatch.setattr(ac, "_REQUESTED_AT", {ac._dedupe_key("周杰倫的晴天"): 1.0})
+    ac._note_title_alias("周杰倫的晴天", "晴天")
+    assert ac.is_song_active("晴天") and ac.is_song_active("周杰倫的晴天")
+    assert ac._REQUESTED_AT == {"晴天": 1.0}
+    monkeypatch.setattr(ac, "READY_SONGS", ac.deque([{"title": "晴天"}]))
+    assert ac._same_song_queued("周杰倫的晴天")
+
+
+def test_first_playable_ai_pick(monkeypatch):
+    import services.piano_engine as pe
+    monkeypatch.setattr(pe, "is_midi_playable", lambda p: "redone" in p)
+    files = ["Beethoven Moonlight Sonata.mid", "Moonlight (redone).mid", "小星星.mid"]
+    got = pe._first_playable_pick(["Beethoven Moonlight Sonata.mid", "Moonlight (redone).mid"], files)
+    assert got.endswith("Moonlight (redone).mid")
+    assert pe._first_playable_pick(["不在清單.mid"], files) is None
+
+
+def test_same_midi_not_restarted_right_after_start():
+    import inspect
+    import services.piano_engine as pe
+    src = inspect.getsource(pe.play_virtual_piano)
+    assert "SAME_FILE_REPEAT_SEC" in src and "_LAST_WORKER_START" in inspect.getsource(pe._start_piano_worker)
+
+
+def test_midi_fetch_no_longer_falls_back_to_youtube_transcription(tmp_path, monkeypatch):
+    import services.pianist_midi_engine as pm
+    monkeypatch.setattr(pm.onlinesequencer_engine, "fetch_and_download_first_match", lambda *a, **k: None)
+    monkeypatch.setattr(pm.bitmidi_engine, "fetch_and_download_first_match", lambda *a, **k: None)
+
+    def boom(*a, **k):
+        raise AssertionError("不能自動拿 YouTube 音訊轉譜")
+    monkeypatch.setattr(pm, "search_youtube_and_download_midi", boom)
+    assert pm.fetch_and_download_pianist_match("Mythology 神話", str(tmp_path)) is None   # 曲名有 yt 也不算指定 YouTube
+
+
+def test_watchdog_does_not_resend_slip_after_newer_speech():
+    ns = load_main("_slip_superseded", "_unpack_slip", _LAST_HUMAN_SLIP_TS={})
+    t = time.time()
+    slip = ("[黑板同步] E5傳來文字訊息：彈周杰倫的夜曲", "dad", "彈周杰倫的夜曲", "")
+    assert ns["_slip_superseded"](slip, t) is False
+    ns["_LAST_HUMAN_SLIP_TS"][("dad", "")] = t + 10        # 老爸後來說了「收起鋼琴」
+    assert ns["_slip_superseded"](slip, t) is True
+    assert ns["_slip_superseded"]("[系統提示：…]", t) is False        # 系統紙條照舊撿回
+    assert ns["_slip_superseded"](("…", "audience", "唱晴天", "小明"), t) is False   # 別人講話不算
+
+
+def test_rescue_skips_song_already_dispatched():
+    from core import eventlog
+    log = eventlog.EventLog(":memory:")
+    ns = load_main("_song_dispatched_since", eventlog=type("E", (), {"get": staticmethod(lambda: log)}),
+                   log_swallowed=lambda: None)
+    t = time.time()
+    log.record("stage_cmd", 'auto_sing_song|{"song_name": "payphone"}', ts=t + 1)
+    assert ns["_song_dispatched_since"]("Payphone", t) is True
+    assert ns["_song_dispatched_since"]("晴天", t) is False
+    assert ns["_song_dispatched_since"]("payphone", t + 5) is False
+
+
+def test_cover_dedupe_by_vocal_file(monkeypatch):
+    import services.auto_cover_pipeline as ac
+    monkeypatch.setattr(ac, "_TITLE_ALIAS", {})
+    monkeypatch.setattr(ac, "READY_SONGS", ac.deque())
+    monkeypatch.setattr(ac, "_STAGED_VOCAL", {"path": "C:/x/Faded_7l_vocal.wav"})
+    monkeypatch.setattr(ac, "_NOW_PLAYING_TITLE", "")
+    assert ac._same_song_queued("Alan Walker - faded", "C:/x/Faded_7l_vocal.wav")   # 正要上台的同一個檔
+    assert not ac._same_song_queued("晴天", "C:/x/晴天_7l_vocal.wav")

@@ -1686,6 +1686,7 @@ async def resolve_piano_intent_by_ai(
    - 若使用者點的歌本地無收錄、或指定特定演奏家而本地無此版本，matched_files 務必留空 []，並在 search_online_query 填寫真實精確曲名（如 "未完成婚姻論"），引導系統自動走線上/YouTube 抓譜！
    - 只有當本地確實有同名或完全相符之樂曲時，才將最吻合的檔案放入 matched_files（若要求換版本，必須為另一個版本的檔名）。
    - 同一首歌換了語言、譯名、加了作曲家或演奏者、大小寫或錯字都算同一首（例如「月光奏鳴曲」＝ Beethoven Moonlight Sonata、「小星星」＝ Twinkle Twinkle Little Star）。
+   - 本地有好幾個版本的同一首曲子，就全部放進 matched_files，最符合的排第一（有的檔可能壞掉，系統會依序挑能彈的）。
 
 【請輸出純 JSON】：
 {{
@@ -1839,6 +1840,19 @@ def _fetch_validated_midi(song_query: str, title: str = "") -> Optional[str]:
     return pianist_midi_engine.fetch_and_download_pianist_match(
         song_query, MIDI_SHEETS_DIR,
         validate=lambda t: is_midi_match_valid(want, t))
+
+def _first_playable_pick(matched_files, available_files) -> Optional[str]:
+    """AI 列的同曲版本裡第一個在清單裡、又能彈的（2026-10-27 實機：月光奏鳴曲 AI 挑到的那份太短被拒收，
+    本機明明還有另外兩個版本，卻直接上網抓）。都不能彈就回第一個在清單裡的，讓後面照舊拒收、轉線上。"""
+    picks = [f for f in (matched_files or []) if _ai_pick_in_list(f, available_files)]
+    for f in picks:
+        path = os.path.join(MIDI_SHEETS_DIR, f)
+        if is_midi_playable(path):
+            if f != picks[0]:
+                log_print(f"🎹 [AI 曲庫] 《{picks[0]}》不能彈，改用同曲的《{f}》")
+            return path
+    return os.path.join(MIDI_SHEETS_DIR, picks[0]) if picks else None
+
 
 def _ai_pick_in_list(cand: str, available_files) -> bool:
     """AI 從檔名清單挑的：只要真的是清單裡的檔就信它（2026-10-27 老爸：歌名跟檔案列表丟給 AI，回傳要哪個或沒有）。
@@ -2319,9 +2333,14 @@ def _take_stage(title: str, midi_file: str = "", note: str = "") -> int:
     return PIANO_SESSION_ID
 
 
+SAME_FILE_REPEAT_SEC = 20.0   # 同一份譜剛開彈這麼久內又點（換個寫法），不從頭重彈
+_LAST_WORKER_START = {"ts": 0.0}
+
+
 def _start_piano_worker(song_title: str, midi_file: str, custom_sheet: str = "", start_at: float = 0.0):
     """有譜直接開彈：開新場次、換上新的演奏協程。"""
     global current_piano_task
+    _LAST_WORKER_START["ts"] = time.time()
     session_id = _take_stage(song_title, midi_file)
     current_piano_task = asyncio.create_task(
         play_piano_worker(
@@ -2469,11 +2488,7 @@ async def play_virtual_piano(song_name: str = "", custom_sheet: str = "", auto_r
         if ai_intent.get("song_title"):
             target_title = ai_intent.get("song_title")
         if ai_intent.get("matched_files"):
-            cand_f = ai_intent["matched_files"][0]
-            if _ai_pick_in_list(cand_f, available_files):
-                target_midi = os.path.join(MIDI_SHEETS_DIR, cand_f)
-            else:
-                target_midi = None
+            target_midi = _first_playable_pick(ai_intent["matched_files"], available_files)
 
     is_switch_version = ai_intent.get("is_switch_version", False)
     is_replay_command = ai_intent.get("is_replay", False)
@@ -2645,11 +2660,19 @@ async def play_virtual_piano(song_name: str = "", custom_sheet: str = "", auto_r
             return _queued
     _PLAY_STARTED_SEQ = max(_PLAY_STARTED_SEQ, my_seq)
     if target_midi and os.path.exists(target_midi):
+        if (is_piano_active and current_piano_midi_file
+                and os.path.abspath(target_midi) == os.path.abspath(current_piano_midi_file)
+                and time.time() - _LAST_WORKER_START.get("ts", 0.0) < SAME_FILE_REPEAT_SEC):
+            # 程式照老爸打的「bad apple 東方」開彈，主腦又用「Bad Apple!!」叫一次：同一個檔，不要從頭重彈（2026-10-27 實機）。
+            # 重播判斷這裡不看：那首正在彈，AI 常把主腦再叫一次判成「重播」，剛開彈幾秒也不會真的要重來
+            log_print(f"🎹 [7L 鋼琴曲庫] 《{os.path.basename(target_midi)}》剛開彈，同一份譜不從頭重來。")
+            return "[EXPRESSION: 星星眼]"
         _start_piano_worker(target_title, target_midi, custom_sheet=custom_sheet or "")
         return "[EXPRESSION: 星星眼]"
 
     # 🌐 若指定 YouTube 或本地無樂譜 ➔ 啟動非阻塞背景線上抓譜並接續開彈協程
-    final_search_query = clean_search_target if is_explicit_yt else (clean_q or "鋼琴名曲")
+    # 上網搜譜用 AI 給的正式曲名（「月光奏鳴曲」→ Moonlight Sonata）：OnlineSequencer、BitMidi 拿中文口語常搜不到
+    final_search_query = clean_search_target if is_explicit_yt else ((ai_intent.get("search_online_query") or "").strip() or clean_q or "鋼琴名曲")
     session_id = _take_stage(final_search_query, "", note=f"鋼琴準備線上搜尋演奏《{final_search_query}》")
 
     async def async_fetch_and_play_worker(song_q: str, sid: int, c_sheet: str):

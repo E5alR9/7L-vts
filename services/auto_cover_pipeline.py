@@ -377,9 +377,29 @@ async def wait_for_intro_speech_complete(timeout: float = 15.0, reply_deadline: 
         else:
             break
 
+_TITLE_ALIAS = {}   # 點歌寫法的去重鍵 → AI 對到的快取檔名的去重鍵（「周杰倫的晴天」→「晴天」）
+
+
 def _dedupe_key(title: str) -> str:
-    """去重鍵：用實際快取檔名歸一化（同檔＝同首歌，連「晴天」vs「晴天！」這種都算同一首）"""
-    return get_safe_filename((title or "").strip()).casefold()
+    """去重鍵：用實際快取檔名歸一化（同檔＝同首歌，連「晴天」vs「晴天！」這種都算同一首）；
+    AI 對過的寫法換成它對到的那首（_note_title_alias）。"""
+    k = get_safe_filename((title or "").strip()).casefold()
+    return _TITLE_ALIAS.get(k, k)
+
+
+def _note_title_alias(title: str, cache_name: str) -> None:
+    """AI 說「title」就是本機的 cache_name：之後這兩個寫法去重算同一首，已經排著的也搬過去
+    （程式照老爸打的「周杰倫的晴天」排了，主腦接著叫「晴天」，就會被當成已經在排）。"""
+    old = _dedupe_key(title)
+    new = get_safe_filename(cache_name or "").casefold()
+    if not new or old == new:
+        return
+    _TITLE_ALIAS[get_safe_filename((title or "").strip()).casefold()] = new
+    if old in _ACTIVE_TITLES:
+        _ACTIVE_TITLES.discard(old)
+        _ACTIVE_TITLES.add(new)
+    if old in _REQUESTED_AT:
+        _REQUESTED_AT.setdefault(new, _REQUESTED_AT.pop(old))
 
 def is_song_active(song_name: str) -> bool:
     """這首歌是否已在唱／排隊／準備中（斷線救援用，避免重複排入）。"""
@@ -660,6 +680,19 @@ async def _run_with_heartbeat(awaitable_fn, label: str, song: str, interval: flo
             pass
 
 
+_STAGED_VOCAL = {"path": ""}   # 正要上台（等開場白）或正在唱的那首人聲檔
+
+
+def _same_song_queued(title: str, vocal: str = "") -> bool:
+    """另一張點歌（不同寫法）已經備好待播、正要上台或正在唱同一首：歌名去重鍵一樣，或用的是同一個人聲檔
+    （2026-10-27 實機：主腦把「Alan Walker 的 faded」改寫成「Alan Walker - faded」又叫一次，Faded 排了兩遍）。"""
+    key = _dedupe_key(title)
+    same = lambda t, v: _dedupe_key(t or "") == key or bool(vocal and v and os.path.abspath(v) == os.path.abspath(vocal))
+    if (_NOW_PLAYING_TITLE or _STAGED_VOCAL["path"]) and same(_NOW_PLAYING_TITLE, _STAGED_VOCAL["path"]):
+        return True
+    return any(same((it or {}).get("title", ""), (it or {}).get("vocal", "")) for it in list(READY_SONGS))
+
+
 async def _prepare_worker(item, gen: int):
     """背景準備一首歌（下載→分離→RVC）：成功進 READY，失敗遞紙條，全程不擋台上演唱。"""
     title = item["title"]
@@ -668,6 +701,10 @@ async def _prepare_worker(item, gen: int):
                                                origin=item.get("origin", ""))
         if gen != _PIPELINE_GEN:
             log_print(f"🛑 [翻唱隊列] 《{title}》準備完成但已被停止，丟棄不上台。")
+            return
+        if vocal and _same_song_queued(title, vocal):
+            # 主腦先用「晴天」排了、程式又照老爸打的「周杰倫的晴天」排：AI 對到同一首，這張不再上台
+            log_print(f"⏭️ [翻唱隊列] 《{title}》跟已經排著／在唱的是同一首，不重複上台。")
             return
         if vocal:
             READY_SONGS.append({"title": title, "vocal": vocal, "inst": inst,
@@ -700,6 +737,7 @@ async def play_prepared_song(title: str, vocal_path: str, inst_path: str, gen: i
     """播一首備好的歌：等開場白 → 世代檢查 → 開唱 → 謝幕紙條（含隊列深度）。"""
     global _NOW_PLAYING_TITLE
     key = _dedupe_key(title)
+    _STAGED_VOCAL["path"] = vocal_path or ""
     try:
         _asked = _REQUESTED_AT.pop(key, 0.0)
         await wait_for_intro_speech_complete(reply_deadline=_asked + INTRO_REPLY_WAIT_SEC if _asked else 0.0)
@@ -734,6 +772,7 @@ async def play_prepared_song(title: str, vocal_path: str, inst_path: str, gen: i
         return f"《{title}》開唱失敗，跳過。"
     finally:
         _NOW_PLAYING_TITLE = ""
+        _STAGED_VOCAL["path"] = ""
         _ACTIVE_TITLES.discard(key)
         try:
             import services.web_dashboard as web_dash
@@ -850,6 +889,7 @@ async def prepare_cover_song(song_name: str, source_mp3: str = "", origin: str =
             if _hit:
                 log_print(f"🧠 [翻唱快取 AI 比對] 《{song_name}》＝本機已有的《{_hit}》，直接用")
                 safe_name = _hit
+                _note_title_alias(song_name, _hit)
         cached_vocal = os.path.join(CACHE_DIR, f"{safe_name}_7l_vocal.wav")
         cached_inst = os.path.join(CACHE_DIR, f"{safe_name}_instrumental.wav")
 
