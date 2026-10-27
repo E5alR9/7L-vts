@@ -433,3 +433,30 @@ def test_rest_brain_waits_for_the_screen_only_while_a_look_is_running():
                                 + [_fn("_vision_wait_text"), _fn("_rest_speak")], type_ignores=[]), "v", "exec"), ns)
         asyncio.run(ns["_rest_speak"](None, None, "我看看～[TOOL:VISION]老爸在用 Gemini", "dad"))
         assert said == [want]                 # 看完回報後她順手又帶標籤（沒在看）：描述照念
+
+
+def test_piano_notes_are_scheduled_apart_from_the_animation():
+    # 以前音符在畫面那一格碰線才發聲：7L 講話時鋼琴視窗掉到 30 FPS，音跟著晚、不均勻（實測每格 33ms、偶爾 81ms）；
+    # GS 合成器比 7L 人聲慢約 160ms（錄喇叭實測），彈唱對不上。2026-10-27 起另一條執行緒照歌曲時間發聲、提早 0.16 秒
+    src = open(os.path.join(ROOT, "test_virtual_piano.py"), encoding="utf-8").read()
+    tree = ast.parse(src)
+    gui = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "VirtualPianoGUI")
+    meth = {f.name: ast.get_source_segment(src, f) for f in gui.body if isinstance(f, ast.FunctionDef)}
+    assert "note_on(" not in meth["animate_timeline_loop"] and "note_off(" not in meth["animate_timeline_loop"]
+    assert "self._clock = (current_perf" in meth["animate_timeline_loop"]
+    sched = meth["_note_scheduler_loop"]
+    assert "SYNTH_LEAD_SEC * speed" in sched and "CLOCK_MAX_EXTRAPOLATE_SEC" in sched and "self._clock is not clock" in sched
+    for name in ("start_midi_playback", "start_multi_midi_playback", "seek_to_time", "set_playback_speed",
+                 "align_to_clock", "toggle_play_current"):
+        assert "self._clock = None" in meth[name], name     # 跳時間前先作廢時鐘，免得一口氣彈出去
+    assert "SYNTH_LEAD_SEC = 0.16" in src and "_engine_locked" in src
+
+
+def test_desktop_chat_reply_gives_up_fast_and_vts_uses_one_token_file():
+    # 桌面版卡住時老爸一句閒聊要等 120 秒才改走 Live（2026-10-27 開 VTS 完整測試兩項因此沒過）
+    src = ast.get_source_segment(MAIN, _fn("_desktop_dad_reply"))
+    assert "DESKTOP_CHAT_TIMEOUT_SEC" in src and "120.0" not in src
+    import services.vts_client as vcl
+    assert os.path.isabs(vcl.VTS_TOKEN_PATH) and vcl.VTS_TOKEN_PATH.endswith("vts_token.txt")
+    assert vcl.RobustVTSClient().token_file == vcl.VTS_TOKEN_PATH
+    assert '"authentication_token_path": vc.VTS_TOKEN_PATH' in MAIN

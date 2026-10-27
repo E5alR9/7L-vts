@@ -7,6 +7,10 @@ import random
 import re
 from core.utils import log_print, log_swallowed
 from core.hard_command import asks_to_remember_model_position
+from core.paths import ROOT_DIR
+
+# 授權 Token 一律用專案根目錄這一份（老爸指定）：相對路徑在別的工作目錄會找不到、又跳 VTS 授權視窗
+VTS_TOKEN_PATH = os.path.join(ROOT_DIR, "vts_token.txt")
 
 # ── VTS 相關全域狀態與鎖 ────────────────────────────────────────────────────────
 vts_lock = asyncio.Lock()
@@ -156,9 +160,9 @@ class RobustVTSClient:
         self.plugin_info = plugin_info or {
             "plugin_name": "7L_AI_VTuber",
             "developer": "e5_Studio",
-            "authentication_token_path": "./vts_token.txt"
+            "authentication_token_path": VTS_TOKEN_PATH
         }
-        self.token_file = self.plugin_info.get("authentication_token_path", "./vts_token.txt")
+        self.token_file = self.plugin_info.get("authentication_token_path") or VTS_TOKEN_PATH
         # 埠號：參數 > 8001；連不上時會自動掃 8001~8010（VTS 設定裡的 API 埠可能被改過）
         self.port = int(port or 8001)
         self.uri = f"ws://127.0.0.1:{self.port}"

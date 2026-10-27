@@ -5886,6 +5886,8 @@ def _likely_needs_tools(text: str) -> bool:
 DESKTOP_FIRST = True   # 老爸打字閒聊先給免費的桌面版 Gemini 答（CPU 沒命中、沒工具味時）；False＝一律交給主腦
 _DESKTOP_DOWN_SEC = 300.0
 _DESKTOP_DOWN_UNTIL = 0.0
+# 閒聊代答等桌面版最多這麼久，超過就走 Live（以前等 120 秒：桌面版卡住時老爸一句話要等兩分鐘，2026-10-27 實測）
+DESKTOP_CHAT_TIMEOUT_SEC = 20.0
 
 
 async def _desktop_dad_reply(vts, input_queue, user_input: str, owner: str = "老爸"):
@@ -5906,7 +5908,7 @@ async def _desktop_dad_reply(vts, input_queue, user_input: str, owner: str = "�
         log_print("⚡ [極速直通主腦] Live 模式下，控制台訊息已轉交 Live 大腦處理。")
 
     try:
-        ans = await asyncio.to_thread(_dh.get_answer, f"老爸說：{user_input}", 120.0)
+        ans = await asyncio.to_thread(_dh.get_answer, f"老爸說：{user_input}", DESKTOP_CHAT_TIMEOUT_SEC)
     except Exception as e:
         global _DESKTOP_DOWN_UNTIL
         if "找不到" in str(e):
@@ -6615,9 +6617,8 @@ async def main():
     #  載入或初始化全集中全景時序記憶中樞
     init_unified_memory()
 
-    # 使用絕對路徑：避免 GPT-SoVITS 預熱期間 os.chdir 導致讀不到 Token 而重新要求授權
-    _vts_token_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vts_token.txt")
-    plugin_info = {"plugin_name": "7L_AI_VTuber", "developer": "e5_Studio", "authentication_token_path": _vts_token_path}
+    # Token 用專案根目錄的 vts_token.txt（絕對路徑：GPT-SoVITS 預熱期間會 os.chdir，相對路徑會讀不到而重新要求授權）
+    plugin_info = {"plugin_name": "7L_AI_VTuber", "developer": "e5_Studio", "authentication_token_path": vc.VTS_TOKEN_PATH}
     vts = RobustVTSClient(plugin_info=plugin_info)
     
     vc.GLOBAL_VTS = vts
