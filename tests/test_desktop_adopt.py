@@ -128,15 +128,15 @@ def test_adopt_finds_helper_chat():
         dh._ADOPTED_NAME = ""
 
 
-def test_adopt_without_memory_scans():
+def test_adopt_without_memory_does_not_open_private_chats():
+    # 2026-10-27 起沒記住助手串就不逐個點開最近的對話（又慢、又會翻老爸的私人對話；英文版還把側欄的
+    # Customize 當對話點進去），直接開新串
     dh._ADOPTED_NAME = ""
     c = _FakeC({"閒聊A": [{"role": "user", "content": "今天天氣真好"}],
                 "助手串": PERSONA_TURNS})
     try:
-        assert dh._adopt_recent_helper_chat(c, limit=5) is True
-        assert c.window_ctrl._box["current"] == "助手串"
-        assert c.window_ctrl._box["invoked"][-1] == "助手串"
-        assert dh._ADOPTED_NAME == "助手串"  # 記住，下次直達
+        assert dh._adopt_recent_helper_chat(c, limit=5) is False
+        assert c.window_ctrl._box["invoked"] == [] or "閒聊A" not in c.window_ctrl._box["invoked"]
     finally:
         dh._ADOPTED_NAME = ""
 

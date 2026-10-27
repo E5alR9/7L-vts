@@ -37,6 +37,8 @@ class _FakeInput:
     def __init__(self, ok=True):
         self._ok = ok
 
+    IsOffscreen = False   # 畫面上看得到（藏起來的輸入框不算找到，2026-10-27）
+
     def Exists(self, t):
         return self._ok
 

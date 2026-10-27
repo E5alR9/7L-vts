@@ -5908,7 +5908,9 @@ async def _desktop_dad_reply(vts, input_queue, user_input: str, owner: str = "�
         log_print("⚡ [極速直通主腦] Live 模式下，控制台訊息已轉交 Live 大腦處理。")
 
     try:
-        ans = await asyncio.to_thread(_dh.get_answer, f"老爸說：{user_input}", DESKTOP_CHAT_TIMEOUT_SEC)
+        # 整段（含開新串、切模型、塞人格）最多多給 10 秒，超過就走 Live（以前開新串時又多等 30 秒）
+        ans = await asyncio.wait_for(asyncio.to_thread(_dh.get_answer, f"老爸說：{user_input}", DESKTOP_CHAT_TIMEOUT_SEC),
+                                     DESKTOP_CHAT_TIMEOUT_SEC + 10.0)
     except Exception as e:
         global _DESKTOP_DOWN_UNTIL
         if "找不到" in str(e):

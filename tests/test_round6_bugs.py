@@ -460,3 +460,29 @@ def test_desktop_chat_reply_gives_up_fast_and_vts_uses_one_token_file():
     assert os.path.isabs(vcl.VTS_TOKEN_PATH) and vcl.VTS_TOKEN_PATH.endswith("vts_token.txt")
     assert vcl.RobustVTSClient().token_file == vcl.VTS_TOKEN_PATH
     assert '"authentication_token_path": vc.VTS_TOKEN_PATH' in MAIN
+
+
+def test_desktop_helper_reads_the_english_gemini_app():
+    # 桌面版 Gemini 1.16.0 是英文介面：「新對話」「傳送訊息」「你說了／Gemini 說了」全找不到，
+    # 認領舊串時把側欄的 Customize 當對話點進去，問題打進了那頁的搜尋框（2026-10-27 實測）
+    import re as _re
+    from services import desktop_helper as dh
+    assert _re.match(dh._NEW_CHAT_RE, "New chat") and _re.match(dh._NEW_CHAT_RE, "新對話")
+    assert _re.match(dh._PROMPT_BOX_RE, "Enter a prompt for Gemini") and not _re.match(dh._PROMPT_BOX_RE, "Search")
+    assert _re.match(dh._SEND_RE, "Send message") and _re.match(dh._SEND_RE, "傳送訊息")
+    assert _re.match(dh.DESKTOP_MODEL_RE, "3.5 Flash-Lite Fastest answers") and not _re.match(dh.DESKTOP_MODEL_RE, "4 Argon")
+    assert {"Customize", "Library", "New chat"} <= dh._NAV_LINKS
+
+    class C:
+        def _get_chat_container(self):
+            return object()
+
+        def _collect_text_nodes(self, node):
+            return ["You said 這是測試", "You said", "這是測試", "這是測試", "Gemini said", "收到",
+                    "Ask Gemini", "Gemini is AI and can make mistakes."]
+    assert dh._history(C()) == [{"role": "user", "content": "這是測試"}, {"role": "gemini", "content": "收到"}]
+
+    class Z(C):
+        def _collect_text_nodes(self, node):
+            return ["你說了 今天天氣", "Gemini 說了", "晴天"]
+    assert dh._history(Z()) == [{"role": "user", "content": "今天天氣"}, {"role": "gemini", "content": "晴天"}]
