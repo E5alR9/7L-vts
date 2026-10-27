@@ -44,7 +44,7 @@ _TREE = ast.parse(MAIN_SRC)
 MAIN_FUNCS = (
     "chat_processor_worker", "process_chat_message", "add_to_streamer_mind_board", "is_piano_song_request",
     "background_tool_executor", "run_stage_commands", "_hard_cmd_seen_recently", "_dispatch_in_background",
-    "send_brain_slip", "_send_stage_slip", "_supersede_board_requests", "_unpack_slip", "_owner_text_slip", "_slip_is_dupe", "_record_slip",
+    "send_brain_slip", "_send_stage_slip", "_supersede_board_requests", "_unpack_slip", "_take_slip", "_owner_text_slip", "_slip_is_dupe", "_record_slip",
     "_note_brain_origin", "_brain_requester", "_her_words_before", "_brain_replaying_old_request",
     "is_live_brain_active", "live_brain_down_for", "use_rest_brain",
     "rest_slip_worker", "_rest_answer_slip", "_speak_brain_turn", "_rest_speak", "_run_subagent_task",
@@ -251,10 +251,10 @@ class DryRun:
         """假的 Live 收紙條端：做 send_system_prompts_to_live 送出前後那幾件事（去重、記帳），不真的送。"""
         ns = self.ns
         while True:
-            prompt, origin, said, name = ns["_unpack_slip"](await ns["LIVE_API_SYSTEM_PROMPT_QUEUE"].get())
-            if ns["_slip_is_dupe"](prompt, time.time()):
-                self.logs.append("📄 [紙條去重] 10 秒內相同紙條已送過，跳過")
+            slip = await ns["_take_slip"]()
+            if not slip:
                 continue
+            prompt, origin, said, name = slip
             ns["_note_brain_origin"](origin, said, name)
             ns["_record_slip"](prompt, origin, name, "live")
             self.sent_slips.append((prompt, origin, said, name))

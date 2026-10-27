@@ -1298,6 +1298,26 @@ def _slip_is_dupe(prompt: str, now: float) -> bool:
 
 # 送失敗待重送的紙條：下個 session 優先送（asyncio.Queue 不能插隊到最前面）
 _LIVE_SLIP_RETRY = deque()
+
+
+async def _take_slip(timeout: float = None):
+    """下一張要交給主腦的紙條：送失敗待重送的優先，否則等新紙條；10 秒內交過的同一張丟掉。
+    回 (prompt, origin, said, name)；等了 timeout 秒沒有、或是重複的，回 None。
+    Live 主腦和 REST 大腦共用（2026-10-27 以前各寫一份）。"""
+    if _LIVE_SLIP_RETRY:
+        item = _LIVE_SLIP_RETRY.popleft()
+    elif timeout is None:
+        item = await LIVE_API_SYSTEM_PROMPT_QUEUE.get()
+    else:
+        try:
+            item = await asyncio.wait_for(LIVE_API_SYSTEM_PROMPT_QUEUE.get(), timeout=timeout)
+        except asyncio.TimeoutError:
+            return None
+    slip = _unpack_slip(item)
+    if _slip_is_dupe(slip[0], time.time()):
+        log_print("📄 [紙條去重] 10 秒內相同紙條已送過，跳過（一次點歌三張同字紙條會自斷風暴）。")
+        return None
+    return slip
 # 進行中的子智能體任務（防 GC、手動盤點用；開幾個跑幾個，不設上限）
 _RUNNING_SUBAGENT_TASKS = set()
 pygame.mixer.init()
@@ -3263,17 +3283,11 @@ async def rest_slip_worker(vts, input_queue):
         if not use_rest_brain():
             await asyncio.sleep(1.0)
             continue
-        if _LIVE_SLIP_RETRY:
-            item = _LIVE_SLIP_RETRY.popleft()
-        else:
-            try:
-                item = await asyncio.wait_for(LIVE_API_SYSTEM_PROMPT_QUEUE.get(), timeout=1.0)
-            except asyncio.TimeoutError:
-                continue
-        prompt, origin, said, name = _unpack_slip(item)
+        slip = await _take_slip(timeout=1.0)
+        if not slip:
+            continue
+        prompt, origin, said, name = slip
         try:
-            if _slip_is_dupe(prompt, time.time()):
-                continue
             _record_slip(prompt, origin, name, "rest")
             log_print(f"📥 [REST 大腦] Live 主腦不在，接紙條: {prompt[:80]}")
             _note_brain_origin(origin, said, name)
@@ -3572,17 +3586,10 @@ async def continuous_live_worker(vts):
                 async def send_system_prompts_to_live():
                     try:
                         while True:
-                            if _LIVE_SLIP_RETRY:
-                                prompt = _LIVE_SLIP_RETRY.popleft()
-                            else:
-                                prompt = await LIVE_API_SYSTEM_PROMPT_QUEUE.get()
-                            prompt, origin, said, name = _unpack_slip(prompt)
-                            try:
-                                if _slip_is_dupe(prompt, time.time()):
-                                    log_print("📄 [紙條去重] 10 秒內相同紙條已送過，跳過（一次點歌三張同字紙條會自斷風暴）。")
-                                    continue
-                            except Exception:
-                                log_swallowed()
+                            slip = await _take_slip()
+                            if not slip:
+                                continue
+                            prompt, origin, said, name = slip
                             log_print(f"📥 [黑板同步] 透過紙條傳送給 Live 大腦: {prompt}")
                             try:
                                 async with ws_send_lock:
