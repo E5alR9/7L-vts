@@ -414,6 +414,7 @@ import collections
 class ClassicalPianoSoundEngine:
     """ 88 鍵高復音數無削波 MIDI 聲音引擎 (支援 Rush E / 黑樂譜高密度連彈，0 消音 0 掐音)"""
     def __init__(self, volume: int = 100, instrument: int = 0):
+        self._lock = threading.RLock()   # 發聲執行緒和畫面執行緒共用，MIDI 輸出一次只給一個人用
         self.midi_out = None
         self.volume = max(0, min(200, int(volume)))
         self.current_instrument = max(0, min(127, int(instrument)))
@@ -550,6 +551,28 @@ class ClassicalPianoSoundEngine:
                 self.active_voices_fifo.clear()
             except Exception:
                 pass
+
+def _engine_locked(fn):
+    def wrapper(self, *a, **k):
+        with self._lock:
+            return fn(self, *a, **k)
+    wrapper.__name__ = fn.__name__
+    wrapper.__doc__ = fn.__doc__
+    return wrapper
+
+
+for _name in ("note_on", "note_off", "all_notes_off", "set_volume", "set_instrument", "set_sustain_pedal"):
+    setattr(ClassicalPianoSoundEngine, _name, _engine_locked(getattr(ClassicalPianoSoundEngine, _name)))
+
+# ── 音符排程（2026-10-27）──
+# 以前音符在畫面那一格（animate_timeline_loop）方塊碰線才發聲：7L 講話、唱歌時畫面合成變慢，鋼琴視窗掉到 30 FPS
+# （實測每格 33ms、偶爾 59～81ms），音就跟著晚、跟著不均勻。現在另一條執行緒照歌曲時間每 2ms 檢查發聲／停聲，
+# 畫面只管方塊和琴鍵亮暗；歌曲時間由畫面每格發布一次，兩格之間照經過的時間往前推。
+# Windows GS 合成器從按鍵到出聲約 208ms、7L 人聲（pygame）約 45ms（實測 4 次），所以發聲提早 SYNTH_LEAD_SEC：
+# 彈唱時鋼琴跟人聲對齊，平常聲音也剛好落在方塊碰線那一刻（以前碰線後 0.2 秒才出聲）。
+SYNTH_LEAD_SEC = 0.16
+NOTE_MIN_HOLD_SEC = 0.15          # 音符至少響這麼久（高密度連彈剛按就放會消音）
+CLOCK_MAX_EXTRAPOLATE_SEC = 0.12  # 畫面卡住太久就不再往前推，免得一口氣把後面的音全彈出來
 
 SOUND_ENGINE: Optional[ClassicalPianoSoundEngine] = None
 
@@ -734,6 +757,8 @@ class VirtualPianoGUI:
         self.setup_ui()
         self.bind_keyboard_events()
         self.refresh_local_library()
+        self._clock = None   # (perf, {軌道 id: 歌曲時間}, 單軌歌曲時間, 倍速)：畫面每格發布，發聲執行緒讀
+        threading.Thread(target=self._note_scheduler_loop, daemon=True, name="piano-notes").start()
         self.animate_timeline_loop()
         self.start_ipc_command_server()
         
@@ -1033,6 +1058,7 @@ class VirtualPianoGUI:
 
     def set_playback_speed(self, speed: float, from_ui: bool = False):
         """設定鋼琴演奏倍速並同步更新 UI 與狀態 (0.05 ~ 50.0)"""
+        self._clock = None   # 時間要跳了：發聲執行緒先停手，等畫面發布新時鐘
         speed = max(0.05, min(50.0, round(float(speed), 2)))
         self.playback_speed = speed
         spd_str = format_speed_str(speed)
@@ -1603,6 +1629,7 @@ class VirtualPianoGUI:
 
     def seek_to_time(self, seek_sec: float):
         """將播放進度無縫跳轉到指定的秒數 (支援多軌同步精準跳轉)"""
+        self._clock = None   # 時間要跳了：發聲執行緒先停手，等畫面發布新時鐘
         if not self.active_tracks and not self.playback_events:
             return
             
@@ -1952,6 +1979,7 @@ class VirtualPianoGUI:
             self.start_midi_playback(selected_name, selected_path)
             return
 
+        self._clock = None   # 暫停／繼續都會跳時間：發聲執行緒先停手
         if self.is_playing:
             # 暫停播放
             self.is_playing = False
@@ -2090,6 +2118,7 @@ class VirtualPianoGUI:
         """
         if not self.is_playing or not (self.active_tracks or self.playback_events):
             return
+        self._clock = None   # 時間要跳了：發聲執行緒先停手，等畫面發布新時鐘
         target = (time.time() - float(start_at)) * self.playback_speed
         if target - self.current_song_time >= 0.1:
             for bar in [b for b in self.active_falling_bars if not b['played'] and b['hit_time'] < target]:
@@ -2110,6 +2139,7 @@ class VirtualPianoGUI:
 
     def start_midi_playback(self, title: str, midi_path: str, clear_existing: bool = True):
         """開始/切換 Synthesia 前置下落時間軸演奏 (支援單曲與多軌無縫切歌)"""
+        self._clock = None   # 時間要跳了：發聲執行緒先停手，等畫面發布新時鐘
         if clear_existing:
             if SOUND_ENGINE:
                 SOUND_ENGINE.all_notes_off()
@@ -2165,6 +2195,7 @@ class VirtualPianoGUI:
 
     def start_multi_midi_playback(self, tracks_info: list):
         """同時啟動多首 MIDI 即時多軌並發演奏 (無數量限制，經典粉白黑深粉 4 色瀑布流)"""
+        self._clock = None   # 時間要跳了：發聲執行緒先停手，等畫面發布新時鐘
         if SOUND_ENGINE:
             SOUND_ENGINE.all_notes_off()
         for bar in self.active_falling_bars:
@@ -2279,6 +2310,46 @@ class VirtualPianoGUI:
         self.update_timeline_ui(0.0)
         self.broadcast_piano_status("stopped")
 
+    def _note_scheduler_loop(self):
+        """發聲執行緒：每 2ms 照歌曲時間決定哪些方塊該發聲、該停聲（提早 SYNTH_LEAD_SEC 抵掉合成器延遲）。
+        畫面掉格不影響發聲時間；時鐘被作廢（暫停、跳時間、換歌）時不動，等畫面發布新的。"""
+        try:
+            import ctypes
+            ctypes.windll.winmm.timeBeginPeriod(1)
+            ctypes.windll.kernel32.SetThreadPriority(ctypes.windll.kernel32.GetCurrentThread(), 2)   # HIGHEST
+        except Exception:
+            pass
+        while True:
+            time.sleep(0.002)
+            clock = self._clock
+            engine = SOUND_ENGINE
+            if clock is None or engine is None or not self.is_playing:
+                continue
+            perf0, track_times, single_t, speed = clock
+            now = time.perf_counter()
+            ahead = min(max(0.0, now - perf0), CLOCK_MAX_EXTRAPOLATE_SEC) * speed + SYNTH_LEAD_SEC * speed
+            for bar in list(self.active_falling_bars):
+                t = track_times.get(bar['track_id'], single_t) if bar['track_id'] else single_t
+                t += ahead
+                if not bar['played']:
+                    if t < bar['hit_time']:
+                        continue
+                    with engine._lock:
+                        if bar['played'] or self._clock is not clock:
+                            continue
+                        bar['played'] = True
+                        bar['is_holding'] = True
+                        bar['hit_perf_time'] = now
+                        bar['channel'] = engine.note_on(bar['midi'], velocity=bar.get('vel', 105))
+                elif bar.get('is_holding') and t >= bar['hit_time'] + bar['dur'] \
+                        and now - bar.get('hit_perf_time', now) >= NOTE_MIN_HOLD_SEC:
+                    with engine._lock:
+                        if not bar.get('is_holding'):
+                            continue
+                        bar['is_holding'] = False
+                        bar['sound_off'] = True
+                        engine.note_off(bar['midi'], bar.get('channel'))
+
     def animate_timeline_loop(self):
         """60 FPS Synthesia 正統多軌並發時間線下落與擊鍵發聲引擎 (經典粉白黑深粉 4 色自由搭配)"""
         if self.is_playing and (self.active_tracks or self.playback_events):
@@ -2382,6 +2453,10 @@ class VirtualPianoGUI:
                     else:
                         break
             
+            # 發布歌曲時間給發聲執行緒（這一格推進時間那一刻的 perf）
+            self._clock = (current_perf, {t['id']: t['current_song_time'] for t in self.active_tracks},
+                           self.current_song_time, self.playback_speed)
+
             # 更新時間軸進度
             if not self.is_dragging_timeline:
                 self.update_timeline_ui(max(0.0, self.current_song_time))
@@ -2396,27 +2471,19 @@ class VirtualPianoGUI:
                 y_bottom = self.waterfall_height - (time_to_hit * self.SPEED_PX_PER_SEC)
                 y_top = y_bottom - bar['len']
                 
-                #  碰線瞬間：古典鋼琴發聲 + 琴鍵按下變深色（持續保持到長條結束！）
-                now_perf = time.perf_counter()
-                if y_bottom >= self.waterfall_height and not bar['played']:
-                    bar['played'] = True
-                    bar['is_holding'] = True
-                    bar['hit_perf_time'] = now_perf
+                #  碰線瞬間：琴鍵按下變深色（持續保持到長條結束）；發聲由發聲執行緒照歌曲時間處理
+                if y_bottom >= self.waterfall_height and not bar.get('key_down'):
+                    bar['key_down'] = True
                     m = bar['midi']
                     hit_notes_frame.append(m)
-                    if SOUND_ENGINE:
-                        bar['channel'] = SOUND_ENGINE.note_on(m, velocity=bar.get('vel', 105))
                     self.set_key_pressed(m, True)
-                    
-                #  離線瞬間：長條頂部完全通過擊鍵線（長條結束）➔ Note Off + 琴鍵彈起恢復原色
-                #  守護音符飽滿度：音符至少需發聲 150ms，嚴防高密度音符在同一影格剛 Note On 就立即 Note Off 造成消音！
+
+                #  離線瞬間：長條頂部完全通過擊鍵線 ➔ 琴鍵彈起；聲音還沒停（最短 150ms）就讓長條多留一下
                 if y_top >= self.waterfall_height:
-                    hit_t = bar.get('hit_perf_time')
-                    if hit_t and (now_perf - hit_t < 0.15):
+                    if bar.get('played') and bar.get('is_holding'):
                         visible_bottom = min(self.waterfall_height, y_bottom)
                         self.canvas.coords(bar['id'], bar['x1'], y_top, bar['x2'], visible_bottom)
                     else:
-                        bar['is_holding'] = False
                         self.canvas.delete(bar['id'])
                         removals.append(bar)
                 else:
@@ -2429,11 +2496,10 @@ class VirtualPianoGUI:
                 
             for r in removals:
                 self.active_falling_bars.remove(r)
+                r['key_down'] = False
                 m = r['midi']
-                if SOUND_ENGINE:
-                    SOUND_ENGINE.note_off(m, r.get('channel'))
-                still_holding = any(b.get('is_holding') and b['midi'] == m for b in self.active_falling_bars)
-                if not still_holding:
+                still_down = any(b.get('key_down') and b['midi'] == m for b in self.active_falling_bars)
+                if not still_down:
                     self.set_key_pressed(m, False)
                 
             # 3. 檢查所有音軌是否演奏結束
@@ -2468,6 +2534,8 @@ class VirtualPianoGUI:
                     self._last_status_broadcast_time = now_perf
                     self.broadcast_piano_status("tick")
                 
+        if not self.is_playing:
+            self._clock = None
         self.root.after(16, self.animate_timeline_loop)
 
     def bind_keyboard_events(self):
