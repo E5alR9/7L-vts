@@ -36,7 +36,7 @@ def test_key_modules_load_dotenv_themselves():
     import subprocess
     import sys
     from conftest import ROOT
-    env_path = os.path.join(ROOT, ".env")
+    from core.env_config import ENV_PATH as env_path   # 專案裡的 .env，沒有就家目錄的（2026-10-27 起）
     if not os.path.exists(env_path) or "GEMINI_API_KEY" not in open(env_path, encoding="utf-8", errors="replace").read():
         import pytest
         pytest.skip("這台沒有含 Gemini 金鑰的 .env")

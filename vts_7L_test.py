@@ -58,8 +58,9 @@ if __name__ == "__main__":
 
 import os
 from dotenv import load_dotenv
-#  用「本檔所在目錄」明確載入 .env：確保第一時間套用 MODE
-load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"), override=True)
+#  第一時間載入 .env 套用 MODE：專案資料夾有就用它，沒有就家目錄的（core.env_config.ENV_PATH）
+from core.env_config import ENV_PATH as _ENV_PATH
+load_dotenv(_ENV_PATH, override=True)
 #  運行模式開機定一次（後台存過模式開關就照開關），要在 import 記憶模組之前：記憶檔路徑一 import 就定了
 from core import settings as _settings
 SETTINGS = _settings.boot(os.path.join(os.path.dirname(os.path.abspath(__file__)), "data"))
@@ -830,7 +831,7 @@ from mic_live_plugin import voiceprint_verifier  # noqa: F401
 # ────────────────────────────────────────────────────────
 #  讀 .env、印出各家金鑰數量；金鑰池怎麼分工、模型叫什麼名字都定義在 core/llm_engine。
 
-load_dotenv(override=True)
+load_dotenv(_ENV_PATH, override=True)
 os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"  # 關閉 Hugging Face 符號連結警告
 
 print("=== 🔍 .env 金鑰讀取測試 ===")

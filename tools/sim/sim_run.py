@@ -132,7 +132,8 @@ def _load_dotenv_then_override(*a, **k):
 
 
 _dotenv.load_dotenv = _load_dotenv_then_override
-_dotenv.load_dotenv(os.path.join(ROOT, ".env"), override=True)   # 跟主程式一樣先讀 .env，金鑰模組才不會空著初始化
+from core.env_config import ENV_PATH as _ENV_PATH   # 專案資料夾的 .env，沒有就家目錄的
+_dotenv.load_dotenv(_ENV_PATH, override=True)   # 跟主程式一樣先讀 .env，金鑰模組才不會空著初始化
 if _SIM_OVERRIDES:
     print(f"🧪 [測試包裝] 覆寫 {_SIM_OVERRIDES}", flush=True)
 

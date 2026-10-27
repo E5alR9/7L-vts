@@ -50,10 +50,17 @@ FINETUNE_DATA_DIR: str = _resolve(
     os.path.join(HOME, "finetune_data"),
 )
 
-# 聲線參考音檔（優先本機家目錄，原作者機器上的檔案存在時也相容）
-REF_VOICE_ZH: str = _resolve("TTS_REF_ZH", os.path.join(HOME, "xiaoyi_girl_ref.wav"))
-REF_VOICE_ZH_ALT: str = _resolve("TTS_REF_ZH_ALT", os.path.join(HOME, "xiaoyi_ref.wav"))
-REF_VOICE_JA: str = _resolve("TTS_REF_JA", os.path.join(HOME, "xiaoyi_japanese_ref.wav"))
+# 聲線參考音檔：專案的 assets/voice（2026-10-27 從家目錄搬進來），舊位置家目錄留著相容
+VOICE_DIR: str = os.path.join(ROOT_DIR, "assets", "voice")
+REF_VOICE_ZH: str = _resolve("TTS_REF_ZH", os.path.join(VOICE_DIR, "xiaoyi_girl_ref.wav"), os.path.join(HOME, "xiaoyi_girl_ref.wav"))
+REF_VOICE_ZH_ALT: str = _resolve("TTS_REF_ZH_ALT", os.path.join(VOICE_DIR, "xiaoyi_ref.wav"), os.path.join(HOME, "xiaoyi_ref.wav"))
+REF_VOICE_JA: str = _resolve("TTS_REF_JA", os.path.join(VOICE_DIR, "xiaoyi_japanese_ref.wav"), os.path.join(HOME, "xiaoyi_japanese_ref.wav"))
+
+# 7L 翻唱的 RVC 聲線模型：專案的 models/rvc（從 RVC-WebUI 複製進來），RVC-WebUI 原位置當後備
+RVC_7L_MODEL: str = _resolve("", os.path.join(ROOT_DIR, "models", "rvc", "weights", "7L_v2.pth"),
+                             os.path.join(HOME, "RVC-WebUI", "assets", "weights", "7L_v2.pth"))
+RVC_7L_INDEX: str = _resolve("", os.path.join(ROOT_DIR, "models", "rvc", "indices", "7L_v2_added_IVF256_Flat_nprobe_1_7L_v2_v2.index"),
+                             os.path.join(HOME, "RVC-WebUI", "assets", "indices", "7L_v2_added_IVF256_Flat_nprobe_1_7L_v2_v2.index"))
 
 
 def ref_voices() -> list:

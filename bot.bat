@@ -24,6 +24,6 @@ if not exist .deps_ok (
 )
 
 echo [2/2] 正在使用 6.env 啟動程式...
-python -c "from dotenv import load_dotenv; load_dotenv('6.env'); import runpy; runpy.run_path('bot.py', run_name='__main__')"
+python -c "import os; from dotenv import load_dotenv; load_dotenv('6.env' if os.path.exists('6.env') else os.path.join(os.path.expanduser('~'), '6.env')); import runpy; runpy.run_path('bot.py', run_name='__main__')"
 
 pause

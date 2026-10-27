@@ -1,5 +1,6 @@
 # --- secrets / tokens ---
 .env*
+!.env.example
 6.env
 vts_token.txt*
 
@@ -109,6 +110,7 @@ GPT_SoVITS/
 RVC-WebUI/
 curseforge/
 xiaoyi_dataset/
+dataset/
 finetune_data/
 songs_library/
 backup_before_revert_20261008/

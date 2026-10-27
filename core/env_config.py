@@ -14,7 +14,14 @@ import re
 import tempfile
 from typing import Any, Dict, List, Tuple
 
-ENV_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
+def _env_path() -> str:
+    """金鑰檔：專案資料夾裡有 .env 就用它，沒有就用家目錄的（2026-10-27 專案搬進 7L-vts，.env 留在家目錄不動）。"""
+    here = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
+    home = os.path.join(os.path.expanduser("~"), ".env")
+    return here if os.path.exists(here) or not os.path.exists(home) else home
+
+
+ENV_PATH = _env_path()
 
 _KEY_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=")
 _PROJECT_ENV_LOADED = False

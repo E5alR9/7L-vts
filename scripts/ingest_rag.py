@@ -34,7 +34,8 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, BASE_DIR)
 try:
     from dotenv import load_dotenv
-    load_dotenv(os.path.join(BASE_DIR, ".env"))   # MODE 在 .env；從一般終端機跑也要讀到
+    from core.env_config import ENV_PATH
+    load_dotenv(ENV_PATH)   # MODE 在 .env（專案資料夾或家目錄）；從一般終端機跑也要讀到
 except Exception:
     pass
 

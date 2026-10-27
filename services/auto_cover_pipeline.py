@@ -211,8 +211,7 @@ def pitch_shift_vocal_to_female(vocal_in: str, vocal_out: str, semitones: float 
     """
     try:
         from services.neural_voice_converter import convert_vocal_to_xiaoyi
-        _MODEL_PTH = r"C:\Users\qiwai\RVC-WebUI\assets\weights\7L_v2.pth"
-        _INDEX_FILE = r"C:\Users\qiwai\RVC-WebUI\assets\indices\7L_v2_added_IVF256_Flat_nprobe_1_7L_v2_v2.index"
+        from core.paths import RVC_7L_MODEL as _MODEL_PTH, RVC_7L_INDEX as _INDEX_FILE   # 專案 models/rvc，沒有就 RVC-WebUI
 
         def _valid(path):
             return bool(path) and os.path.exists(path) and os.path.getsize(path) > 10000
