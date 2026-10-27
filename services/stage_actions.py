@@ -12,7 +12,7 @@ import time
 import services.piano_engine as pe
 import services.vts_client as vc
 from services.vts_client import apply_spatial_position, set_vts_expression
-from core.utils import log_print, log_swallowed
+from core.utils import log_print, log_swallowed, spawn
 
 
 def parse_action_timeline(raw_text: str, total_duration: float) -> list:
@@ -139,56 +139,56 @@ async def execute_speech_visual_actions(vts, text: str):
     if exp_match:
         exp_tag = exp_match.group(1).strip()
         if any(k in exp_tag.upper() for k in ["WINK", "眨眼", "單眼", "眨單眼"]):
-            asyncio.create_task(vc.trigger_wink())
+            spawn(vc.trigger_wink())
             log_print("😉 [Live2D 動作] 標籤觸發 Wink 單眼眨一下眼")
         elif any(k in exp_tag for k in ["驚訝", "惊讶", "驚", "惊", "震驚", "震惊", "瞳孔", "嚇到", "SHOCK", "SURPRISE"]):
-            asyncio.create_task(vc.trigger_shock())
+            spawn(vc.trigger_shock())
             log_print("😱 [Live2D 動作] 標籤觸發驚訝縮瞳與瞪大雙眼微顫")
         elif any(k in exp_tag for k in ["皺眉", "皱眉", "八字眉", "困擾", "困扰", "委屈", "傲嬌皺眉", "難過眉", "生氣皺眉", "FROWN"]):
-            asyncio.create_task(vc.trigger_frown())
+            spawn(vc.trigger_frown())
             log_print("🥺 [Live2D 動作] 標籤觸發八字皺眉/委屈表情")
         else:
             log_print(f"🎭 [Live2D 表情] 標籤觸發表情: 「{exp_tag}」")
-            asyncio.create_task(set_vts_expression(vts, exp_tag))
+            spawn(set_vts_expression(vts, exp_tag))
 
     move_match = re.search(r'\[(?:MOVE|SPATIAL|WINDOW|POSITION)[：:]\s*([^\]\[]+)\]', text, re.IGNORECASE)
     if move_match:
         pos_tag = move_match.group(1).strip()
         if not pe.is_piano_active or any(k in pos_tag for k in ["鋼琴", "原本", "大小", "視窗"]):
             log_print(f"🚶 [Live2D 走位] 標籤觸發模型移動至: 「{pos_tag}」")
-            asyncio.create_task(apply_spatial_position(pos_tag))
+            spawn(apply_spatial_position(pos_tag))
 
     try:
         upper_text = text.upper()
         if "WINK" in upper_text and not exp_match:
-            asyncio.create_task(vc.trigger_wink())
+            spawn(vc.trigger_wink())
             log_print("😉 [Live2D 動作] 動作觸發 Wink 單眼眨一下眼")
         elif any(k in upper_text for k in ["SHOCK", "SHOCKED", "SURPRISE", "PUPIL", "驚訝", "惊讶", "震驚", "震惊", "瞳孔", "嚇到"]) and not exp_match:
-            asyncio.create_task(vc.trigger_shock())
+            spawn(vc.trigger_shock())
             log_print("😱 [Live2D 動作] 動作觸發驚訝縮瞳與瞪大雙眼微顫")
         elif any(k in upper_text for k in ["FROWN", "FROWNING", "皺眉", "皱眉", "八字眉", "困擾", "委屈"]) and not exp_match:
-            asyncio.create_task(vc.trigger_frown())
+            spawn(vc.trigger_frown())
             log_print("🥺 [Live2D 動作] 動作觸發八字皺眉/委屈神態")
         elif any(k in upper_text for k in ["ROLL", "AROUND", "WANDER", "轉眼", "環視"]):
-            asyncio.create_task(vc.trigger_eye_roll())
+            spawn(vc.trigger_eye_roll())
             log_print("🌀 [Live2D 動作] 動作觸發招牌靈動轉眼珠環視四周")
         elif "MOUSE" in upper_text and "LOOK" in upper_text:
-            asyncio.create_task(vc.set_tracking_mouse(True))
+            spawn(vc.set_tracking_mouse(True))
             log_print("👀 [Live2D 視線] 視線切換為鎖定追蹤滑鼠游標")
         elif "LEFT" in upper_text and "LOOK" in upper_text:
-            asyncio.create_task(vc.set_target_look(-25.0, 0.0))
+            spawn(vc.set_target_look(-25.0, 0.0))
             log_print("👀 [Live2D 視線] 視線轉向【左邊】")
         elif "RIGHT" in upper_text and "LOOK" in upper_text:
-            asyncio.create_task(vc.set_target_look(25.0, 0.0))
+            spawn(vc.set_target_look(25.0, 0.0))
             log_print("👀 [Live2D 視線] 視線轉向【右邊】")
         elif "UP" in upper_text and "LOOK" in upper_text:
-            asyncio.create_task(vc.set_target_look(0.0, 25.0))
+            spawn(vc.set_target_look(0.0, 25.0))
             log_print("👀 [Live2D 視線] 視線轉向【上方】")
         elif "DOWN" in upper_text and "LOOK" in upper_text:
-            asyncio.create_task(vc.set_target_look(0.0, -25.0))
+            spawn(vc.set_target_look(0.0, -25.0))
             log_print("👀 [Live2D 視線] 視線轉向【下方】")
         elif "CENTER" in upper_text and "LOOK" in upper_text:
-            asyncio.create_task(vc.set_target_look(0.0, 0.0))
+            spawn(vc.set_target_look(0.0, 0.0))
             log_print("👀 [Live2D 視線] 視線回正【正前方】")
 
         if "EARS" in upper_text:

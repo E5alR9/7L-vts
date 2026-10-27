@@ -11,7 +11,7 @@ from collections import deque
 from typing import List, Dict, Any, Optional
 
 # Project imports
-from core.utils import log_print, log_swallowed
+from core.utils import log_print, log_swallowed, spawn
 from core.identity import get_mode, get_owner_name, get_character_name, claims_owner_identity
 import core.db as db_module
 import services.rag_memory_service as rag_service
@@ -413,7 +413,8 @@ def _schedule_on_loop(coro, loop=None) -> None:
     """把協程排到 event loop 上。存檔常在執行緒池裡跑，那裡沒有 running loop，
     舊版直接 get_running_loop() 必定 RuntimeError 被吞掉，雲端備份從沒送出過。"""
     try:
-        asyncio.get_running_loop().create_task(coro)
+        asyncio.get_running_loop()
+        spawn(coro)   # 留強參考到跑完，出錯有日誌
         return
     except RuntimeError:
         pass
@@ -613,11 +614,7 @@ def append_to_unified_memory(speaker: str, target: str, content: str, role: str 
     # 向量記憶庫（老爸的話、她的回覆、熟客的留言；規則在 rag_memory_entry）
     rag_entry = rag_memory_entry(speaker, target, clean_c, role, source, t_str)
     if rag_entry:
-        try:
-            loop = asyncio.get_running_loop()
-            loop.create_task(rag_service.add_rag_memory(rag_entry[0], source=role, viewer=rag_entry[1].get("viewer", "")))
-        except RuntimeError:
-            pass
+        _schedule_on_loop(rag_service.add_rag_memory(rag_entry[0], source=role, viewer=rag_entry[1].get("viewer", "")))
 
 def init_unified_memory():
     """啟動時載入歷史雙軌記憶：
