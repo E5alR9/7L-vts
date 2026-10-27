@@ -4,11 +4,9 @@
 PROVIDER: TAVILY（主）／DuckDuckGo（備援）／GROQ（摘要）。
 TAVILY_KEYS 讀 .env 的 TAVILY_KEYS／TAVILY_API_KEYS／TAVILY_API_KEY；沒裝 tavily 套件就用純 Python 版打 REST。
 """
-import asyncio
 import os
 import re
 
-from core.llm_engine import GROQ_CLIENTS
 from core.utils import log_print, log_swallowed
 
 try:
@@ -94,11 +92,12 @@ if TAVILY_KEYS:
 else:
     tavily_client = None
 
-def search_google(query: str) -> str:
+def search_google(query: str, depth: str = "advanced") -> str:
     """使用 Google / 網路搜尋引擎查詢最新的即時資訊、天氣、時事新聞或未知知識。
     
     Args:
         query: 要搜尋的關鍵字或問題描述
+        depth: Tavily 搜尋深度（basic 省額度）
     """
     log_print(f"\n🔍 [Tool 調用] 7L 正在使用 Google / 網路搜尋: 「{query}」")
     try:
@@ -106,7 +105,7 @@ def search_google(query: str) -> str:
         topic_mode = "news" if is_news_query else "general"
 
         if tavily_client:
-            res = tavily_client.search(query=query, topic=topic_mode, search_depth="advanced")
+            res = tavily_client.search(query=query, topic=topic_mode, search_depth=depth)
             if isinstance(res, dict) and "results" in res:
                 snippets = []
                 for item in res["results"][:4]:
@@ -137,7 +136,7 @@ def search_google(query: str) -> str:
 async def summarize_search_to_speech(query: str, search_raw: str, user_role_name: str = "") -> str:
     """PROVIDER: GROQ（core.groq_router.groq_chat 純文字提煉；見 docs/AI_SOURCES.md）"""
     """將搜尋到的原始資料，以 7L 招牌自然口語（1~3 句，親切隨性）進行提煉整理。
-    容災序（全程零 Gemini）：groq_chat 梯隊 -> Groq 快答梯隊 -> 本機離線摘要器，絕不直接傾倒原文！"""
+    容災序（全程零 Gemini）：groq_chat 梯隊（模型×金鑰輪詢）-> 本機離線摘要器，絕不直接傾倒原文！"""
     # ⚠️ 收聽人不一定是老爸：未知走中性（有誰寫誰，沒人可寫就不加稱呼）
     _who = (user_role_name or "").strip()
     _voc = f"{_who}，" if _who else ""
@@ -149,7 +148,7 @@ async def summarize_search_to_speech(query: str, search_raw: str, user_role_name
     clean_search = re.sub(r'https?://\S+', '', search_raw)
     clean_search = re.sub(r'\s{2,}', ' ', clean_search).strip()[:1500]
 
-    #  第 1 防線：Groq 極速提煉（groq_chat 梯隊，實測 0.4s 級；失敗或無結果才交給下方 Groq 快答梯隊）
+    #  第 1 防線：Groq 極速提煉（groq_chat 梯隊，實測 0.4s 級；失敗或無結果才交給本機摘要）
     try:
         from core.groq_router import groq_chat
         g_resp = await groq_chat(
@@ -166,36 +165,7 @@ async def summarize_search_to_speech(query: str, search_raw: str, user_role_name
     except Exception:
         log_swallowed()
 
-    # 2. 第二防線：Groq 快答梯隊 (0.3s 提煉)
-    if GROQ_CLIENTS:
-        groq_models_to_try = [
-            'qwen/qwen3.8-27b',
-            'openai/gpt-oss-120b',
-            'openai/gpt-oss-20b'
-        ]
-        for g_client in GROQ_CLIENTS[:3]:
-            for g_model in groq_models_to_try:
-                try:
-                    g_resp = await asyncio.wait_for(
-                        g_client.chat.completions.create(
-                            model=g_model,
-                            messages=[
-                                {"role": "system", "content": f"妳是 7L，正在直播中與{_prompt_who}對話。請以親切隨性口吻（1~2句短句）提煉搜尋重點回答{_prompt_who}，請將清單內容轉為口語，並使用純文字對話。"},
-                                {"role": "user", "content": f"查詢問題: {query}\n搜尋內容: {clean_search[:800]}"}
-                            ],
-                            max_tokens=120,
-                            temperature=0.7
-                        ),
-                        timeout=3.0
-                    )
-                    if g_resp.choices and g_resp.choices[0].message.content:
-                        ans = g_resp.choices[0].message.content.strip()
-                        if ans:
-                            return ans
-                except Exception:
-                    continue
-
-    # 3. 第三防線：純本地智慧摘要器（100% 離線可用，絕不傾倒條列與 URL）
+    # 2. 第二防線：純本地智慧摘要器（100% 離線可用，絕不傾倒條列與 URL）
     lines = [l.strip() for l in search_raw.split('\n') if l.strip()]
     snippets = []
     for l in lines:
