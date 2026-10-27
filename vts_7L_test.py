@@ -193,7 +193,7 @@ from core.hard_command import (
 from core.subagent_router import resolve_subagent_chain
 from core.live_timer_sensor import live_timer_hub
 import services.piano_engine as pe
-from services.web_search import TAVILY_KEYS, tavily_client, search_google, summarize_search_to_speech
+from services.web_search import TAVILY_KEYS, search_google, summarize_search_to_speech
 from services.audio_analysis import (extract_audio_mouth_envelope, load_sound_with_envelope,
                                      normalize_text_for_echo, check_is_echo_by_waveform)
 from services.stage_actions import (parse_action_timeline, execute_action_timeline,
@@ -2802,25 +2802,17 @@ async def live_mirror_tool_task():
             log_print(f"⚠️ [鏡子] 無法傳送 fallback: {inner_e}")
 
 async def live_search_tool_task(query):
-    """搜網專家副腦：使用 Tavily API 搜尋並將原始結果回傳給主腦"""
-    try:
-        log_print(f"🌐 [搜網專家啟動] 正在背景搜尋關鍵字：{query}...")
-        if 'tavily_client' in globals() and tavily_client:
-            # 同步 HTTP 必須扔線程池：在 event loop 裡直打會凍住麥克風/紙條幾秒
-            res = await asyncio.to_thread(tavily_client.search, query, search_depth="basic", topic="general")
-            if res and isinstance(res, dict):
-                results_text = "\n".join([f"- {r.get('title', '')}: {r.get('content', '')}" for r in res.get('results', [])[:3]])
-                log_print(f"🌐 [搜網專家回報] 找到 {len(res.get('results', []))} 筆結果。")
-                send_brain_slip(f"[系統提示：搜網專家回報搜尋結果，請自然地把這段資料告訴老爸（不要全唸，要口語化提煉）：]\n{_clean_result_for_brain(results_text)}")
-                return
-        raise Exception("Tavily 搜尋客戶端未初始化或搜尋無結果")
-    except Exception as e:
-        log_print(f"❌ [搜網錯誤] {e}")
-        fallback_prompt = "[系統提示：搜尋功能暫時失敗。請自然地告訴老爸妳現在連不上外網，然後直接憑妳豐富的內建記憶回答他的問題！請發揮創意。]"
-        try:
-            send_brain_slip(fallback_prompt)
-        except Exception as inner_e:
-            log_print(f"⚠️ [搜網] 無法傳送 fallback: {inner_e}")
+    """搜網專家副腦：搜尋並把原始結果交給主腦。跟 search_google 工具同一份（Tavily，失敗改 DuckDuckGo）；
+    2026-10-27 以前這裡另寫一份 Tavily，沒有 DuckDuckGo 備援。"""
+    log_print(f"🌐 [搜網專家啟動] 正在背景搜尋關鍵字：{query}...")
+    # 同步 HTTP 必須扔線程池：在 event loop 裡直打會凍住麥克風/紙條幾秒
+    results_text = await asyncio.to_thread(search_google, query, "basic")
+    if results_text.startswith("- "):
+        log_print(f"🌐 [搜網專家回報] 找到 {results_text.count(chr(10)) + 1} 筆結果。")
+        send_brain_slip(f"[系統提示：搜網專家回報搜尋結果，請自然地把這段資料告訴老爸（不要全唸，要口語化提煉）：]\n{_clean_result_for_brain(results_text)}")
+        return
+    log_print(f"❌ [搜網錯誤] {results_text}")
+    send_brain_slip("[系統提示：搜尋功能暫時失敗。請自然地告訴老爸妳現在連不上外網，然後直接憑妳豐富的內建記憶回答他的問題！請發揮創意。]")
 
 
 # 主腦上次調用工具的時間戳（紙條看門狗用：送出 20 秒還沒動靜＝她沒理會）

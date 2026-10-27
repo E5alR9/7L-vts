@@ -59,9 +59,10 @@ def test_search_falls_back_to_duckduckgo_when_tavily_fails(monkeypatch):
     assert ws.search_google("台北明天天氣") == "- 天氣: 台北明天晴"   # 以前回 "{'error': ...}"
 
 
-def test_live_search_passes_tavily_options_by_name():
+def test_live_search_uses_the_shared_search_with_ddg_fallback():
+    # 以前主檔另寫一份 Tavily 搜尋，沒有 DuckDuckGo 備援
     src = ast.get_source_segment(MAIN, _fn("live_search_tool_task"))
-    assert 'search_depth="basic", topic="general"' in src
+    assert 'search_google, query, "basic"' in src and "tavily_client" not in src
 
 
 def test_medium_screen_change_wakes_her():
