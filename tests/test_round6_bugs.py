@@ -570,15 +570,41 @@ def test_subagent_result_survives_a_live_reconnect():
 def test_unfinished_turn_is_salvaged_after_a_disconnect():
     # 收話迴圈斷掉時，老爸剛說的、她說到一半的以前整段丟掉（2026-10-27）
     slips = []
-    ns = {"to_tw": lambda t: t, "_brain_text_for_memory": lambda t: t.strip(), "_owner_name": lambda: "E5",
+    import time as _t
+    ns = {"to_tw": lambda t: t, "_brain_text_for_memory": lambda t: t.strip(), "_owner_name": lambda: "E5", "_RUNNING_SUBAGENT_TASKS": set(),
+          "time": _t, "_BRAIN_INPUT_ORIGIN": {"said": "講一個小狐狸的故事", "ts": _t.time() - 3},
           "log_print": lambda *a: None, "send_brain_slip": lambda *a, **k: slips.append((a, k))}
     exec(compile(ast.Module(body=[_fn("_salvage_unfinished_turn")], type_ignores=[]), "s", "exec"), ns)
+    resent = []
+    ns["_resend_unanswered_slip"] = lambda: resent.append(1)
     ns["_salvage_unfinished_turn"]("", "")
-    assert slips == []                                                    # 正常換線：沒東西要補
+    assert slips == [] and resent == [1]                                  # 還沒開始講：改看斷線前那張紙條要不要重送
     ns["_salvage_unfinished_turn"]("今天晚餐吃什麼", "我覺得可以吃")
     (text,), kw = slips[0]
     assert "E5剛說「今天晚餐吃什麼」" in text and "說到一半：「我覺得可以吃」" in text
     assert kw == {"origin": "dad", "said": "今天晚餐吃什麼"}
+    slips.clear()
+    ns["_salvage_unfinished_turn"]("", "老爸想聽故事？沒問")                # 說到一半：附上她原本在回哪句
+    (text,), kw = slips[0]
+    assert "妳原本在回「講一個小狐狸的故事」" in text and "說到一半：「老爸想聽故事？沒問」" in text
     recv = next(n for n in ast.walk(TREE) if isinstance(n, ast.AsyncFunctionDef) and n.name == "receive_from_live")
     assert "_salvage_unfinished_turn(_said, turn_buffer)" in ast.get_source_segment(MAIN, recv)
     assert "if isinstance(_sent[0], Exception):" in MAIN                # 送主腦失敗要觸發重連
+
+
+def test_unanswered_slip_is_resent_soon_after_a_disconnect():
+    # 斷線時紙條送出了、她還沒開始回：以前要等看門狗 20 秒（2026-10-27 斷線實測）
+    import time as _t
+    sent, spawned = [], []
+    ns = {"time": _t, "asyncio": asyncio, "_SLIP_DEDUPE_SEC": 0.0, "LAST_BRAIN_TURN_TS": 0.0, "LAST_BRAIN_TOOL_TS": 0.0,
+          "_unpack_slip": lambda s: (s, "", "", ""), "send_brain_slip": lambda *a: sent.append(a[0]),
+          "log_print": lambda *a: None, "spawn": spawned.append}
+    exec(compile(ast.Module(body=[_fn("_resend_unanswered_slip")], type_ignores=[]), "r", "exec"), ns)
+    now = _t.time()
+    ns["_LAST_LIVE_SLIP"] = {"slip": "講個故事", "ts": now - 2}
+    assert ns["_resend_unanswered_slip"](now) is True
+    asyncio.run(spawned[0])
+    assert sent == ["講個故事"] and ns["_LAST_LIVE_SLIP"]["slip"] is None
+    ns["_LAST_LIVE_SLIP"] = {"slip": "回過了", "ts": now - 2}
+    ns["LAST_BRAIN_TURN_TS"] = now - 1                                     # 斷線前已經回了：不重送
+    assert ns["_resend_unanswered_slip"](now) is False

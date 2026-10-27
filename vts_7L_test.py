@@ -1301,6 +1301,8 @@ def _slip_is_dupe(prompt: str, now: float) -> bool:
 
 # 送失敗待重送的紙條：下個 session 優先送（asyncio.Queue 不能插隊到最前面）
 _LIVE_SLIP_RETRY = deque()
+# 最後一張送進 Live 的紙條（斷線時她還沒開始回就重送，見 _resend_unanswered_slip）
+_LAST_LIVE_SLIP = {"slip": None, "ts": 0.0}
 
 
 async def _take_slip(timeout: float = None):
@@ -3261,21 +3263,47 @@ def _subagent_result_by_slip(task_ins: str, text: str, sched, err) -> None:
     send_brain_slip(note)
 
 
+def _resend_unanswered_slip(now: float = None) -> bool:
+    """斷線時最後一張紙條送出了、她還沒開始回（沒叫工具、沒說完一段、也沒說到一半）：換線後盡快重送。
+    以前要等看門狗 20 秒（2026-10-27 斷線實測）。同一張紙條 _SLIP_DEDUPE_SEC 秒內會被當重複擋掉，所以排在那之後。"""
+    now = time.time() if now is None else now
+    slip, ts = _LAST_LIVE_SLIP.get("slip"), _LAST_LIVE_SLIP.get("ts") or 0.0
+    if not slip or now - ts > 30.0 or LAST_BRAIN_TURN_TS >= ts or LAST_BRAIN_TOOL_TS >= ts:
+        return False
+    _LAST_LIVE_SLIP.update(slip=None, ts=0.0)
+
+    async def _later():
+        await asyncio.sleep(max(0.0, _SLIP_DEDUPE_SEC + 0.5 - (time.time() - ts)))
+        if LAST_BRAIN_TURN_TS >= ts or LAST_BRAIN_TOOL_TS >= ts:
+            return   # 換線後她自己回了
+        log_print("🔌 [Live 斷線] 斷線前那張紙條她還沒回，重送一次")
+        send_brain_slip(*_unpack_slip(slip))
+    spawn(_later())
+    return True
+
+
 # 收話迴圈斷掉時這輪沒做完：老爸剛說的還沒回、她說到一半（2026-10-27）
 def _salvage_unfinished_turn(dad_said: str, partial: str) -> None:
     """Live 斷線時這輪沒做完：換線後遞紙條請她接著講（7L 要等一段話說完才念，說到一半的一個字都沒念到）。"""
     dad_said = to_tw((dad_said or "").strip())
     partial = _brain_text_for_memory(partial or "").strip() if (partial or "").strip() else ""
     if not dad_said and not partial:
+        _resend_unanswered_slip()   # 這輪還沒開始講：斷線前那張紙條換線後重送
         return
     parts = []
     if dad_said:
         parts.append(f"{_owner_name()}剛說「{dad_said[-200:]}」妳還沒回到")
     if partial:
+        # 附上她原本在回哪句（斷線實測：只給說到一半的話，她接下去問「你想聽勇者鬥惡龍還是…」，忘了要的是小狐狸故事）
+        asked = (_BRAIN_INPUT_ORIGIN.get("said") or "").strip()
+        if asked and not dad_said and time.time() - (_BRAIN_INPUT_ORIGIN.get("ts") or 0.0) < 120:
+            parts.append(f"妳原本在回「{asked[-200:]}」")
         parts.append(f"妳話說到一半：「{partial[-200:]}」")
     log_print(f"🔌 [Live 斷線] 這輪沒做完（{'；'.join(parts)[:80]}），換線後請她接著講")
-    send_brain_slip("[系統提示：剛才連線中斷，" + "，".join(parts) + "。換線好了，請自然地接著講完（說過的不要整段重講）。]",
-                    origin="dad" if dad_said else "", said=dad_said)
+    # 子智能體還在辦：答案會再交給她，先別自己編（斷線實測：還在算時她接著講「明哥可以血賺一波」亂填）
+    pending = "（妳交辦的事還在辦，結果會再交給妳，在那之前不要自己編答案）" if _RUNNING_SUBAGENT_TASKS else ""
+    send_brain_slip("[系統提示：剛才連線中斷，" + "，".join(parts) + "。換線好了，請自然地接著講完（說過的不要整段重講）"
+                    + pending + "。]", origin="dad" if dad_said else "", said=dad_said)
 
 
 async def _handle_invoke_subagent(session, ws_send_lock, _fn_name, _fn_call_id, _task_ins, _intent=None):
@@ -3755,6 +3783,7 @@ async def continuous_live_worker(vts):
                                     sent_ts = time.time()
                                     _note_brain_origin(origin, said, name)
                                     _record_slip(prompt, origin, name, "live", sent_ts)
+                                    _LAST_LIVE_SLIP.update(slip=(prompt, origin, said, name) if origin else prompt, ts=sent_ts)
                                     #  所有紙條都掛看門狗（聊天紙條裸奔會靜默丟失）；
                                     #  自主閒聊除外（[SILENCE] 是合法答案，盯了只會狼來了）。
                                     if "【自主閒聊】" not in (prompt or ""):
