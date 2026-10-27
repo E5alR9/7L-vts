@@ -18,10 +18,10 @@ import re
 import subprocess
 import sys
 import time
-from urllib.parse import urlparse, parse_qs
 
 from core.utils import log_print
 from core.paths import ROOT_DIR
+from core.hard_command import youtube_id
 
 WATCH_DIR = os.path.join(ROOT_DIR, "data", "watch")
 os.makedirs(WATCH_DIR, exist_ok=True)
@@ -45,28 +45,9 @@ FRAME_PROMPT = ("這是一部 YouTube 影片裡的一格畫面。請用 1~2 句�
 def normalize_video_url(raw: str) -> str:
     """純函式：任意 YT 輸入 → 11 碼 ID（失敗回空字串）。"""
     raw = (raw or "").strip().strip("'\"")
-    if not raw:
-        return ""
     if re.fullmatch(r"[A-Za-z0-9_\-]{11}", raw):
         return raw
-    try:
-        if "://" not in raw:
-            raw = "https://" + raw
-        u = urlparse(raw)
-        host = (u.hostname or "").lower()
-        if "youtu.be" in host:
-            vid = (u.path or "").strip("/").split("/")[0]
-            return vid if re.fullmatch(r"[A-Za-z0-9_\-]{11}", vid) else ""
-        if "youtube.com" in host:
-            v = (parse_qs(u.query or {}).get("v") or [""])[0]
-            if re.fullmatch(r"[A-Za-z0-9_\-]{11}", v):
-                return v
-            m = re.search(r"/(live|shorts|embed)/([A-Za-z0-9_\-]{11})", u.path or "")
-            if m:
-                return m.group(2)
-    except Exception:
-        pass
-    return ""
+    return youtube_id(raw)
 
 
 VIDEO_WATCH_MAX_MIN = 30     # 單片最多看幾分鐘
