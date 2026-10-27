@@ -6,6 +6,7 @@ import websockets
 import random
 import re
 from core.utils import log_print, log_swallowed
+from core.hard_command import asks_to_remember_model_position
 
 # ── VTS 相關全域狀態與鎖 ────────────────────────────────────────────────────────
 vts_lock = asyncio.Lock()
@@ -614,7 +615,7 @@ async def move_vts_spatial(
     clean_pos = str(target_pos or "").strip().lower()
     
     # 1. 檢查是否為重置/記憶指令
-    if any(k == clean_pos or k in clean_pos for k in ["記住位置", "記住大小", "記住現在大小", "記住現在位置", "記錄位置", "記錄大小", "記住模型位置", "記住當前位置", "記住基準", "記錄基準", "save_pos", "save_position"]):
+    if asks_to_remember_model_position(clean_pos):
         await fetch_vts_base_model_pos(target_vts)
         return True
 

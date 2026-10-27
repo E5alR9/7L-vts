@@ -189,11 +189,18 @@ _ASK_DESKTOP_RE = re.compile(
 # 貼 YouTube 連結叫她看，主腦常只嘴上說「我這就去看」卻沒呼叫工具（實機），CPU 直接接。
 # 要有連結＋「看／點播」才算：光貼連結不算，觀眾洗連結不會讓她一直下載影片。
 _YT_URL_RE = re.compile(
-    r'(?:https?://)?(?:www\.|m\.)?(?:youtube\.com/(?:watch\?\S*?v=|shorts/|live/|embed/)|youtu\.be/)'
+    r'(?:https?://)?(?:www\.|m\.|music\.)?(?:youtube\.com/(?:watch\?\S*?v=|shorts/|live/|embed/)|youtu\.be/)'
     r'([A-Za-z0-9_\-]{11})[^\s，。！？、]*', re.IGNORECASE)
 _WATCH_INTENT_RE = re.compile(r'看|點播')
 # 「我剛看完 <連結>」「看過了」是在聊天；「幫我看完這部」才是要她看
 _NEG_WATCH = re.compile(r'(?:不|別)(?:要|用)?(?:看|點播)|(?:剛|已經?|有)看(?:完|過)|看(?:過|完了|了)')
+
+
+def youtube_id(text: Optional[str]) -> str:
+    """文字裡第一個 YouTube 影片連結的 11 碼 ID（watch?v=、youtu.be、shorts、live、embed）；沒有回空字串。
+    點播看片、扒譜、拆音軌都用這一份（2026-10-27 以前 video_watch 另用 urlparse 拆一次）。"""
+    m = _YT_URL_RE.search(text or "")
+    return m.group(1) if m else ""
 
 
 def extract_watch_url(text: Optional[str]) -> Optional[str]:
@@ -348,13 +355,15 @@ STAGE_CONTROL_TOOLS = PIANO_CONTROL_TOOLS | SING_CONTROL_TOOLS   # 只聽老爸�
 _STAGE_CONTROL_NAMES = frozenset(t.split(".")[-1] for t in STAGE_CONTROL_TOOLS) | {"stop_singing_song", "stop_cover"}
 
 
-_MODEL_POSITION_WORDS = ("記住大小", "記住位置", "記住現在位置", "記住當前位置", "記住現在大小", "記錄位置", "記錄大小",
-                         "記住模型位置", "記住模型", "記錄基準大小", "記錄基準位置", "記住當前大小")
+# 她的話和 [MOVE] 位置標籤共用這一份（2026-10-27 以前 vts_client 另有一份、內容還不一樣）；比對前先轉小寫
+_MODEL_POSITION_WORDS = ("記住大小", "記住位置", "記住現在位置", "記住當前位置", "記住現在大小", "記住當前大小",
+                         "記錄位置", "記錄大小", "記住模型位置", "記住模型", "記住基準", "記錄基準", "save_pos")
 
 
 def asks_to_remember_model_position(text: str) -> bool:
     """「記住位置」這類：把 VTube Studio 模型現在的位置和大小存成基準（之後走位都以它為準）。"""
-    return any(k in (text or "") for k in _MODEL_POSITION_WORDS)
+    t = (text or "").lower()
+    return any(k in t for k in _MODEL_POSITION_WORDS)
 
 
 def is_stage_control(fn_name: Optional[str]) -> bool:
@@ -405,9 +414,9 @@ def structured_stage_command(action: str = "", song: str = "", song2: str = "", 
     if a in ("stop_piano", "pause_piano", "resume_piano"):
         return [(f"pe.{a.split('_')[0]}_virtual_piano", {})]
     if a == "watch_video":
-        m = _YT_URL_RE.search(str(url or ""))
-        if m:
-            return [("video.request_watch", {"url": f"https://youtu.be/{m.group(1)}"})]
+        vid = youtube_id(str(url or ""))
+        if vid:
+            return [("video.request_watch", {"url": f"https://youtu.be/{vid}"})]
     return []
 
 

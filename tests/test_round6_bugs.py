@@ -217,3 +217,11 @@ def test_live_disconnect_forgets_the_dead_session():
     assert "GLOBAL_LIVE_SESSION = None" in src[down:down + 200]
     up = src.index("GLOBAL_LIVE_SESSION = session")
     assert '_LIVE_MUTE.update(strikes=0, rotate="")' in src[up:up + 500]
+
+
+def test_remember_position_words_are_one_list():
+    # 以前 vts_client 另有一份：她說「記住基準」只有位置標籤認得，說「記住模型」只有講話認得
+    from core.hard_command import asks_to_remember_model_position as asks
+    assert asks("記住基準") and asks("記住模型") and asks("SAVE_POSITION") and not asks("往左一點")
+    src = open(os.path.join(ROOT, "services", "vts_client.py"), encoding="utf-8").read()
+    assert "asks_to_remember_model_position(clean_pos)" in src and '"save_position"]' not in src
