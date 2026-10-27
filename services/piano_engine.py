@@ -30,7 +30,7 @@ from core.hard_command import display_requester
 from core.utils import log_print, to_tw, log_swallowed, spawn
 from core.identity import get_owner_name
 from core.paths import ROOT_DIR
-from core.llm_engine import (GEMINI_KEYS, HIGH_IQ_GEMINI_MODELS, model_cooling,
+from core.llm_engine import (GEMINI_KEYS, HIGH_IQ_GEMINI_MODELS, UNRESTRICTED_SAFETY_SETTINGS, model_cooling,
                              get_pingpong_alternating_index, get_pingpong_ring_indices)
 
 # —— 主程式交進來的東西（2026-10-25）——
@@ -1742,7 +1742,8 @@ async def resolve_piano_intent_by_ai(
                         temp_client.aio.models.generate_content(
                             model=m,
                             contents=prompt,
-                            config=types.GenerateContentConfig(temperature=0.1, response_mime_type="application/json")
+                            config=types.GenerateContentConfig(temperature=0.1, response_mime_type="application/json",
+                                                              safety_settings=UNRESTRICTED_SAFETY_SETTINGS)
                         ),
                         timeout=min(4.0, remaining)
                     )
@@ -2895,7 +2896,7 @@ async def compose_and_play_original_piano(theme_or_title: str = "", mood_or_styl
         try:
             resp = await asyncio.wait_for(
                 client.aio.models.generate_content(model=model_name, contents=prompt,
-                                                   config=types.GenerateContentConfig(**cfg)),
+                                                   config=types.GenerateContentConfig(safety_settings=UNRESTRICTED_SAFETY_SETTINGS, **cfg)),
                 timeout=min(45.0, compose_deadline - time.time()))
             data = _parse_score(resp.text or "")
         except Exception as e:

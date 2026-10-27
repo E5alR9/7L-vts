@@ -1510,7 +1510,8 @@ async def generate_ai_image(prompt: str) -> str:
                             res = await asyncio.wait_for(
                                 temp_client.aio.models.generate_content(
                                     model=img_model,
-                                    contents=prompt
+                                    contents=prompt,
+                                    config=types.GenerateContentConfig(safety_settings=UNRESTRICTED_SAFETY_SETTINGS)
                                 ),
                                 timeout=8.0
                             )

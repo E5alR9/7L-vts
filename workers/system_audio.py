@@ -20,7 +20,7 @@ from google.genai import types
 
 import core.stage_state as stage
 import services.piano_engine as pe
-from core.llm_engine import AUDIO_MODEL, GEMINI_KEYS, KEYS_VISION, get_dynamic_live_key_candidates, report_gemini_key_error
+from core.llm_engine import AUDIO_MODEL, UNRESTRICTED_SAFETY_SETTINGS, GEMINI_KEYS, KEYS_VISION, get_dynamic_live_key_candidates, report_gemini_key_error
 from core.utils import log_print, log_swallowed, spawn
 
 HOST_ATTRS = (
@@ -116,7 +116,8 @@ async def identify_system_music_and_sound(wav_bytes: bytes) -> str:
         resp = await asyncio.wait_for(asyncio.to_thread(
             client.models.generate_content,
             model=AUDIO_MODEL,
-            contents=[audio_part, prompt_text]
+            contents=[audio_part, prompt_text],
+            config=types.GenerateContentConfig(safety_settings=UNRESTRICTED_SAFETY_SETTINGS)
         ), timeout=12.0)
 
         res_text = resp.text.strip() if resp and resp.text else ""

@@ -288,3 +288,22 @@ def test_failed_vision_falls_back_to_what_peripheral_vision_saw():
     ns, slips, _ = _vision_ns([{"time": _t.time() - 600, "text": "很久以前的畫面"}], fail)
     asyncio.run(ns["live_vision_tool_task"]())
     assert "沒看清楚畫面" in slips[0]                                          # 太舊的不拿來講
+
+
+def test_gemini_calls_use_block_none_but_live_must_not():
+    # 老爸指定 Gemini 一律 BLOCK_NONE（2026-10-27）；但 Live API 不認這個欄位，帶了直接 1007 連不上（實測）
+    missing, live_bad = [], []
+    files = ["vts_7L_test.py"] + [os.path.join(d, f) for d in ("core", "services", "workers")
+                                  for f in os.listdir(os.path.join(ROOT, d)) if f.endswith(".py")]
+    for rel in files:
+        tree = ast.parse(open(os.path.join(ROOT, rel), encoding="utf-8").read())
+        for n in ast.walk(tree):
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute):
+                kws = {k.arg for k in n.keywords}
+                if n.func.attr == "GenerateContentConfig" and "safety_settings" not in kws:
+                    missing.append(f"{rel}:{n.lineno}")
+                if n.func.attr == "LiveConnectConfig" and "safety_settings" in kws:
+                    live_bad.append(f"{rel}:{n.lineno}")
+                if n.func.attr == "generate_content" and "config" not in kws:
+                    missing.append(f"{rel}:{n.lineno}（沒有 config）")
+    assert missing == [] and live_bad == []
