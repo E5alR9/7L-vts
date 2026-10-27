@@ -1905,7 +1905,31 @@ async def play_voice_complete(text, target: str = "dad", raw_actions_text: str =
     backup_start_time = stage.CURRENT_SPEECH_START_TIME if is_singing_now else 0.0
 
     if not text: return
-    
+
+    # 收尾要用的東西先放好：取消／出錯可能發生在任何一步（以前用 'x' in locals() 一個個猜）
+    director_task = producer_task = timeline_task = None
+    timeline_cancel_event = None
+    temp_files_to_clean = []
+    _used_speech_channels = []
+    _used_music_fallback = False
+
+    def _release_playback():
+        """收尾（念完、被取消、出錯都走這裡）：停句中動作和背景任務、只關自己的發話通道、刪分段暫存檔。"""
+        if timeline_cancel_event:
+            timeline_cancel_event.set()
+        for _t in (timeline_task, producer_task, director_task):
+            if _t and not _t.done():
+                _t.cancel()
+        #  只關自己的發話通道（2026-10-11）：唱歌/鋼琴/別句 TTS 在別的通道，
+        #  mixer.stop() 全關就是誤殺麥克風。並發說話各關各的，互不掐。
+        _stop_own_channels(_used_speech_channels, _used_music_fallback)
+        for tf in temp_files_to_clean:
+            try:
+                if os.path.exists(tf):
+                    os.remove(tf)
+            except Exception:
+                pass
+
     # 提早進行文字清理：把神態、語速、音高、工具呼叫等標籤過濾掉，只留下純淨的台詞
     source_text = raw_actions_text if raw_actions_text else text
     _, source_text = TextCleanEngine.extract_thought(source_text)
@@ -1922,7 +1946,6 @@ async def play_voice_complete(text, target: str = "dad", raw_actions_text: str =
         try:
             _remove_temp_mp3()
             base_proj_dir = os.path.dirname(os.path.abspath(__file__))
-            output_file = os.path.join(base_proj_dir, f"temp_reply_{int(time.time() * 1000)}_{random.randint(100, 999)}.mp3")
             
             #  語音合成前置解析：長回覆在標點處切段，第一段合成好就先念、邊念邊合成後面（2026-10-25）。
             # 以前照老爸指示整段一次合成（怕碎音停頓），但 60 字以上要等 6～17 秒才出聲；
@@ -2112,24 +2135,7 @@ async def play_voice_complete(text, target: str = "dad", raw_actions_text: str =
                         stage.clear_mouth()
 
             finally:
-                if timeline_cancel_event:
-                    timeline_cancel_event.set()
-                if timeline_task and not timeline_task.done():
-                    timeline_task.cancel()
-                if producer_task and not producer_task.done():
-                    producer_task.cancel()
-                if director_task and not director_task.done():
-                    director_task.cancel()
-
-                #  只關自己的發話通道（2026-10-11）：唱歌/鋼琴/別句 TTS 在別的通道，
-                #  mixer.stop() 全關就是誤殺麥克風。並發說話各關各的，互不掐。
-                _stop_own_channels(_used_speech_channels, _used_music_fallback)
-
-                # 清理所有分段臨時音訊檔案
-                for tf in temp_files_to_clean:
-                    try:
-                        if os.path.exists(tf): os.remove(tf)
-                    except Exception: pass
+                _release_playback()
 
                 # 清除或還原口型波形狀態
                 if is_singing_now and backup_envelope is not None:
@@ -2149,41 +2155,14 @@ async def play_voice_complete(text, target: str = "dad", raw_actions_text: str =
                     await asyncio.to_thread(update_subtitle, "")
 
         except asyncio.CancelledError:
-            try: pygame.mixer.music.stop()
-            except Exception: pass
-            try: pygame.mixer.music.unload()
-            except Exception: pass
-            if 'temp_files_to_clean' in locals():
-                for tf in temp_files_to_clean:
-                    try:
-                        if os.path.exists(tf): os.remove(tf)
-                    except Exception: pass
-            if 'timeline_cancel_event' in locals() and timeline_cancel_event:
-                timeline_cancel_event.set()
-            if 'timeline_task' in locals() and timeline_task and not timeline_task.done():
-                timeline_task.cancel()
-            if 'producer_task' in locals() and producer_task and not producer_task.done():
-                producer_task.cancel()
-            if 'director_task' in locals() and director_task and not director_task.done():
-                director_task.cancel()
+            _release_playback()
             stage.IS_MP3_PLAYING = False
             LAST_TTS_END_TIME = time.time()
             set_ai_state("IDLE", "語音被取消", only_from="TALKING")
             raise
         except Exception as e:
             log_print(f"❌ [語音合成錯誤]: {e}")
-            try: pygame.mixer.music.stop()
-            except Exception: pass
-            try: pygame.mixer.music.unload()
-            except Exception: pass
-            try:
-                if 'output_file' in locals() and os.path.exists(output_file):
-                    os.remove(output_file)
-            except Exception: pass
-            if 'timeline_cancel_event' in locals() and timeline_cancel_event:
-                timeline_cancel_event.set()
-            if 'timeline_task' in locals() and timeline_task and not timeline_task.done():
-                timeline_task.cancel()
+            _release_playback()
             stage.IS_MP3_PLAYING = False
             LAST_TTS_END_TIME = time.time()
             set_ai_state("IDLE", "語音合成錯誤", only_from="TALKING")

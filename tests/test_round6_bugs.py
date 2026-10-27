@@ -171,3 +171,11 @@ def test_spatial_move_reports_failure_and_lets_conscious_moves_win(monkeypatch):
 def test_temp_reply_cleanup_covers_wav_segments():
     src = ast.get_source_segment(MAIN, _fn("_remove_temp_mp3"))
     assert '"temp_reply_*"' in src and "GPT-SoVITS" not in src
+
+
+def test_speech_cleanup_is_one_helper_and_never_stops_shared_music():
+    """念完、被取消、出錯三條路共用 _release_playback：只關自己的通道，不再 mixer.music.stop() 掐掉唱歌／音效。"""
+    src = ast.get_source_segment(MAIN, _fn("play_voice_complete"))
+    assert src.count("_release_playback()") == 4   # 定義一次＋三條路各叫一次
+    assert "in locals() and" not in src and "in locals():" not in src   # 不再一個個猜變數有沒有建好
+    assert "mixer.music.stop()" not in src.split("except asyncio.CancelledError")[1]   # 取消、出錯不再掐共用的 music
