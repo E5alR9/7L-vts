@@ -8,7 +8,7 @@ from aiohttp import web
 
 from datetime import datetime
 import logging
-from core.utils import log_print, record_interaction_tick, spawn
+from core.utils import log_print, record_interaction_tick, spawn, operator_input_enabled, speech_allowed
 from core.paths import ROOT_DIR
 
 # 🔇 關閉 aiohttp.access 日誌，避免輪詢視覺畫面或狀態時在終端洗版
@@ -690,8 +690,8 @@ async def get_full_telemetry(include_full_memory: bool = False) -> Dict[str, Any
         "core": core_state,
         # 🚦 系統開關旗標（前端用來提示：操作者輸入/發聲是否停用）
         "system_flags": {
-            "operator_input": (os.getenv("OPERATOR_INPUT", "0") or "0").strip().lower() in ("1", "true", "yes"),
-            "operator_speech": (os.getenv("OPERATOR_SPEECH", "0") or "0").strip().lower() in ("1", "true", "yes"),
+            "operator_input": operator_input_enabled(),
+            "operator_speech": speech_allowed(True),
         },
         "tiktok": {
             "is_streaming": is_streaming,

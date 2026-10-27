@@ -8,6 +8,11 @@ current_system_notification = ""
 notification_expire_time = 0.0
 
 
+def env_flag(name: str) -> bool:
+    """.env 的開關（1／true／yes 算開，沒設算關）。"""
+    return (os.getenv(name, "0") or "0").strip().lower() in ("1", "true", "yes")
+
+
 def speech_allowed(private: bool) -> bool:
     """這句回話是否允許『播出聲音』（直播對象控制的總閘門）。
 
@@ -23,7 +28,7 @@ def speech_allowed(private: bool) -> bool:
     """
     if not private:
         return True
-    return (os.getenv("OPERATOR_SPEECH", "0") or "0").strip().lower() in ("1", "true", "yes")
+    return env_flag("OPERATOR_SPEECH")
 
 
 def operator_input_enabled() -> bool:
@@ -39,7 +44,7 @@ def operator_input_enabled() -> bool:
             return False
     except Exception:
         pass
-    return (os.getenv("OPERATOR_INPUT", "0") or "0").strip().lower() in ("1", "true", "yes")
+    return env_flag("OPERATOR_INPUT")
 
 # ⏱️ 7L 統一神經時間心跳中樞 (Unified Tick Engine: 1 Tick = 1 秒)
 SYSTEM_BOOT_TIME = time.time()

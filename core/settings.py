@@ -61,6 +61,6 @@ def boot(data_dir: str) -> Settings:
     mem = sys.modules.get("core.memory")
     if mem is not None and getattr(mem, "MODE", mode) != mode:
         print(f"⚠️ [運行模式] core.memory 已經用 {mem.MODE} 的記憶檔載入，跟這次的模式 {mode} 不同（settings.boot 要更早呼叫）")
-    flag = lambda k: (os.getenv(k, "0") or "0").strip().lower() in ("1", "true", "yes")
-    return Settings(mode=mode, operator_input=flag("OPERATOR_INPUT") and mode == "companion",
-                    operator_speech=flag("OPERATOR_SPEECH"), source=source)
+    from core.utils import env_flag
+    return Settings(mode=mode, operator_input=env_flag("OPERATOR_INPUT") and mode == "companion",
+                    operator_speech=env_flag("OPERATOR_SPEECH"), source=source)
