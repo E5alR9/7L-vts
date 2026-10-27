@@ -203,7 +203,8 @@ def test_relay_text_keeps_facts():
         assert "數字" in s and "不要自己補" in s
 
 
-def _interpret(chain, calls, tool=(None, None), gemini_think=("advice", "[答案]"), nv_think=("advice", "[NV 答案]")):
+def _interpret(chain, calls, tool=(None, None), gemini_think=("advice", "[答案]"), nv_think=("advice", "[NV 答案]"),
+               desktop_think=("miss", "")):
     def mk(name, result):
         async def f(*a, **k):
             calls.append(name)
@@ -214,17 +215,25 @@ def _interpret(chain, calls, tool=(None, None), gemini_think=("advice", "[答案
 
     ns = _load("nv_interpret_task", asyncio=asyncio, resolve_subagent_chain=lambda: chain, promptkit=SimpleNamespace(subagent_system=lambda: ""),
                _gemini_tool_pass=mk("gemini_tool", tool), _nv_tool_pass=mk("nv_tool", tool),
-               _gemini_think_pass=mk("gemini_think", gemini_think), _nv_think_pass=mk("nv_think", nv_think))
+               _gemini_think_pass=mk("gemini_think", gemini_think), _nv_think_pass=mk("nv_think", nv_think),
+               _desktop_think_pass=mk("desktop_think", desktop_think))
     return asyncio.run(ns["nv_interpret_task"]("想一個老媽生日的驚喜點子"))
 
 
 def test_auto_thinks_with_gemini_first_and_nv_only_as_backup():
     calls = []
     assert _interpret(["gemini", "nv"], calls) == ("advice", "[答案]")
-    assert calls == ["gemini_tool", "gemini_think"]
+    assert calls == ["gemini_tool", "desktop_think", "gemini_think"]
     calls = []
     assert _interpret(["gemini", "nv"], calls, gemini_think=RuntimeError("503")) == ("advice", "[NV 答案]")
-    assert calls == ["gemini_tool", "gemini_think", "nv_think"]
+    assert calls == ["gemini_tool", "desktop_think", "gemini_think", "nv_think"]
+
+
+def test_deep_think_asks_the_desktop_gemini_first():
+    # 老爸指定（2026-10-27）：深度思考先問免費的桌面版 Gemini（比 API 穩），答得出來就不打 API
+    calls = []
+    assert _interpret(["gemini", "nv"], calls, desktop_think=("advice", "[桌面版答案]")) == ("advice", "[桌面版答案]")
+    assert calls == ["gemini_tool", "desktop_think"]
 
 
 def test_search_result_is_a_report_to_be_spoken():

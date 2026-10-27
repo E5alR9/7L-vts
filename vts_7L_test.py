@@ -5431,6 +5431,33 @@ async def _gemini_tool_pass(task_ins, target, requester_name, system_instruction
     raise last_err if last_err is not None else RuntimeError("Gemini 工具判定梯隊全滅")
 
 
+# 深度思考先問免費的桌面版 Gemini（老爸指定 2026-10-27：比 API 穩）。Live 主腦照舊是主角，桌面版只幫她想；
+# 桌面版沒開、卡住、超過 DESKTOP_THINK_TIMEOUT_SEC 就照舊走 Gemini API → NV。
+DESKTOP_THINK_FIRST = True
+DESKTOP_THINK_TIMEOUT_SEC = 25.0
+
+
+async def _desktop_think_pass(task_ins, target, requester_name):
+    """桌面版 Gemini 深度思考：回 ("advice", text) 或 ("miss", "")（沒開、卡住、沒答）。"""
+    if not DESKTOP_THINK_FIRST or time.time() < _DESKTOP_DOWN_UNTIL:
+        return "miss", ""
+    from services import desktop_helper as _dh
+    q = task_ins   # 原句直接問（老爸 2026-10-27：規矩一多反而讓它陷入幻覺）
+    try:
+        with usage.as_role("子智能體"):
+            ans = await asyncio.wait_for(asyncio.to_thread(_dh.get_answer, q, DESKTOP_THINK_TIMEOUT_SEC),
+                                         DESKTOP_THINK_TIMEOUT_SEC + 5.0)
+    except Exception as e:
+        _note_desktop_error(e)
+        log_print(f"⚠️ [桌面版深思] 沒想成（{type(e).__name__} {str(e)[:60]}），改走 API")
+        return "miss", ""
+    ans = (ans or "").strip()
+    if not ans:
+        return "miss", ""
+    log_print(f"💡 [桌面版深思] {ans[:80]}")
+    return "advice", _subagent_advice_text(requester_name, ans)
+
+
 async def _gemini_think_pass(task_ins, target, requester_name, system_instruction_text):
     """Gemini 第二棒「深度思考」（temp 0.8、無 tools）：回 ("advice", text) 或 ("miss", "")，報錯上拋。"""
     pairs = list(_subagent_gemini_pairs(HIGH_IQ_GEMINI_MODELS, _SUBAGENT_GEMINI_THINK_ATTEMPTS))
@@ -5587,7 +5614,10 @@ async def nv_interpret_task(task_ins: str, target: str = "dad", requester_name: 
                 _dispatch_in_background(fn_name, fn_args, caller_target=target, caller_user=requester_name)
             # ⚠️ 同 CPU 路徑：唱歌/彈琴紙條必須寫明演唱者是 7L 本人，避免主腦說成「老爸唱的」
             return "tool", build_slip_text(fn_name, fn_args, requester_name, via="")
-        # —— 第二棒：深度思考（第一棒乾淨無調用才到這裡；順序同第一棒，Gemini 先）——
+        # —— 第二棒：深度思考（第一棒乾淨無調用才到這裡）：先問免費的桌面版，不行才照用腦順序走 API ——
+        _k, _t = await _desktop_think_pass(task_ins, target, requester_name)
+        if _k == "advice":
+            return _k, _t
         for _brain in chain:
             try:
                 if _brain == "gemini":
@@ -5890,6 +5920,25 @@ _DESKTOP_DOWN_UNTIL = 0.0
 DESKTOP_CHAT_TIMEOUT_SEC = 20.0
 
 
+def _note_desktop_error(e) -> None:
+    """桌面版沒開（找不到視窗）：5 分鐘內閒聊、深度思考都不再試，直接走 Live／API。"""
+    global _DESKTOP_DOWN_UNTIL
+    if "找不到" in str(e):
+        _DESKTOP_DOWN_UNTIL = time.time() + _DESKTOP_DOWN_SEC
+        log_print(f"⚠️ [桌機代答] 桌面版 Gemini 沒開，{_DESKTOP_DOWN_SEC / 60:.0f} 分鐘內直接走 Live／API。")
+
+
+def _desktop_prewarm() -> None:
+    """開機時在背景先開好桌面版的助手串、切好模型；沒開就記下，5 分鐘內不試。"""
+    from services import desktop_helper as _dh
+    try:
+        _dh._controller().ensure_connected()
+    except Exception as e:
+        _note_desktop_error(e)
+        return
+    _dh.prewarm()
+
+
 async def _desktop_dad_reply(vts, input_queue, user_input: str, owner: str = "老爸"):
     """桌機代答老爸閒聊（2026-10-11 v3）：桌面只查料，開口的是 7L（紙條→主腦；唱歌中才 TTS 插播）。
     掛了走 Live 老路一句不丟。"""
@@ -5909,7 +5958,7 @@ async def _desktop_dad_reply(vts, input_queue, user_input: str, owner: str = "�
 
     try:
         # 整段（含開新串、切模型、塞人格）最多多給 10 秒，超過就走 Live（以前開新串時又多等 30 秒）
-        ans = await asyncio.wait_for(asyncio.to_thread(_dh.get_answer, f"老爸說：{user_input}", DESKTOP_CHAT_TIMEOUT_SEC),
+        ans = await asyncio.wait_for(asyncio.to_thread(_dh.get_answer, user_input, DESKTOP_CHAT_TIMEOUT_SEC),
                                      DESKTOP_CHAT_TIMEOUT_SEC + 10.0)
     except Exception as e:
         global _DESKTOP_DOWN_UNTIL
@@ -6612,6 +6661,8 @@ async def main():
 
     await asyncio.to_thread(_remove_temp_mp3)
     spawn(asyncio.to_thread(pe.init_piano_synthesizer))
+    if DESKTOP_FIRST or DESKTOP_THINK_FIRST:
+        spawn(asyncio.to_thread(_desktop_prewarm))   # 桌面版 Gemini 先開好助手串（閒聊、深度思考用）
     # 嘗試將本地因配額限制未上傳的資料補傳上雲端
     import core.db as db_module
     spawn(db_module.flush_offline_queue())

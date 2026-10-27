@@ -40,6 +40,10 @@ def _memory_files_in_tmp(tmp_path_factory):
     import core.db as db
     import core.memory as mem
     import services.rag_memory_service as rag_service
+    import services.desktop_helper as desktop_helper
+
+    def _no_desktop(*a, **k):
+        raise RuntimeError("找不到桌面版（測試一律不碰老爸的桌面版 Gemini）")
     mem.register_rag(rag_service)   # 跟主程式一樣接上向量庫（下面再把寫入換成假的）
 
     async def _no_rag(*a, **k):
@@ -52,6 +56,8 @@ def _memory_files_in_tmp(tmp_path_factory):
             mp.setattr(mem, name, os.path.join(tmp, os.path.basename(getattr(mem, name))))
         mp.setattr(db, "db", None)
         mp.setattr(rag_service, "add_rag_memory", _no_rag)
+        mp.setattr(desktop_helper, "get_answer", _no_desktop)   # 查資料備援、深度思考會叫它
+        mp.setattr(desktop_helper, "prewarm", lambda: False)
         yield tmp
 
 

@@ -486,3 +486,31 @@ def test_desktop_helper_reads_the_english_gemini_app():
         def _collect_text_nodes(self, node):
             return ["你說了 今天天氣", "Gemini 說了", "晴天"]
     assert dh._history(Z()) == [{"role": "user", "content": "今天天氣"}, {"role": "gemini", "content": "晴天"}]
+
+
+def test_search_falls_back_to_the_desktop_gemini_before_ddg(monkeypatch):
+    # 老爸指定（2026-10-27）：Tavily 優先，沒餘額改問桌面版 Gemini（它自己會上網），再不行才 DuckDuckGo
+    import sys
+    import types
+
+    class Dead:
+        def search(self, **k):
+            return {"error": "quota"}
+    import services.desktop_helper as dh
+    monkeypatch.setattr(ws, "tavily_client", Dead())
+    monkeypatch.setattr(dh, "get_answer", lambda q, t: "1. 台北明天晴，27 度\n2. 降雨機率 10%")
+    monkeypatch.setitem(sys.modules, "duckduckgo_search", None)
+    assert ws.search_google("台北明天天氣") == "- 1. 台北明天晴，27 度\n- 2. 降雨機率 10%"
+    monkeypatch.setattr(dh, "get_answer", lambda q, t: (_ for _ in ()).throw(RuntimeError("找不到")))
+
+    class FakeDDGS:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def text(self, q, max_results=3):
+            return [{"title": "天氣", "body": "台北明天晴"}]
+    monkeypatch.setitem(sys.modules, "duckduckgo_search", types.SimpleNamespace(DDGS=FakeDDGS))
+    assert ws.search_google("台北明天天氣") == "- 天氣: 台北明天晴"

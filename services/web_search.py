@@ -92,6 +92,29 @@ if TAVILY_KEYS:
 else:
     tavily_client = None
 
+# Tavily 沒餘額／失敗時改問桌面版 Gemini（它自己會上網查，免費；老爸指定 2026-10-27），再不行才 DuckDuckGo
+DESKTOP_SEARCH_FALLBACK = True
+DESKTOP_SEARCH_TIMEOUT_SEC = 25.0
+
+
+def _desktop_search(query: str) -> str:
+    """請桌面版 Gemini 上網查，回「- 重點」幾行；沒開、卡住、沒答回空字串。"""
+    if not DESKTOP_SEARCH_FALLBACK:
+        return ""
+    try:
+        from services import desktop_helper as dh
+        ans = dh.get_answer(query, DESKTOP_SEARCH_TIMEOUT_SEC)   # 直接問（規矩一多反而讓它陷入幻覺，老爸 2026-10-27）
+    except Exception as e:
+        log_print(f"⚠️ [網路搜尋] 桌面版 Gemini 也沒查成（{str(e)[:60]}），改用 DuckDuckGo")
+        return ""
+    lines = [ln.strip().lstrip("-•*").strip() for ln in (ans or "").splitlines()]
+    lines = [ln for ln in lines if ln]
+    if not lines:
+        return ""
+    log_print(f"📱 [網路搜尋] Tavily 不行，桌面版 Gemini 查到 {len(lines)} 行")
+    return "\n".join(f"- {ln}" for ln in lines[:6])
+
+
 def search_google(query: str, depth: str = "advanced") -> str:
     """使用 Google / 網路搜尋引擎查詢最新的即時資訊、天氣、時事新聞或未知知識。
     
@@ -117,8 +140,12 @@ def search_google(query: str, depth: str = "advanced") -> str:
             else:
                 # 金鑰全失敗（額度爆、401）：記一行、改走 DuckDuckGo（以前把錯誤字典當結果回給大腦）
                 err = res.get("error") if isinstance(res, dict) else res
-                log_print(f"⚠️ [網路搜尋] Tavily 失敗，改用 DuckDuckGo：{str(err)[:120]}")
-        
+                log_print(f"⚠️ [網路搜尋] Tavily 失敗，改問桌面版 Gemini：{str(err)[:120]}")
+
+        desk = _desktop_search(query)
+        if desk:
+            return desk
+
         try:
             from duckduckgo_search import DDGS
             with DDGS() as ddgs:

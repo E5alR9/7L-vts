@@ -30,12 +30,9 @@ MAX_QUESTION_CHARS = 500
 
 # 手機人格（2026-10-11）：新對話串只設一次。重點是第 3 條——分流閘偶爾漏網，
 # 誠實背帶兜底：辦不到的事直說，絕不假裝辦了（記住了/查到了這種謊最傷）。
-HELPER_SYSTEM_PROMPT = (
-    "往後我會貼問題，你直接給重點回答。這是 7L 查詢助手串。\n"
-    "規矩：用繁體中文；只答問題本身，不加稱呼寒暄，不自報身份；"
-    "不知道就說不知道，絕不編答案；"
-    "控制設備/記錄/即時操作一律說辦不到。"
-)
+# 2026-10-27 老爸：不用繁瑣的提示詞，規矩一多反而讓它陷入幻覺，直接問就好。這一句只當暗號（認得出是助手串，
+# 免得把問題打進老爸自己的對話），之後每一題都原句直接問。
+HELPER_SYSTEM_PROMPT = "這是查詢助手串，之後我會直接問問題。"
 
 _lock = threading.Lock()
 _chat_ready = False
@@ -129,6 +126,22 @@ def _history(c):
     return turns
 
 
+def _set_prompt(c, text: str) -> None:
+    """寫進聊天輸入框：原廠只用 Legacy 寫法，失敗就直接報錯；那個寫法現在常回「元件不可用」
+    （COMError -2147220992，2026-10-27 實測），ValuePattern 照樣寫得進去（寫完送出鈕會出現）。"""
+    el = c.get_input_field()
+    for how in ("value", "legacy"):
+        try:
+            if how == "value":
+                el.GetValuePattern().SetValue(text)
+            else:
+                el.GetLegacyIAccessiblePattern().SetValue(text)
+            return
+        except Exception:
+            continue
+    el.SendKeys(text)
+
+
 def _patch_controller(c):
     """原廠控制器（根目錄 gemini_desktop_controller.py）只認中文介面：找元件的幾個方法換成中英文都認的。"""
     _orig_get_input = c.get_input_field
@@ -139,6 +152,7 @@ def _patch_controller(c):
             return el
         return _orig_get_input()
     c.get_input_field = _get_input
+    c.set_prompt_text = lambda text: _set_prompt(c, text)
     c.get_send_button = lambda: _send_button(c)
     c.get_conversation_history = lambda: _history(c)
     return c
@@ -229,7 +243,8 @@ def _ensure_chat_view(c):
 # 助手串指紋：人格版本關鍵句（對話串身份證；被刪/切走/人格改版就認得出來重建）。
 # v2（2026-10-11）：v1 誠實背帶走火，連陪聊都拒；v2 只擋設備操作。
 # v3（2026-10-11）：去角色化，桌面版只是工具，7L 自己回話。舊串自動重建。
-HELPER_MARKER = "7L 查詢助手"
+# 不提 7L（老爸 2026-10-27：桌面版只是代替 Live 做穩定思考的，不用知道 7L）
+HELPER_MARKER = "查詢助手串"
 # 上次認領的串名（回家一跳直達；被刪就當沒記過）。
 _ADOPTED_NAME = ""
 
@@ -399,6 +414,33 @@ def _find_input_box(c):
         except Exception:
             pass
     return None
+
+
+def prewarm() -> bool:
+    """7L 開機時先開好助手串、切好模型（第一次深度思考／閒聊才不用多等約 30 秒）。不問問題。"""
+    global _chat_ready
+    _uninit = _com_init()
+    try:
+        with _lock:
+            c = _controller()
+            c.ensure_connected()
+            c = _ensure_chat_view(c)
+            if not _in_helper_chat(c):
+                _chat_ready = False
+                ensure_helper_chat()
+                c = _ensure_chat_view(c)
+            _ensure_model(c)
+        print("📱 [桌機助手] 桌面版 Gemini 預熱好了（助手串、模型都就緒）")
+        return True
+    except Exception as e:
+        print(f"⚠️ [桌機助手] 桌面版預熱沒成功（{e}），用到時再試")
+        return False
+    finally:
+        try:
+            if _uninit:
+                _uninit()
+        except Exception:
+            pass
 
 
 def get_answer(question: str, timeout: float = ASK_TIMEOUT_SEC) -> str:
