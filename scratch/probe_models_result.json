@@ -1,0 +1,353 @@
+{
+ "models": [
+  "gemini-3.5-flash-lite",
+  "gemini-3.1-flash-lite",
+  "gemini-3.5-flash",
+  "gemini-3.6-flash",
+  "gemini-3.7-flash",
+  "gemini-3.8-flash",
+  "gemini-2.5-flash",
+  "gemini-2.5-flash-lite"
+ ],
+ "n_keys": 31,
+ "ok": {
+  "gemini-3.5-flash-lite": 30,
+  "gemini-3.1-flash-lite": 30,
+  "gemini-3.5-flash": 0,
+  "gemini-3.6-flash": 0,
+  "gemini-3.7-flash": 0,
+  "gemini-3.8-flash": 0,
+  "gemini-2.5-flash": 0,
+  "gemini-2.5-flash-lite": 0
+ },
+ "fail": {
+  "gemini-3.5-flash-lite": [
+   "K13(...3PbVlg):RemoteProtocolError:Server disconnected without sending a response."
+  ],
+  "gemini-3.1-flash-lite": [
+   "K27(...JJYp1Q):ServerError:503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This mo"
+  ],
+  "gemini-3.5-flash": [
+   "K0(...W59l6g):empty",
+   "K1(...qMPfBQ):empty",
+   "K2(...bTb7ug):empty",
+   "K3(...bnnBIg):ServerError:503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This mo",
+   "K4(...jGhrsQ):empty",
+   "K5(...kfxwAg):empty",
+   "K6(...goCDCw):empty",
+   "K7(...2xAdfA):empty",
+   "K8(...f0h2ew):empty",
+   "K9(...RRj25g):empty",
+   "K10(...-dE5RQ):empty",
+   "K11(...CqX3KQ):empty",
+   "K12(...JnQLOw):empty",
+   "K13(...3PbVlg):empty",
+   "K14(...UtrK6w):empty",
+   "K15(...Zvzq8Q):empty",
+   "K16(...q4l_qA):empty",
+   "K17(...0btU4g):empty",
+   "K18(...h_VGlg):empty",
+   "K19(...lUePRw):empty",
+   "K20(...tVu6EQ):empty",
+   "K21(...gVqcOA):empty",
+   "K22(...ZwHo_Q):empty",
+   "K23(...Z9BORg):empty",
+   "K24(...TZKrBA):empty",
+   "K25(...zkwyIg):empty",
+   "K26(...FoeP3g):empty",
+   "K27(...JJYp1Q):empty",
+   "K28(...YyshtQ):empty",
+   "K29(...pLZfkg):empty",
+   "K30(...aCut6w):empty"
+  ],
+  "gemini-3.6-flash": [
+   "K0(...W59l6g):empty",
+   "K1(...qMPfBQ):empty",
+   "K2(...bTb7ug):empty",
+   "K3(...bnnBIg):empty",
+   "K4(...jGhrsQ):empty",
+   "K5(...kfxwAg):empty",
+   "K6(...goCDCw):empty",
+   "K7(...2xAdfA):empty",
+   "K8(...f0h2ew):empty",
+   "K9(...RRj25g):empty",
+   "K10(...-dE5RQ):empty",
+   "K11(...CqX3KQ):empty",
+   "K12(...JnQLOw):empty",
+   "K13(...3PbVlg):empty",
+   "K14(...UtrK6w):empty",
+   "K15(...Zvzq8Q):empty",
+   "K16(...q4l_qA):empty",
+   "K17(...0btU4g):empty",
+   "K18(...h_VGlg):empty",
+   "K19(...lUePRw):empty",
+   "K20(...tVu6EQ):empty",
+   "K21(...gVqcOA):empty",
+   "K22(...ZwHo_Q):empty",
+   "K23(...Z9BORg):empty",
+   "K24(...TZKrBA):empty",
+   "K25(...zkwyIg):empty",
+   "K26(...FoeP3g):empty",
+   "K27(...JJYp1Q):empty",
+   "K28(...YyshtQ):empty",
+   "K29(...pLZfkg):empty",
+   "K30(...aCut6w):empty"
+  ],
+  "gemini-3.7-flash": [
+   "K0(...W59l6g):ServerError:503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This mo",
+   "K1(...qMPfBQ):empty",
+   "K2(...bTb7ug):ServerError:503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This mo",
+   "K3(...bnnBIg):ServerError:503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This mo",
+   "K4(...jGhrsQ):ServerError:503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This mo",
+   "K5(...kfxwAg):empty",
+   "K6(...goCDCw):empty",
+   "K7(...2xAdfA):ServerError:503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This mo",
+   "K8(...f0h2ew):empty",
+   "K9(...RRj25g):empty",
+   "K10(...-dE5RQ):empty",
+   "K11(...CqX3KQ):empty",
+   "K12(...JnQLOw):empty",
+   "K13(...3PbVlg):empty",
+   "K14(...UtrK6w):ServerError:503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This mo",
+   "K15(...Zvzq8Q):empty",
+   "K16(...q4l_qA):empty",
+   "K17(...0btU4g):ServerError:503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This mo",
+   "K18(...h_VGlg):ServerError:503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This mo",
+   "K19(...lUePRw):empty",
+   "K20(...tVu6EQ):ServerError:503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This mo",
+   "K21(...gVqcOA):ServerError:503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This mo",
+   "K22(...ZwHo_Q):ServerError:503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This mo",
+   "K23(...Z9BORg):ServerError:503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This mo",
+   "K24(...TZKrBA):ServerError:503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This mo",
+   "K25(...zkwyIg):ServerError:503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This mo",
+   "K26(...FoeP3g):ServerError:503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This mo",
+   "K27(...JJYp1Q):empty",
+   "K28(...YyshtQ):empty",
+   "K29(...pLZfkg):empty",
+   "K30(...aCut6w):ServerError:503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This mo"
+  ],
+  "gemini-3.8-flash": [
+   "K0(...W59l6g):ServerError:503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This mo",
+   "K1(...qMPfBQ):empty",
+   "K2(...bTb7ug):empty",
+   "K3(...bnnBIg):empty",
+   "K4(...jGhrsQ):ServerError:503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This mo",
+   "K5(...kfxwAg):ServerError:503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This mo",
+   "K6(...goCDCw):ServerError:503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This mo",
+   "K7(...2xAdfA):empty",
+   "K8(...f0h2ew):ServerError:503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This mo",
+   "K9(...RRj25g):empty",
+   "K10(...-dE5RQ):ServerError:503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This mo",
+   "K11(...CqX3KQ):empty",
+   "K12(...JnQLOw):ServerError:503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This mo",
+   "K13(...3PbVlg):empty",
+   "K14(...UtrK6w):empty",
+   "K15(...Zvzq8Q):empty",
+   "K16(...q4l_qA):empty",
+   "K17(...0btU4g):ServerError:503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This mo",
+   "K18(...h_VGlg):empty",
+   "K19(...lUePRw):empty",
+   "K20(...tVu6EQ):empty",
+   "K21(...gVqcOA):empty",
+   "K22(...ZwHo_Q):ServerError:503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This mo",
+   "K23(...Z9BORg):empty",
+   "K24(...TZKrBA):empty",
+   "K25(...zkwyIg):ServerError:503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This mo",
+   "K26(...FoeP3g):empty",
+   "K27(...JJYp1Q):ServerError:503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This mo",
+   "K28(...YyshtQ):ServerError:503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This mo",
+   "K29(...pLZfkg):empty",
+   "K30(...aCut6w):empty"
+  ],
+  "gemini-2.5-flash": [
+   "K0(...W59l6g):404",
+   "K1(...qMPfBQ):404",
+   "K2(...bTb7ug):404",
+   "K3(...bnnBIg):404",
+   "K4(...jGhrsQ):404",
+   "K5(...kfxwAg):404",
+   "K6(...goCDCw):404",
+   "K7(...2xAdfA):404",
+   "K8(...f0h2ew):404",
+   "K9(...RRj25g):404",
+   "K10(...-dE5RQ):404",
+   "K11(...CqX3KQ):404",
+   "K12(...JnQLOw):404",
+   "K13(...3PbVlg):404",
+   "K14(...UtrK6w):404",
+   "K15(...Zvzq8Q):404",
+   "K16(...q4l_qA):404",
+   "K17(...0btU4g):404",
+   "K18(...h_VGlg):404",
+   "K19(...lUePRw):404",
+   "K20(...tVu6EQ):404",
+   "K21(...gVqcOA):404",
+   "K22(...ZwHo_Q):404",
+   "K23(...Z9BORg):404",
+   "K24(...TZKrBA):404",
+   "K25(...zkwyIg):404",
+   "K26(...FoeP3g):404",
+   "K27(...JJYp1Q):404",
+   "K28(...YyshtQ):404",
+   "K29(...pLZfkg):404",
+   "K30(...aCut6w):404"
+  ],
+  "gemini-2.5-flash-lite": [
+   "K0(...W59l6g):404",
+   "K1(...qMPfBQ):404",
+   "K2(...bTb7ug):404",
+   "K3(...bnnBIg):404",
+   "K4(...jGhrsQ):404",
+   "K5(...kfxwAg):404",
+   "K6(...goCDCw):404",
+   "K7(...2xAdfA):404",
+   "K8(...f0h2ew):404",
+   "K9(...RRj25g):404",
+   "K10(...-dE5RQ):404",
+   "K11(...CqX3KQ):404",
+   "K12(...JnQLOw):404",
+   "K13(...3PbVlg):404",
+   "K14(...UtrK6w):404",
+   "K15(...Zvzq8Q):404",
+   "K16(...q4l_qA):404",
+   "K17(...0btU4g):404",
+   "K18(...h_VGlg):404",
+   "K19(...lUePRw):404",
+   "K20(...tVu6EQ):404",
+   "K21(...gVqcOA):404",
+   "K22(...ZwHo_Q):404",
+   "K23(...Z9BORg):404",
+   "K24(...TZKrBA):404",
+   "K25(...zkwyIg):404",
+   "K26(...FoeP3g):404",
+   "K27(...JJYp1Q):404",
+   "K28(...YyshtQ):404",
+   "K29(...pLZfkg):404",
+   "K30(...aCut6w):404"
+  ]
+ },
+ "per_key_ok": {
+  "K0": [
+   "gemini-3.5-flash-lite",
+   "gemini-3.1-flash-lite"
+  ],
+  "K1": [
+   "gemini-3.5-flash-lite",
+   "gemini-3.1-flash-lite"
+  ],
+  "K2": [
+   "gemini-3.5-flash-lite",
+   "gemini-3.1-flash-lite"
+  ],
+  "K3": [
+   "gemini-3.5-flash-lite",
+   "gemini-3.1-flash-lite"
+  ],
+  "K4": [
+   "gemini-3.5-flash-lite",
+   "gemini-3.1-flash-lite"
+  ],
+  "K5": [
+   "gemini-3.5-flash-lite",
+   "gemini-3.1-flash-lite"
+  ],
+  "K6": [
+   "gemini-3.5-flash-lite",
+   "gemini-3.1-flash-lite"
+  ],
+  "K7": [
+   "gemini-3.5-flash-lite",
+   "gemini-3.1-flash-lite"
+  ],
+  "K8": [
+   "gemini-3.5-flash-lite",
+   "gemini-3.1-flash-lite"
+  ],
+  "K9": [
+   "gemini-3.5-flash-lite",
+   "gemini-3.1-flash-lite"
+  ],
+  "K10": [
+   "gemini-3.5-flash-lite",
+   "gemini-3.1-flash-lite"
+  ],
+  "K11": [
+   "gemini-3.5-flash-lite",
+   "gemini-3.1-flash-lite"
+  ],
+  "K12": [
+   "gemini-3.5-flash-lite",
+   "gemini-3.1-flash-lite"
+  ],
+  "K13": [
+   "gemini-3.1-flash-lite"
+  ],
+  "K14": [
+   "gemini-3.5-flash-lite",
+   "gemini-3.1-flash-lite"
+  ],
+  "K15": [
+   "gemini-3.5-flash-lite",
+   "gemini-3.1-flash-lite"
+  ],
+  "K16": [
+   "gemini-3.5-flash-lite",
+   "gemini-3.1-flash-lite"
+  ],
+  "K17": [
+   "gemini-3.5-flash-lite",
+   "gemini-3.1-flash-lite"
+  ],
+  "K18": [
+   "gemini-3.5-flash-lite",
+   "gemini-3.1-flash-lite"
+  ],
+  "K19": [
+   "gemini-3.5-flash-lite",
+   "gemini-3.1-flash-lite"
+  ],
+  "K20": [
+   "gemini-3.5-flash-lite",
+   "gemini-3.1-flash-lite"
+  ],
+  "K21": [
+   "gemini-3.5-flash-lite",
+   "gemini-3.1-flash-lite"
+  ],
+  "K22": [
+   "gemini-3.5-flash-lite",
+   "gemini-3.1-flash-lite"
+  ],
+  "K23": [
+   "gemini-3.5-flash-lite",
+   "gemini-3.1-flash-lite"
+  ],
+  "K24": [
+   "gemini-3.5-flash-lite",
+   "gemini-3.1-flash-lite"
+  ],
+  "K25": [
+   "gemini-3.5-flash-lite",
+   "gemini-3.1-flash-lite"
+  ],
+  "K26": [
+   "gemini-3.5-flash-lite",
+   "gemini-3.1-flash-lite"
+  ],
+  "K27": [
+   "gemini-3.5-flash-lite"
+  ],
+  "K28": [
+   "gemini-3.5-flash-lite",
+   "gemini-3.1-flash-lite"
+  ],
+  "K29": [
+   "gemini-3.5-flash-lite",
+   "gemini-3.1-flash-lite"
+  ],
+  "K30": [
+   "gemini-3.5-flash-lite",
+   "gemini-3.1-flash-lite"
+  ]
+ }
+}

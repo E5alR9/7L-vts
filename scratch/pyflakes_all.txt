@@ -1,0 +1,41 @@
+﻿vts_7L_test.py:64:1: 'services.piano_engine.get_piano_realtime_prompt' imported but unused
+vts_7L_test.py:65:1: 'services.piano_engine.is_piano_active' imported but unused
+vts_7L_test.py:66:1: 'services.tiktok_listener.tiktok_live_worker' imported but unused
+vts_7L_test.py:71:1: 'PIL.BmpImagePlugin' imported but unused
+vts_7L_test.py:72:1: 'PIL.ImageDraw' imported but unused
+vts_7L_test.py:72:1: 'PIL.ImageGrab' imported but unused
+vts_7L_test.py:72:1: 'PIL.ImageChops' imported but unused
+vts_7L_test.py:76:1: 'copy' imported but unused
+vts_7L_test.py:81:1: 'websockets' imported but unused
+vts_7L_test.py:82:1: 'core.websocket_patch' imported but unused
+vts_7L_test.py:83:1: 'pyvts' imported but unused
+vts_7L_test.py:95:1: 'socket' imported but unused
+vts_7L_test.py:101:1: 'typing.Any' imported but unused
+vts_7L_test.py:101:1: 'typing.Union' imported but unused
+vts_7L_test.py:103:1: 'collections.defaultdict' imported but unused
+vts_7L_test.py:108:1: redefinition of unused 'datetime' from line 89
+vts_7L_test.py:564:1: 'core.utils.get_unified_time_prompt' imported but unused
+vts_7L_test.py:571:1: 'from core.db import *' used; unable to detect undefined names
+vts_7L_test.py:571:1: 'core.db.*' imported but unused
+vts_7L_test.py:588:1: 'core.memory.UNIFIED_DIALOGUE_MEMORY' imported but unused
+vts_7L_test.py:588:1: 'core.memory.MemoryDemandLevel' imported but unused
+vts_7L_test.py:588:1: 'core.memory.MODE' imported but unused
+vts_7L_test.py:946:121: f-string is missing placeholders
+vts_7L_test.py:1157:5: local variable 'used_eye' is assigned to but never used
+vts_7L_test.py:2166:5: 'pyaudio' imported but unused
+vts_7L_test.py:2175:1: 'mic_live_plugin.os_desktop_sensor' imported but unused
+vts_7L_test.py:3321:1: redefinition of unused 'collections' from line 102
+vts_7L_test.py:4223:9: redefinition of unused 'ImageDraw' from line 72
+vts_7L_test.py:4276:9: 'PIL.ImageDraw' imported but unused
+vts_7L_test.py:4276:9: redefinition of unused 'ImageDraw' from line 72
+vts_7L_test.py:4359:13: redefinition of unused 'ImageChops' from line 72
+vts_7L_test.py:4526:9: local variable 'gpu_name' is assigned to but never used
+vts_7L_test.py:4529:9: local variable 'lines' is assigned to but never used
+vts_7L_test.py:4592:25: redefinition of unused 'os_desktop_sensor' from line 2175
+vts_7L_test.py:4742:9: local variable 'has_dispatched_tool' is assigned to but never used
+vts_7L_test.py:4967:13: redefinition of unused 'pyaudio' from line 2166
+vts_7L_test.py:5344:5: 'base64' imported but unused
+vts_7L_test.py:5344:5: redefinition of unused 'pyaudio' from line 2166
+vts_7L_test.py:5542:41: redefinition of unused 'UNIFIED_DIALOGUE_MEMORY' from line 588
+vts_7L_test.py:6045:9: redefinition of unused 'os_desktop_sensor' from line 2175
+vts_7L_test.py:6905:13: redefinition of unused 'auto_cover' from line 6805

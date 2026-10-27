@@ -1,0 +1,30 @@
+{
+ "gemini-3.5-flash": [
+  false,
+  false,
+  false,
+  false,
+  false
+ ],
+ "gemini-3.6-flash": [
+  true,
+  false,
+  false,
+  false,
+  false
+ ],
+ "gemini-3.7-flash": [
+  false,
+  false,
+  false,
+  false,
+  false
+ ],
+ "gemini-3.8-flash": [
+  false,
+  false,
+  false,
+  false,
+  false
+ ]
+}

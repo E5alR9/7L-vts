@@ -1,0 +1,14 @@
+1664 1823 fetch_fast_text_reply
+2340 2365 save_local_audio_clip
+2367 2370 get_recent_local_audio_clips
+2372 2380 load_audio_clip_base64
+2955 2968 save_user_profile
+3360 3362 search_internet
+3385 3386 is_too_similar_to_recent
+3601 3603 strip_all_emojis
+4176 4205 capture_system_audio_chunk
+4207 4216 transcribe_audio_bytes
+4218 4287 gemini_system_audio_live_transcribe
+5290 5313 live_code_tool_task
+7066 7092 background_system_task
+7097 7134 check_requires_deep_gemini
