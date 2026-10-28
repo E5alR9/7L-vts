@@ -135,8 +135,9 @@ def separate_stems_gpu(input_wav: str, song_name: str, tag: str = "") -> tuple[s
         return vocals_out, inst_out
 
     log_print("⚡ [AI 人聲分離] Tier-1 Roformer GPU 分離（分鐘級，有進度＋心跳，不空轉）...")
-    
+
     # Tier-1: Mel-Roformer（品質最好；失敗自動降級，絕不卡住管線）
+    # 筆電有開就兩台分工（services/gpu_split.py：切兩段合力分，或整首給先空的那台）；沒開就桌機整首分，跟以前一樣
     def _sep_progress(pct: int):
         try:
             import services.web_dashboard as web_dash
@@ -147,9 +148,9 @@ def separate_stems_gpu(input_wav: str, song_name: str, tag: str = "") -> tuple[s
             pass
 
     try:
-        from services.roformer_sep import separate_roformer
-        if separate_roformer(input_wav, vocals_out, inst_out,
-                             song_name=song_name, progress_cb=_sep_progress):
+        from services import gpu_split
+        if gpu_split.separate(input_wav, vocals_out, inst_out,
+                              song_name=song_name, progress_cb=_sep_progress):
             return vocals_out, inst_out
         log_print("🔄 [Roformer 未成功，降級 Demucs]...")
     except Exception as e:
@@ -217,10 +218,14 @@ def pitch_shift_vocal_to_female(vocal_in: str, vocal_out: str, semitones: float 
             return bool(path) and os.path.exists(path) and os.path.getsize(path) > 10000
 
         def _run_convert(v_in, v_out, _key, _auto):
-            return convert_vocal_to_xiaoyi(
-                v_in, v_out, key=_key,
-                model_pth=_MODEL_PTH, index_file=_INDEX_FILE,
-                index_rate=0.88, auto_pitch=_auto)
+            # 平常桌機做；桌機正在分別首、筆電空著才丟筆電（services/gpu_split.py）
+            from services import gpu_split
+            return gpu_split.convert_vocal(
+                lambda: convert_vocal_to_xiaoyi(
+                    v_in, v_out, key=_key,
+                    model_pth=_MODEL_PTH, index_file=_INDEX_FILE,
+                    index_rate=0.88, auto_pitch=_auto),
+                v_in, v_out, key=_key, auto_pitch=_auto, index_rate=0.88)
 
         mode_str = "整首統一音域判決" if auto_pitch else f"固定 key={semitones:+0.1f}"
         log_print(f"👑 [7L 專屬曉伊原聲音色轉換] 啟用曉伊原生歌聲神經轉換 ({mode_str})...")
@@ -240,8 +245,9 @@ IS_SINGING_ACTIVE = False
 stage.register_singing_probe(lambda: IS_SINGING_ACTIVE)   # 「她在唱嗎」全程式看這個旗（core.stage_state.singing）
 
 # —— 點歌排隊（2026-10-09：台上有人在唱就排隊＋背景 RVC 照做，不再直接丟掉）——
-# 流程：請求進 SONG_REQUEST_QUEUE → 背景一次只做一首準備（GPU 安全）→
-#  備好進 READY_SONGS → 舞台空了就開唱 → 每首結束遞謝幕紙條 → 下一首。
+# 流程：請求進 SONG_REQUEST_QUEUE → 背景一次只做一首準備（GPU 安全；筆電有開最多兩首，
+#  顯卡誰空誰做由 services/gpu_split.py 排）→ 備好照點歌順序進 READY_SONGS → 舞台空了就開唱 →
+#  每首結束遞謝幕紙條 → 下一首。
 SONG_REQUEST_QUEUE = deque()   # 待準備：{"title", "requester"}
 READY_SONGS = deque()          # 已備好待播：{"title", "vocal", "inst", "requester", "gen"}
 MAX_PENDING_SONGS = 5          # 待播上限（防彈幕洗版；備好＋在唱的不計）
@@ -249,7 +255,10 @@ _ACTIVE_TITLES = set()         # 準備中＋備好＋演唱中的去重鍵（�
 _PIPELINE_GEN = 0              # 世代計數：stop_singing() 遞增，遲到的背景任務自動丟棄
 _ORCH_TASK = None
 _PREPARE_TASK = None
+_PREPARE_TASK2 = None          # 筆電有開時同時準備的第二首（_PREPARE_TASK 做完就搬過去，外面看 _PREPARE_TASK 就夠）
 _PLAY_TASK = None
+_REQ_SEQ = [0]                 # 點歌序號：兩首同時準備時後點的可能先好，開唱照序號
+_PREPARING_SEQS = set()
 
 # 主程式交進來的東西（main() 開機時 bind_host）。以前從 sys.modules 撈主程式模組、或直接 import 主程式，
 # 主程式改名或換啟動方式就默默失效；紙條還繞過紙條佇列直接送給主腦，沒去重也沒加鎖（2026-10-25 健檢）
@@ -607,8 +616,9 @@ def request_cover_song(song_name: str, requester: str = "", source_mp3: str = ""
     idle = ((_ORCH_TASK is None or _ORCH_TASK.done())
             and not READY_SONGS and not _stage_busy()
             and (_PREPARE_TASK is None or _PREPARE_TASK.done()))
+    _REQ_SEQ[0] += 1
     SONG_REQUEST_QUEUE.append({"title": title, "requester": (requester or "").strip(),
-                                 "source_mp3": source_mp3 or "", "origin": origin or ""})
+                                 "source_mp3": source_mp3 or "", "origin": origin or "", "seq": _REQ_SEQ[0]})
     _ACTIVE_TITLES.add(key)
     _ensure_orchestrator()
     if idle:
@@ -618,23 +628,34 @@ def request_cover_song(song_name: str, requester: str = "", source_mp3: str = ""
     return f"《{title}》已排入點歌隊列{tail}，背景 RVC 會接著做、唱完手上這首就輪到它！"
 
 async def _sing_orchestrator():
-    """隊列調度：一次只做一首背景準備（GPU 安全），備好＋舞台空了就開唱，全空就收工。
+    """隊列調度：一次只做一首背景準備（GPU 安全；筆電有開最多兩首），備好＋舞台空了就開唱，全空就收工。
     播放本身也是背景任務——迴圈全程每 0.5 秒轉一圈，台上唱歌時照樣開新的背景準備。"""
-    global _ORCH_TASK, _PREPARE_TASK, _PLAY_TASK
+    global _ORCH_TASK, _PREPARE_TASK, _PREPARE_TASK2, _PLAY_TASK
+    from services import remote_gpu
+    _running = lambda t: t is not None and not t.done()
     try:
         while True:
-            play_busy = _PLAY_TASK is not None and not _PLAY_TASK.done()
+            play_busy = _running(_PLAY_TASK)
             # 1. 有備好的歌、舞台空了、且沒有播放任務在跑 → 開唱（不 await，做成背景任務）
-            if READY_SONGS and not _stage_busy() and not play_busy:
+            #    更早點的歌還在準備就先等它，照點歌順序唱
+            if (READY_SONGS and not _stage_busy() and not play_busy
+                    and not any(s < READY_SONGS[0].get("seq", 0) for s in _PREPARING_SEQS)):
                 item = READY_SONGS.popleft()
                 _PLAY_TASK = asyncio.create_task(
                     play_prepared_song(item["title"], item["vocal"], item["inst"], item["gen"]))
+            if not _running(_PREPARE_TASK) and _running(_PREPARE_TASK2):
+                _PREPARE_TASK, _PREPARE_TASK2 = _PREPARE_TASK2, None
             # 2. 有待準備且沒有準備任務在跑 → 開一個背景準備（唱歌中也能 RVC）
-            if SONG_REQUEST_QUEUE and (_PREPARE_TASK is None or _PREPARE_TASK.done()):
+            if SONG_REQUEST_QUEUE and not _running(_PREPARE_TASK):
                 item = SONG_REQUEST_QUEUE.popleft()
                 _PREPARE_TASK = asyncio.create_task(_prepare_worker(item, _PIPELINE_GEN))
+            # 2b. 筆電有開就同時準備第二首：下載跟上一首的分離錯開，顯卡誰空誰做由 gpu_split 排
+            elif (SONG_REQUEST_QUEUE and not _running(_PREPARE_TASK2)
+                    and await asyncio.to_thread(remote_gpu.available)):
+                item = SONG_REQUEST_QUEUE.popleft()
+                _PREPARE_TASK2 = asyncio.create_task(_prepare_worker(item, _PIPELINE_GEN))
             # 3. 全空且舞台空 → 收工（下次點歌再啟動，不留殭屍任務）
-            prep_busy = _PREPARE_TASK is not None and not _PREPARE_TASK.done()
+            prep_busy = _running(_PREPARE_TASK) or _running(_PREPARE_TASK2)
             play_busy = _PLAY_TASK is not None and not _PLAY_TASK.done()
             if not SONG_REQUEST_QUEUE and not READY_SONGS and not _stage_busy() and not prep_busy and not play_busy:
                 break
@@ -695,6 +716,8 @@ def _same_song_queued(title: str, vocal: str = "") -> bool:
 async def _prepare_worker(item, gen: int):
     """背景準備一首歌（下載→分離→RVC）：成功進 READY，失敗遞紙條，全程不擋台上演唱。"""
     title = item["title"]
+    seq = item.get("seq", 0)
+    _PREPARING_SEQS.add(seq)
     try:
         vocal, inst = await prepare_cover_song(title, source_mp3=item.get("source_mp3", ""),
                                                origin=item.get("origin", ""))
@@ -706,8 +729,11 @@ async def _prepare_worker(item, gen: int):
             log_print(f"⏭️ [翻唱隊列] 《{title}》跟已經排著／在唱的是同一首，不重複上台。")
             return
         if vocal:
-            READY_SONGS.append({"title": title, "vocal": vocal, "inst": inst,
-                                "requester": item.get("requester", ""), "gen": gen})
+            idx = len(READY_SONGS)
+            while idx > 0 and READY_SONGS[idx - 1].get("seq", 0) > seq:
+                idx -= 1
+            READY_SONGS.insert(idx, {"title": title, "vocal": vocal, "inst": inst,
+                                     "requester": item.get("requester", ""), "gen": gen, "seq": seq})
             log_print(f"✅ [翻唱隊列] 《{title}》背景準備完成，已排入待播！")
         else:
             _ACTIVE_TITLES.discard(_dedupe_key(title))
@@ -731,6 +757,8 @@ async def _prepare_worker(item, gen: int):
         _ACTIVE_TITLES.discard(_dedupe_key(title))
         if gen == _PIPELINE_GEN:
             _send_brain_slip(f"[系統提示：剛才點的《{title}》背景準備失敗（下載／分離／轉換卡住），請自然地跟大家說這首先跳過、可以再點別首！]")
+    finally:
+        _PREPARING_SEQS.discard(seq)
 
 async def play_prepared_song(title: str, vocal_path: str, inst_path: str, gen: int) -> str:
     """播一首備好的歌：等開場白 → 世代檢查 → 開唱 → 謝幕紙條（含隊列深度）。"""
