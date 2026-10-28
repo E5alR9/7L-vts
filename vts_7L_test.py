@@ -3087,7 +3087,7 @@ async def instinct_live_worker():
                             text = c.output_transcription.text
                             import services.vts_client as vc
                         
-                            exp_match = re.search(r'\[EXPRESSION[：:]\s*([^\]\[]+)\]', text, re.IGNORECASE)
+                            exp_match = re.search(r'\[EXPRESSIONS?[：:]\s*([^\]\[]+)\]', text, re.IGNORECASE)   # 複數也認
                             if exp_match:
                                 exp_tag = exp_match.group(1).strip()
                                 kind = vc.action_kind(exp_tag)   # 跟舞台動作、vts_client 同一份關鍵字

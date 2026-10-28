@@ -135,7 +135,8 @@ async def execute_speech_visual_actions(vts, text: str):
     if not text:
         return
         
-    exp_match = re.search(r'\[EXPRESSION[：:]\s*([^\]\[]+)\]', text, re.IGNORECASE)
+    # 她偶爾寫成複數 [EXPRESSIONS: 吐舌]（2026-10-29 後台對話紀錄），以前整個沒認到、表情沒做
+    exp_match = re.search(r'\[EXPRESSIONS?[：:]\s*([^\]\[]+)\]', text, re.IGNORECASE)
     if exp_match:
         exp_tag = exp_match.group(1).strip()
         kind = vc.action_kind(exp_tag)   # 眨眼／驚訝／皺眉的關鍵字跟 vts_client 同一份

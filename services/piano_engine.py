@@ -1469,6 +1469,11 @@ async def stop_virtual_piano(force: bool = False) -> str:
         log_print("🛡️ [鋼琴安全防護] 88 鍵鋼琴剛在 3.5 秒內被拿出，自動忽略衝突的【收起鋼琴】指令！")
         return ""
         
+    # 鋼琴本來就沒拿出來（2026-10-29 後台：主腦唱歌前常順手叫收琴，每次都重置表情、走回原位、
+    # 記一筆「鋼琴演奏結束並收起」，對話紀錄洗版，唱歌中還會連話筒一起關）：只做下面的取消，不演收琴
+    was_out = bool(is_piano_active or is_piano_window_alive()
+                   or (current_piano_process and current_piano_process.poll() is None)
+                   or (current_piano_task and not current_piano_task.done()))
     PIANO_SESSION_ID += 1  # 註銷所有先前或進行中的鋼琴 Session
     _PIANO_STOPS["n"] += 1   # 還在判斷意圖的點曲看到這個就不開彈（play_virtual_piano）
     IS_PIANO_AUTO_RADIO_MODE = False  # 關閉無限隨機電台模式
@@ -1478,7 +1483,11 @@ async def stop_virtual_piano(force: bool = False) -> str:
     current_piano_song_title = ""
     PIANO_REQUEST_QUEUE.clear()
     save_persisted_piano_state(False, "", False)
-    
+    if not was_out:
+        stage.set_ai_state("IDLE", "收起鋼琴", only_from="PIANO")   # 狀態卡在彈琴（琴已經不在）照樣解開
+        log_print("🎹 [鋼琴舞台] 鋼琴本來就收著，不用收")
+        return "（系統回報：鋼琴本來就沒拿出來，不用收）"
+
     if is_piano_window_alive():
         send_piano_ipc_command({"cmd": "close"})
         await asyncio.sleep(0.08)

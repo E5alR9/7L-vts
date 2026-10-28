@@ -854,7 +854,7 @@ async def set_vts_expression(vts, exp_tag, is_instinct=False):
                 CURRENT_ACTIVE_EXPS.clear()
             elif CURRENT_ACTIVE_EXPS:
                 CURRENT_ACTIVE_EXPS.clear()
-            elif CURRENT_ACTIVE_EXP:
+            elif CURRENT_ACTIVE_EXP and not _is_protected_exp(CURRENT_ACTIVE_EXP):   # 唱歌中的話筒、水印照樣不碰
                 async with vts_lock:
                     try:
                         await asyncio.wait_for(vts.request({
@@ -993,10 +993,82 @@ async def trigger_vts_expression(expression_name: str, is_instinct: bool = False
 # 會把它當殘留關掉（開機每講完一句就滅一次）。這裡白名單，兩條路都跳過。
 PROTECTED_EXPRESSIONS = frozenset({"水印.exp3.json"})
 
+# ── 表演中拿在手上的道具（2026-10-29 老爸：開唱時話筒被她唱歌前那句話收尾的 reset 關掉）──
+# 唱歌拿出話筒時登記在這裡，表演中 reset/sync 都跳過；唱完先取消登記再收起來（見 auto_cover_pipeline）
+HELD_PROPS = set()
 
-def _is_protected_exp(filename: str) -> bool:
+
+def hold_prop(filename: str, held: bool) -> None:
+    (HELD_PROPS.add if held else HELD_PROPS.discard)(filename)
+
+
+def _is_watermark(filename: str) -> bool:
     f = str(filename or "")
     return f in PROTECTED_EXPRESSIONS or "水印" in f or "watermark" in f.lower()
+
+
+def _is_protected_exp(filename: str) -> bool:
+    return _is_watermark(filename) or str(filename or "") in HELD_PROPS
+
+
+# ── 後台表情盤（2026-10-29 老爸：後台只有寫死的 7 顆，模型新的表情都沒放上去）──
+# 按鈕照模型實際有的表情檔長（問 VTS），這裡只管顯示的中文名和哪些是道具；模型多了新檔不用改這裡也會出現（用檔名）
+EXPRESSION_LABELS = {
+    "爱心.exp3.json": "愛心", "星星眼.exp3.json": "星星眼", "红脸.exp3.json": "臉紅", "比心.exp3.json": "比心",
+    "花花.exp3.json": "花花", "吐舌.exp3.json": "吐舌", "问号.exp3.json": "問號", "流汗.exp3.json": "流汗",
+    "着急.exp3.json": "著急", "晕晕.exp3.json": "暈", "哭哭.exp3.json": "哭哭", "生气.exp3.json": "生氣",
+    "黑脸.exp3.json": "黑臉", "黑化.exp3.json": "黑化",
+    "话筒.exp3.json": "話筒", "打游戏.exp3.json": "打遊戲", "双马尾.exp3.json": "雙馬尾",
+    "右抬手.exp3.json": "右抬手", "左抬手.exp3.json": "左抬手",
+}
+PROP_FILES = frozenset({"话筒.exp3.json", "打游戏.exp3.json", "双马尾.exp3.json", "右抬手.exp3.json", "左抬手.exp3.json"})
+
+
+async def list_expressions(vts=None) -> list:
+    """後台表情盤：模型裡有的表情檔和開著沒（問 VTS）；連不上 VTS 就列對照表裡的檔、開著沒照小本本。水印不列。
+    回 [{"file", "name", "prop", "active"}]，有中文名的照 EXPRESSION_LABELS 的順序排在前面。"""
+    target = vts or globals().get("GLOBAL_VTS")
+    files = {}
+    if target is not None:
+        try:
+            st = await asyncio.wait_for(target.request({
+                "apiName": "VTubeStudioPublicAPI", "apiVersion": "1.0", "requestID": "ListExpressions",
+                "messageType": "ExpressionStateRequest", "data": {"details": False}
+            }), timeout=1.5)
+            for e in ((st or {}).get("data", {}) or {}).get("expressions", []) or []:
+                f = isinstance(e, dict) and (e.get("file") or e.get("expressionFile", ""))
+                if f and str(f).endswith(".exp3.json") and not _is_watermark(f):
+                    files[f] = bool(e.get("active"))
+        except Exception:
+            files = {}
+    if not files:
+        files = {f: f in CURRENT_ACTIVE_EXPS for f in set(VTS_EXPRESSION_MAP.values()) if not _is_watermark(f)}
+    order = list(EXPRESSION_LABELS)
+    ranked = sorted(files, key=lambda f: (order.index(f) if f in EXPRESSION_LABELS else len(order), f))
+    return [{"file": f, "name": EXPRESSION_LABELS.get(f, f[:-len(".exp3.json")]), "prop": f in PROP_FILES,
+             "active": files[f]} for f in ranked]
+
+
+async def set_expression_file(filename: str, active: bool, vts=None) -> bool:
+    """後台按鈕開／關單一個表情檔：關只關這一個（_RESET_ 是整張臉清掉）。水印不給動。成功回 True。"""
+    target = vts or globals().get("GLOBAL_VTS")
+    f = str(filename or "")
+    if target is None or not f.endswith(".exp3.json") or _is_watermark(f):
+        return False
+    try:
+        async with vts_lock:
+            resp = await asyncio.wait_for(target.request({
+                "apiName": "VTubeStudioPublicAPI", "apiVersion": "1.0", "requestID": "PanelExpression",
+                "messageType": "ExpressionActivationRequest", "data": {"expressionFile": f, "active": bool(active)}
+            }), timeout=1.0)
+    except Exception as e:
+        log_print(f"⚠️ [Live2D 表情] 後台{'開' if active else '關'} {f} 失敗: {e}")
+        return False
+    if not _vts_ok(resp):
+        log_print(f"⚠️ [Live2D 表情] 後台{'開' if active else '關'} {f} 失敗: {_vts_err(resp)}")
+        return False
+    (CURRENT_ACTIVE_EXPS.add if active else CURRENT_ACTIVE_EXPS.discard)(f)
+    return True
 
 
 # ── 表情選單唯一真相（2026-10-10：主腦 responses.md＋本能 prompt 都從這裡自動帶，改一處即全改）──

@@ -1111,7 +1111,9 @@ async def play_cover_audio(vocal_path: str, song_name: str, inst_path: str = Non
             _core_set_ai_state("SINGING", f"雙軌齊發《{song_name}》")
             
             # 🎤 唱歌自動拿出麥克風 (不重置其他表情，單獨開關麥克風)
+            # 登記成手上的道具：唱歌前那句話收尾的表情 reset 跟開唱幾乎同時，不登記會連話筒一起關掉
             import services.vts_client as vc
+            vc.hold_prop("话筒.exp3.json", True)
             if vc.GLOBAL_VTS:
                 async def _toggle_mic(active=True):
                     try:
@@ -1147,6 +1149,7 @@ async def play_cover_audio(vocal_path: str, song_name: str, inst_path: str = Non
         # 唱歌結束自動收起麥克風 (不重置其他表情)
         if _HOST:
             import services.vts_client as vc
+            vc.hold_prop("话筒.exp3.json", False)
             if vc.GLOBAL_VTS:
                 async def _toggle_mic_off():
                     try:

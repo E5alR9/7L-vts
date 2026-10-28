@@ -953,6 +953,39 @@ async def api_trigger_expression(request):
     except Exception as e:
         return web.json_response({"ok": False, "error": str(e)}, status=500)
 
+_EXPRESSION_ACTIONS = [("眨眼", "眨眼"), ("驚訝", "驚訝"), ("皺眉", "皺眉"), ("翻白眼", "翻白眼")]   # 一下就過的動作（計時器），不是開關
+
+
+async def _expression_summary(items) -> str:
+    on = [it["name"] for it in items if it.get("active")]
+    return "、".join(on) if on else "自然"
+
+
+async def api_get_expressions(request):
+    """後台表情盤：模型實際有的表情（開著沒）＋一下就過的動作"""
+    import services.vts_client as vc
+    items = await vc.list_expressions()
+    return web.json_response({"ok": True, "connected": vc.GLOBAL_VTS is not None, "items": items,
+                              "actions": [{"name": n, "expr": e} for n, e in _EXPRESSION_ACTIONS],
+                              "summary": await _expression_summary(items)})
+
+
+async def api_toggle_expression(request):
+    """後台表情盤：開／關單一個表情檔（不像重置會把整張臉清掉）"""
+    import services.vts_client as vc
+    try:
+        body = await request.json()
+        f = str(body.get("file", "")).strip()
+        if not await vc.set_expression_file(f, bool(body.get("active"))):
+            return web.json_response({"ok": False, "error": "VTS 沒接上或這個表情不能動"}, status=503)
+        items = await vc.list_expressions()
+        summary = await _expression_summary(items)
+        broadcast_event("expression_changed", {"expression": summary})
+        return web.json_response({"ok": True, "items": items, "summary": summary})
+    except Exception as e:
+        return web.json_response({"ok": False, "error": str(e)}, status=500)
+
+
 async def api_set_sleep(request):
     """切換 7L 睡眠模式 (0 API 消耗)"""
     try:
@@ -1456,6 +1489,8 @@ async def start_web_dashboard(
     app.router.add_post("/api/toggle_mic", api_toggle_mic)
     app.router.add_post("/api/set_sleep", api_set_sleep)
     app.router.add_post("/api/trigger_expression", api_trigger_expression)
+    app.router.add_get("/api/expressions", api_get_expressions)
+    app.router.add_post("/api/expression_toggle", api_toggle_expression)
     app.router.add_post("/api/action/punish", api_punish_action)
     app.router.add_post("/api/action/reward", api_reward_action)
     app.router.add_get("/api/prompts", api_get_prompts)

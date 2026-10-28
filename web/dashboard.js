@@ -89,6 +89,58 @@ class SevenLMonitorApp {
     this.loadSwitches();
     this.loadModelUsage();
     setInterval(() => this.loadModelUsage(), 15000);
+    this.loadExpressions();
+    setInterval(() => this.loadExpressions(), 10000);   // 她自己換表情時，按鈕的開關狀態也跟上
+  }
+
+  // Live2D 表情盤（/api/expressions）：按鈕照模型實際有的表情長，開著的亮起來；道具和一下就過的動作分開放
+  async loadExpressions() {
+    const grid = document.getElementById('exprGrid');
+    if (!grid) return;
+    try {
+      const resp = await fetch('/api/expressions');
+      const data = await resp.json();
+      if (!data.ok) return;
+      this.renderExpressions(data);
+    } catch (e) {
+      // 7L 關著或剛重開：下一輪再試
+    }
+  }
+
+  renderExpressions(data) {
+    const chip = (attrs, label, on) =>
+      `<button class="expr-chip${on ? ' active' : ''}" ${attrs}>${this.escapeHtml(label)}</button>`;
+    const items = Array.isArray(data.items) ? data.items : [];
+    const faces = items.filter(it => !it.prop);
+    const props = items.filter(it => it.prop);
+    const fileChip = it => chip(`data-file="${this.escapeHtml(it.file)}" data-active="${it.active ? 1 : 0}"`, it.name, it.active);
+    const grid = document.getElementById('exprGrid');
+    grid.innerHTML = faces.length ? faces.map(fileChip).join('') : '<span class="tip-text">VTS 還沒接上</span>';
+    const propGrid = document.getElementById('exprProps');
+    if (propGrid) propGrid.innerHTML = props.map(fileChip).join('');
+    const actGrid = document.getElementById('exprActions');
+    if (actGrid && Array.isArray(data.actions)) {
+      actGrid.innerHTML = data.actions.map(a => chip(`data-expr="${this.escapeHtml(a.expr)}"`, a.name, false)).join('');
+    }
+    if (this.monVtsExpression && data.summary) safeSetText(this.monVtsExpression, `目前：${data.summary}`);
+  }
+
+  async toggleExpressionFile(file, active) {
+    try {
+      const resp = await fetch('/api/expression_toggle', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ file, active })
+      });
+      const data = await resp.json();
+      if (!data.ok) {
+        this.showToast(`表情切換失敗：${data.error || resp.status}`);
+        return;
+      }
+      this.renderExpressions(data);
+    } catch (e) {
+      this.showToast('表情切換失敗：7L 沒有回應');
+    }
   }
 
   // 模型用量（/api/model_usage）：最近一小時誰叫了哪個模型幾次
@@ -244,7 +296,6 @@ class SevenLMonitorApp {
     this.monMicStatus = document.getElementById('monMicStatus');
     this.monModelName = document.getElementById('monModelName');
     this.monVtsExpression = document.getElementById('monVtsExpression');
-    this.exprChips = document.querySelectorAll('.expr-chip');
     this.monMindBoard = document.getElementById('monMindBoard');
 
     // 日誌分頁
@@ -535,39 +586,28 @@ class SevenLMonitorApp {
       });
     }
 
-    // Live2D 表情切換按鈕 - 開關式 (Toggle Switch: 點擊開啟，再點擊關閉)
-    this.exprChips.forEach(chip => {
-      chip.addEventListener('click', () => {
-        const expr = chip.dataset.expr;
-        if (!expr) return;
-
-        if (expr === '_RESET_') {
-          // 點擊「重置預設」：全部關閉，恢復自然
-          this.activeExpression = null;
-          this.exprChips.forEach(c => c.classList.remove('active'));
+    // Live2D 表情盤：按鈕是 loadExpressions 動態長的，點擊交給整塊面板處理。
+    // 表情／道具：點一下開、再點一下只關那一個（可以疊）；動作：一下就過；「全部關掉」：整張臉恢復自然
+    const exprPanel = document.getElementById('exprGrid')?.closest('.glass-panel');
+    if (exprPanel) {
+      exprPanel.addEventListener('click', (ev) => {
+        const chip = ev.target.closest('.expr-chip');
+        if (!chip) return;
+        const name = chip.textContent.trim();
+        if (chip.dataset.file) {
+          const turnOn = chip.dataset.active !== '1';
+          this.toggleExpressionFile(chip.dataset.file, turnOn);
+          this.appendLog(`[表情開關] ${turnOn ? '開啟' : '關閉'}表情「${name}」`, 'line-info');
+        } else if (chip.dataset.expr === '_RESET_') {
           this.triggerExpression('_RESET_');
           this.appendLog('[表情控制] 關閉所有表情，恢復預設自然狀態', 'line-info');
-        } else if (this.activeExpression === expr) {
-          // 再次點擊已開啟的同一個表情：開關式關閉 (Toggle OFF)
-          this.activeExpression = null;
-          chip.classList.remove('active');
-          this.triggerExpression('_RESET_');
-          this.appendLog(`[表情開關] 關閉表情「${chip.innerText.trim()}」，恢復自然狀態`, 'line-info');
-        } else {
-          // 點擊未開啟的表情：開關式開啟 (Toggle ON)，並關閉其他表情
-          this.activeExpression = expr;
-          this.exprChips.forEach(c => {
-            if (c.dataset.expr === expr && expr !== '_RESET_') {
-              c.classList.add('active');
-            } else {
-              c.classList.remove('active');
-            }
-          });
-          this.triggerExpression(expr);
-          this.appendLog(`[表情開關] 開啟表情「${chip.innerText.trim()}」`, 'line-info');
+          setTimeout(() => this.loadExpressions(), 800);
+        } else if (chip.dataset.expr) {
+          this.triggerExpression(chip.dataset.expr);
+          this.appendLog(`[表情動作] ${name}`, 'line-info');
         }
       });
-    });
+    }
 
     // 視覺相框放大檢視與手動刷新
     const box = document.getElementById('visionPreviewBox');
@@ -1136,9 +1176,8 @@ class SevenLMonitorApp {
         }
       }
     } else if (type === 'expression_changed') {
-      if (this.monVtsExpression) {
-        safeSetText(this.monVtsExpression, `目前：${data.expression}`);
-      }
+      clearTimeout(this.exprReloadTimer);
+      this.exprReloadTimer = setTimeout(() => this.loadExpressions(), 300);   // 重新問 VTS，按鈕跟著亮／暗
     } else if (type === 'timer_added') {
       if (data) {
         this.updateLiveTimerUI(data);
@@ -1563,13 +1602,7 @@ class SevenLMonitorApp {
         }
       }
 
-      if (core.vts_expression && this.monVtsExpression) {
-        safeSetText(this.monVtsExpression, `目前：${core.vts_expression}`);
-        if (core.vts_expression === '自然' || core.vts_expression === '預設') {
-          this.activeExpression = null;
-          this.exprChips.forEach(c => c.classList.remove('active'));
-        }
-      }
+      // 「目前：」和按鈕亮不亮由表情盤（loadExpressions，問 VTS 臉上真正開著的）負責，這裡不再蓋掉
 
       // 🎧 聲音感知中樞即時動態更新 (電腦 WASAPI Loopback & 現實環境人聲)
       const audio = core.audio_perception || {};
@@ -2260,14 +2293,8 @@ class SevenLMonitorApp {
   }
 
   triggerExpression(expr) {
-    if (this.monVtsExpression) {
-      if (expr === '_RESET_') {
-        safeSetText(this.monVtsExpression, '目前：自然');
-      } else {
-        const chip = Array.from(this.exprChips).find(c => c.dataset.expr === expr);
-        const name = chip ? chip.childNodes[0].textContent.trim() : expr;
-        safeSetText(this.monVtsExpression, `目前：${name}`);
-      }
+    if (this.monVtsExpression && expr === '_RESET_') {
+      safeSetText(this.monVtsExpression, '目前：自然');
     }
     this.appendLog(`[表情指令] 切換 Live2D 表情: ${expr}`, 'line-info');
 
@@ -3574,10 +3601,14 @@ class SevenLMonitorApp {
     }
   }
 
-  // 7L 的回覆夾著給 TTS／表情用的控制標籤（[SPEED:+10%]、[EXPRESSION: 開心]…），對話框只顯示要說的話
+  // 7L 的回覆夾著給 TTS／表情用的控制標籤（[SPEED:+10%]、[EXPRESSION: 開心]、[VIEWER_UPDATE:…]…），對話框只顯示要說的話。
+  // 跟後端 dashboard_bridge 同一條：方括號裡是大寫英文標籤名就拿掉（以前列舉名單，[EXPRESSIONS: …]、[VIEWER_UPDATE:…] 漏網）。
+  // Live 的逐字稿一段一段送來，中文字之間會多出空格（「《小 星星》」），中文字之間的空白也拿掉
   stripControlTags(text) {
+    const cjk = '\\u3000-\\u303f\\u3400-\\u9fff\\uff00-\\uffef《》「」『』';
     return String(text || '')
-      .replace(/\[(?:SPEED|PITCH|VOLUME|RATE|EXPRESSION|MOVE|LOOK|WINK|FROWN|SHOCK|SPATIAL|POSITION|WINDOW|TOOL|SILENCE|PASS|SKIP|INTERRUPT_SELF)\b[^\]]*\]/gi, '')
+      .replace(/\[[A-Z_]+(?:[:：][^\]]*)?\]/g, '')
+      .replace(new RegExp(`(?<=[${cjk}])[ \\t]+(?=[${cjk}])`, 'g'), '')
       .replace(/\s{2,}/g, ' ')
       .trim();
   }

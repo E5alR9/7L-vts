@@ -2338,6 +2338,18 @@ body.frosted-theme::before {
   grid-column: span 4;
   text-align: center;
 }
+.expr-section-label {
+  font-size: 0.72rem;
+  color: var(--text-low, rgba(255, 255, 255, 0.55));
+  margin: 10px 0 6px;
+  letter-spacing: 0.04em;
+}
+.expression-grid + .expression-grid {
+  margin-top: 8px;
+}
+.expression-grid:empty {
+  display: none;
+}
 
 .mind-box {
   min-height: 80px;

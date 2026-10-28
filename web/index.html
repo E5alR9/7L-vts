@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Noto+Sans+TC:wght@300;400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/dashboard.css?v=20260920_tts_hud_top_right_v2">
+  <link rel="stylesheet" href="/static/dashboard.css?v=20261029_expr_panel">
 </head>
 <body class="frosted-theme">
   <!-- 背景黑白粉動態極光流光 (Dynamic Living Aurora Lights) -->
@@ -519,15 +519,15 @@
             </div>
             <span class="tip-text font-mono" id="monVtsExpression">目前：自然</span>
           </div>
+          <!-- 按鈕照模型實際有的表情長（/api/expressions，問 VTS）；點一下開、再點一下只關那一個 -->
+          <div class="expr-section-label">表情</div>
+          <div class="expression-grid" id="exprGrid"><span class="tip-text">讀取模型表情中…</span></div>
+          <div class="expr-section-label">道具／手勢</div>
+          <div class="expression-grid" id="exprProps"></div>
+          <div class="expr-section-label">一下就過的動作</div>
+          <div class="expression-grid" id="exprActions"></div>
           <div class="expression-grid">
-            <button class="expr-chip" data-expr="happy">微笑</button>
-            <button class="expr-chip" data-expr="shy">害羞</button>
-            <button class="expr-chip" data-expr="shock">震驚</button>
-            <button class="expr-chip" data-expr="heart">喜愛</button>
-            <button class="expr-chip" data-expr="wink">眨眼</button>
-            <button class="expr-chip" data-expr="frown">委屈</button>
-            <button class="expr-chip" data-expr="star">專注</button>
-            <button class="expr-chip expr-reset-all" data-expr="_RESET_">重置預設</button>
+            <button class="expr-chip expr-reset-all" data-expr="_RESET_">全部關掉（恢復自然）</button>
           </div>
         </div>
 
@@ -1089,6 +1089,6 @@
   <!-- 全域透明玻璃輕量通知 Toast -->
   <div class="glass-toast font-mono" id="glassToast"></div>
 
-  <script src="/static/dashboard.js?v=20261025_strip_tags"></script>
+  <script src="/static/dashboard.js?v=20261029_expr_panel"></script>
 </body>
 </html>

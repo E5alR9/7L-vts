@@ -92,6 +92,22 @@ def test_reset_never_touches_watermark():
     assert fake.active == {"水印.exp3.json"}
 
 
+def test_reset_keeps_held_mic_while_singing():
+    """2026-10-29：開唱時話筒被唱歌前那句話收尾的 reset 關掉。唱歌中登記成手上道具，reset 不碰；唱完取消登記照常關。"""
+    _reset_state(("笑.exp3.json",))
+    fake = FakeVTS(active_files=("话筒.exp3.json", "笑.exp3.json"))
+    v.hold_prop("话筒.exp3.json", True)
+    try:
+        asyncio.run(v.set_vts_expression(fake, "_RESET_"))
+        assert "话筒.exp3.json" not in fake.deactivated
+        assert "笑.exp3.json" in fake.deactivated
+        assert fake.active == {"话筒.exp3.json"}
+    finally:
+        v.hold_prop("话筒.exp3.json", False)
+    asyncio.run(v.set_vts_expression(fake, "_RESET_"))
+    assert "话筒.exp3.json" in fake.deactivated
+
+
 def test_sync_never_seeds_watermark():
     v.CURRENT_ACTIVE_EXPS = set()
     fake = FakeVTS(active_files=("水印.exp3.json", "星星眼.exp3.json"))
