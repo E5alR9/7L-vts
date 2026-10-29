@@ -3495,32 +3495,29 @@ async def _send_say_response(session, ws_send_lock, fn_call_id, result: str) -> 
         log_swallowed()
 
 
-# 交辦結果回來、她只在腦內講完沒 say（2026-10-29 換 3.8 主腦後實機：查明天台北天氣，結果回來她在腦內講了一段完整的
-# 「老爸，明天台北多雲轉晴，最高 32 度…」，提醒她 say 之後又在腦內講一次，一個字都沒念出來）。結果交回去之後
-# RESULT_RELAY_SEC 秒內、她還沒 say 過，腦內那段是完整的話就照念（她就是要講這個，只是沒走 say）。
-RESULT_RELAY_SEC = 30.0
-_RESULT_RELAY = {"ts": 0.0}   # 最近一次要她講出來的子智能體結果交回去的時間
+# 人跟她講話、她只在腦內回（2026-10-29 換 3.8 主腦後實機：老爸兩次說「妳唱得好可愛喔」，她都只在腦內回
+# 「哼，這還用你說！不過被老爸誇獎…」，一個字沒念；觀眾打招呼 4 句也有 2 句這樣）。曾經把腦內那段直接念出來，
+# 老爸：感覺不太好，還是用 say 專門去說——現在不幫她念，提醒她一次「他聽不到，要回就 say」，講不講、講什麼由她 say。
+# 叫了工具（腦內在盤算）、腦內是在決定不回的（不用回、自言自語、先安靜…）不提醒。交辦結果沒講的由 _nudge_if_unsaid 提醒。
+REPLY_NUDGE_SEC = 30.0
+_NOT_REPLYING_RE = re.compile(r"不用回|不回|不必回|不理|沒在跟我|不是在跟我|自言自語|先安靜|保持安靜|不打擾|不插話|不出聲|不用講|不講")
+_REPLY_NUDGED = {"ts": 0.0}   # 每句人話只提醒一次
 
 
-def _inner_voice_is_unsaid_result(text: str, now: float) -> bool:
+def _unsaid_reply_nudge(text: str, now: float) -> str:
+    """她這輪只在腦內回了人、沒 say 也沒叫工具 → 提醒她的紙條；不用提醒回空字串。"""
+    o = _BRAIN_INPUT_ORIGIN
+    ts = o.get("ts") or 0.0
+    if not (LIVE_SAY_GATE and o.get("human") and ts and now - ts < REPLY_NUDGE_SEC and ts != _REPLY_NUDGED["ts"]
+            and LAST_SAY_TS < ts and LAST_BRAIN_TOOL_TS < ts):
+        return ""
     t = re.sub(r"\[[^\]]*\]", "", text or "").strip()
-    return bool(LIVE_SAY_GATE and _RESULT_RELAY["ts"] and now - _RESULT_RELAY["ts"] < RESULT_RELAY_SEC
-                and LAST_SAY_TS < _RESULT_RELAY["ts"] and len(re.findall(r"\w", t)) >= 8)
-
-
-async def _say_unsaid_result(vts, text: str) -> None:
-    """把她腦內講完的結果照念（跟 say 同一條鎖、同一個出口）。"""
-    global LAST_SAY_TS, LAST_BRAIN_TURN_TS
-    async with _SAY_LOCK:
-        if LAST_SAY_TS >= _RESULT_RELAY["ts"]:
-            return   # 這段時間她自己 say 了
-        LAST_SAY_TS = LAST_BRAIN_TURN_TS = time.time()
-        log_print(f"🗣️ [結果照念] 結果回來她只在腦內講、沒 say，照念：{text[:80]}")
-        _who = "audience" if _BRAIN_INPUT_ORIGIN.get("who") == "audience" else "dad"
-        spoken = await _speak_brain_turn(vts, input_queue, text, _who, _live_reply_target(), "live_api",
-                                         queue_while_singing=True, from_live=True)
-        if spoken:
-            spawn(_afterthought(spoken))
+    if len(re.findall(r"\w", t)) < 6 or _NOT_REPLYING_RE.search(t):
+        return ""
+    _REPLY_NUDGED["ts"] = ts
+    who = _owner_name() if o.get("who") == "dad" else f"觀眾「{o.get('name') or '觀眾'}」"
+    return (f"[系統提示：妳剛才只在腦內回{who}（「{t[:60]}」），{who}聽不到。要回就呼叫 say 講出來；"
+            f"決定不回就不用。]")
 
 
 def _note_inner_voice(text: str) -> None:
@@ -3553,7 +3550,6 @@ async def _handle_invoke_subagent(session, ws_send_lock, _fn_name, _fn_call_id, 
             async with ws_send_lock:
                 await session.send_tool_response(function_responses=[types.FunctionResponse(**_fr)])
             if LIVE_SAY_GATE and not _more and _sched == types.FunctionResponseScheduling.WHEN_IDLE:
-                _RESULT_RELAY["ts"] = time.time()   # 她接著只在腦內講的話，_say_unsaid_result 照念
                 if AFTERTHOUGHT_ENABLED:
                     _advisor().note(f"（7L 交辦的結果回來了：{_text[:400]}）")   # 軍師下一輪一起看
                 spawn(_nudge_if_unsaid(_text, time.time()))
@@ -4063,10 +4059,11 @@ async def continuous_live_worker(vts):
                                             _who = "audience" if _BRAIN_INPUT_ORIGIN.get("who") == "audience" else "dad"
                                             _turn_text = turn_buffer.strip()
                                             if LIVE_SAY_GATE:
-                                                if _inner_voice_is_unsaid_result(_turn_text, time.time()):
-                                                    spawn(_say_unsaid_result(vts, _turn_text))   # 結果回來只在腦內講完：照念
-                                                else:
-                                                    _note_inner_voice(_turn_text)   # 腦內聲音：只記不念（標籤在上面逐段已經觸發過）
+                                                _nudge = _unsaid_reply_nudge(_turn_text, time.time())
+                                                _note_inner_voice(_turn_text)   # 腦內聲音：只記不念（標籤在上面逐段已經觸發過）
+                                                if _nudge:   # 回人只在腦內回：提醒她用 say（老爸：講話專門用 say）
+                                                    log_print(f"👂 [沒開口] 有人跟她講話，她只在腦內回，提醒她用 say：{_turn_text[:60]}")
+                                                    send_brain_slip(_nudge)
                                                 turn_buffer = ""
                                                 chunk_buffer = ""
                                                 turn_vision = False

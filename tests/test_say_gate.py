@@ -193,27 +193,28 @@ def test_mic_holds_her_own_singing_back_but_lets_dad_through():
     assert "sing_dad_open_until = _now + SING_DAD_HOLD_SEC" in sing and r"data = b'\x00' * len(data)" in sing
 
 
-def test_result_she_only_said_in_her_head_is_spoken():
-    """2026-10-29 換 3.8 主腦後實機：查明天台北天氣，結果回來她在腦內講完「老爸，明天台北多雲轉晴，最高 32 度…」，
-    提醒她 say 之後又在腦內講一次，一個字都沒念出來。結果交回去後 30 秒內她還沒 say 過，腦內那段完整的話就照念。"""
-    ns, sess, spoken, logs, _ = _say_ns()
-    exec(compile(ast.Module(body=[_fn("_inner_voice_is_unsaid_result"), _fn("_say_unsaid_result")], type_ignores=[]),
-                 "r", "exec"), ns)
+def test_reply_only_in_her_head_gets_one_reminder_to_say_it():
+    """同日 3.8 主腦實機：老爸兩次說「妳唱得好可愛喔」，她都只在腦內回，一個字沒念。曾經直接把腦內那段念出來，
+    老爸：感覺不太好，還是用 say 專門去說。現在不幫她念，提醒她一次「他聽不到，要回就 say」，講不講由她 say。"""
     now = time.time()
-    ns.update(LIVE_SAY_GATE=True, RESULT_RELAY_SEC=30.0, _RESULT_RELAY={"ts": now - 3}, LAST_SAY_TS=now - 10)
-    f = ns["_inner_voice_is_unsaid_result"]
-    answer = "老爸，明天台北多雲轉晴，最高溫有32度！[EXPRESSION: 眨眼]"
-    assert f(answer, now)
-    assert not f("嗯…", now)                                   # 太短：不是在講結果
-    ns["LAST_SAY_TS"] = now - 1
-    assert not f(answer, now)                                  # 結果回來後她 say 過了
-    ns["LAST_SAY_TS"] = now - 10
-    assert not f(answer, now + 40)                             # 結果早就講過了
-    asyncio.run(ns["_say_unsaid_result"]("V", answer))
-    assert spoken and spoken[0][0] == answer and ns["LAST_SAY_TS"] >= now
-    asyncio.run(ns["_say_unsaid_result"]("V", answer))          # 念過了：不念第二次
-    assert len(spoken) == 1
+    pat = next(n.value.args[0].value for n in TREE.body if isinstance(n, ast.Assign)
+               and getattr(n.targets[0], "id", "") == "_NOT_REPLYING_RE")
+    ns = _load("_unsaid_reply_nudge", re=re, LIVE_SAY_GATE=True, REPLY_NUDGE_SEC=30.0, _REPLY_NUDGED={"ts": 0.0},
+               _NOT_REPLYING_RE=re.compile(pat), _owner_name=lambda: "老爸",
+               _BRAIN_INPUT_ORIGIN={"human": True, "ts": now - 3, "who": "dad"},
+               LAST_SAY_TS=now - 60, LAST_BRAIN_TOOL_TS=now - 60)
+    f = ns["_unsaid_reply_nudge"]
+    reply = "[EXPRESSION: 愛心] 哼，這還用你說！不過被老爸誇獎，我心情還是挺好的～"
+    slip = f(reply, now)
+    assert "只在腦內回老爸" in slip and "say" in slip and "哼，這還用你說" in slip
+    assert f(reply, now) == ""                                    # 同一句人話只提醒一次
+    ns["_REPLY_NUDGED"]["ts"] = 0.0
+    assert f("老爸在自言自語，先不用回", now) == ""                # 腦內決定不回：不提醒
+    ns["LAST_BRAIN_TOOL_TS"] = now - 1
+    assert f(reply, now) == ""                                    # 叫了工具：腦內是在盤算
+    ns["LAST_BRAIN_TOOL_TS"] = now - 60
+    ns["_BRAIN_INPUT_ORIGIN"]["human"] = False
+    assert f(reply, now) == ""                                    # 系統紙條（感知、謝幕）：不提醒
     recv = ast.get_source_segment(MAIN, next(n for n in ast.walk(TREE)
                                              if isinstance(n, ast.AsyncFunctionDef) and n.name == "receive_from_live"))
-    assert "spawn(_say_unsaid_result(vts, _turn_text))" in recv
-    assert '_RESULT_RELAY["ts"] = time.time()' in ast.get_source_segment(MAIN, _fn("_handle_invoke_subagent"))
+    assert "send_brain_slip(_nudge)" in recv and "_say_unsaid_result" not in MAIN   # 不再幫她念腦內的話
