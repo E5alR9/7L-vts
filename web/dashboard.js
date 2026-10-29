@@ -1309,8 +1309,11 @@ class SevenLMonitorApp {
       this.rvcHideTimer = null;
     }
 
-    if (this.rvcHudIcon) safeSetText(this.rvcHudIcon, '🔄');
-    if (this.rvcHudTitle) safeSetText(this.rvcHudTitle, '7L 音色轉換中 (RVC)');
+    // 開唱後整首歌都掛著這張卡：以前一直寫「音色轉換中 (RVC) 100%」，看起來像卡住（老爸 2026-10-29）
+    const onStage = data.active && data.stage === '舞台開唱';
+    this.rvcOnStageSince = onStage ? Date.now() : 0;
+    if (this.rvcHudIcon) safeSetText(this.rvcHudIcon, onStage ? '🎤' : '🔄');
+    if (this.rvcHudTitle) safeSetText(this.rvcHudTitle, onStage ? '7L 演唱中' : '7L 音色轉換中 (RVC)');
 
     if (data.active && data.stage) {
       this.rvcProgressHud.style.display = 'flex';
@@ -1460,6 +1463,11 @@ class SevenLMonitorApp {
       const mode = (core.ai_state || (this.isSleeping ? 'sleep' : 'idle')).toLowerCase();
       safeSetText(this.valMode, mode);
       safeSetText(this.footMode, mode);
+      // 「演唱中」卡的保險：唱完那則事件沒收到（斷線、唱到一半重開），她已經不在唱就收掉
+      if (this.rvcOnStageSince && Date.now() - this.rvcOnStageSince > 8000 && mode !== 'singing' && mode !== 'talking') {
+        this.rvcOnStageSince = 0;
+        this.updateRvcProgress({ active: false, stage: '演唱完畢' });
+      }
 
       // API 能量與調用次數
       const apiCalls = core.api_calls !== undefined ? core.api_calls : 0;

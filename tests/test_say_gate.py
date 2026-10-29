@@ -180,3 +180,14 @@ def test_live_brain_gets_the_say_tool_and_rule_only_when_the_gate_is_on():
                                              if isinstance(n, ast.AsyncFunctionDef) and n.name == "receive_from_live"))
     assert 'if fn_name == "say" and LIVE_SAY_GATE:' in recv and "_note_inner_voice(_turn_text)" in recv
     assert "tools=LIVE_SAY_TOOLS if LIVE_SAY_GATE else LIVE_API_TOOLS" in MAIN
+
+
+def test_mic_holds_her_own_singing_back_but_lets_dad_through():
+    """唱歌中喇叭的歌聲被 Live 聽成老爸在講話（2026-10-29 實機：她唱「我的心裡還有你」被記成老爸說的，她還回他）。
+    跟她講話時一樣先不送，聲紋聽出是老爸才放行；不停歌，之後 SING_DAD_HOLD_SEC 秒照送讓他講完。
+    離線量：她三首歌（人聲＋伴奏、衰減成回音）271 段只有 1 段像老爸、從沒連續 2 段（2 段才放行）。"""
+    src = MAIN[MAIN.index("async def send_mic_audio"):MAIN.index("async def receive_from_live")]
+    sing = src[src.index("elif is_singing_active():"):src.index("barge.reset()", src.index("elif is_singing_active():"))]
+    assert "barge.feed(data)" in sing and "await barge.check(_now)" in sing
+    assert "interrupt_current_speech" not in sing                         # 不停歌
+    assert "sing_dad_open_until = _now + SING_DAD_HOLD_SEC" in sing and r"data = b'\x00' * len(data)" in sing

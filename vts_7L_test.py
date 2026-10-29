@@ -3052,6 +3052,7 @@ async def build_brain_system_prompt(owner: str, char_name: str, say_gate: bool =
 # 探路（3.1-flash-live，7 題）：全部改用 say、腦內沒有漏講，開口時間跟以前一樣約 1 秒；查東西是 叫子代理→say 答應→結果回來→say 答案。
 # 關掉＝以前的樣子（輸出就念）。REST 大腦（Live 斷線時接手）不受影響，照舊直接講。
 LIVE_SAY_GATE = True
+SING_DAD_HOLD_SEC = 3.0   # 唱歌中聲紋聽出老爸在講話：之後這麼久麥克風照送（讓他講完），每聽到一次再延長
 LIVE_SAY_BARGE_IN_SEC = 3.0   # 開著 say 閘：被打斷前這麼久內老爸有開口，才算他插話、清掉她排隊要講的
 # 子智能體結果交給她（要她講的那種）之後這麼久還沒 say，提醒一次（2026-10-29 實測：查天氣＋計時器的結果回來，
 # 她只在腦內吐一個「|」就沒下文，天氣結果整個不見）
@@ -3302,6 +3303,12 @@ async def _run_subagent_task(_task_ins, _intent, _respond):
             _req = _brain_requester()
             # 主腦填了結構化舞台動作就照欄位直接執行，不再用正則猜她轉述的說法（2026-10-25）
             _cmds = structured_stage_command(**(_intent or {}))
+            if not _cmds and _autonomy_turn(time.time()):
+                # 感知那輪沒人問她事情：不查東西（2026-10-29 實機：她叫桌面版 Gemini「問老爸在做什麼」，桌面版看不到畫面，回一大篇猜的）
+                log_print(f"🫀 [感知] 沒人問她事情，不叫子智能體查：{_task_ins[:40]}")
+                await _respond("[系統底層：沒有人問妳事情，不用查。想知道老爸在做什麼就看紙條上寫的畫面，"
+                               "不知道就安靜；想自己彈琴唱歌可以。]", _quiet)
+                return
             _said = _BRAIN_INPUT_ORIGIN.get("said", "")
             if (_cmds or _SING_PLAY_RE.search(_task_ins)) and _SING_PLAY_RE.search(_said or "") \
                     and await _stage_already_handled(_said):
@@ -3782,6 +3789,7 @@ async def continuous_live_worker(vts):
                     global current_mic_action_str, LATEST_REALWORLD_SPEECH_TIME
                     from mic_live_plugin.voiceprint_verifier import dad_and_her_scores
                     barge = BargeInDetector(score_fn=dad_and_her_scores)
+                    sing_dad_open_until = 0.0   # 唱歌中聽到老爸：到這個時間前麥克風照送
                     try:
                         while True:
                             data = await asyncio.to_thread(_read_mic_chunk)
@@ -3802,8 +3810,23 @@ async def continuous_live_worker(vts):
                                     spawn(interrupt_current_speech(clear_queue=False, reason="老爸插話"))
                                 else:
                                     data = b'\x00' * len(data)
+                            elif is_singing_active():
+                                # 她在唱：喇叭的歌聲被 Live 聽成老爸在講話（2026-10-29 實機：她唱的「我的心裡還有你」
+                                # 記成老爸說的，她還回「這句歌詞很適合我對你唱」）。跟她講話時一樣先不送，
+                                # 聲紋聽出是老爸才放行（不停歌，只讓他的話送到），之後幾秒照送讓他講完
+                                barge.feed(data)
+                                _now = time.time()
+                                if await barge.check(_now):
+                                    if _now > sing_dad_open_until:
+                                        _d, _h = barge.last_scores
+                                        log_print(f"🎙️ [唱歌中聽到老爸] 像老爸 {_d:.2f}／像她 {_h:.2f}，他的話照送")
+                                        data = barge.buffered()
+                                    sing_dad_open_until = _now + SING_DAD_HOLD_SEC
+                                elif _now > sing_dad_open_until:
+                                    data = b'\x00' * len(data)
                             else:
                                 barge.reset()
+                                sing_dad_open_until = 0.0
                                 
                             import numpy as np
                             data_np = np.frombuffer(data, dtype=np.int16)
@@ -3861,6 +3884,7 @@ async def continuous_live_worker(vts):
                         log_print(f"🎤 [老爸說話 (Live STT)] {user_spoken}")
                         spawn(_accept_offer_by_voice(user_spoken, owner))   # 她剛問要不要唱、老爸說「要」（2026-10-27）
                         if _SING_PLAY_RE.search(user_spoken):   # 有唱／彈：不等她決定，直接判斷（老爸 2026-10-29）
+                            _stage_mark(user_spoken, "pending")   # 當場記：同一批的工具呼叫會等這個判斷
                             spawn(background_tool_executor(user_spoken, target="dad", requester_name=owner, voice=True))
                         spawn(_related_context_for_speech(user_spoken))   # 查舊對話，有就當背景資料給主腦（2026-10-26）
                         try:
@@ -3890,6 +3914,10 @@ async def continuous_live_worker(vts):
                                 _fcs = list(getattr(getattr(resp, 'tool_call', None), 'function_calls', None) or [])
                                 if c and getattr(c, 'model_turn', None) and c.model_turn.parts:
                                     _fcs += [p.function_call for p in c.model_turn.parts if getattr(p, 'function_call', None)]
+                                if _fcs:
+                                    # 老爸的話平常在她開口時才收尾；工具呼叫比她開口早到，先收尾，唱／彈的判斷才排得在主腦前面
+                                    # （2026-10-29 實機：麥克風說「唱小星星」，主腦先排、Groq 那條就沒判）
+                                    _flush_user_speech()
                                 for _fc in _fcs:
                                     fn_name = _fc.name
                                     fn_args = getattr(_fc, 'args', {}) or {}
@@ -5307,6 +5335,13 @@ def _autonomy_slip(changes: list, cur: dict, now: float) -> str:
     return "\n".join(lines)
 
 
+def _autonomy_turn(now: float) -> bool:
+    """主腦這輪是不是在回感知紙條（剛遞過、之後沒人講話）。"""
+    a = _AUTONOMY
+    return bool(AUTONOMY_ENABLED and a["pulse_ts"] and now - a["pulse_ts"] < AUTONOMY_AFTER_HUMAN_SEC + 30.0
+                and a["pulse_ts"] >= (_BRAIN_INPUT_ORIGIN.get("ts") or 0.0))
+
+
 def _autonomy_note_say(text: str, now: float) -> str:
     """say 時呼叫：這句是不是回應感知的主動開口；是的話檢查上限。回 "block"（擋）、"self"（主動開口，放行）或 ""（不相干）。"""
     a = _AUTONOMY
@@ -6445,9 +6480,10 @@ async def background_tool_executor(user_text: str, target: str = "dad", requeste
         cmds = []
         if not from_brain and _SING_PLAY_RE.search(user_text or ""):
             # 有唱／彈：CPU 不猜，整句交給 Groq（老爸 2026-10-29）
-            if await _stage_already_handled(user_text):   # 主腦已經照這句排了
-                return False, "", {}
-            _stage_mark(user_text, "pending")
+            if not voice:   # 語音那條收尾時已經記了「判斷中」（不能等自己）
+                if await _stage_already_handled(user_text):   # 主腦已經照這句排了
+                    return False, "", {}
+                _stage_mark(user_text, "pending")
             _t0 = time.time()
             cmds = await _judge_stage_request(user_text)
             _stage_mark(user_text, "hit" if cmds else "none")

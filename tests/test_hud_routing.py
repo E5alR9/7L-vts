@@ -34,3 +34,13 @@ def test_rvc_hud_dom_and_style_present():
     assert ".tts-progress-hud.rvc-below" in css
     js = _src("web/dashboard.js")
     assert "getElementById('rvcProgressHud')" in js
+
+
+def test_on_stage_card_says_singing_and_heals_itself():
+    """後台的翻唱卡（老爸 2026-10-29：RVC 顯示卡住）：開唱後整首歌寫「音色轉換中 (RVC) 100%」看起來像卡住；
+    唱完那則事件沒收到（斷線、唱到一半重開）卡片就永遠掛著。現在開唱寫「演唱中」，她不在唱了就自己收掉。"""
+    import os
+    js = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "web", "dashboard.js"),
+              encoding="utf-8").read()
+    assert "onStage ? '7L 演唱中' : '7L 音色轉換中 (RVC)'" in js
+    assert "mode !== 'singing' && mode !== 'talking'" in js and "this.updateRvcProgress({ active: false" in js

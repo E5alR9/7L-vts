@@ -128,3 +128,18 @@ def test_wiring():
     assert "queue_while_singing=True" in say and '_autonomy_note_say(raw, time.time()) == "block"' in say
     speak = ast.get_source_segment(MAIN, _fn("_speak_brain_turn"))
     assert "queue_while_singing or not is_singing_active()" in speak           # 唱歌中 say 排隊，等間奏空白
+
+
+def test_perception_turn_does_not_look_things_up():
+    """2026-10-29 實機：開始放 Chopin 的感知紙條，她叫桌面版 Gemini「問老爸在做什麼」，桌面版看不到畫面，回一大篇猜的。
+    感知那輪（剛遞紙條、之後沒人講話）不准叫子智能體查東西；自己彈琴唱歌照准。"""
+    now = time.time()
+    ns = _load("_autonomy_turn", AUTONOMY_ENABLED=True, AUTONOMY_AFTER_HUMAN_SEC=30.0,
+               _AUTONOMY={"pulse_ts": now - 5}, _BRAIN_INPUT_ORIGIN={"ts": now - 300})
+    assert ns["_autonomy_turn"](now)
+    ns["_BRAIN_INPUT_ORIGIN"]["ts"] = now - 1                                  # 紙條之後老爸講話了：是在回他
+    assert not ns["_autonomy_turn"](now)
+    ns["_BRAIN_INPUT_ORIGIN"]["ts"] = now - 300
+    assert not ns["_autonomy_turn"](now + 120)                                 # 感知早就過了
+    sub = ast.get_source_segment(MAIN, _fn("_run_subagent_task"))
+    assert "if not _cmds and _autonomy_turn(time.time()):" in sub              # 舞台動作（_cmds）照准

@@ -99,6 +99,21 @@ def test_brain_waits_for_a_pending_judgment():
     assert asyncio.run(go()) is True
 
 
+def test_voice_is_judged_before_the_brains_tool_call():
+    """2026-10-29 實機：麥克風「唱小星星」，主腦的工具呼叫比她開口早到、先排了，Groq 那條看到已處理就沒判。
+    現在收到工具呼叫先收尾老爸的話、當場記「判斷中」，主腦那邊等 Groq；語音那條不能等自己。"""
+    import time as _t
+    ns, ran, asked = _ns('{"action": "sing", "song": "小星星"}')
+    ns["_stage_mark"]("唱 小 星 星 。", "pending")      # 收尾時記的
+    t0 = _t.time()
+    asyncio.run(ns["background_tool_executor"]("唱 小 星 星 。", target="dad", voice=True))
+    assert _t.time() - t0 < 0.2 and asked and ran[0][0] == [("auto_sing_song", {"song_name": "小星星"})]
+    assert asyncio.run(ns["_stage_already_handled"]("唱小星星"))   # 空格、句號不影響：主腦那條看得到
+    recv = ast.get_source_segment(MAIN, _fn("receive_from_live"))
+    assert recv.index("_flush_user_speech()", recv.index("_fcs = list(")) < recv.index("for _fc in _fcs:")
+    assert '_stage_mark(user_spoken, "pending")' in MAIN
+
+
 def test_wiring():
     sub = ast.get_source_segment(MAIN, _fn("_run_subagent_task"))
     assert "await _stage_already_handled(_said)" in sub and '_stage_mark(_said, "hit")' in sub
