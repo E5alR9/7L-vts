@@ -135,3 +135,11 @@ def test_sync_failure_keeps_book():
     v.CURRENT_ACTIVE_EXPS = {"黑臉.exp3.json"}
     fake = FakeVTS(active_files=(), fail_query=True)
     assert asyncio.run(v.sync_expression_state(fake)) == {"黑臉.exp3.json"}
+
+
+def test_reset_goes_back_to_idle_look_not_locked_on_the_mouse():
+    """清臉以前把「盯滑鼠」鎖成 True、沒人關回來：待命擺頭、睡覺低頭都沒跑過（2026-10-29 實機）。"""
+    _reset_state(())
+    v.is_tracking_mouse = True   # 例如「LOOK: MOUSE」之後
+    asyncio.run(v.set_vts_expression(FakeVTS(), "_RESET_"))
+    assert v.is_tracking_mouse is False

@@ -875,7 +875,9 @@ async def set_vts_expression(vts, exp_tag, is_instinct=False):
             wink_timer = 0.0
             frown_timer = 0.0
             eye_roll_timer = 0.0
-            is_tracking_mouse = True
+            # 清臉＝回到待命：不鎖定盯滑鼠（偶爾自己瞄一下滑鼠由 face_tracking 管）。以前這裡設 True、沒有地方關回來，
+            # 開機第一次清臉之後就永遠盯著游標，待命擺頭、睡覺低頭呼吸都沒跑過，滑鼠不動她就像雕像（2026-10-29 實機）
+            is_tracking_mouse = False
             if failed:
                 log_print(f"⚠️ [Live2D 表情] 重置未完成，還掛在臉上：{', '.join(failed)}（下次 reset 會重試）")
             elif to_close:
