@@ -35,6 +35,12 @@ def _load(*names, **ns):
     ns.setdefault("usage", __import__("core.usage", fromlist=["usage"]))   # 主程式函式掛著 @usage.role_scope
     ns.setdefault("resolve_tool_name", resolve_tool_name)
     ns.setdefault("_SUBAGENT_MIRROR_TASK_RE", __import__("re").compile(_const_pattern("_SUBAGENT_MIRROR_TASK_RE")))
+    ns.setdefault("_SING_PLAY_RE", __import__("re").compile(_const_pattern("_SING_PLAY_RE")))   # 有唱／彈直接判斷（10-29）
+
+    async def _not_handled(said):
+        return False
+    ns.setdefault("_stage_already_handled", _not_handled)
+    ns.setdefault("_stage_mark", lambda said, state: None)
     for n in names:
         exec(compile(ast.Module(body=[_fn(n)], type_ignores=[]), n, "exec"), ns)
     return ns
@@ -95,7 +101,7 @@ def _run_handler(cpu, nv, total_timeout=45.0, task="幫我查日圓匯率", orig
 
     from core.hard_command import build_slip_text, structured_stage_command
     sess = _FakeSession()
-    ns = _load("_run_subagent_task", "_handle_invoke_subagent", types=types, asyncio=asyncio, session=sess, GLOBAL_LIVE_SESSION=sess,
+    ns = _load("_run_subagent_task", "_handle_invoke_subagent", _AWAITING_RESULTS={}, LIVE_SAY_GATE=False, types=types, asyncio=asyncio, session=sess, GLOBAL_LIVE_SESSION=sess,
                ws_send_lock=asyncio.Lock(), _desktop_lookup=desktop_lookup,
                background_tool_executor=background_tool_executor, nv_interpret_task=nv_interpret_task,
                build_slip_text=build_slip_text, _SUBAGENT_TOTAL_TIMEOUT=total_timeout,
@@ -316,7 +322,7 @@ def test_screen_task_is_handed_to_the_vision_brain():
 
     def run(recent):
         sess = _FakeSession()
-        ns = _load("_run_subagent_task", "_handle_invoke_subagent", types=types, asyncio=asyncio, time=time, GLOBAL_LIVE_SESSION=sess,
+        ns = _load("_run_subagent_task", "_handle_invoke_subagent", _AWAITING_RESULTS={}, LIVE_SAY_GATE=False, types=types, asyncio=asyncio, time=time, GLOBAL_LIVE_SESSION=sess,
                    background_tool_executor=never, nv_interpret_task=never, build_slip_text=build_slip_text,
                    _SUBAGENT_TOTAL_TIMEOUT=45.0, _SUBAGENT_VISION_TASK_RE=_re.compile(_const_pattern("_SUBAGENT_VISION_TASK_RE")),
                    _start_vision=lambda: not recent and (looked.append(True) or True),   # 剛看過／正在看就回 False
@@ -483,7 +489,7 @@ def test_mirror_task_is_handed_to_the_mirror_once():
 
     def run(can_start):
         sess = _FakeSession()
-        ns = _load("_run_subagent_task", "_handle_invoke_subagent", types=types, asyncio=asyncio, time=time, GLOBAL_LIVE_SESSION=sess,
+        ns = _load("_run_subagent_task", "_handle_invoke_subagent", _AWAITING_RESULTS={}, LIVE_SAY_GATE=False, types=types, asyncio=asyncio, time=time, GLOBAL_LIVE_SESSION=sess,
                    background_tool_executor=never, nv_interpret_task=never,
                    _SUBAGENT_VISION_TASK_RE=__import__("re").compile(_const_pattern("_SUBAGENT_VISION_TASK_RE")),
                    _start_mirror=lambda: started.append(1) or can_start)

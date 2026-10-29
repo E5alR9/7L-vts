@@ -4,7 +4,7 @@
 
     MODE            companion | vtuber（預設 vtuber）。開機由 core/settings.boot 定一次（後台存的模式開關優先），
                     執行中切換只經 settings.apply_mode
-    OWNER_NAME      擁有者稱謂（預設「老爸」），讀環境變數
+    擁有者稱謂固定「老爸」（2026-10-29 老爸：不用 OWNER_NAME，她叫什麼靠她自己的記憶）
     CHARACTER_NAME  角色名（預設「7L」），讀環境變數
     OWNER_ACCOUNT_IDS  老爸的平台帳號（認老爸只信這個）寫在本檔
 
@@ -28,8 +28,8 @@ def is_vtuber() -> bool:
 
 
 def get_owner_name() -> str:
-    """擁有者稱謂（舊碼裡的「老爸」）。"""
-    return (os.getenv("OWNER_NAME") or OWNER_DEFAULT).strip() or OWNER_DEFAULT
+    """擁有者稱謂：固定「老爸」。以前讀 env OWNER_NAME，設成別的名字後紙條寫「E5離開電腦」、她嘴上叫老爸，兩邊對不上。"""
+    return OWNER_DEFAULT
 
 
 def get_character_name() -> str:
@@ -62,7 +62,7 @@ def is_owner_account(unique_id: str) -> bool:
 
 
 def claims_owner_identity(text: str) -> bool:
-    """稱呼／關係是否在冒充擁有者（含設定的 OWNER_NAME）。"""
+    """稱呼／關係是否在冒充擁有者。"""
     t = _norm_account(text)
     if not t:
         return False

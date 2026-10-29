@@ -432,7 +432,7 @@ def _invoke_subagent_declaration(non_blocking: bool) -> types.FunctionDeclaratio
     # 描述不叫她「先答應」：那樣她更常只嘴上說「停下囉」卻沒呼叫（停止彈琴 0/3）
     decl = types.FunctionDeclaration(
         name="invoke_subagent",
-        description="當老爸明確要求進行操作（例如點歌、唱歌、彈琴、停止或暫停鋼琴、計時、查資料）時，呼叫此工具。將任務交給背景的子智能體處理。只有呼叫才會真的執行，光說「好了」不算；結果回來系統會告訴妳。注意：若只是純聊天，請不要呼叫此工具！看螢幕畫面不要用這個工具（子智能體看不到畫面），請照規則說 [TOOL:VISION]。舞台動作（彈琴、唱歌、邊彈邊唱、停止唱歌、收起／暫停／繼續鋼琴、看 YouTube 影片）請同時填 action 和歌名或網址，系統會直接照做。查資料、想問題由妳選：action 填 ask_desktop 交給桌面版 Gemini（免費、會自己上網，適合一般查詢和要想一想的問題，慢幾秒到半分鐘；看不到畫面、不能計時或操作電腦），或填 other 交給 API 子代理（會用工具：搜尋、計時、作曲…）；其他事 action 填 other。",
+        description="當老爸明確要求進行操作（例如點歌、唱歌、彈琴、停止或暫停鋼琴、計時、查資料）時，呼叫此工具。將任務交給背景的子智能體處理。只有呼叫才會真的執行，光說「好了」不算；結果回來系統會告訴妳。一句話裡有好幾件要辦的事（例如查天氣又要設計時器），就分開呼叫好幾次，一件一次，會同時辦（一次只交一件，交兩件會漏掉一件）。注意：若只是純聊天，請不要呼叫此工具！看螢幕畫面不要用這個工具（子智能體看不到畫面），請照規則說 [TOOL:VISION]。舞台動作（彈琴、唱歌、邊彈邊唱、停止唱歌、收起／暫停／繼續鋼琴、看 YouTube 影片）請同時填 action 和歌名或網址，系統會直接照做。查資料、想問題由妳選：action 填 ask_desktop 交給桌面版 Gemini（免費、會自己上網，適合一般查詢和要想一想的問題，慢幾秒到半分鐘；看不到畫面、不能計時或操作電腦），或填 other 交給 API 子代理（會用工具：搜尋、計時、作曲…）；其他事 action 填 other。",
         parameters=types.Schema(
             type="OBJECT",
             properties={
@@ -462,7 +462,30 @@ def _invoke_subagent_declaration(non_blocking: bool) -> types.FunctionDeclaratio
     return decl
 
 
+def _say_declaration() -> types.FunctionDeclaration:
+    """「說出口」（2026-10-29 老爸：她以前輸出就直接念，像沒有腦內聲音的人；改成先想、調度完再決定說）。
+    開了這個工具時，Live 主腦直接輸出的話是腦內的聲音，只有 say 的內容會念出來。"""
+    decl = types.FunctionDeclaration(
+        name="say",
+        description="把話說出口給對方聽。妳直接輸出的話是妳腦內的聲音，老爸和觀眾都聽不到；只有呼叫 say 的內容會念出來。"
+                    "想講就呼叫，可以先在腦內想、先叫 invoke_subagent 查或辦，等結果回來想好了再 say。"
+                    "不呼叫 say 就是安靜不講。一次 say 一段話，要講兩段就叫兩次。",
+        parameters=types.Schema(
+            type="OBJECT",
+            properties={
+                "text": types.Schema(
+                    type="STRING",
+                    description="要說出口的話，跟平常講話一樣（可以夾 [EXPRESSION: 名] 這些標籤）"),
+            },
+            required=["text"],
+        ),
+    )
+    decl.behavior = types.Behavior.NON_BLOCKING
+    return decl
+
+
 LIVE_API_TOOLS = [types.Tool(function_declarations=[_invoke_subagent_declaration(True)])]
+LIVE_SAY_TOOLS = [types.Tool(function_declarations=[_invoke_subagent_declaration(True), _say_declaration()])]
 REST_BRAIN_TOOLS = [types.Tool(function_declarations=[_invoke_subagent_declaration(False)])]
 
 GENAI_TOOLS = build_genai_declarations(is_proactive=False)

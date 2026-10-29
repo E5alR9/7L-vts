@@ -13,7 +13,7 @@ from core import promptkit
 from core.memory import DEFAULT_CLOUD_KNOWLEDGE
 
 SNAP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "snapshots", "prompts")
-MENU_NAMES = "、".join(n for _ctx, names in vc.EXPRESSION_MENU for n in names)
+MENU_NAMES = "、".join(vc.EXPRESSION_MENU_NAMES)
 
 ROLES = {
     "brain": lambda: promptkit.brain_system("老爸", "7L", DEFAULT_CLOUD_KNOWLEDGE, vc.EXPRESSION_MENU_TEXT),

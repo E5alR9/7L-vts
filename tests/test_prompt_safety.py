@@ -37,8 +37,8 @@ def test_claims_owner_identity(monkeypatch):
         assert ident.claims_owner_identity(t), t
     for t in ("badminton", "好朋友", "常客", "", None):
         assert not ident.claims_owner_identity(t), t
-    monkeypatch.setenv("OWNER_NAME", "E5")
-    assert ident.claims_owner_identity("E5")
+    monkeypatch.setenv("OWNER_NAME", "E5")             # 不再讀這個設定（2026-10-29 老爸）
+    assert ident.get_owner_name() == "老爸" and not ident.claims_owner_identity("E5")
 
 
 def test_main_no_longer_trusts_nickname_or_relationship():

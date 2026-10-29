@@ -1,0 +1,182 @@
+# -*- coding: utf-8 -*-
+"""Live 主腦的 say 閘（2026-10-29 老爸：以前她輸出就直接念，像沒有腦內聲音的人；改成先想、調度完再決定說）。
+直接輸出＝腦內聲音只記不念；她呼叫 say(text) 的才念。"""
+import ast
+import asyncio
+import re
+import time
+from types import SimpleNamespace
+
+from google.genai import types
+
+from conftest import MAIN_SRC as MAIN, MAIN_TREE as TREE  # noqa: E402
+
+
+def _fn(name):
+    return next(n for n in ast.walk(TREE) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == name)
+
+
+def _load(*names, **ns):
+    for n in names:
+        exec(compile(ast.Module(body=[_fn(n)], type_ignores=[]), n, "exec"), ns)
+    return ns
+
+
+class _Session:
+    def __init__(self):
+        self.sent = []
+
+    async def send_tool_response(self, function_responses):
+        self.sent += function_responses
+
+
+def _say_ns(singing=False, vision_busy=False):
+    spoken, logs, after = [], [], []
+
+    async def speak(vts, iq, text, who, reply_to, source, **k):
+        if singing:
+            return ""
+        spoken.append((text, who, reply_to, source, k.get("from_live")))
+        return text
+
+    sess = _Session()
+    ns = _load("_handle_say", "_send_say_response", "_note_inner_voice", re=re, time=time, asyncio=asyncio, types=types,
+               _AWAITING_RESULTS={}, AWAIT_RESULT_MAX_SEC=75.0, LAST_SAY_TS=0.0,
+               _autonomy_note_say=lambda t, now: "", AUTONOMY_SAY_MIN_GAP=60.0,
+               _SAY_LOCK=asyncio.Lock(), GLOBAL_LIVE_SESSION=sess, _speak_brain_turn=speak, input_queue=None,
+               _start_marker_tools=lambda t: t.replace("[TOOL:VISION]", "").strip(),
+               _VISION_STATE={"busy": vision_busy}, _vision_wait_text=lambda t: t.split("～")[0] + "～",
+               _BRAIN_INPUT_ORIGIN={"who": "dad"}, _live_reply_target=lambda: "dad",
+               log_print=logs.append, log_swallowed=lambda *a: None, spawn=lambda c: (after.append(c), c.close()),
+               _afterthought=lambda t: asyncio.sleep(0), LAST_BRAIN_TURN_TS=0.0, LAST_BRAIN_REPLY_DONE_TS=0.0,
+               eventlog=SimpleNamespace(get=lambda: SimpleNamespace(record=lambda *a, **k: logs.append(("ev", a)))))
+    return ns, sess, spoken, logs, after
+
+
+def test_say_is_spoken_through_the_normal_path_and_answered_silently():
+    ns, sess, spoken, _, after = _say_ns()
+    asyncio.run(ns["_handle_say"](sess, asyncio.Lock(), "c1", "[EXPRESSION: 開心] 老爸查到了！明天不會下雨", vts="V"))
+    assert spoken == [("[EXPRESSION: 開心] 老爸查到了！明天不會下雨", "dad", "dad", "live_api", True)]
+    r = sess.sent[0]
+    assert r.name == "say" and r.id == "c1" and r.scheduling == types.FunctionResponseScheduling.SILENT   # 不再開一輪
+    assert ns["LAST_BRAIN_TURN_TS"] > 0 and len(after) == 1        # 算她回話了；背後照樣再想一次
+
+
+def test_say_keeps_order_and_skips_empty_or_silence():
+    ns, sess, spoken, _, _ = _say_ns()
+
+    async def go():
+        lock = asyncio.Lock()
+        await asyncio.gather(ns["_handle_say"](sess, lock, "a", "第一句"), ns["_handle_say"](sess, lock, "b", "第二句"),
+                             ns["_handle_say"](sess, lock, "c", "[SILENCE]"))
+    asyncio.run(go())
+    assert [s[0] for s in spoken] == ["第一句", "第二句"] and len(sess.sent) == 3
+
+
+def test_only_the_ack_is_said_while_a_result_is_pending():
+    # 2026-10-29 實測：搜尋還沒開始她就 say「查好囉！明天陰天 20～23 度」，真結果回來又講一次不一樣的
+    ns, sess, spoken, logs, _ = _say_ns()
+    ns["_AWAITING_RESULTS"]["call-9"] = [time.time(), 0]
+
+    async def go():
+        lock = asyncio.Lock()
+        await ns["_handle_say"](sess, lock, "a", "好，我去查！")
+        await ns["_handle_say"](sess, lock, "b", "查好囉！明天陰天 20～23 度")      # 結果還沒回來：擋
+        ns["_AWAITING_RESULTS"].pop("call-9")                                        # 結果交回去了
+        await ns["_handle_say"](sess, lock, "c", "查到了！明天小雨轉多雲")
+    asyncio.run(go())
+    assert [s[0] for s in spoken] == ["好，我去查！", "查到了！明天小雨轉多雲"]
+    assert "不要先講結果" in sess.sent[1].response["result"] and any("先別講" in str(x) for x in logs)
+    ns["_AWAITING_RESULTS"]["stale"] = [time.time() - 200, 5]                        # 漏撤銷的不會永遠擋住
+    asyncio.run(ns["_handle_say"](sess, asyncio.Lock(), "d", "老爸晚安"))
+    assert spoken[-1][0] == "老爸晚安" and "stale" not in ns["_AWAITING_RESULTS"]
+
+
+def test_two_tasks_at_once_each_result_can_be_said():
+    """老爸一句話交兩件事，主腦分兩次叫子智能體（2026-10-29）：第一件回來能講，第二件沒回來前不能先編。"""
+    ns, sess, spoken, _, _ = _say_ns()
+    waiting = ns["_AWAITING_RESULTS"]
+
+    async def run_task(task, intent, respond):
+        await respond(f"[{task}的結果]", types.FunctionResponseScheduling.WHEN_IDLE)
+
+    exec(compile(ast.Module(body=[_fn("_handle_invoke_subagent")], type_ignores=[]), "h", "exec"), ns)
+    ns.update(_run_subagent_task=run_task, LIVE_SAY_GATE=False, _subagent_result_by_slip=lambda *a: None)
+
+    async def go():
+        lock = asyncio.Lock()
+        waiting["weather"] = [time.time(), 0]
+        waiting["timer"] = [time.time(), 0]
+        await ns["_handle_say"](sess, lock, "a", "好，查天氣跟設計時器！")           # 答應：放行
+        await ns["_handle_say"](sess, lock, "b", "明天晴天喔")                       # 兩件都還沒回來：擋
+        await ns["_handle_invoke_subagent"](sess, lock, "invoke_subagent", "weather", "查天氣")
+        await ns["_handle_say"](sess, lock, "c", "查到了，明天小雨")                 # 天氣回來了：放行
+        await ns["_handle_say"](sess, lock, "d", "計時器也設好了")                   # 計時器還沒回來：擋
+        await ns["_handle_invoke_subagent"](sess, lock, "invoke_subagent", "timer", "設計時器")
+        await ns["_handle_say"](sess, lock, "e", "計時器設好了！")
+    asyncio.run(go())
+    assert [s[0] for s in spoken] == ["好，查天氣跟設計時器！", "查到了，明天小雨", "計時器設好了！"]
+    assert waiting == {}
+
+
+def test_say_before_seeing_the_screen_only_says_the_first_clause():
+    ns, sess, spoken, _, _ = _say_ns(vision_busy=True)
+    asyncio.run(ns["_handle_say"](sess, asyncio.Lock(), "v", "我看看～[TOOL:VISION] 老爸在看晴天教學耶"))
+    assert spoken[0][0] == "我看看～"
+
+
+def test_inner_voice_is_logged_not_spoken_and_ends_the_turn():
+    ns, sess, spoken, logs, _ = _say_ns()
+    ns["_note_inner_voice"]("老爸問天氣，我先叫子智能體查")
+    assert spoken == [] and any("💭 [腦內]" in str(x) for x in logs) and ns["LAST_BRAIN_TURN_TS"] > 0
+    for empty in ("", "|", " ｜ "):                              # 空的、或她沒話想時吐的「|」：不算她回了
+        ns["LAST_BRAIN_TURN_TS"] = 0.0
+        ns["_note_inner_voice"](empty)
+        assert ns["LAST_BRAIN_TURN_TS"] == 0.0, empty
+    # 腦內想完不算「這輪回完了」：點歌開唱前要等她真的 say（2026-10-29 實測兩次開場白都被唱歌蓋掉）
+    ns["LAST_BRAIN_REPLY_DONE_TS"] = 0.0
+    ns["_note_inner_voice"]("先想一下要說什麼")
+    assert ns["LAST_BRAIN_REPLY_DONE_TS"] == 0.0
+    recv = ast.get_source_segment(MAIN, next(n for n in ast.walk(TREE)
+                                             if isinstance(n, ast.AsyncFunctionDef) and n.name == "receive_from_live"))
+    assert '_note_inner_voice("")' not in recv
+
+
+def _nudge_ns(said_after=False, singing=False):
+    slips = []
+    ns = _load("_nudge_if_unsaid", asyncio=asyncio, SAY_NUDGE_SEC=0.05, LAST_SAY_TS=0.0, IS_SLEEPING=False,
+               is_singing_active=lambda: singing, log_print=lambda *a: None, _brain_requester=lambda: "老爸",
+               send_brain_slip=slips.append)
+    if said_after:
+        ns["LAST_SAY_TS"] = time.time() + 1
+    return ns, slips
+
+
+def test_result_that_was_never_said_gets_one_reminder():
+    # 2026-10-29 實測：查天氣＋計時器的結果回來，她只在腦內吐一個「|」，天氣結果整個不見
+    ns, slips = _nudge_ns()
+    asyncio.run(ns["_nudge_if_unsaid"]("[搜尋結果，要告訴老爸：明天多雲 20% 降雨]", time.time()))
+    assert len(slips) == 1 and "say" in slips[0] and "明天多雲" in slips[0] and "老爸" in slips[0]
+    ns, slips = _nudge_ns(said_after=True)                       # 她講了：不提醒
+    asyncio.run(ns["_nudge_if_unsaid"]("[搜尋結果]", time.time()))
+    assert slips == []
+    ns, slips = _nudge_ns(singing=True)                          # 唱歌中：不提醒
+    asyncio.run(ns["_nudge_if_unsaid"]("[搜尋結果]", time.time()))
+    assert slips == []
+
+
+def test_live_brain_gets_the_say_tool_and_rule_only_when_the_gate_is_on():
+    from core import promptkit
+    from core.tool_schema import LIVE_SAY_TOOLS, LIVE_API_TOOLS, REST_BRAIN_TOOLS
+    names = [d.name for d in LIVE_SAY_TOOLS[0].function_declarations]
+    assert names == ["invoke_subagent", "say"]
+    say = LIVE_SAY_TOOLS[0].function_declarations[1]
+    assert say.behavior == types.Behavior.NON_BLOCKING and say.parameters.required == ["text"]
+    assert [d.name for d in LIVE_API_TOOLS[0].function_declarations] == ["invoke_subagent"]
+    assert [d.name for d in REST_BRAIN_TOOLS[0].function_declarations] == ["invoke_subagent"]   # REST 大腦照舊直接講
+    assert "腦內的聲音" in promptkit.brain_system("老爸", "7L", {}, "", say_gate=True)
+    assert "腦內的聲音" not in promptkit.brain_system("老爸", "7L", {}, "")
+    recv = ast.get_source_segment(MAIN, next(n for n in ast.walk(TREE)
+                                             if isinstance(n, ast.AsyncFunctionDef) and n.name == "receive_from_live"))
+    assert 'if fn_name == "say" and LIVE_SAY_GATE:' in recv and "_note_inner_voice(_turn_text)" in recv
+    assert "tools=LIVE_SAY_TOOLS if LIVE_SAY_GATE else LIVE_API_TOOLS" in MAIN

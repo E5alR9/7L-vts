@@ -118,14 +118,21 @@ def _run_executor(text, target):
     async def _song_ack(*a, **k):
         pass
 
+    async def _no_judge(text):   # 假的 Groq：用舊的 CPU 正則代替
+        fn, args = parse_hard_command(text)
+        return [(fn, args)] if fn else []
+
     ns = {"asyncio": asyncio, "time": time, "log_print": lambda *a, **k: None, "log_swallowed": lambda: None,
           "parse_hard_command": parse_hard_command, "build_slip_text": build_slip_text,
           "PIANO_CONTROL_TOOLS": PIANO_CONTROL_TOOLS, "STAGE_CONTROL_TOOLS": STAGE_CONTROL_TOOLS,
           "split_original_request": split_original_request, "is_stage_control": is_stage_control,
           "execute_tool_dispatch": execute_tool_dispatch, "_song_ack_missing_original": _song_ack, "spawn": __import__("core.utils", fromlist=["spawn"]).spawn,
           "is_live_brain_active": lambda: False, "LIVE_API_SYSTEM_PROMPT_QUEUE": collections.deque(),
-          "eventlog": eventlog, "_HARD_CMD_DEDUPE_SEC": 20.0, "_supersede_board_requests": lambda kind: 0}
-    for name in ("_hard_cmd_seen_recently", "_dispatch_in_background", "run_stage_commands", "background_tool_executor"):
+          "eventlog": eventlog, "_HARD_CMD_DEDUPE_SEC": 20.0, "_supersede_board_requests": lambda kind: 0,
+          "re": __import__("re"), "to_tw": lambda s: s, "_STAGE_JUDGED": {}, "STAGE_JUDGE_WAIT_SEC": 4.0,
+          "_SING_PLAY_RE": __import__("re").compile(r"唱|彈|弹"), "_judge_stage_request": _no_judge}
+    for name in ("_hard_cmd_seen_recently", "_dispatch_in_background", "run_stage_commands", "_stage_said_key",
+                 "_stage_mark", "_stage_already_handled", "background_tool_executor"):
         exec(compile(ast.Module(body=[_fn(name)], type_ignores=[]), name, "exec"), ns)
 
     async def go():

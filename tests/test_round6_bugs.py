@@ -427,7 +427,8 @@ def test_she_does_not_describe_the_screen_before_seeing_it():
     recv = next(n for n in ast.walk(TREE) if isinstance(n, ast.AsyncFunctionDef) and n.name == "receive_from_live")
     src = ast.get_source_segment(MAIN, recv)
     assert 'turn_vision = turn_vision or "[TOOL:VISION]" in text_chunk' in src
-    assert 'if turn_vision and _VISION_STATE.get("busy"):' in src and src.count("turn_vision = False") == 3
+    # 3 處（一輪開始、被打斷、一輪結束）＋ say 閘的 2 處（腦內被打斷、腦內一輪結束）
+    assert 'if turn_vision and _VISION_STATE.get("busy"):' in src and src.count("turn_vision = False") == 5
 
 
 def test_rest_brain_waits_for_the_screen_only_while_a_look_is_running():
@@ -536,7 +537,8 @@ def test_subagent_result_survives_a_live_reconnect():
         def put_nowait(self, x):
             silent.append(x)
     ns = {"types": NS(FunctionResponseScheduling=Sched, FunctionResponse=lambda **k: k), "log_print": logs.append,
-          "send_brain_slip": slips.append, "LIVE_SILENT_CONTEXT_QUEUE": Q(), "log_swallowed": lambda *a: None}
+          "send_brain_slip": slips.append, "LIVE_SILENT_CONTEXT_QUEUE": Q(), "log_swallowed": lambda *a: None,
+          "_AWAITING_RESULTS": {}, "LIVE_SAY_GATE": False}
     for n in ("_subagent_result_by_slip", "_handle_invoke_subagent"):
         exec(compile(ast.Module(body=[_fn(n)], type_ignores=[]), n, "exec"), ns)
     old, new = object(), object()
@@ -576,7 +578,8 @@ def test_unfinished_turn_is_salvaged_after_a_disconnect():
     (text,), kw = slips[0]
     assert "妳原本在回「講一個小狐狸的故事」" in text and "說到一半：「老爸想聽故事？沒問」" in text
     recv = next(n for n in ast.walk(TREE) if isinstance(n, ast.AsyncFunctionDef) and n.name == "receive_from_live")
-    assert "_salvage_unfinished_turn(_said, turn_buffer)" in ast.get_source_segment(MAIN, recv)
+    # 開著 say 閘時說到一半的是腦內聲音、不是講出口的，不當「話說到一半」（2026-10-29）
+    assert "_salvage_unfinished_turn(_said, \"\" if LIVE_SAY_GATE else turn_buffer)" in ast.get_source_segment(MAIN, recv)
     assert "if isinstance(_sent[0], Exception):" in MAIN                # 送主腦失敗要觸發重連
 
 

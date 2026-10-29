@@ -46,6 +46,7 @@ MAIN_FUNCS = (
     "background_tool_executor", "run_stage_commands", "_hard_cmd_seen_recently", "_dispatch_in_background",
     "send_brain_slip", "_send_stage_slip", "_supersede_board_requests", "_unpack_slip", "_take_slip", "_owner_text_slip", "_slip_is_dupe", "_record_slip",
     "_note_brain_origin", "_brain_requester", "_her_words_before", "_brain_replaying_old_request", "_offer_accept_cmds",
+    "_stage_said_key", "_stage_mark", "_stage_already_handled",
     "is_live_brain_active", "live_brain_down_for", "use_rest_brain",
     "rest_slip_worker", "_rest_answer_slip", "_speak_brain_turn", "_rest_speak", "_run_subagent_task",
     "execute_actions", "normalize_silence_token", "_brain_text_for_memory", "_start_marker_tools",
@@ -60,6 +61,7 @@ MAIN_CONSTS = (
     "_SLIP_DEDUPE_SEC", "LIVE_FALLBACK_AFTER_SEC", "VISION_REPORT_QUIET_SEC", "VISION_FAIL_QUIET_SEC",
     "_BARE_PING_NAMES", "_PING_COOLDOWN_SEC", "_PING_QUIET_SEC",
     "_VIEWER_UPDATE_RE", "VIEWER_UPDATE_HINT",
+    "_SING_PLAY_RE", "STAGE_JUDGE_WAIT_SEC", "_STAGE_JUDGED",
 )
 
 
@@ -110,6 +112,7 @@ class DryRun:
         self.tools, self.memory, self.logs, self.errors, self.acks = [], [], [], [], []
         self.subagent_tasks, self.saved_position, self.vision, self.related_queries, self.related_viewers = [], [], [], [], []
         self._tasks, self._workers = set(), []
+        self.stage_judged, self.stage_judge_result = [], None
         self.ns = self._build()
 
     # ── 假零件 ────────────────────────────────────────────────────────
@@ -135,6 +138,17 @@ class DryRun:
 
         async def mixed_piano_run(*a, **k):
             d.tools.append(("mixed_piano_run", a, "", ""))
+
+        async def stage_judge(text):
+            # 假的 Groq 點歌判斷：塞了 d.stage_judge_result 就回它，沒塞就用舊的 CPU 正則代替（情境測試照舊跑）
+            d.stage_judged.append(text)
+            if d.stage_judge_result is not None:
+                return list(d.stage_judge_result)
+            cmds = hc.parse_mixed_command(text)
+            if not cmds:
+                fn, args = hc.parse_hard_command(text)
+                cmds = [(fn, args)] if fn else []
+            return cmds
 
         async def nv_interpret_task(task_ins, target="dad", requester_name=""):
             d.subagent_tasks.append((task_ins, target, requester_name))
@@ -218,6 +232,7 @@ class DryRun:
             "live_mirror_tool_task": lambda: d._record_vision("mirror"),
             "live_search_tool_task": lambda q: d._record_vision("search"),
             "_owner_name": lambda: "老爸", "_SUBAGENT_GEMINI_TOOL_TIMEOUT": 5.0,
+            "to_tw": lambda s: s, "_judge_stage_request": stage_judge,   # 有唱／彈直接判斷（10-29）：預設判成不用做
         }
         for node in _main_nodes(MAIN_CONSTS + MAIN_FUNCS):
             exec(compile(ast.Module(body=[node], type_ignores=[]), "vts_7L_test.py", "exec"), ns)

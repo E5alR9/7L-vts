@@ -11,12 +11,21 @@ import services.vts_client as v
 
 def test_menu_names_all_resolvable():
     """選單唯一真相：每個名都必須可落地（查表/計時器/重置），否則開空頭支票。"""
-    for ctx, names in v.EXPRESSION_MENU:
+    for names in [v.EXPRESSION_MENU_NAMES]:
         for n in names:
             files, kind, is_reset = v._expression_targets(n)
-            assert files or kind or is_reset, f"選單落空：{n!r}（場合：{ctx}）"
+            assert files or kind or is_reset, f"選單落空：{n!r}"
     assert v.EXPRESSION_MENU_TEXT, "選單文字不可為空"
     assert "暈" in v.EXPRESSION_MENU_TEXT
+
+
+def test_menu_names_are_what_shows_on_her_face():
+    """2026-10-29 老爸：吐舌頭就吐舌頭。選單寫真正的表情名（括號是什麼時候用），不再「調皮→吐舌」讓她把情境字當名字。"""
+    assert "吐舌（調皮" in v.EXPRESSION_MENU_TEXT and "→" not in v.EXPRESSION_MENU_TEXT
+    assert "笑" not in v.EXPRESSION_MENU_NAMES and "開心" not in v.EXPRESSION_MENU_NAMES   # 模型沒有笑臉，以前其實是愛心眼
+    files, kind, _ = v._expression_targets("翻白眼")
+    assert not files and kind                                  # 只做翻白眼動作，不再順便開黑臉
+    assert v._expression_targets("調皮")[0] and v._expression_targets("開心")[0]   # 舊說法照樣認得
 
 
 def _seed(files=(), **timers):
@@ -99,3 +108,11 @@ def test_wait_sees_late_arrival():
         return await v.wait_expression_active(key, timeout=2.5)
 
     assert asyncio.run(main()) is True
+
+
+def test_when_word_used_as_name_maps_back():
+    """2026-10-29 實測：她把「花花（陶醉、夢幻）」括號裡的陶醉當表情名，表情沒做。"""
+    import services.vts_client as v
+    assert v._menu_when_word_file("陶醉") == v.VTS_EXPRESSION_MAP["花花"]
+    assert v._menu_when_word_file("撒嬌") == v.VTS_EXPRESSION_MAP["愛心"]
+    assert v._menu_when_word_file("不存在的字") == ""

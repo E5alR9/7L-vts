@@ -115,7 +115,7 @@ except ImportError:
 input_queue: Optional[asyncio.Queue] = None
 
 import logging
-from core.tool_schema import (INTERACTIONS_TOOLS, LIVE_API_TOOLS, REST_BRAIN_TOOLS, GENAI_TOOLS,
+from core.tool_schema import (INTERACTIONS_TOOLS, LIVE_API_TOOLS, LIVE_SAY_TOOLS, REST_BRAIN_TOOLS, GENAI_TOOLS,
                               resolve_tool_name)
 from core.rest_brain import rest_chat
 from core.groq_router import groq_chat
@@ -952,7 +952,7 @@ def save_local_audio_clip(audio_base64: str) -> Optional[str]:
 #  彈加唱的會合 _mixed_piano_run；紙條記帳與去重（流水帳在 core/eventlog）。
 
 from core.identity import get_owner_name as _owner_name
-DEFAULT_USER_TITLE = _owner_name()  # 跟 core.prompts、鋼琴同一個來源（env OWNER_NAME，預設老爸）
+DEFAULT_USER_TITLE = _owner_name()  # 跟 core.prompts、鋼琴同一個來源（固定老爸）
 
 
 tk_listener.IS_STREAMING = False
@@ -1861,7 +1861,7 @@ async def _director_ensure_session():
         g_key = candidate_keys[(st.get("key_idx", 0) + i) % n]
         try:
             import services.vts_client as _vc_menu
-            _menu_names = "、".join(n for _ctx, names in _vc_menu.EXPRESSION_MENU for n in names)
+            _menu_names = "、".join(_vc_menu.EXPRESSION_MENU_NAMES)
             client = genai.Client(api_key=g_key)
             live_cfg = types.LiveConnectConfig(
                 response_modalities=[types.Modality.AUDIO],
@@ -3040,10 +3040,27 @@ def use_rest_brain() -> bool:
     """該由 REST 大腦接手講話了嗎：Live 主腦斷線超過 LIVE_FALLBACK_AFTER_SEC（兩種模式都一樣，2026-10-26 起 VTuber 模式也開 Live 主腦）。"""
     return live_brain_down_for() >= LIVE_FALLBACK_AFTER_SEC
 
-async def build_brain_system_prompt(owner: str, char_name: str) -> str:
-    """主腦的系統提示詞（core/promptkit.brain_system）。Live 主腦和 REST 大腦共用。"""
+async def build_brain_system_prompt(owner: str, char_name: str, say_gate: bool = False) -> str:
+    """主腦的系統提示詞（core/promptkit.brain_system）。Live 主腦和 REST 大腦共用；say_gate 只有 Live 主腦開。"""
     from core.identity import get_mode
-    return promptkit.brain_system(owner, char_name, await get_cloud_knowledge(), vc.EXPRESSION_MENU_TEXT, mode=get_mode())
+    return promptkit.brain_system(owner, char_name, await get_cloud_knowledge(), vc.EXPRESSION_MENU_TEXT, mode=get_mode(),
+                                  say_gate=say_gate)
+
+
+# Live 主腦的 say 閘（2026-10-29 老爸：以前她輸出就直接念，像沒有腦內聲音的人，沒辦法先想、反覆調度再決定說）。
+# 開著：Live 直接輸出的是腦內的聲音，只記不念（標籤照樣觸發看畫面／照鏡子／搜網）；她呼叫 say(text) 的才念。
+# 探路（3.1-flash-live，7 題）：全部改用 say、腦內沒有漏講，開口時間跟以前一樣約 1 秒；查東西是 叫子代理→say 答應→結果回來→say 答案。
+# 關掉＝以前的樣子（輸出就念）。REST 大腦（Live 斷線時接手）不受影響，照舊直接講。
+LIVE_SAY_GATE = True
+LIVE_SAY_BARGE_IN_SEC = 3.0   # 開著 say 閘：被打斷前這麼久內老爸有開口，才算他插話、清掉她排隊要講的
+# 子智能體結果交給她（要她講的那種）之後這麼久還沒 say，提醒一次（2026-10-29 實測：查天氣＋計時器的結果回來，
+# 她只在腦內吐一個「|」就沒下文，天氣結果整個不見）
+SAY_NUDGE_SEC = 10.0
+LAST_SAY_TS = 0.0   # 她最後一次 say 出口的時間
+# 交辦了、結果還沒回來的子智能體任務。這段時間只准 say 一句（答應那句），
+# 多的擋下不念（2026-10-29 實測：搜尋還沒開始她就 say「查好囉！明天陰天 20～23 度」，結果回來又講一次不一樣的）
+_AWAITING_RESULTS = {}   # {呼叫 id: [交辦時間, 交辦後 say 了幾句]}
+AWAIT_RESULT_MAX_SEC = 75.0   # 子智能體整段上限 45 秒＋餘裕；超過還在表上就當漏撤銷
 
 async def instinct_live_worker():
     """身體本能守護進程：常駐接收音訊，平行輸出動作與表情 (權限低於主腦意識)"""
@@ -3130,7 +3147,7 @@ async def _slip_watchdog(prompt: str, sent_ts: float, timeout: float = 20.0, sli
     """
     await asyncio.sleep(timeout)
     try:
-        if "【自主閒聊】" in (prompt or ""):
+        if "【自主閒聊】" in (prompt or "") or "【感知】" in (prompt or ""):
             return
         try:
             if stage.singing() or IS_SLEEPING:
@@ -3285,6 +3302,15 @@ async def _run_subagent_task(_task_ins, _intent, _respond):
             _req = _brain_requester()
             # 主腦填了結構化舞台動作就照欄位直接執行，不再用正則猜她轉述的說法（2026-10-25）
             _cmds = structured_stage_command(**(_intent or {}))
+            _said = _BRAIN_INPUT_ORIGIN.get("said", "")
+            if (_cmds or _SING_PLAY_RE.search(_task_ins)) and _SING_PLAY_RE.search(_said or "") \
+                    and await _stage_already_handled(_said):
+                log_print(f"⏭️ [子智能體] 這句的唱／彈已經直接判斷排好了，不再做一次：{_said[:30]}")
+                await _respond("[系統底層：這句要唱／彈的已經排好了，妳口頭答應就好，不要再叫工具。]"
+                               + _if_said, _quiet)
+                return
+            if _cmds and _SING_PLAY_RE.search(_said or ""):
+                _stage_mark(_said, "hit")   # 主腦先到：語音那邊晚到的判斷就不用再做
             try:
                 if _cmds:
                     log_print(f"🧩 [子智能體] 主腦填了結構化動作 {_intent}，直接執行")
@@ -3405,6 +3431,78 @@ def _salvage_unfinished_turn(dad_said: str, partial: str) -> None:
                     + pending + "。]", origin="dad" if dad_said else "", said=dad_said)
 
 
+_SAY_LOCK = asyncio.Lock()
+
+
+async def _handle_say(session, ws_send_lock, fn_call_id, text: str, vts=None) -> None:
+    """Live 主腦呼叫 say(text)：照講話的老路念出來（標籤、排隊、TTS、記憶），再悄悄回「已說出口」（SILENT，不再開一輪）。
+    同一輪 say 好幾次時照順序念（asyncio.Lock 先到先拿）。"""
+    async with _SAY_LOCK:
+        raw = (text or "").strip()
+        spoken = ""
+        now = time.time()
+        for _k, (_ts, _n) in list(_AWAITING_RESULTS.items()):
+            if now - _ts > AWAIT_RESULT_MAX_SEC:   # 保險：撤銷漏掉的不要永遠擋住她
+                _AWAITING_RESULTS.pop(_k, None)
+        if any(_n >= 1 for _ts, _n in _AWAITING_RESULTS.values()):
+            log_print(f"🤐 [先別講] 交辦的結果還沒回來就要講第二句，不念：{raw[:80]}")
+            await _send_say_response(session, ws_send_lock, fn_call_id,
+                                     "沒有念：交辦的結果還沒回來，不要先講結果、也不要猜；等結果回來再 say。")
+            return
+        for _v in _AWAITING_RESULTS.values():
+            _v[1] += 1
+        if raw:
+            wants_vision = "[TOOL:VISION]" in raw
+            raw = _start_marker_tools(raw)
+            if wants_vision and _VISION_STATE.get("busy"):
+                raw = _vision_wait_text(raw)   # 還沒看到畫面：只念「我看看～」，不要先編
+            raw = re.sub(r"\[(?:SILENCE|PASS|SKIP)\]", "", raw, flags=re.IGNORECASE).strip()
+        if raw and _autonomy_note_say(raw, time.time()) == "block":
+            log_print(f"🤐 [主動開口太密] {AUTONOMY_SAY_MIN_GAP:.0f} 秒內剛主動講過，這句先不講：{raw[:60]}")
+            await _send_say_response(session, ws_send_lock, fn_call_id, "沒有念：妳剛剛才主動講過話，先安靜一下，有人跟妳說話再回。")
+            return
+        if raw:
+            global LAST_BRAIN_TURN_TS, LAST_SAY_TS
+            LAST_BRAIN_TURN_TS = LAST_SAY_TS = time.time()
+            _who = "audience" if _BRAIN_INPUT_ORIGIN.get("who") == "audience" else "dad"
+            spoken = await _speak_brain_turn(vts, input_queue, raw, _who, _live_reply_target(), "live_api",
+                                             queue_while_singing=True, from_live=True)
+            log_print(f"🗣️ [說出口] {raw[:120]}")
+            if spoken:
+                spawn(_afterthought(spoken))
+        await _send_say_response(session, ws_send_lock, fn_call_id,
+                                 "已說出口" if spoken else "沒有念（唱歌中或內容是空的）")
+
+
+async def _send_say_response(session, ws_send_lock, fn_call_id, result: str) -> None:
+    """say 的工具回應：SILENT（記著就好，不再開一輪）。"""
+    _fr = {"name": "say", "response": {"result": result}, "scheduling": types.FunctionResponseScheduling.SILENT}
+    if fn_call_id:
+        _fr["id"] = fn_call_id
+    try:
+        if session is GLOBAL_LIVE_SESSION:
+            async with ws_send_lock:
+                await session.send_tool_response(function_responses=[types.FunctionResponse(**_fr)])
+    except Exception:
+        log_swallowed()
+
+
+def _note_inner_voice(text: str) -> None:
+    """開著 say 閘時 Live 直接輸出的話：她腦內的聲音，只記不念。日誌和流水帳看得到，不進對話記憶（免得被當成她講過的話）。
+    不算「她這輪回完了」（點歌開唱前看的那個）：開著 say 閘時一輪結束常常只是她還沒輪到講，
+    2026-10-29 實測兩次點歌都因此提早開唱，她的開場白 0.3 秒後才 say、唱歌中就被跳過。回完只看她真的 say 了。"""
+    global LAST_BRAIN_TURN_TS
+    t = re.sub(r"\[(?:SILENCE|PASS|SKIP)\]", "", (text or "").strip(), flags=re.IGNORECASE).strip()
+    if not re.search(r"\w", t):
+        return   # 空的、或只有符號（她沒話想時吐的「|」）：不算她回了，紙條看門狗、不回話偵測照舊
+    LAST_BRAIN_TURN_TS = time.time()
+    log_print(f"💭 [腦內] {t[:160]}")
+    try:
+        eventlog.get().record("thought", t[:500], who="live_brain")
+    except Exception:
+        log_swallowed()
+
+
 async def _handle_invoke_subagent(session, ws_send_lock, _fn_name, _fn_call_id, _task_ins, _intent=None):
     """Live 主腦呼叫 invoke_subagent：每通獨立背景跑 _run_subagent_task，結果用工具回應交回去。"""
     async def _respond(_text, _sched, _more=False):
@@ -3418,15 +3516,36 @@ async def _handle_invoke_subagent(session, ws_send_lock, _fn_name, _fn_call_id, 
                 raise ConnectionError("叫子智能體的那條 Live 連線已經換掉了")
             async with ws_send_lock:
                 await session.send_tool_response(function_responses=[types.FunctionResponse(**_fr)])
+            if LIVE_SAY_GATE and not _more and _sched == types.FunctionResponseScheduling.WHEN_IDLE:
+                spawn(_nudge_if_unsaid(_text, time.time()))
         except Exception as _se:
             if _more:
                 return   # 「先答應一聲」換線後不用補（正式結果還會再來）
             _subagent_result_by_slip(_task_ins, _text, _sched, _se)
 
-    await _run_subagent_task(_task_ins, _intent, _respond)
+    try:
+        await _run_subagent_task(_task_ins, _intent, _respond)
+    finally:
+        _AWAITING_RESULTS.pop(_fn_call_id, None)
+        # 同時交辦好幾件時：這件的結果交回去了，還在等的其他件重新算，讓她能講這件的結果（下一句又會被擋到下一件回來）
+        for _v in _AWAITING_RESULTS.values():
+            _v[1] = 0
 
 
-async def _speak_brain_turn(vts, input_queue, text: str, who: str, reply_to: str, source: str, **item_extra) -> str:
+async def _nudge_if_unsaid(result_text: str, sent_ts: float) -> None:
+    """開著 say 閘：子智能體的結果要她講，過 SAY_NUDGE_SEC 秒她還沒 say 就提醒一次（只提醒一次，不追）。
+    這段時間她有 say 任何話就算了（可能已經講了、或改講別的）；唱歌中不提醒。"""
+    await asyncio.sleep(SAY_NUDGE_SEC)
+    if LAST_SAY_TS >= sent_ts or is_singing_active() or IS_SLEEPING:
+        return
+    log_print(f"👂 [沒開口] 結果交給她 {SAY_NUDGE_SEC:.0f} 秒還沒 say，提醒一次：{(result_text or '')[:50]}")
+    who = _brain_requester() or "剛才問的人"
+    send_brain_slip(f"[系統提示：剛才交辦的結果妳還沒講出口（只在腦內想不算，要呼叫 say 才念得出來），"
+                    f"現在用 say 簡短講給{who}聽：] {(result_text or '')[:500]}")
+
+
+async def _speak_brain_turn(vts, input_queue, text: str, who: str, reply_to: str, source: str,
+                            queue_while_singing: bool = False, **item_extra) -> str:
     """主腦（Live 或 REST）說完一段話的收尾：執行話裡的控制標籤、排進說話佇列、記觀眾資料、寫記憶。
     who＝這輪是誰觸發的（標籤照誰的權限跑），reply_to＝這段話對誰講（dad 是私話）。回實際要念的字。
     2026-10-27 以前兩邊各寫一份：Live 一律照老爸的權限跑標籤（觀眾那輪也是）、記憶對象寫 "dad"
@@ -3435,7 +3554,9 @@ async def _speak_brain_turn(vts, input_queue, text: str, who: str, reply_to: str
     to_dad = who == "dad"
     spoken = (await execute_actions(vts, text, input_queue, caller_target="dad" if to_dad else "audience",
                                     caller_user=_owner_name() if to_dad else _BRAIN_INPUT_ORIGIN.get("name", ""))).strip()
-    if spoken and not is_singing_active():
+    # 唱歌中：以前一律不念只記住（10-26）；她用 say 決定要講的（queue_while_singing）照樣排隊，
+    # 說話佇列會等到伴奏空白夠長再插話（speech_queue_worker 的 is_vocal_upcoming，2026-10-29 老爸要的）
+    if spoken and (queue_while_singing or not is_singing_active()):
         await speech_queue.put({"text": spoken, "target": reply_to, "raw_text": text, "private": reply_to == "dad",
                                 **item_extra})
     _save_viewer_updates(text)
@@ -3596,7 +3717,7 @@ async def continuous_live_worker(vts):
             live_m = live_models[current_m_idx]
             api_key = GEMINI_KEYS[current_k_idx]
             client = genai.Client(api_key=api_key)
-            system_instruction = await build_brain_system_prompt(owner, char_name)
+            system_instruction = await build_brain_system_prompt(owner, char_name, say_gate=LIVE_SAY_GATE)
             import time
             from core.memory import get_unified_memory_context
             _resume_handle = _take_live_resume_handle(live_m, current_k_idx)
@@ -3611,7 +3732,7 @@ async def continuous_live_worker(vts):
             live_cfg = types.LiveConnectConfig(
                 response_modalities=[types.Modality.AUDIO], 
                 system_instruction=types.Content(parts=[types.Part.from_text(text=system_instruction)]),
-                tools=LIVE_API_TOOLS,
+                tools=LIVE_SAY_TOOLS if LIVE_SAY_GATE else LIVE_API_TOOLS,
                 # 老爸講的話也要轉成文字：沒開的話 input_transcription 永遠是空的，麥克風的話不進記憶、後台看不到，
                 # 睡著時喊「起床」也聽不出來（2026-10-26 實機：流水帳 264 筆「聽到」沒有一筆來自麥克風）
                 input_audio_transcription=types.AudioTranscriptionConfig(),
@@ -3725,6 +3846,7 @@ async def continuous_live_worker(vts):
                     turn_buffer = ""
                     turn_vision = False   # 這輪叫了看畫面：看到前只念第一句，不要先編畫面
                     user_transcription_buffer = ""
+                    last_dad_voice_ts = 0.0   # 老爸最後一次真的開口（Live 聽到他的聲音）
 
                     def _flush_user_speech():
                         """老爸這輪講的話記進記憶、推到後台（她開口前記，或這輪她沒開口也要記）。"""
@@ -3738,6 +3860,8 @@ async def continuous_live_worker(vts):
                         append_to_unified_memory(speaker=owner, target=char_name, content=user_spoken, role="user", source="mic")
                         log_print(f"🎤 [老爸說話 (Live STT)] {user_spoken}")
                         spawn(_accept_offer_by_voice(user_spoken, owner))   # 她剛問要不要唱、老爸說「要」（2026-10-27）
+                        if _SING_PLAY_RE.search(user_spoken):   # 有唱／彈：不等她決定，直接判斷（老爸 2026-10-29）
+                            spawn(background_tool_executor(user_spoken, target="dad", requester_name=owner, voice=True))
                         spawn(_related_context_for_speech(user_spoken))   # 查舊對話，有就當背景資料給主腦（2026-10-26）
                         try:
                             import services.web_dashboard as _wd
@@ -3779,7 +3903,12 @@ async def continuous_live_worker(vts):
                                     LAST_BRAIN_TOOL_TS = time.time()
                                     _brain_output_seen()
                                             
-                                    if fn_name == "invoke_subagent":
+                                    if fn_name == "say" and LIVE_SAY_GATE:
+                                        # 按順序念（同一輪 say 好幾次）：每個 say 排進一條鎖，先到先念
+                                        spawn(_handle_say(session, ws_send_lock, fn_call_id, fn_args.get("text", ""), vts))
+                                    elif fn_name == "invoke_subagent":
+                                        if LIVE_SAY_GATE and fn_call_id:   # 沒 id 的撤不掉，不登記
+                                            _AWAITING_RESULTS[fn_call_id] = [time.time(), 0]
                                         # 來幾個跑幾個、互不堵塞：每通呼叫獨立背景任務，
                                         # 開多少量由主腦自己決定（不設上限，同時回報各做各的）。
                                         _sub_t = asyncio.create_task(
@@ -3802,7 +3931,15 @@ async def continuous_live_worker(vts):
                                         ))
 
                                 if c:
-                                    if getattr(c, 'interrupted', False):
+                                    if getattr(c, 'interrupted', False) and LIVE_SAY_GATE and \
+                                            time.time() - last_dad_voice_ts > LIVE_SAY_BARGE_IN_SEC:
+                                        # 開著 say 閘：被打斷的是她腦內那段；已經 say 出口排隊的是她決定要講的，
+                                        # 只有老爸真的開口插話才清（紙條、系統提示進來也會觸發 interrupted）
+                                        log_print("💭 [Live 大腦] 腦內想到一半被新訊息打斷（已經 say 的照念）")
+                                        turn_buffer = ""
+                                        chunk_buffer = ""
+                                        turn_vision = False
+                                    elif getattr(c, 'interrupted', False):
                                         log_print("🛑 [Live 大腦] 偵測到新對話/環境指令打斷，清掉她還沒講的那段！")
                                         if CURRENT_PLAYING_VOICE_TASK and not CURRENT_PLAYING_VOICE_TASK.done():
                                             CURRENT_PLAYING_VOICE_TASK.cancel()
@@ -3817,6 +3954,7 @@ async def continuous_live_worker(vts):
                                         turn_vision = False
                                     
                                     if c.input_transcription and c.input_transcription.text:
+                                        last_dad_voice_ts = time.time()
                                         user_transcription_buffer += c.input_transcription.text
                                         _note_brain_origin("dad", user_transcription_buffer)
                                         # 麥克風直送 Live、不經過輸入佇列，那邊的喚醒判斷看不到：在這裡聽喚醒詞
@@ -3848,6 +3986,14 @@ async def continuous_live_worker(vts):
                                             # 跟 REST 大腦同一份收尾；標籤照觸發這輪的人的權限跑
                                             _who = "audience" if _BRAIN_INPUT_ORIGIN.get("who") == "audience" else "dad"
                                             _turn_text = turn_buffer.strip()
+                                            if LIVE_SAY_GATE:
+                                                _note_inner_voice(_turn_text)   # 腦內聲音：只記不念（標籤在上面逐段已經觸發過）
+                                                turn_buffer = ""
+                                                chunk_buffer = ""
+                                                turn_vision = False
+                                                if goaway_pending:
+                                                    raise ConnectionResetError("goaway：這輪講完了，主動換線續接")
+                                                continue
                                             if turn_vision and _VISION_STATE.get("busy"):
                                                 _turn_text = _vision_wait_text(_turn_text)   # 還沒看到畫面：只念「我看看～」
                                             _spoken = await _speak_brain_turn(vts, input_queue, _turn_text, _who,
@@ -3873,7 +4019,7 @@ async def continuous_live_worker(vts):
                         _said = user_transcription_buffer
                         try:
                             _flush_user_speech()
-                            _salvage_unfinished_turn(_said, turn_buffer)
+                            _salvage_unfinished_turn(_said, "" if LIVE_SAY_GATE else turn_buffer)
                         except Exception:
                             log_swallowed()
 
@@ -3894,7 +4040,7 @@ async def continuous_live_worker(vts):
                                     _LAST_LIVE_SLIP.update(slip=(prompt, origin, said, name) if origin else prompt, ts=sent_ts)
                                     #  所有紙條都掛看門狗（聊天紙條裸奔會靜默丟失）；
                                     #  自主閒聊除外（[SILENCE] 是合法答案，盯了只會狼來了）。
-                                    if "【自主閒聊】" not in (prompt or ""):
+                                    if "【自主閒聊】" not in (prompt or "") and "【感知】" not in (prompt or ""):
                                         spawn(_slip_watchdog(prompt, sent_ts,
                                                              slip=(prompt, origin, said, name) if origin else prompt))
                             except Exception as inner_e:
@@ -5008,6 +5154,216 @@ def _idle_chatter_due(now: float, last_speech_ts: float, last_chatter_ts: float,
     return True
 
 
+# ── 持續感知（2026-10-29 老爸：Live 退到幕後了，讓她持續感知世界、自己決定要不要講）──
+# 以前畫面一變只悄悄放進背景（10-26 老爸：畫面一變她就評論，太吵），主動開口全靠「安靜 3 分鐘、冷卻 7 分鐘」的時間表。
+# 開了 say 閘之後她想的不會念出來，所以改成定時給她一份「自上次以來的變化＋現況」讓她想一輪，
+# 要不要講、要不要做事（彈琴、看畫面…）她自己決定。開著時取代 idle_chatter_worker。
+# 第一版實測（2026-10-29，10 分鐘）：6 輪想了 5 輪都講——紙條寫「想一想有沒有想說的」她就一定說；滑鼠停 2 分鐘就被當
+# 「離開」再動就「回來」，每次都打招呼；畫面描述換了字就當畫面變了；同一個對話框講了 4 輪。第二版：預設不講，
+# 只有真的發生事情才值得開口；訊號去雜；主動開口後休息久一點；提過的不再提；老爸不在不問問題。
+# 第二版實測（同日，10 分鐘）：2 輪都講、兩次都是假訊號——老爸剛打字叫她「陪我就好」，滑鼠 6 分鐘沒動就寫「離開電腦」，
+# 開機後第一次看到畫面也算「畫面變了」，她就說「老爸還沒回來呀」自己彈唱晴天；唱完她自己的琴聲被當成「電腦開始在放
+# 《鋼琴曲》」，還跟謝幕紙條同一秒到。第三版：剛跟她講過話就算在；第一次看到畫面、她自己的琴聲歌聲不算變化；
+# 剛遞過別的紙條不插；紙條帶老爸最後那句話；他在時不叫工具（彈唱會吵到他）；只准講紙條上寫的事。
+# 第四、五版實測：「沒什麼變化」那輪她照樣自己彈琴、問老爸要不要聽，有變化的那輪反而講得自然。
+# 第五版：改成有事才想（開始放音樂、老爸離開／回來、畫面換了），平常不定時叫她；
+# 只有很久都沒事才給她一輪「無聊了想做點自己的事」（彈琴可以，不想就安靜）。
+AUTONOMY_ENABLED = True
+AUTONOMY_PULSE_SEC = 900.0       # 都沒事的話，多久給她一輪「無聊了」
+AUTONOMY_PULSE_MAX_SEC = 1800.0  # 她連續好幾輪無聊都沒動，間隔慢慢拉長到這麼久
+AUTONOMY_CHANGE_SEC = 45.0       # 有變化（畫面、音樂、老爸離開／回來）時，上一輪過這麼久就想
+AUTONOMY_AFTER_HUMAN_SEC = 30.0  # 有人剛跟她講話，這段時間內不插感知
+AUTONOMY_SAY_MIN_GAP = 240.0     # 她自己主動開口後，這麼久內不准再主動開口（答應後的工具結果照講）
+AUTONOMY_AFTER_SAY_SEC = 900.0   # 主動講過一句之後，下一輪「無聊了」等這麼久（有事照樣想，但受 AUTONOMY_SAY_MIN_GAP 擋）
+AUTONOMY_PRESENT_IDLE_SEC = 300.0   # 滑鼠鍵盤超過這麼久沒動才算「離開電腦」（停 2 分鐘讀東西不算走）
+AUTONOMY_SELF_SAY_MEMORY = 3     # 記她最近幾句主動講的話，告訴她不要再提同一件事
+_AUTONOMY = {"pulse_ts": 0.0, "interval": AUTONOMY_PULSE_SEC, "silent_run": 0, "judged": True, "said_in_pulse": False,
+             "last_self_say_ts": 0.0, "last_self_say": "", "recent_self_says": [], "pulses": 0, "self_says": 0, "prev": None}
+# 畫面描述裡出現這些字＝其實沒變，不當成「畫面變了」
+_NO_CHANGE_WORDS = ("沒有特別", "沒有明顯", "沒有變化", "無明顯", "維持", "保持著", "一樣", "相同", "沒什麼變", "仍然", "依舊", "持續在")
+
+
+def _her_own_music(music: str) -> bool:
+    """電腦在放的是不是她自己的琴聲歌聲（system_audio 在她彈唱時會把曲名寫進 LATEST_SYSTEM_MUSIC_INFO）。"""
+    try:
+        if is_singing_active() or pe.is_piano_active or stage.ai_state() in ("PIANO", "SINGING"):
+            return True
+        title = getattr(pe, "current_piano_song_title", "") or ""
+    except Exception:
+        title = ""
+    return music in ("7L 本人翻唱歌曲", "《鋼琴曲》") or bool(title and music == f"《{title}》")
+
+
+def _autonomy_snapshot(now: float = None) -> dict:
+    """現在感知到的世界（給比對有沒有變化、寫進感知紙條）。
+    在不在電腦前：滑鼠鍵盤動過，或老爸剛跟她講過話（打字、麥克風）都算在——他打字叫她陪、之後只看不動滑鼠，不是走了。"""
+    now = time.time() if now is None else now
+    idle = _input_idle_sec()
+    o = _BRAIN_INPUT_ORIGIN
+    if o.get("who") == "dad" and o.get("ts"):
+        idle = min(idle, now - o["ts"]) if idle is not None else now - o["ts"]
+    music = (LATEST_SYSTEM_MUSIC_INFO or "").strip()
+    scr = (current_screen_context or "").strip()
+    if scr.startswith("目前沒有特別的畫面動態"):   # 開機佔位字，還沒真的看過畫面（第三版實測被當成上一輪的畫面）
+        scr = ""
+    return {"screen": scr, "screen_ts": LAST_VISION_LOOK_TIME,
+            "music": "" if music and _her_own_music(music) else music,
+            "present": None if idle is None else idle < AUTONOMY_PRESENT_IDLE_SEC, "idle": idle,
+            "dad_ts": o.get("ts") or 0.0 if o.get("who") == "dad" else 0.0}
+
+
+def _autonomy_changes(prev, cur) -> list:
+    """純函數：上一輪到現在變了什麼（一句一件）；第一輪或沒變回 []。"""
+    if not prev:
+        return []
+    out = []
+    scr = cur.get("screen") or ""
+    if (cur.get("screen_ts", 0) > prev.get("screen_ts", 0) and scr and prev.get("screen") and scr != prev["screen"]
+            and not any(w in scr for w in _NO_CHANGE_WORDS)):   # 開機後第一次看到畫面不算「變了」
+        out.append(f"電腦畫面變了：{scr[:160]}")
+    if cur.get("music") and not prev.get("music"):   # 只算「安靜→開始放」；歌單換下一首不算（第四版實測每首都評論）
+        out.append(f"電腦開始在放：{cur['music'][:80]}")
+    # 老爸一開口 present 就變 True：他剛跟她講過話，不是「回到電腦前」（第三版實測：剛叫她陪就跟著一句「回到電腦前了」）
+    spoke = cur.get("dad_ts", 0) > prev.get("dad_ts", 0)
+    if (prev.get("present") is not None and cur.get("present") is not None and cur["present"] != prev["present"]
+            and not (cur["present"] and spoke)):
+        out.append(f"{_owner_name()}回到電腦前了" if cur["present"] else f"{_owner_name()}離開電腦了")
+    return out
+
+
+def _autonomy_due(now: float, last_pulse: float, interval: float, changed: bool) -> bool:
+    """純函數：該想一輪了沒（有變化就提早）。"""
+    return now - last_pulse >= (min(interval, AUTONOMY_CHANGE_SEC) if changed else interval)
+
+
+def _autonomy_blocked(now: float) -> str:
+    """現在不要插感知的原因；可以就回空字串。"""
+    if IS_SLEEPING:
+        return "睡覺"
+    if not is_live_brain_active():
+        return "Live 不在"
+    if is_singing_active() or stage.ai_state() in ("SINGING", "TALKING", "THINKING"):
+        return "在唱／在講"
+    if not speech_queue.empty():
+        return "還有話排隊"
+    if _AWAITING_RESULTS:
+        return "等子智能體結果"
+    if now - _AUTONOMY["last_self_say_ts"] < AUTONOMY_SAY_MIN_GAP:
+        return "剛主動講過"   # 第四版實測：老爸一離開就提早想一輪，她想講的三句全被上限擋掉；變化留著，時間到再想
+    if not LIVE_API_SYSTEM_PROMPT_QUEUE.empty() or now - (_LAST_LIVE_SLIP.get("ts") or 0.0) < AUTONOMY_AFTER_HUMAN_SEC:
+        return "剛遞過別的紙條"   # 第二版實測：唱完的謝幕紙條跟感知同一秒到
+    if not _BRAIN_INPUT_ORIGIN.get("ts"):
+        return "開機後還沒人跟她說過話"
+    if now - (_BRAIN_INPUT_ORIGIN.get("ts") or 0.0) < AUTONOMY_AFTER_HUMAN_SEC:
+        return "有人剛講話"
+    try:
+        if any(m.get("status") == "unread" for m in STREAMER_MIND_BOARD):
+            return "有未讀留言（哨兵負責）"
+    except Exception:
+        log_swallowed()
+    return ""
+
+
+def _autonomy_slip(changes: list, cur: dict, now: float) -> str:
+    """感知紙條：自上次以來的變化＋幾句現況。"""
+    owner = _owner_name()
+    last_human = now - (_BRAIN_INPUT_ORIGIN.get("ts") or now)
+    if cur.get("present") is None:
+        presence = ""
+    elif cur["present"]:
+        presence = f"{owner}在電腦前"
+    else:
+        presence = f"{owner}離開電腦約 {int((cur.get('idle') or 0) // 60)} 分鐘"
+    try:
+        doing = "在彈琴" if pe.is_piano_performing() else ("坐在鋼琴前" if pe.is_piano_active else "閒著")
+    except Exception:
+        doing = "閒著"
+    if _AUTONOMY["last_self_say_ts"]:
+        mine = f"妳上次自己主動開口是 {int((now - _AUTONOMY['last_self_say_ts']) // 60)} 分鐘前，說「{_AUTONOMY['last_self_say'][:40]}」"
+    else:
+        mine = "妳還沒自己主動開口過"
+    lines = [f"[系統提示：【感知】這是妳的餘光，不是誰在跟妳說話（現在 {get_current_time_string()}）。"]
+    lines.append("自上次以來：" + ("；".join(changes) if changes
+                                  else f"已經安靜 {int(last_human // 60)} 分鐘，什麼都沒發生（想自己找點事做，例如彈首琴，可以；不想就繼續安靜）"))
+    o = _BRAIN_INPUT_ORIGIN
+    who_last = owner if o.get("who") == "dad" else (o.get("name") or "觀眾")
+    # 第五版實測：6 分鐘前那句「陪我就好」照樣附上，她又回一次「好喔，安靜陪老爸」——太久以前的話不附
+    last_words = f"，說「{(o.get('said') or '')[:40]}」" if o.get("said") and last_human < AUTONOMY_PRESENT_IDLE_SEC else ""
+    now_parts = [x for x in (presence, f"{who_last}最後跟妳講話是 {int(last_human // 60)} 分鐘前{last_words}",
+                             f"妳現在{doing}") if x]
+    if not any("畫面" in c for c in changes) and cur.get("screen"):
+        now_parts.append(f"畫面大概是：{cur['screen'][:80]}")
+    if cur.get("music") and not any("在放" in c for c in changes):
+        now_parts.append(f"電腦在放：{cur['music'][:60]}")
+    lines.append("現況：" + "；".join(now_parts) + "。" + mine + "。")
+    if _AUTONOMY.get("recent_self_says"):
+        lines.append("妳最近主動講過：" + "／".join(f"「{t[:30]}」" for t in _AUTONOMY["recent_self_says"]) + "——這些事不要再提。")
+    rule = ("預設安靜、什麼都不做：沒有新的事就不要開口，不要找話題，不要評論畫面。只有真的發生了新的事、而且值得跟在場的人說，才 say 一兩句。"
+            "只能講這張紙條上寫的事，沒寫的不要編（例如沒寫音樂停了就不要說音樂播完了）。")
+    if cur.get("present") is False:
+        rule += f"{owner}不在電腦前：不要問問題、不要等人回答、不要打招呼。"
+    rule += "不用叫工具替誰查東西；想自己彈琴唱歌可以。]"   # 老爸 2026-10-29：他在也准她自己彈唱
+    lines.append(rule)
+    return "\n".join(lines)
+
+
+def _autonomy_note_say(text: str, now: float) -> str:
+    """say 時呼叫：這句是不是回應感知的主動開口；是的話檢查上限。回 "block"（擋）、"self"（主動開口，放行）或 ""（不相干）。"""
+    a = _AUTONOMY
+    if not (AUTONOMY_ENABLED and a["pulse_ts"]) or a["pulse_ts"] < (_BRAIN_INPUT_ORIGIN.get("ts") or 0.0):
+        return ""   # 最近一則是人講的話：是在回人，不算主動
+    if now - a["pulse_ts"] > AUTONOMY_AFTER_HUMAN_SEC + 30.0 or a["said_in_pulse"]:
+        return ""   # 這輪已經開過口，後面是答應後的結果；或感知早就過了
+    if now - a["last_self_say_ts"] < AUTONOMY_SAY_MIN_GAP:
+        return "block"
+    a.update(said_in_pulse=True, last_self_say_ts=now, last_self_say=(text or "")[:80],
+             interval=AUTONOMY_AFTER_SAY_SEC)   # 剛主動講過：下一輪等久一點
+    a["recent_self_says"] = (a.get("recent_self_says") or [])[-(AUTONOMY_SELF_SAY_MEMORY - 1):] + [re.sub(r"\[[^\]]*\]", "", text or "").strip()]
+    a["self_says"] += 1
+    return "self"
+
+
+async def autonomy_worker():
+    """持續感知：照 _autonomy_due 的節奏遞【感知】紙條給主腦，她自己決定講不講、做不做事。"""
+    a = _AUTONOMY
+    while True:
+        try:
+            await asyncio.sleep(5.0)
+            if not (AUTONOMY_ENABLED and LIVE_SAY_GATE):
+                continue
+            now = time.time()
+            # 上一輪想完了沒（20 秒後算）：她講了就恢復平常間隔，沒講就慢慢拉長；有人講話也恢復
+            if not a["judged"] and now - a["pulse_ts"] > 20.0:
+                a["judged"] = True
+                if a["said_in_pulse"]:
+                    a["silent_run"] = 0          # 間隔已經在 _autonomy_note_say 設成 AUTONOMY_AFTER_SAY_SEC
+                elif (_BRAIN_INPUT_ORIGIN.get("ts") or 0.0) > a["pulse_ts"]:
+                    a.update(silent_run=0, interval=AUTONOMY_PULSE_SEC)
+                else:
+                    a["silent_run"] += 1
+                    a["interval"] = min(AUTONOMY_PULSE_MAX_SEC, AUTONOMY_PULSE_SEC * (1.5 ** a["silent_run"]))
+            if (_BRAIN_INPUT_ORIGIN.get("ts") or 0.0) > a["pulse_ts"] and a["silent_run"]:
+                a.update(silent_run=0, interval=AUTONOMY_PULSE_SEC)
+            cur = _autonomy_snapshot(now)
+            if a["prev"] is None:
+                a["prev"] = cur
+            changes = _autonomy_changes(a["prev"], cur)
+            last = max(a["pulse_ts"], _BRAIN_INPUT_ORIGIN.get("ts") or 0.0)
+            if not _autonomy_due(now, last, a["interval"], bool(changes)):
+                continue
+            why = _autonomy_blocked(now)
+            if why:
+                continue
+            a.update(pulse_ts=now, judged=False, said_in_pulse=False, prev=cur)
+            a["pulses"] += 1
+            send_brain_slip(_autonomy_slip(changes, cur, now))
+            log_print(f"🫀 [感知] 第 {a['pulses']} 輪（間隔 {a['interval']:.0f} 秒，她主動講過 {a['self_says']} 次）"
+                      + (f"：{'；'.join(changes)[:80]}" if changes else "：沒什麼變化"))
+        except Exception:
+            log_swallowed()
+            await asyncio.sleep(5.0)
+
+
 async def idle_chatter_worker(vts, input_queue):
     """自主閒聊：房間安靜就遞紙條請主腦看畫面/記憶/聊天找話題（1~2 句）。
     只準備紙條，講不講、講什麼主腦定（沒話題回 [SILENCE] 就好）。
@@ -5018,6 +5374,8 @@ async def idle_chatter_worker(vts, input_queue):
             await asyncio.sleep(30.0)
             if IS_SLEEPING or not IS_PROACTIVE_SPEAK_ENABLED:  # 後台「主動搭話」開關（舊碼沒讀，關了照樣閒聊）
                 continue
+            if AUTONOMY_ENABLED and LIVE_SAY_GATE:
+                continue   # 持續感知接手（autonomy_worker），時間表閒聊休息
             if stage.singing() or stage.ai_state() in ("SINGING", "TALKING", "THINKING"):
                 continue
             try:
@@ -6007,7 +6365,68 @@ def _hard_cmd_seen_recently(fn_name: str, fn_args, now: float, from_brain: bool 
     return dup
 
 
-async def background_tool_executor(user_text: str, target: str = "dad", requester_name: str = "", from_brain: bool = False):
+# ── 有唱、彈的字就直接判斷（老爸 2026-10-29）──
+# 以前 CPU 正則先猜歌名（「彈一下那首小星星」猜成歌名「一下那首小星星」），沒認出來就交還主腦：Live 自己決定要不要
+# 叫子智能體、叫了再交下一棒判斷，兩段串著等，她有時只嘴上答應沒叫工具，歌就沒排。現在 CPU 只看有沒有「唱／彈」，
+# 有就整句丟給 Groq 判斷（點歌、停止、暫停、繼續都是它判；CPU 不再猜歌名），跟 Live 同時跑，不等她；
+# 同一句話誰先處理（這裡或主腦的 invoke_subagent）就記帳，另一邊看到就不再做一次。
+# 語音也走這裡（以前語音不跑 CPU，STT 雜訊會誤觸；判斷器會把「我昨天唱了一首歌」判成不用做）。
+_SING_PLAY_RE = re.compile(r"唱|彈|弹")
+_STAGE_JUDGE_SYSTEM = """妳是 7L（AI 主播）的唱歌／彈琴指令判斷器。看一句話是不是要她現在做什麼，只回一行 JSON：
+{"action": "動作", "song": "歌名", "song2": "邊彈邊唱時唱的另一首，同一首留空"}
+動作只能是：
+- sing：叫她唱某首；play_piano：叫她彈某首；play_and_sing：邊彈邊唱、彈 A 唱 B。
+- stop_singing：叫她別唱了、停止唱歌；stop_piano：叫她別彈了、停止彈琴、收琴。
+- pause_piano：琴先暫停；resume_piano：繼續彈（暫停後接著彈）。
+- none：只是聊到唱歌彈琴（我昨天唱了一首歌、妳彈得好好聽、唱得好爛、要不要學彈琴、妳會唱稻香嗎），沒有要她現在做；
+  或沒講歌名（唱首歌、彈一首來聽），讓她自己挑。
+歌名照原話寫，不要加書名號、歌手名、「這首」「那首」「一下」。"""
+_STAGE_JUDGE_ACTIONS = ("sing", "play_piano", "play_and_sing", "stop_singing", "stop_piano", "pause_piano", "resume_piano")
+STAGE_JUDGE_WAIT_SEC = 4.0      # 主腦的 invoke_subagent 遇到這句還在判斷中，最多等這麼久
+_STAGE_JUDGED = {}              # 這句話（正規化）→ {"state": "pending"|"hit"|"none", "ts"}
+
+
+def _stage_said_key(said: str) -> str:
+    return re.sub(r"[\W_]+", "", to_tw(said or "")).casefold()
+
+
+def _stage_mark(said: str, state: str) -> None:
+    now = time.time()
+    for k in [k for k, v in _STAGE_JUDGED.items() if now - v["ts"] > 60.0]:
+        _STAGE_JUDGED.pop(k, None)
+    key = _stage_said_key(said)
+    if key:
+        _STAGE_JUDGED[key] = {"state": state, "ts": now}
+
+
+async def _stage_already_handled(said: str) -> bool:
+    """主腦叫子智能體時：這句話的唱／彈是不是已經處理了（判斷中就等一下結果）。"""
+    key = _stage_said_key(said)
+    deadline = time.time() + STAGE_JUDGE_WAIT_SEC
+    while key in _STAGE_JUDGED and _STAGE_JUDGED[key]["state"] == "pending" and time.time() < deadline:
+        await asyncio.sleep(0.1)
+    e = _STAGE_JUDGED.get(key)
+    return bool(e and e["state"] == "hit" and time.time() - e["ts"] < 60.0)
+
+
+@usage.role_scope("點歌判斷")
+async def _judge_stage_request(text: str) -> list:
+    """Groq 判斷一句話要不要唱／彈哪首 → [(工具, 參數)]；不是、判斷失敗回 []。"""
+    try:
+        r = await groq_chat([{"role": "system", "content": _STAGE_JUDGE_SYSTEM}, {"role": "user", "content": text[:300]}],
+                            temperature=0.0, max_tokens=80, timeout=2.0, total_timeout=3.0)
+        m = re.search(r"\{.*\}", (r.text or "") if r else "", re.S)
+        d = json.loads(m.group(0)) if m else {}
+    except Exception:
+        log_swallowed()
+        return []
+    if not isinstance(d, dict) or d.get("action") not in _STAGE_JUDGE_ACTIONS:
+        return []
+    return structured_stage_command(action=d["action"], song=str(d.get("song") or ""), song2=str(d.get("song2") or ""))
+
+
+async def background_tool_executor(user_text: str, target: str = "dad", requester_name: str = "", from_brain: bool = False,
+                                   voice: bool = False):
     """
     B 架構：純 CPU 文字指令拆解器（零 API、零幻覺、零成本，永遠不碰 AI）。
     只認唱歌/鋼琴兩類硬指令（含鋼琴的停止／暫停／繼續，觀眾不能用）並立即執行；其他一律交還。
@@ -6023,19 +6442,31 @@ async def background_tool_executor(user_text: str, target: str = "dad", requeste
         #    2026-10-09：舊版只認關鍵字「唱」，把「你可以唱歌了？」抽成歌名「歌了？」、
         #    「? 又我唱了????」抽成「了????」，兩次都真的開跑 YT-DLP。改走 parse_hard_command。
         #    混用優先（彈X加唱Y）：兩路都跑、兩張紙條；不是混用才看單句
-        try:
-            from core.hard_command import parse_mixed_command as _parse_mixed
-            cmds = _parse_mixed(user_text)
-        except Exception:
-            cmds = []
-        if not cmds:
-            fn_name, fn_args = parse_hard_command(user_text)
-            cmds = [(fn_name, fn_args)] if fn_name else []
-        if not cmds and not from_brain:
-            # 她剛問「要不要我唱《晴天》？」這句是「要」：照她提議的那首排（主腦常只說好不叫工具）
-            cmds = _offer_accept_cmds(user_text, target, requester_name)
-            if cmds:
-                log_print(f"🤖 [CPU 拆解] 答應她剛才的提議：{cmds}")
+        cmds = []
+        if not from_brain and _SING_PLAY_RE.search(user_text or ""):
+            # 有唱／彈：CPU 不猜，整句交給 Groq（老爸 2026-10-29）
+            if await _stage_already_handled(user_text):   # 主腦已經照這句排了
+                return False, "", {}
+            _stage_mark(user_text, "pending")
+            _t0 = time.time()
+            cmds = await _judge_stage_request(user_text)
+            _stage_mark(user_text, "hit" if cmds else "none")
+            log_print(f"🎯 [點歌判斷] 有唱／彈的字，直接交給 Groq（{time.time() - _t0:.1f}s）："
+                      + (f"{cmds}" if cmds else "不是要她現在唱／彈"))
+        elif not voice:
+            try:
+                from core.hard_command import parse_mixed_command as _parse_mixed
+                cmds = _parse_mixed(user_text)
+            except Exception:
+                cmds = []
+            if not cmds:
+                fn_name, fn_args = parse_hard_command(user_text)
+                cmds = [(fn_name, fn_args)] if fn_name else []
+            if not cmds and not from_brain:
+                # 她剛問「要不要我唱《晴天》？」這句是「要」：照她提議的那首排（主腦常只說好不叫工具）
+                cmds = _offer_accept_cmds(user_text, target, requester_name)
+                if cmds:
+                    log_print(f"🤖 [CPU 拆解] 答應她剛才的提議：{cmds}")
         if not cmds:
             # CPU 沒命中就交還；AI 解讀一律走 A 架構（invoke_subagent → nv_interpret_task），這裡不燒 API
             log_print("🤖 [CPU 拆解] 無硬指令，交還主腦處理。")
@@ -6043,6 +6474,8 @@ async def background_tool_executor(user_text: str, target: str = "dad", requeste
         return await run_stage_commands(cmds, target=target, requester_name=requester_name,
                                         from_brain=from_brain, said=user_text)
     except Exception as e:
+        if not from_brain and _STAGE_JUDGED.get(_stage_said_key(user_text), {}).get("state") == "pending":
+            _stage_mark(user_text, "none")   # 判到一半出錯：別讓主腦那邊乾等
         if isinstance(e, asyncio.TimeoutError) or isinstance(e, TimeoutError):
             pass # CPU 正則不應超時，保險起見靜默略過
         else:
@@ -6930,6 +7363,7 @@ async def main():
     import services.auto_cover_pipeline as _acp_orig
     spawn(_acp_orig.originals_watch_worker())
     spawn(idle_chatter_worker(vts, input_queue))
+    spawn(autonomy_worker())   # 持續感知（開著時舊的自主閒聊休息）
     spawn(autonomous_wander_worker())
     spawn(pe.piano_focus_udp_worker())
     spawn(pe.piano_liveness_watchdog_worker())

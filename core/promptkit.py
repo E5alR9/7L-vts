@@ -38,9 +38,20 @@ VTUBER_MODE_NOTE = """【VTuber 直播模式】現在是對直播間觀眾的直
 妳的話直接播給觀眾聽：跟觀眾互動、用觀眾的名字叫他們，不要對著{owner}講話。"""
 
 
-def brain_system(owner: str, char_name: str, cloud_knowledge: dict, expression_menu: str, mode: str = "companion") -> str:
+# Live 主腦開了 say 工具時加在最後（2026-10-29 老爸：以前輸出就直接念，像沒有腦內聲音的人；改成先想、調度完再決定說）
+SAY_GATE_NOTE = """【腦內聲音與開口】（這條比上面「怎麼講話」優先）
+妳直接輸出的任何話都只是妳腦內的聲音，{owner}和觀眾都聽不到。要讓人聽到，必須呼叫 say(text)，text 就是妳要講出口的話（照上面講話的規矩：短、可夾表情標籤）。
+- 可以先在腦內想、先叫 invoke_subagent 查或辦，結果回來想好了再 say；要等結果的，先 say 一句短話答應。
+- 不呼叫 say 就是沒開口（以前的 [SILENCE] 改成：不 say）。
+- 系統提示要妳答應、講結果、講看到的畫面時，一樣要用 say 才講得出來。
+- 看畫面、照鏡子、搜網的標籤（[TOOL:VISION]／[TOOL:MIRROR]／[TOOL:SEARCH]）在腦內想到就會去做，不用 say。"""
+
+
+def brain_system(owner: str, char_name: str, cloud_knowledge: dict, expression_menu: str, mode: str = "companion",
+                 say_gate: bool = False) -> str:
     """主腦的系統提示詞：人設、限制、說話規則、雲端知識、技術硬規則。Live 主腦和 REST 大腦共用。
-    mode="vtuber" 時最後加一段直播模式說明（2026-10-26 起 VTuber 模式也開 Live 主腦）。"""
+    mode="vtuber" 時最後加一段直播模式說明（2026-10-26 起 VTuber 模式也開 Live 主腦）。
+    say_gate=True（只有 Live 主腦）：最後加 SAY_GATE_NOTE，直接輸出是腦內聲音，要 say 才念。"""
     cloud_kn_prompt = PromptTemplateEngine.format_cloud_knowledge_prompt(cloud_knowledge, current_custom_name=owner)
     p_persona = load_prompt("7L_persona.md", char_name=char_name, owner=owner)
     p_constraints = load_prompt("7L_constraints.md", char_name=char_name, owner=owner)
@@ -54,7 +65,8 @@ def brain_system(owner: str, char_name: str, cloud_knowledge: dict, expression_m
 
 {cloud_kn_prompt}
 {PromptTemplateEngine.HARD_TECHNICAL_RULES}
-""" + ("\n" + VTUBER_MODE_NOTE.format(owner=owner) + "\n" if mode == "vtuber" else "")
+""" + ("\n" + VTUBER_MODE_NOTE.format(owner=owner) + "\n" if mode == "vtuber" else "") \
+      + ("\n" + SAY_GATE_NOTE.format(owner=owner) + "\n" if say_gate else "")
 
 
 def subagent_system() -> str:

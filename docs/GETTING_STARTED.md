@@ -32,7 +32,7 @@ copy .env.example .env   # 若無範例檔，直接新建 .env
 | `GEMINI_API_KEYS` | 是（多模態） | 逗號分隔；視覺＋Live 全雙工＋旗艦推理 |
 | `GROQ_API_KEYS` | 是（純文字快線） | 逗號分隔；秒回／哨兵／摘要 |
 | `MODE` | 否（預設 vtuber） | `companion` 或 `vtuber` |
-| `OWNER_NAME`／`CHARACTER_NAME` | 否（預設 老爸／7L） | 稱謂可改 |
+| `CHARACTER_NAME` | 否（預設 7L） | 角色名可改（擁有者固定叫老爸） |
 | `TWITCH_CHANNELS` | 主播用 | 小寫頻道名，逗號分隔 |
 | `YOUTUBE_CHANNEL` | 主播用 | `@handle`，自動跟播 |
 | `SIGN_API_KEY` | TikTok 用 | Euler 簽章 |

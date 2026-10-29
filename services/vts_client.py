@@ -69,6 +69,9 @@ VTS_EXPRESSION_MAP = {
     "傲嬌": "红脸.exp3.json",
     "傲娇": "红脸.exp3.json",
     "害羞": "红脸.exp3.json",
+    "羞澀": "红脸.exp3.json",   # 2026-10-29：她常用、模型沒有，對到最接近的臉紅
+    "羞涩": "红脸.exp3.json",
+    "嬌羞": "红脸.exp3.json",
     "尷尬": "红脸.exp3.json",
     "尴尬": "红脸.exp3.json",
 
@@ -95,8 +98,6 @@ VTS_EXPRESSION_MAP = {
     "阴沉": "黑脸.exp3.json",
     "黑化": "黑化.exp3.json",
     "病嬌": "黑化.exp3.json",
-    "翻白眼": "黑脸.exp3.json",
-    "白眼": "黑脸.exp3.json",
     "無語": "流汗.exp3.json",
     "无语": "流汗.exp3.json",
     "鄙視": "黑脸.exp3.json",
@@ -119,6 +120,8 @@ VTS_EXPRESSION_MAP = {
     "愛你": "比心.exp3.json",
     "花花": "花花.exp3.json",
     "花": "花花.exp3.json",
+    "夢幻": "花花.exp3.json",   # 表情清單寫「夢幻→花花」，她會把左邊的情境字當名字用（2026-10-29）
+    "梦幻": "花花.exp3.json",
     "問號": "问号.exp3.json",
     "问号": "问号.exp3.json",
     "疑惑": "问号.exp3.json",
@@ -911,6 +914,8 @@ async def set_vts_expression(vts, exp_tag, is_instinct=False):
                     if k in t or t in k:
                         found = v
                         break
+            if not found:
+                found = _menu_when_word_file(t)
             if found:
                 target_filenames.add(found)
 
@@ -1072,28 +1077,42 @@ async def set_expression_file(filename: str, active: bool, vts=None) -> bool:
 
 
 # ── 表情選單唯一真相（2026-10-10：主腦 responses.md＋本能 prompt 都從這裡自動帶，改一處即全改）──
+# 名字就是臉上真的會出現的樣子，括號是什麼時候用（2026-10-29 老爸：以前寫「調皮→吐舌」，她把「調皮」「夢幻」
+# 當表情名用；「開心」「笑」其實是愛心眼、「翻白眼」還順便開黑臉、「雙馬尾」是換髮型卻放在打招呼）。
 # 名單只收「查表/計時器命中字」；tests/test_expression_dedupe.py 強制每個名都可落地。
 EXPRESSION_MENU = (
-    ("被誇/撒嬌", ("愛心", "比心")),
-    ("崇拜/期待", ("星星眼",)),
-    ("害羞/傲嬌", ("臉紅",)),
-    ("難過/委屈", ("哭哭",)),
-    ("開心", ("笑", "開心")),
-    ("不爽/吐槽", ("生氣",)),
-    ("傻眼", ("黑臉",)),
-    ("病嬌", ("黑化",)),
-    ("暈/醉", ("暈",)),
-    ("尷尬", ("流汗",)),
-    ("慌", ("著急",)),
-    ("調皮", ("吐舌",)),
-    ("夢幻", ("花花",)),
-    ("疑惑", ("問號",)),
-    ("嚇到", ("震驚",)),
-    ("鄙視", ("翻白眼", "皺眉")),
-    ("打招呼", ("抬手", "雙馬尾")),
-    ("眨眼", ("WINK",)),
+    ("愛心", "眼睛變愛心：被誇、撒嬌、超喜歡"),
+    ("比心", "手比愛心：謝謝、示愛"),
+    ("星星眼", "崇拜、期待"),
+    ("臉紅", "害羞、傲嬌"),
+    ("哭哭", "難過、委屈"),
+    ("吐舌", "調皮、開玩笑"),
+    ("花花", "陶醉、夢幻"),
+    ("問號", "疑惑"),
+    ("流汗", "尷尬"),
+    ("著急", "慌張"),
+    ("暈", "頭暈、醉"),
+    ("生氣", "不爽、吐槽"),
+    ("黑臉", "傻眼、無言"),
+    ("黑化", "病嬌"),
+    ("驚訝", "嚇到，眼睛瞪大"),
+    ("翻白眼", "鄙視"),
+    ("皺眉", "困擾"),
+    ("眨眼", "放電、俏皮"),
+    ("抬手", "打招呼"),
+    ("雙馬尾", "換成雙馬尾髮型"),
 )
-EXPRESSION_MENU_TEXT = "；".join(f"{ctx}→{'、'.join(names)}" for ctx, names in EXPRESSION_MENU)
+EXPRESSION_MENU_NAMES = tuple(name for name, _when in EXPRESSION_MENU)
+EXPRESSION_MENU_TEXT = "；".join(f"{name}（{when}）" for name, when in EXPRESSION_MENU)
+
+
+def _menu_when_word_file(tag: str) -> str:
+    """她把括號裡「什麼時候用」的字當表情名（2026-10-29 實測：[EXPRESSION: 陶醉]）：照清單對回那個表情的檔案；對不到回空字串。"""
+    import re
+    for name, when in EXPRESSION_MENU:
+        if tag in re.split(r"[、：，\s]+", when):
+            return VTS_EXPRESSION_MAP.get(name, "")
+    return ""
 
 
 # ── 表情去重查詢（2026-10-10：本能腦主做表情、NV 子代理備用）──

@@ -1,7 +1,9 @@
 import asyncio
 import base64
+import ipaddress
 import json
 import os
+import socket
 import time
 from typing import Set, Dict, Any, Optional
 from aiohttp import web
@@ -1361,6 +1363,47 @@ async def telemetry_broadcast_worker():
         except Exception:
             await asyncio.sleep(1.0)
 
+# 後台沒有登入，又有關機、重啟、清記憶這類操作，所以只收「自己人」的連線：本機、家裡網路（私有網段）、
+# Tailscale（100.64.0.0/10）。電腦接到外面的網路、或有人把連接埠轉出去，外面的位址一律擋掉。
+_TAILSCALE_NET = ipaddress.ip_network("100.64.0.0/10")
+
+
+def is_lan_peer(addr: str) -> bool:
+    """這個連線位址是不是本機、家裡網路或 Tailscale。"""
+    try:
+        ip = ipaddress.ip_address((addr or "").split("%")[0])
+    except ValueError:
+        return False
+    if getattr(ip, "ipv4_mapped", None):
+        ip = ip.ipv4_mapped
+    return ip.is_loopback or ip.is_private or ip.is_link_local or (ip.version == 4 and ip in _TAILSCALE_NET)
+
+
+@web.middleware
+async def _lan_only(request, handler):
+    if not is_lan_peer(request.remote or ""):
+        log_print(f"🛡️ [7L Web 後台] 擋掉外部位址的連線：{request.remote}")
+        raise web.HTTPForbidden(text="7L 後台只開給同網路的裝置")
+    return await handler(request)
+
+
+def _lan_urls(port: int) -> list:
+    """這台在家裡網路／Tailscale 上的網址（給其他裝置開）。"""
+    ips = set()
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("192.168.0.1", 80))   # 不會真的送出去，只是問系統走哪張網卡
+            ips.add(s.getsockname()[0])
+    except OSError:
+        pass
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            ips.add(info[4][0])
+    except OSError:
+        pass
+    return [f"http://{ip}:{port}" for ip in sorted(ips) if is_lan_peer(ip) and not ip.startswith("127.")]
+
+
 async def start_web_dashboard(
     port: int = 7860,
     input_queue: Optional[asyncio.Queue] = None,
@@ -1408,7 +1451,7 @@ async def start_web_dashboard(
     if hasattr(yt_comp, 'reject_pending_video'):
         REJECT_YT_COMPANION_CALLBACK = yt_comp.reject_pending_video
 
-    app = web.Application()
+    app = web.Application(middlewares=[_lan_only])
     
     # 靜態資源目錄 (web/)
     web_dir = os.path.join(ROOT_DIR, "web")
@@ -1466,9 +1509,9 @@ async def start_web_dashboard(
     await runner.setup()
 
     bind_port = port
-    # 🛡️ 安全預設只綁本機回環：控制台有重啟/關機/執行工具/清空記憶等危險端點，
-    #    綁 0.0.0.0 會讓同網段任何人操作。需要開放給其他機器時設 WEB_BIND_HOST=0.0.0.0。
-    BIND_HOST = (os.getenv("WEB_BIND_HOST") or "127.0.0.1").strip() or "127.0.0.1"
+    # 同網路的其他裝置（手機、筆電）也能開（老爸 2026-10-29；以前只綁本機）。控制台有重啟／關機／清記憶，
+    # 所以 _lan_only 只收本機、家裡網路、Tailscale 的連線。只想給這台用就設 WEB_BIND_HOST=127.0.0.1。
+    BIND_HOST = (os.getenv("WEB_BIND_HOST") or "0.0.0.0").strip() or "0.0.0.0"
     global MAIN_EVENT_LOOP
     try:
         MAIN_EVENT_LOOP = asyncio.get_running_loop()
@@ -1481,6 +1524,8 @@ async def start_web_dashboard(
             await site.start()
             log_print(f"\n🌐 [7L Web 後台] 已成功在 http://127.0.0.1:{bind_port} 啟動！")
             log_print(f"👉 本機瀏覽器請開啟：http://localhost:{bind_port}\n")
+            if BIND_HOST != "127.0.0.1":
+                log_print(f"📱 [7L Web 後台] 同網路的其他裝置開：{'  '.join(_lan_urls(bind_port)) or '（查不到這台的網址）'}")
             spawn(telemetry_broadcast_worker())
             return
         except OSError as e:
