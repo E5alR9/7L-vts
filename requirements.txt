@@ -19,9 +19,7 @@ duckduckgo_search
 tavily-python
 
 # ── 語音：TTS / STT / 音訊 ─────────────────────────────────────
-edge-tts                   # 雲端備援 TTS（台灣腔女聲 / 日文）
-espeakng-loader            # phonemizer 的 espeak-ng 資料（Windows 內建）
-phonemizer
+edge-tts>=7.3.1            # 雲端備援 TTS（台灣腔女聲 / 日文）
 soundfile
 librosa
 # basic-pitch（彈唱同步：翻唱伴奏轉鋼琴譜）另外裝，一定要 --no-deps（不然會拉 TensorFlow 把 numpy 降版）：

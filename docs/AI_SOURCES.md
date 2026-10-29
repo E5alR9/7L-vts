@@ -23,10 +23,11 @@
 |---|---|---|---|---|---|
 | mic 快覽＋系統音轉錄（現行） | GOOGLE-WEB-SPEECH | `recognize_google(zh-TW)` 非官方免費端點（`listen_once_fast`／`transcribe_audio_bytes`） | 無 | 非官方，無配額概念（隨時可死） | 將遷 3.5-transcribe |
 | 官方 STT（規劃） | GEMINI-TRANSCRIBE | gemini-3.5-transcribe（說話人分離＋詞戳＋自訂詞表） | 同 Gemini keys | RPM 3／RPD 25 | 常駐轉錄仍走本地 faster-whisper（已在 requirements，未接線） |
-| TTS 主力 | LOCAL＋CLOUD | `TTS_ENGINE` 預設 cloud_gptsovits，備援 `TTS_FALLBACK` 預設曉伊 GPT-SoVITS；cosyvoice／edge／elevenlabs 選配（`services/tts_router.py` 引擎鏈） | `TTS_ENGINE`／`TTS_FALLBACK`／`COSYVOICE_URL` | 無 | 120 秒自動升級回鏈首 |
-| TTS 備援 | CLOUD | edge-tts（微軟）／elevenlabs（月 10K 字元守衛） | `ELEVENLABS_API_KEY` | RPD 10（Gemini TTS 系同） | Gemini 3.8-flash-tts 系可追加進鏈 |
+| TTS 主力 | LOCAL＋CLOUD | `TTS_ENGINE` 預設曉伊 GPT-SoVITS（xiaoyi），備援 `TTS_FALLBACK` 預設 edge（`services/tts_router.py` 引擎鏈） | `TTS_ENGINE`／`TTS_FALLBACK` | 無 | 120 秒自動升級回鏈首 |
+| TTS 備援 | CLOUD | edge-tts（微軟台灣腔女聲；套件要 7.3.1 以上，舊版會被微軟擋 403） | 無 | 無 | 曉伊掛了才用（老爸 2026-10-29：只留 edge 備用） |
 | mic 快覽 | GOOGLE-WEB-SPEECH | `recognize_google(zh-TW)`（`listen_once_fast`） | 無 | 非官方 | 深層理解走 Gemini Live audio_b64 |
-| 系統音／轉錄備援 | LOCAL-faster-whisper | `services/stt.py`（`STT_BACKEND = "auto"`，small／CPU int8） | 無 | 無 | Google 失敗自動退本地 |
+| 系統音／轉錄備援 | LOCAL-faster-whisper | `services/stt.py`（`_transcribe_faster`，small／CPU int8；只有看影片用） | 無 | 無 | — |
+| AI 作曲 | LOCAL-ACE-Step 1.5 | `services/acestep_music.py` → 官方 REST（`/release_task`→`/query_result`→`/v1/audio`），turbo 模型，`scripts/start_acestep.bat` 開在 7865 | 無 | 無 | 服務沒開安全跳過；第一次作曲下載約 6 GB 模型 |
 
 ## 記憶／檢索／搜尋
 

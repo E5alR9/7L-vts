@@ -3,22 +3,23 @@ r"""
 
  目的：
    把直播主迴圈的語音合成，從「寫死單一本機 GPT-SoVITS 路徑的單一引擎」
-   改成可插拔的引擎鏈（本機 Kokoro 引擎已移除，目前由 xiaoyi / cosyvoice /
-   cloud_gptsovits / edge / elevenlabs 組成，見 _ENGINES）。
+   改成可插拔的引擎鏈：本機曉伊 xiaoyi（GPT-SoVITS）為主，掛了降級微軟 edge（見 _ENGINES）。
+   Kokoro、CosyVoice、ElevenLabs、雲端 GPT-SoVITS 都已移除（老爸 2026-10-29：只留 edge 備用）。
 
  引擎優先序（可用環境變數覆寫）：
 
-   TTS_FALLBACK=xiaoyi        原 GPT-SoVITS 曉伊（需本機存在 GPT-SoVITS 安裝）
+   TTS_ENGINE=xiaoyi          主引擎（需本機存在 GPT-SoVITS 安裝）
+   TTS_FALLBACK=edge          備用
 
  語言自動判定：假名/漢字/半形片假名啟發式（detect_language 只分 zh/ja 大方向）；
-    多語言 SoVITS（本地曉伊／雲端）一律傳 raw 假名＋text_language auto，由模型
+    多語言 SoVITS（本地曉伊）一律傳 raw 假名＋text_language auto，由模型
     自己分段唸——只有純中文聲線（edge HsiaoChen）才在合成前把假名音譯成中文
     （transliterate_kana_to_zh，例：バカ → 巴卡）。
 
  介面：
    await get_tts_audio_bytes(text)  ->  WAV/MP3 bytes
    get_active_engine()              ->  目前生效的引擎名稱（供儀表板/日誌）
-PROVIDER: LOCAL-cosyvoice/xiaoyi＋CLOUD-edge/elevenlabs/cloud_gptsovits（見 docs/AI_SOURCES.md）
+PROVIDER: LOCAL-xiaoyi＋CLOUD-edge（見 docs/AI_SOURCES.md）
 """
 
 import asyncio
@@ -27,7 +28,7 @@ import re
 import io
 import time
 
-from core.lang import KANA_RE, HAN_RE, has_kana, is_japanese_sentence
+from core.lang import has_kana, is_japanese_sentence
 from core.utils import log_swallowed
 from typing import Optional
 from core.paths import ROOT_DIR
@@ -35,8 +36,8 @@ from core.paths import ROOT_DIR
 BASE_DIR = ROOT_DIR
 
 # ── 設定 ─────────────────────────────────────────────────────────────────────
-ENGINE_ORDER = [e.strip().lower() for e in (os.getenv("TTS_ENGINE") or "cloud_gptsovits").split(",") if e.strip()]
-_FALLBACK = [e.strip().lower() for e in (os.getenv("TTS_FALLBACK") or "xiaoyi").split(",") if e.strip()]
+ENGINE_ORDER = [e.strip().lower() for e in (os.getenv("TTS_ENGINE") or "xiaoyi").split(",") if e.strip()]
+_FALLBACK = [e.strip().lower() for e in (os.getenv("TTS_FALLBACK") or "edge").split(",") if e.strip()]
 
 # 依序嘗試的完整引擎鏈（去重、保序）
 _seen = set()
@@ -281,22 +282,6 @@ def _clean_text(text: str, lang: str) -> str:
     return text
 
 
-def sovits_text_lang(text: str) -> str:
-    """GPT-SoVITS text_language：純日→ja，純中→zh，其餘混合→auto（模型自己分段）。
-
-    跟本地曉伊同一哲學（見 local_xiaoyi_service.synthesize_xiaoyi_bytes）：
-    模型是多語言的，不要硬鎖單一語系逼它唸錯另一種文字。
-    """
-    num_kana = len(KANA_RE.findall(text))
-    num_hanzi = len(HAN_RE.findall(text))
-    has_latin = bool(re.search(r'[A-Za-z]', text))
-    if num_kana > 0 and num_hanzi == 0 and not has_latin:
-        return "ja"
-    if num_kana == 0 and not has_latin:
-        return "zh"
-    return "auto"
-
-
 async def _synth_edge(text: str) -> bytes:
     """微軟 Edge-TTS 雲端合成（台灣腔女聲 / 日文聲線），回傳 MP3 bytes"""
     import edge_tts
@@ -326,173 +311,9 @@ async def _synth_xiaoyi(text: str) -> bytes:
     return await local_xiaoyi_service.get_xiaoyi_audio_bytes(text)
 
 
-# ── ElevenLabs（雲端精品 TTS）───────────────────────────────────────────────
-# 免費版每月 10,000 字元（≈10 分鐘語音），所以：
-#   1) 預設不啟用，要用請設 TTS_ENGINE=elevenlabs（建議 TTS_FALLBACK=edge,xiaoyi）
-#   2) 內建額度守衛：每 10 分鐘查一次官方額度，用盡自動拋錯 → 引擎鏈降級回本地
-#   3) 模型先走最快的 flash（TTFB ~0.37s），失敗自動改試 multilingual_v2（品質最穩）
-ELEVEN_KEY = (os.getenv("ELEVENLABS_API_KEY") or "").strip()
-ELEVEN_VOICE = (os.getenv("ELEVEN_VOICE_ID") or "").strip() or "EXAVITQu4vr4xnSDxMaL"   # Sarah
-ELEVEN_MODEL = "eleven_flash_v2_5"
-ELEVEN_MODEL_QUALITY = "eleven_multilingual_v2"
-ELEVEN_OUT_FMT = "mp3_44100_128"
-ELEVEN_LIMIT_FALLBACK = 10000   # 月字數上限
-
-_quota = {"at": 0.0, "used": 0, "limit": ELEVEN_LIMIT_FALLBACK, "local": 0, "logged": False}
-
-
-async def eleven_remaining() -> int:
-    """剩餘可用字元（遠端額度快取 10 分鐘；查失敗就退回本地計數）"""
-    now = time.time()
-    if ELEVEN_KEY and now - _quota["at"] > 600:
-        try:
-            import httpx
-            async with httpx.AsyncClient(timeout=10.0) as cli:
-                r = await cli.get("https://api.elevenlabs.io/v1/user/subscription",
-                                  headers={"xi-api-key": ELEVEN_KEY})
-            if r.status_code == 200:
-                sub = r.json().get("subscription", r.json())
-                _quota.update(at=now,
-                              used=int(sub.get("character_count") or 0),
-                              limit=int(sub.get("character_limit") or ELEVEN_LIMIT_FALLBACK))
-            else:
-                _quota["at"] = now - 540          # 60 秒後重試，不要每次合成都打
-        except Exception:
-            _quota["at"] = now - 540
-    return max(0, _quota["limit"] - _quota["used"] - _quota["local"])
-
-
-async def _eleven_call(cli, text: str, model: str) -> bytes:
-    url = f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVEN_VOICE}/stream"
-    payload = {
-        "text": text,
-        "model_id": model,
-        "voice_settings": {"stability": 0.4, "similarity_boost": 0.8},
-    }
-    async with cli.stream("POST", url, headers={"xi-api-key": ELEVEN_KEY},
-                          params={"output_format": ELEVEN_OUT_FMT}, json=payload) as resp:
-        if resp.status_code != 200:
-            body = (await resp.aread()).decode("utf-8", "replace")
-            raise RuntimeError(f"ElevenLabs {model} HTTP {resp.status_code}: {body[:150]}")
-        buf = io.BytesIO()
-        async for chunk in resp.aiter_bytes():
-            buf.write(chunk)
-        data = buf.getvalue()
-    if not data:
-        raise RuntimeError(f"ElevenLabs {model} 回傳空白音訊")
-    return data
-
-
-async def _synth_elevenlabs(text: str) -> bytes:
-    """ElevenLabs 串流合成（MP3 bytes）。額度不足拋錯讓引擎鏈降級到本地。"""
-    if not ELEVEN_KEY:
-        raise RuntimeError("未設定 ELEVENLABS_API_KEY")
-    lang = detect_language(text)
-    text = _clean_text(text, lang)
-    if not text:
-        return b""
-
-    left = await eleven_remaining()
-    if left <= 0:
-        raise RuntimeError(f"ElevenLabs 月額度已用盡（{_quota['used']}/{_quota['limit']}），降級本地引擎")
-    if not _quota["logged"]:
-        _quota["logged"] = True
-        _log(f"[TTS Router] ElevenLabs 啟用: voice={ELEVEN_VOICE} model={ELEVEN_MODEL} "
-             f"剩餘額度 {left}/{_quota['limit']} 字元（每月重置）")
-
-    import httpx
-    async with httpx.AsyncClient(timeout=60.0) as cli:
-        try:
-            data = await _eleven_call(cli, text, ELEVEN_MODEL)
-        except Exception as e:
-            # 主模型不可用（免費版沒開／模型改名）→ 退到品質款再試一次
-            if ELEVEN_MODEL_QUALITY and ELEVEN_MODEL != ELEVEN_MODEL_QUALITY:
-                _log(f"[TTS Router] ElevenLabs {ELEVEN_MODEL} 失敗，改試 {ELEVEN_MODEL_QUALITY}: {e}")
-                data = await _eleven_call(cli, text, ELEVEN_MODEL_QUALITY)
-            else:
-                raise
-
-    _quota["local"] += len(text)
-    return data
-
-
-# ── CosyVoice3（本地精品 TTS，獨立 venv + localhost 服務）─────────────────────
-# 模型 Fun-CosyVoice3-0.5B（9.3GB、中文韻律開源第一梯隊），跑在
-#   venvs\cosyvoice\Scripts\python.exe services\cosyvoice_server.py --port 9881
-# 啟動約 25~60 秒；單句合成 RTF 約 1.4。
-# 服務沒開或逾時 → 拋錯讓引擎鏈降級 edge/xiaoyi（不中斷直播）。
-COSYVOICE_URL = (os.getenv("COSYVOICE_URL") or "http://127.0.0.1:9881").rstrip("/")
-COSYVOICE_TIMEOUT = 60.0
-# 雲端 GPT-SoVITS 的參考音訊與文字（空的＝用服務端預設）
-SOVITS_REF_AUDIO = ""
-SOVITS_PROMPT_TEXT = ""
-SOVITS_PROMPT_LANG = "zh"
-
-
-async def _synth_cosyvoice(text: str) -> bytes:
-    lang = detect_language(text)
-    text = _clean_text(text, lang)
-    if not text:
-        return b""
-    import httpx
-    async with httpx.AsyncClient(timeout=COSYVOICE_TIMEOUT) as cli:
-        r = await cli.post(f"{COSYVOICE_URL}/tts", json={"text": text})
-        if r.status_code != 200:
-            detail = r.text[:180]
-            raise RuntimeError(f"cosyvoice HTTP {r.status_code}: {detail}")
-        data = r.content
-    if not data:
-        raise RuntimeError("cosyvoice 回傳空白音訊")
-    return data
-
-async def _synth_cloud_gptsovits(text: str) -> bytes:
-    """傳送到 Google Colab 的遠端 GPT-SoVITS API 伺服器 (api_v2)"""
-    colab_url = (os.getenv("COLAB_SOVITS_URL") or "").rstrip("/")
-    if not colab_url:
-        raise RuntimeError("未設定 COLAB_SOVITS_URL 環境變數")
-        
-    lang = detect_language(text)
-    text = _clean_text(text, lang)
-    if not text:
-        return b""
-        
-    # GPT-SoVITS 的語系：純日→ja、純中→zh，混合一律 auto（模型自己分段唸）。
-    # 絕不能對混合句硬鎖 zh/ja，否則另一種文字會被唸爛。
-    req_lang = sovits_text_lang(text)
-    
-    # 這些是你原本給 GPT-SoVITS 的參考音訊與文字，需根據你的模型微調
-    ref_audio, prompt_text, prompt_lang = SOVITS_REF_AUDIO, SOVITS_PROMPT_TEXT, SOVITS_PROMPT_LANG
-    
-    import httpx
-    async with httpx.AsyncClient(timeout=45.0) as cli:
-        # 呼叫官方 api_v2.py 的寫法
-        payload = {
-            "text": text,
-            "text_language": req_lang,
-            "ref_audio_path": ref_audio,
-            "prompt_text": prompt_text,
-            "prompt_language": prompt_lang,
-            "cut_punc": "，。！？"
-        }
-        r = await cli.post(f"{colab_url}/tts", json=payload)
-        if r.status_code != 200:
-            detail = r.text[:180]
-            raise RuntimeError(f"Colab GPT-SoVITS HTTP {r.status_code}: {detail}")
-        data = r.content
-        
-    if not data:
-        raise RuntimeError("Colab GPT-SoVITS 回傳空白音訊")
-    return data
-
-
-
-
 _ENGINES = {
     "edge": _synth_edge,
     "xiaoyi": _synth_xiaoyi,
-    "elevenlabs": _synth_elevenlabs,
-    "cosyvoice": _synth_cosyvoice,
-    "cloud_gptsovits": _synth_cloud_gptsovits,
 }
 
 # 單引擎無回應上限（GPU 推理 hang 不會拋錯，超時直接換下一個）
@@ -509,7 +330,7 @@ def get_engine_errors() -> dict:
 
 def file_extension(engine: str) -> str:
     """回傳該引擎產出的副檔名（供播放端正確命名暫存檔）"""
-    return ".mp3" if engine in ("edge", "elevenlabs") else ".wav"
+    return ".mp3" if engine == "edge" else ".wav"
 
 
 def _ffmpeg_exe() -> str:
@@ -713,7 +534,7 @@ async def get_tts_audio_bytes(text: str) -> bytes:
     chain = ([_active_engine] if _active_engine in _ENGINES else []) + \
             [e for e in ENGINE_CHAIN if e != _active_engine]
 
-    # 自動升級：當前引擎不是鏈首時（例：啟動時 cosyvoice 服務還沒載入完、先落在後面的引擎），
+    # 自動升級：當前引擎不是鏈首時（例：鏈首引擎暫時失敗、先落在後面的引擎），
     # 每 120 秒試一次鏈首，好了就切回去
 
     top = ENGINE_CHAIN[0] if ENGINE_CHAIN else None

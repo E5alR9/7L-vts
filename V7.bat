@@ -16,12 +16,6 @@ title 7L AI VTuber
 :: 統一切到腳本所在資料夾，確保相對路徑（data/ models/ .env）都能命中
 cd /d "%~dp0"
 
-:: 🎙️ 背景啟動 CosyVoice 本地 TTS 服務（非阻塞；載入約 25~60 秒，
-::    期間 tts_router 先用曉伊／其他引擎，就緒後下次合成會自動切過去）
-if exist "%~dp0venvs\cosyvoice\Scripts\python.exe" (
-    start "" /b powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%~dp0scripts\start_cosyvoice.ps1" >nul 2>&1
-)
-
 echo.
 echo =========================================
 echo          7L AI VTuber 啟動中...

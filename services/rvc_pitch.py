@@ -54,34 +54,6 @@ def decide_song_key_shift(
     return 0.0, ratio
 
 
-def analyze_vocal_range(vocal_path: str, sample_rate: int = ANALYZE_SR):
-    """快速量測原唱整體音域：回 (median_hz, p90_hz, voiced_seconds)，失敗回 (None, None, 0.0)。
-
-    全曲 librosa.yin（3 分鐘約 3 秒）＋能量閘（相對最大 RMS 2%，去伴奏殘響/靜音）。
-    """
-    try:
-        import numpy as np
-        import librosa
-        y, _sr = librosa.load(vocal_path, sr=sample_rate, mono=True)
-        if y is None or len(y) < sample_rate:
-            return None, None, 0.0
-        f0 = librosa.yin(y, fmin=50, fmax=800, sr=sample_rate,
-                         frame_length=2048, hop_length=512)
-        rms = librosa.feature.rms(y=y, frame_length=2048, hop_length=512)[0]
-        n = min(len(f0), len(rms))
-        if n == 0:
-            return None, None, 0.0
-        f0, rms = f0[:n], rms[:n]
-        gate = max(float(np.max(rms)) * 0.02, 1e-4)
-        voiced = f0[(rms > gate) & np.isfinite(f0) & (f0 > 50)]
-        if len(voiced) < 100:  # 發聲不足 1 秒：無從判斷，保守不走三明治
-            return None, None, 0.0
-        hop_sec = 512.0 / sample_rate
-        return float(np.median(voiced)), float(np.percentile(voiced, 90)), float(len(voiced) * hop_sec)
-    except Exception:
-        return None, None, 0.0
-
-
 def _file_peak(path: str) -> float:
     """回傳 wav 峰值（0~1+），讀不到回 0.0。"""
     try:

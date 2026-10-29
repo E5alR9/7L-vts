@@ -61,19 +61,6 @@ class LiveTimerSensorHub:
         log_print(f"⏱️ [API Live 定時感測啟動] 註冊任務 #{self._counter}: {seconds} Ticks ({format_ticks_to_human(seconds)}) ➔ 「{clean_msg}」")
         return timer_item
 
-    def cancel_timer(self, task_id: str) -> bool:
-        """取消指定定時感測任務"""
-        if task_id in self.timers:
-            self.timers[task_id]["status"] = "cancelled"
-            log_print(f"⏱️ [API Live 定時感測] 已取消任務 {task_id}")
-            del self.timers[task_id]
-            return True
-        return False
-
-    def clear_all(self):
-        """清空所有感測任務"""
-        self.timers.clear()
-
     def get_active_timers(self) -> List[Dict[str, Any]]:
         """獲取所有進行中感測任務的即時狀態清單"""
         now = time.time()

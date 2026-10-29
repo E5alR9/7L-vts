@@ -67,7 +67,7 @@ class _FakeSession:
 
 
 def _run_handler(cpu, nv, total_timeout=45.0, task="幫我查日圓匯率", origin="dad", targets=None, intent=None,
-                 staged=(True, "auto_sing_song", {"song_name": "晴天"}), requester="", requesters=None):
+                 staged=(True, "auto_sing_song", {"song_name": "晴天"}), requester="", requesters=None, desktop=("miss", "")):
     targets = [] if targets is None else targets
 
     requesters = [] if requesters is None else requesters
@@ -89,10 +89,14 @@ def _run_handler(cpu, nv, total_timeout=45.0, task="幫我查日圓匯率", orig
             await asyncio.sleep(10)
         return nv
 
+    async def desktop_lookup(task_ins, requester_name):
+        targets.append(("desktop", task_ins))
+        return desktop
+
     from core.hard_command import build_slip_text, structured_stage_command
     sess = _FakeSession()
     ns = _load("_run_subagent_task", "_handle_invoke_subagent", types=types, asyncio=asyncio, session=sess, GLOBAL_LIVE_SESSION=sess,
-               ws_send_lock=asyncio.Lock(),
+               ws_send_lock=asyncio.Lock(), _desktop_lookup=desktop_lookup,
                background_tool_executor=background_tool_executor, nv_interpret_task=nv_interpret_task,
                build_slip_text=build_slip_text, _SUBAGENT_TOTAL_TIMEOUT=total_timeout,
                _BRAIN_INPUT_ORIGIN={"who": origin, "ts": 0.0}, _brain_requester=lambda: requester,
@@ -121,6 +125,22 @@ def test_hard_commands_ask_for_one_ack_without_tool_names():
     assert "[SILENCE]" in text                           # 她已經答應過就不要再講
     text, sched = _run_handler((True, "mixed_play_sing", {"desc": "晴天＋稻香"}), None)
     assert "晴天＋稻香" in text and "mixed_play_sing" not in text
+
+
+def test_brain_picks_the_desktop_gemini_or_the_api_subagent():
+    """老爸 2026-10-29：查東西用桌面版還是 API 子代理由主腦決定（action ask_desktop／other）。"""
+    targets = []
+    text, sched = _run_handler((False, "", {}), ("advice", "[API 答案]"), targets=targets,
+                               intent={"action": "ask_desktop"}, desktop=("advice", "[桌面版答案]"))
+    assert text == "[桌面版答案]" and sched == types.FunctionResponseScheduling.WHEN_IDLE
+    assert ("desktop", "幫我查日圓匯率") in targets and not any(t[0] == "nv" for t in targets)
+    targets = []                                          # 桌面版沒查成：改走 API 子代理，一句不丟
+    text, _ = _run_handler((False, "", {}), ("advice", "[API 答案]"), targets=targets,
+                           intent={"action": "ask_desktop"}, desktop=("miss", ""))
+    assert text == "[API 答案]" and [t[0] for t in targets if t[0] in ("desktop", "nv")] == ["desktop", "nv"]
+    targets = []                                          # 選 other：不碰桌面版
+    text, _ = _run_handler((False, "", {}), ("advice", "[API 答案]"), targets=targets, intent={"action": "other"})
+    assert text == "[API 答案]" and not any(t[0] == "desktop" for t in targets)
 
 
 def test_dispatched_tool_result_is_silent_after_the_ack():
@@ -203,8 +223,7 @@ def test_relay_text_keeps_facts():
         assert "數字" in s and "不要自己補" in s
 
 
-def _interpret(chain, calls, tool=(None, None), gemini_think=("advice", "[答案]"), nv_think=("advice", "[NV 答案]"),
-               desktop_think=("miss", "")):
+def _interpret(chain, calls, tool=(None, None), gemini_think=("advice", "[答案]"), nv_think=("advice", "[NV 答案]")):
     def mk(name, result):
         async def f(*a, **k):
             calls.append(name)
@@ -215,25 +234,17 @@ def _interpret(chain, calls, tool=(None, None), gemini_think=("advice", "[答案
 
     ns = _load("nv_interpret_task", asyncio=asyncio, resolve_subagent_chain=lambda: chain, promptkit=SimpleNamespace(subagent_system=lambda: ""),
                _gemini_tool_pass=mk("gemini_tool", tool), _nv_tool_pass=mk("nv_tool", tool),
-               _gemini_think_pass=mk("gemini_think", gemini_think), _nv_think_pass=mk("nv_think", nv_think),
-               _desktop_think_pass=mk("desktop_think", desktop_think))
+               _gemini_think_pass=mk("gemini_think", gemini_think), _nv_think_pass=mk("nv_think", nv_think))
     return asyncio.run(ns["nv_interpret_task"]("想一個老媽生日的驚喜點子"))
 
 
 def test_auto_thinks_with_gemini_first_and_nv_only_as_backup():
     calls = []
     assert _interpret(["gemini", "nv"], calls) == ("advice", "[答案]")
-    assert calls == ["gemini_tool", "desktop_think", "gemini_think"]
+    assert calls == ["gemini_tool", "gemini_think"]     # 2026-10-29 起不再自動先問桌面版（主腦自己選 ask_desktop）
     calls = []
     assert _interpret(["gemini", "nv"], calls, gemini_think=RuntimeError("503")) == ("advice", "[NV 答案]")
-    assert calls == ["gemini_tool", "desktop_think", "gemini_think", "nv_think"]
-
-
-def test_deep_think_asks_the_desktop_gemini_first():
-    # 老爸指定（2026-10-27）：深度思考先問免費的桌面版 Gemini（比 API 穩），答得出來就不打 API
-    calls = []
-    assert _interpret(["gemini", "nv"], calls, desktop_think=("advice", "[桌面版答案]")) == ("advice", "[桌面版答案]")
-    assert calls == ["gemini_tool", "desktop_think"]
+    assert calls == ["gemini_tool", "gemini_think", "nv_think"]
 
 
 def test_search_result_is_a_report_to_be_spoken():

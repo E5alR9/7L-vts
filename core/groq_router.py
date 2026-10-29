@@ -509,30 +509,6 @@ async def groq_chat(
 
 
 # ── Google GenAI 內容 -> OpenAI 訊息（純文字） ───────────────────────────────
-def contents_to_messages(contents) -> Optional[List[Dict[str, str]]]:
-    """
-    把 google.genai 的 types.Content 列表轉成 OpenAI messages。
-    含圖片/音訊等非文字零件時回傳 None（這類多模態請求請交給 Gemini）。
-    """
-    if not contents:
-        return None
-    out: List[Dict[str, str]] = []
-    for c in contents:
-        role = getattr(c, "role", "user") or "user"
-        oai_role = "assistant" if role in ("model", "assistant") else "user"
-        parts = getattr(c, "parts", None) or []
-        texts = []
-        for p in parts:
-            if getattr(p, "inline_data", None) is not None:
-                return None                      # 圖片 / 音訊 -> 交給 Gemini
-            if getattr(p, "function_call", None) is not None:
-                return None                      # 既有工具呼叫軌跡 -> 交給 Gemini
-            t = getattr(p, "text", None)
-            if t:
-                texts.append(t)
-        if texts:
-            out.append({"role": oai_role, "content": "\n".join(texts)})
-    return out or None
 
 
 def _note_failure(model: str, key: str, err: str):

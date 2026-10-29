@@ -488,7 +488,7 @@ def test_live_brain_tool_declares_structured_fields():
     props = decl.parameters.properties
     assert set(props) >= {"task_instruction", "action", "song", "song2", "url"}
     from core.hard_command import STAGE_ACTIONS
-    assert set(props["action"].enum) == set(STAGE_ACTIONS) | {"other"}
+    assert set(props["action"].enum) == set(STAGE_ACTIONS) | {"ask_desktop", "other"}   # ask_desktop：主腦選桌面版查（2026-10-29）
     assert decl.parameters.required == ["task_instruction"]
 
 

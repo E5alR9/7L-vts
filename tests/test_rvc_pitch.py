@@ -78,22 +78,6 @@ def _peak_hz(path):
     return float(freqs[int(np.argmax(spec[1:])) + 1]), data.shape, sr
 
 
-def test_analyze_vocal_range_on_tones(tmp_path):
-    from services.rvc_pitch import analyze_vocal_range
-    p = tmp_path / "hi.wav"
-    _sine_wav(p, 440.0)
-    med, p90, vs = analyze_vocal_range(str(p))
-    assert med == pytest.approx(440.0, abs=8.0)
-    assert p90 == pytest.approx(440.0, abs=8.0)
-    assert vs > 3.0
-    p2 = tmp_path / "lo.wav"
-    _sine_wav(p2, 150.0)
-    med2, _, _ = analyze_vocal_range(str(p2))
-    assert med2 == pytest.approx(150.0, abs=8.0)
-    # 空檔／不存在 → 保守 None
-    assert analyze_vocal_range(str(tmp_path / "nope.wav")) == (None, None, 0.0)
-
-
 def test_shift_octave_direction_and_shape(tmp_path):
     from services.rvc_pitch import shift_octave_file
     src = tmp_path / "src.wav"

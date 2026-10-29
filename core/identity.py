@@ -8,7 +8,7 @@
     CHARACTER_NAME  角色名（預設「7L」），讀環境變數
     OWNER_ACCOUNT_IDS  老爸的平台帳號（認老爸只信這個）寫在本檔
 
-白名單在 core/env_config.py；啟動步驟見 docs/GETTING_STARTED.md。
+啟動步驟見 docs/GETTING_STARTED.md。
 """
 import os
 

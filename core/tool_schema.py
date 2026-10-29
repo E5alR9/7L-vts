@@ -156,7 +156,7 @@ INTERACTIONS_TOOLS = [
     {
         "type": "function",
         "name": "music.generate_song",
-        "description": " AI 作曲（ACE-Step 本地服務）：文字→完整歌曲（含人聲編曲，慢任務）。當老爸或觀眾說『寫一首歌』、『AI 作曲』、『生成一首歌』時調用！（需 ACESTEP_ENABLED=1，否則安全跳過）",
+        "description": " AI 作曲（ACE-Step 本地服務）：文字→完整歌曲（含人聲編曲，慢任務）。當老爸或觀眾說『寫一首歌』、『AI 作曲』、『生成一首歌』時調用！（要先開 ACE-Step 服務，沒開會回失敗；生一首要幾十秒到幾分鐘）",
         "parameters": {
             "type": "object",
             "properties": {
@@ -432,7 +432,7 @@ def _invoke_subagent_declaration(non_blocking: bool) -> types.FunctionDeclaratio
     # 描述不叫她「先答應」：那樣她更常只嘴上說「停下囉」卻沒呼叫（停止彈琴 0/3）
     decl = types.FunctionDeclaration(
         name="invoke_subagent",
-        description="當老爸明確要求進行操作（例如點歌、唱歌、彈琴、停止或暫停鋼琴、計時、查資料）時，呼叫此工具。將任務交給背景的子智能體處理。只有呼叫才會真的執行，光說「好了」不算；結果回來系統會告訴妳。注意：若只是純聊天，請不要呼叫此工具！看螢幕畫面不要用這個工具（子智能體看不到畫面），請照規則說 [TOOL:VISION]。舞台動作（彈琴、唱歌、邊彈邊唱、停止唱歌、收起／暫停／繼續鋼琴、看 YouTube 影片）請同時填 action 和歌名或網址，系統會直接照做；其他事 action 填 other。",
+        description="當老爸明確要求進行操作（例如點歌、唱歌、彈琴、停止或暫停鋼琴、計時、查資料）時，呼叫此工具。將任務交給背景的子智能體處理。只有呼叫才會真的執行，光說「好了」不算；結果回來系統會告訴妳。注意：若只是純聊天，請不要呼叫此工具！看螢幕畫面不要用這個工具（子智能體看不到畫面），請照規則說 [TOOL:VISION]。舞台動作（彈琴、唱歌、邊彈邊唱、停止唱歌、收起／暫停／繼續鋼琴、看 YouTube 影片）請同時填 action 和歌名或網址，系統會直接照做。查資料、想問題由妳選：action 填 ask_desktop 交給桌面版 Gemini（免費、會自己上網，適合一般查詢和要想一想的問題，慢幾秒到半分鐘；看不到畫面、不能計時或操作電腦），或填 other 交給 API 子代理（會用工具：搜尋、計時、作曲…）；其他事 action 填 other。",
         parameters=types.Schema(
             type="OBJECT",
             properties={
@@ -444,10 +444,11 @@ def _invoke_subagent_declaration(non_blocking: bool) -> types.FunctionDeclaratio
                 "action": types.Schema(
                     type="STRING",
                     enum=["play_piano", "sing", "play_and_sing", "stop_singing",
-                          "stop_piano", "pause_piano", "resume_piano", "watch_video", "other"],
+                          "stop_piano", "pause_piano", "resume_piano", "watch_video", "ask_desktop", "other"],
                     description="play_piano 彈琴／sing 唱歌／play_and_sing 邊彈邊唱／stop_singing 停止唱歌／"
                                 "stop_piano 收起鋼琴／pause_piano 暫停鋼琴／resume_piano 繼續彈／"
-                                "watch_video 看 YouTube 影片／other 其他（查資料、計時、作曲…）"
+                                "watch_video 看 YouTube 影片／ask_desktop 請桌面版 Gemini 查資料或想問題／"
+                                "other 交給 API 子代理（查資料、計時、作曲…）"
                 ),
                 "song": types.Schema(type="STRING", description="歌名或曲名（彈琴、唱歌、邊彈邊唱時填，只填歌名）"),
                 "song2": types.Schema(type="STRING", description="邊彈邊唱但彈和唱不同首時，要唱的那首"),

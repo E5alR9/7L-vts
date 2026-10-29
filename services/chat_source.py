@@ -11,7 +11,6 @@
                              放這裡（而非 vts_7L_test）是為了避開循環 import：
                              web_dashboard 只依賴 services.*，vts 主程式只管註冊。
 """
-import asyncio
 import collections
 import time
 
@@ -140,45 +139,3 @@ def chat_workers_status():
     return out
 
 
-async def _supervised(name, func, queue):
-    _set_status(name, "waiting", "啟動中")
-    try:
-        await func(queue)
-    except asyncio.CancelledError:
-        _set_status(name, "stopped", "已手動停止")
-        raise
-    except Exception as e:
-        _set_status(name, "error", f"{type(e).__name__}: {e}")
-    else:
-        st = WORKER_STATUS.get(name, {})
-        if st.get("state") not in ("stopped",):
-            _set_status(name, "stopped", "worker 已結束（可能未設定頻道）")
-
-
-def start_chat_worker(name):
-    """啟動（先停舊的再起新的）。回 dict 給 API 直接轉發。"""
-    if name not in WORKER_FACTORIES:
-        return {"ok": False, "error": f"未知 worker：{name}"}
-    if _INPUT_QUEUE is None:
-        return {"ok": False, "error": "主程式尚未就緒（input_queue 未綁定）"}
-    old = WORKER_TASKS.pop(name, None)
-    try:
-        if old and not old.done():
-            old.cancel()
-    except Exception:
-        pass
-    WORKER_TASKS[name] = asyncio.create_task(_supervised(name, WORKER_FACTORIES[name], _INPUT_QUEUE))
-    return {"ok": True, "state": "starting"}
-
-
-def stop_chat_worker(name):
-    if name not in WORKER_FACTORIES:
-        return {"ok": False, "error": f"未知 worker：{name}"}
-    task = WORKER_TASKS.pop(name, None)
-    try:
-        if task and not task.done():
-            task.cancel()
-    except Exception:
-        pass
-    _set_status(name, "stopped", "已手動停止")
-    return {"ok": True, "state": "stopped"}

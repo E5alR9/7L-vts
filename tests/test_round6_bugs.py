@@ -452,10 +452,7 @@ def test_piano_notes_are_scheduled_apart_from_the_animation():
     assert "SYNTH_LEAD_SEC = 0.16" in src and "_engine_locked" in src
 
 
-def test_desktop_chat_reply_gives_up_fast_and_vts_uses_one_token_file():
-    # 桌面版卡住時老爸一句閒聊要等 120 秒才改走 Live（2026-10-27 開 VTS 完整測試兩項因此沒過）
-    src = ast.get_source_segment(MAIN, _fn("_desktop_dad_reply"))
-    assert "DESKTOP_CHAT_TIMEOUT_SEC" in src and "120.0" not in src
+def test_vts_uses_one_token_file():
     import services.vts_client as vcl
     assert os.path.isabs(vcl.VTS_TOKEN_PATH) and vcl.VTS_TOKEN_PATH.endswith("vts_token.txt")
     assert vcl.RobustVTSClient().token_file == vcl.VTS_TOKEN_PATH

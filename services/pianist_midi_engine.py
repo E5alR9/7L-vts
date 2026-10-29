@@ -45,19 +45,6 @@ def clean_song_query(query: str) -> str:
     clean_q = re.sub(r'\s+', ' ', clean_q).strip()
     return clean_q or query
 
-def is_title_relevant(search_q: str, result_title: str) -> bool:
-    """過濾完全不相關的搜尋結果"""
-    if not search_q or not result_title:
-        return True
-    sq_lower = search_q.lower()
-    rt_lower = result_title.lower()
-    
-    tokens = [t for t in re.split(r'[\s_\-.,!?()（）\[\]/]+', sq_lower) if len(t) >= 2 and t not in ["piano", "midi", "bgm", "theme", "ost", "soundtrack", "fc", "任天堂"]]
-    if not tokens:
-        return True
-    
-    return any(t in rt_lower for t in tokens)
-
 def convert_youtube_url_to_midi(url: str, output_dir: str = "midi_sheets", filename_hint: str = "") -> Optional[str]:
     """ YouTube 直連轉檔：自 YouTube 下載 MP3 並透過線上 BearAudio 轉錄為 88 鍵 MIDI"""
     vid = extract_youtube_video_id(url)

@@ -49,7 +49,7 @@ MAIN_FUNCS = (
     "is_live_brain_active", "live_brain_down_for", "use_rest_brain",
     "rest_slip_worker", "_rest_answer_slip", "_speak_brain_turn", "_rest_speak", "_run_subagent_task",
     "execute_actions", "normalize_silence_token", "_brain_text_for_memory", "_start_marker_tools",
-    "_vision_report_recent", "_vision_wanted", "_start_vision", "_start_mirror", "_likely_needs_tools",
+    "_vision_report_recent", "_vision_wanted", "_start_vision", "_start_mirror",
     "streamer_mind_loop_worker", "_format_board_batch", "_ping_short_circuit", "_is_bare_ping",
     "_split_fossil_batch", "_viewer_profiles_block", "_save_viewer_updates",
 )
@@ -58,7 +58,7 @@ MAIN_CONSTS = (
     "AUDIENCE_STAGE_DECLINE", "UNASKED_STAGE_DECLINE", "_SUBAGENT_VISION_TASK_RE", "_SUBAGENT_MIRROR_TASK_RE",
     "_SUBAGENT_TOTAL_TIMEOUT", "_HARD_CMD_DEDUPE_SEC", "_PLATFORM_LABEL",
     "_SLIP_DEDUPE_SEC", "LIVE_FALLBACK_AFTER_SEC", "VISION_REPORT_QUIET_SEC", "VISION_FAIL_QUIET_SEC", "_VISION_ASK_RE", "VISION_ASK_WINDOW_SEC",
-    "_BARE_PING_NAMES", "_PING_COOLDOWN_SEC", "_PING_QUIET_SEC", "_DESKTOP_TOOL_HINTS",
+    "_BARE_PING_NAMES", "_PING_COOLDOWN_SEC", "_PING_QUIET_SEC",
     "_VIEWER_UPDATE_RE", "VIEWER_UPDATE_HINT",
 )
 
@@ -210,7 +210,7 @@ class DryRun:
             "tk_listener": pytypes.SimpleNamespace(current_tiktok_status_str=""),
             "web_dash": pytypes.SimpleNamespace(broadcast_event=lambda *a, **k: None),
             "live_timer_hub": pytypes.SimpleNamespace(detect_timer_intent=lambda t: None),
-            "_desktop_dad_reply": anoop, "_save_model_position": lambda: d.saved_position.append(1),
+            "_save_model_position": lambda: d.saved_position.append(1),
             "_related_memories_block": related_block, "is_known_viewer": lambda n: n in d.known_viewers,
             "set_timer": anoop, "interrupt_current_speech": anoop, "execute_speech_visual_actions": anoop,
             "is_singing_active": lambda: False, "save_local_audio_clip": lambda *a: "",

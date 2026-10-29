@@ -598,29 +598,6 @@ async def ws_handler(request):
                         if TRIGGER_EXPRESSION_CALLBACK and expr:
                             await TRIGGER_EXPRESSION_CALLBACK(expr)
                             broadcast_event("expression_changed", {"expression": expr})
-                    elif action == "execute_tool":
-                        tool_name = data.get("tool")
-                        args = data.get("args", {})
-                        t_start = time.time()
-                        try:
-                            if EXECUTE_TOOL_CALLBACK:
-                                res = EXECUTE_TOOL_CALLBACK(tool_name, args)
-                                if asyncio.iscoroutine(res):
-                                    res = await res
-                                dur = (time.time() - t_start) * 1000
-                                rec = record_tool_call(tool_name, args, res, caller="老爸 (手動調用)", status="success", duration_ms=dur)
-                                await ws.send_str(json.dumps({"type": "tool_executed", "data": {"ok": True, "record": rec}}, ensure_ascii=False))
-                            else:
-                                dur = (time.time() - t_start) * 1000
-                                rec = record_tool_call(tool_name, args, None, caller="老爸 (手動調用)", status="error", duration_ms=dur, error="工具執行器未就緒")
-                                await ws.send_str(json.dumps({"type": "tool_executed", "data": {"ok": False, "error": "工具執行器未就緒", "record": rec}}, ensure_ascii=False))
-                        except Exception as err:
-                            dur = (time.time() - t_start) * 1000
-                            rec = record_tool_call(tool_name, args, None, caller="老爸 (手動調用)", status="error", duration_ms=dur, error=str(err))
-                            await ws.send_str(json.dumps({"type": "tool_executed", "data": {"ok": False, "error": str(err), "record": rec}}, ensure_ascii=False))
-                    elif action == "clear_tool_history":
-                        TOOL_HISTORY.clear()
-                        broadcast_event("tools_cleared", {})
                     elif action == "restart":
                         broadcast_event("system_restart", {"message": "7L 系統正在重新啟動中..."})
                         spawn(perform_restart())
@@ -830,37 +807,6 @@ async def api_set_memory_capacity(request):
         return web.json_response(res)
     except Exception as e:
         return web.json_response({"ok": False, "error": str(e)}, status=500)
-
-async def api_get_settings(request):
-    """控制台 .env 設定：讀取白名單表單（機密只回 secret_info，不回值）"""
-    try:
-        from core.env_config import read_settings
-    except Exception as e:
-        return web.json_response({"ok": False, "error": f"設定模組載入失敗: {e}"}, status=500)
-    try:
-        return web.json_response({"ok": True, "settings": read_settings()})
-    except Exception as e:
-        return web.json_response({"ok": False, "error": str(e)}, status=500)
-
-
-async def api_save_settings(request):
-    """控制台 .env 設定：寫入"""
-    try:
-        body = await request.json()
-        updates = body.get("settings") if isinstance(body, dict) and "settings" in body else body
-        if not isinstance(updates, dict):
-            return web.json_response({"ok": False, "error": "settings 必須是 {key: value} 物件"}, status=400)
-        from core.env_config import update_settings
-        applied, restart, errors = update_settings({str(k): ("" if v is None else str(v)) for k, v in updates.items()})
-        if errors and not applied:
-            return web.json_response({"ok": False, "applied": [], "restart": [], "errors": errors}, status=400)
-        if restart:
-            broadcast_event("settings_saved", {"applied": applied, "restart": restart,
-                                               "message": "⚠️ 部分設定需重啟 V7 才生效"})
-        return web.json_response({"ok": True, "applied": applied, "restart": restart, "errors": errors})
-    except Exception as e:
-        return web.json_response({"ok": False, "error": str(e)}, status=500)
-
 
 async def api_send_message(request):
     """手動發送訊息/指令給 7L"""
@@ -1501,8 +1447,6 @@ async def start_web_dashboard(
     app.router.add_get("/api/model_usage", api_get_model_usage)
     app.router.add_post("/api/tools/execute", api_execute_tool)
     app.router.add_post("/api/tools/clear_history", api_clear_tool_history)
-    app.router.add_get("/api/settings", api_get_settings)
-    app.router.add_post("/api/settings", api_save_settings)
     app.router.add_post("/api/restart", api_restart)
     app.router.add_post("/api/shutdown", api_shutdown)
     app.router.add_post("/api/yt_companion/approve", api_yt_companion_approve)

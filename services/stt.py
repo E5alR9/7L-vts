@@ -1,13 +1,10 @@
 # -*- coding: utf-8 -*-
 """
-🎙️ STT 轉錄器 (PROVIDER: GOOGLE-WEB-SPEECH 為主／LOCAL faster-whisper 為備；見 docs/AI_SOURCES.md)
+🎙️ STT 轉錄器 (PROVIDER: LOCAL faster-whisper；見 docs/AI_SOURCES.md)：看影片時把片段轉成文字（services/video_watch）。
+    以前還有 Google 免費端點和 backend 切換，沒人用，2026-10-29 刪掉。
 
-    STT_BACKEND = auto    預設：Google 免費端點先，失敗退本地 faster-whisper
-                  google  只用 Google（舊行為）
-                  faster  只用本地（離線、零額度、中文用 small 模型兼顧品質）
     STT_FWHISPER_MODEL = tiny|base|small|medium（預設 small；CPU int8）
 """
-import io
 import os
 import threading
 
@@ -17,21 +14,7 @@ logging.getLogger("faster_whisper").setLevel(logging.WARNING)
 
 _fw_model = None
 _fw_model_name = ""
-STT_BACKEND = "auto"
 STT_FWHISPER_MODEL = "small"
-
-
-def backend() -> str:
-    return STT_BACKEND
-
-
-def _transcribe_google(wav_bytes: bytes) -> str:
-    import speech_recognition as sr
-    r = sr.Recognizer()
-    buf = io.BytesIO(wav_bytes)
-    with sr.AudioFile(buf) as source:
-        audio = r.record(source)
-    return (r.recognize_google(audio, language="zh-TW") or "").strip()
 
 
 def _get_fw_model():
@@ -62,23 +45,3 @@ def _transcribe_faster(wav_bytes: bytes) -> str:
                 pass
 
 
-def transcribe_wav(wav_bytes: bytes) -> str:
-    """記憶體內 WAV → 中文文字（失敗回空字串，絕不拋錯）。"""
-    if not wav_bytes:
-        return ""
-    b = backend()
-    if b in ("auto", "google"):
-        try:
-            t = _transcribe_google(wav_bytes)
-            if t:
-                return t
-        except Exception:
-            pass
-        if b == "google":
-            return ""
-    if b in ("auto", "faster"):
-        try:
-            return _transcribe_faster(wav_bytes)
-        except Exception:
-            pass
-    return ""

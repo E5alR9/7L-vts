@@ -34,8 +34,7 @@ def test_detect_language_mixed_prefers_chinese_with_markers():
 # ── 副檔名對應（播放端靠它命名暫存檔）──────────────────────────────────────
 def test_file_extension_mapping():
     assert t.file_extension("edge") == ".mp3"
-    assert t.file_extension("elevenlabs") == ".mp3"
-    for eng in ("cosyvoice", "xiaoyi", "unknown_engine"):
+    for eng in ("xiaoyi", "unknown_engine"):
         assert t.file_extension(eng) == ".wav"
 
 
@@ -97,22 +96,10 @@ def test_clean_text_keeps_kana_on_both_paths():
     assert "こんにちは" in out_ja
 
 
-def test_sovits_text_lang():
-    # GPT-SoVITS 語系：純日→ja、純中→zh，混合一律 auto（模型自己分段）
-    assert t.sovits_text_lang("こんにちは") == "ja"
-    assert t.sovits_text_lang("カタカナです") == "ja"
-    assert t.sovits_text_lang("你好嗎，今天天氣真好。") == "zh"
-    assert t.sovits_text_lang("") == "zh"
-    assert t.sovits_text_lang("點這首「ロンリーユニバース」超有品味") == "auto"
-    assert t.sovits_text_lang("接下來唱 Never Gonna Give You Up！") == "auto"
-    assert t.sovits_text_lang("Never Gonna Give You Up") == "auto"
-    assert t.sovits_text_lang("ﾛﾝﾘｰﾕﾆﾊﾞｰｽ") == "ja"
-
-
 # ── 引擎註冊表與降級鏈 ─────────────────────────────────────────────────────
 def test_engine_registry_contains_all_known_engines():
-    # 與 services/tts_router._ENGINES 同步（kokoro 已於 0d0ab8d22 移除）
-    for eng in ("edge", "xiaoyi", "elevenlabs", "cosyvoice", "cloud_gptsovits"):
+    # 與 services/tts_router._ENGINES 同步（kokoro 已於 0d0ab8d22 移除；cosyvoice、elevenlabs、cloud_gptsovits 2026-10-29 移除）
+    for eng in ("edge", "xiaoyi"):
         assert eng in t._ENGINES, f"缺少引擎註冊: {eng}"
         assert callable(t._ENGINES[eng])
 

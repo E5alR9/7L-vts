@@ -105,7 +105,6 @@ GROUPS = {
         ("提示詞", ("get", "/api/prompts"), [], [], 5, 0, r"^$"),
         ("工具目錄", ("get", "/api/tools"), [], [], 5, 0, r"^$"),
         ("工具紀錄", ("get", "/api/tools/history"), [], [], 5, 0, r"^$"),
-        ("設定", ("get", "/api/settings"), [], [], 5, 0, r"^$"),
         ("聊天來源", ("get", "/api/chat_sources"), [], [], 5, 0, r"^$"),
     ],
     "chat": [

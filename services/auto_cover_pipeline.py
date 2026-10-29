@@ -474,10 +474,6 @@ async def _mixed_rendezvous_sing(rv, title, inst_path):
     return start_at
 
 
-def disarm_mixed_rendezvous(sing_title):
-    _MIXED_RENDEZVOUS.pop(_dedupe_key(sing_title or ""), None)
-
-
 async def _clear_prep_halo() -> bool:
     """開唱清場：臉上只有準備期的暈就摘掉；有別的戲/沒暈就不碰。回 True=摘過。"""
     try:

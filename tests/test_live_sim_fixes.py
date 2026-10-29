@@ -179,8 +179,8 @@ def test_dad_typing_wakes_her_up():
 
 
 def test_desktop_helper_absence_is_remembered():
-    assert "_DESKTOP_DOWN_UNTIL = time.time() + _DESKTOP_DOWN_SEC" in _src("_desktop_dad_reply")
-    assert "time.time() >= _DESKTOP_DOWN_UNTIL" in MAIN
+    assert "_DESKTOP_DOWN_UNTIL = time.time() + _DESKTOP_DOWN_SEC" in _src("_note_desktop_error")
+    assert "time.time() < _DESKTOP_DOWN_UNTIL" in _src("_desktop_lookup")
 
 
 # ── 截圖 ──────────────────────────────────────────────────────────────
@@ -257,7 +257,8 @@ def test_vision_reply_uses_whole_text_not_first_char():
         return "這是鋼琴影片和 Minecraft"
     ns = {"log_print": lambda *a: None, "describe_images": describe_images, "get_combined_temporal_screen_snapshot": lambda: ["x"],
           "_VISION_STATE": {"report_ts": 0.0}, "time": time, "send_brain_slip": slips.append, "VISION_HISTORY_STREAM": [],
-          "_clean_result_for_brain": lambda t: t, "asyncio": asyncio, "VISION_TOOL_TIMEOUT_SEC": 45.0}
+          "_clean_result_for_brain": lambda t: t, "asyncio": asyncio, "VISION_TOOL_TIMEOUT_SEC": 45.0,
+          "capture_screen_as_base64": lambda: None, "log_swallowed": lambda *a: None}
     exec(compile(ast.Module(body=[_fn("live_vision_tool_task")], type_ignores=[]), "v", "exec"), ns)
     asyncio.run(ns["live_vision_tool_task"]())
     assert len(slips) == 1 and slips[0].endswith("這是鋼琴影片和 Minecraft")
@@ -273,10 +274,39 @@ def test_vision_without_a_screen_does_not_ask_the_model():
         return "畫面中開著 main.py"
     ns = {"log_print": lambda *a: None, "describe_images": describe_images, "get_combined_temporal_screen_snapshot": lambda: None,
           "_VISION_STATE": {"report_ts": 0.0}, "time": time, "send_brain_slip": slips.append, "VISION_HISTORY_STREAM": [],
-          "_clean_result_for_brain": lambda t: t, "asyncio": asyncio, "VISION_TOOL_TIMEOUT_SEC": 45.0}
+          "_clean_result_for_brain": lambda t: t, "asyncio": asyncio, "VISION_TOOL_TIMEOUT_SEC": 45.0,
+          "capture_screen_as_base64": lambda: None, "log_swallowed": lambda *a: None}
     exec(compile(ast.Module(body=[_fn("live_vision_tool_task")], type_ignores=[]), "v", "exec"), ns)
     asyncio.run(ns["live_vision_tool_task"]())
     assert asked == [] and len(slips) == 1 and "沒看清楚畫面" in slips[0]
+
+
+def test_vision_takes_a_fresh_screenshot_when_the_cache_is_empty():
+    """2026-10-29 實測：睡著時截圖迴圈不存圖，剛叫醒就叫她看螢幕，快取是空的、直接回看不到。叫她看就當場截一張。"""
+    import asyncio
+    slips, asked = [], []
+
+    async def describe_images(prompt, images):
+        asked.append(images)
+        return "老爸在看鋼琴影片"
+    ns = {"log_print": lambda *a: None, "describe_images": describe_images, "latest_screen_cache": None,
+          "_VISION_STATE": {"report_ts": 0.0}, "time": time, "send_brain_slip": slips.append, "VISION_HISTORY_STREAM": [],
+          "_clean_result_for_brain": lambda t: t, "asyncio": asyncio, "VISION_TOOL_TIMEOUT_SEC": 45.0,
+          "capture_screen_as_base64": lambda: [("【1. 全景】", "b64")], "log_swallowed": lambda *a: None}
+    ns["get_combined_temporal_screen_snapshot"] = lambda: ns["latest_screen_cache"]
+    exec(compile(ast.Module(body=[_fn("live_vision_tool_task")], type_ignores=[]), "v", "exec"), ns)
+    asyncio.run(ns["live_vision_tool_task"]())
+    assert asked == [[("【1. 全景】", "b64")]] and slips[0].endswith("老爸在看鋼琴影片")
+
+
+def test_vision_sends_only_the_last_few_history_frames():
+    """緩衝區留 60 幀給餘光，看畫面只附最近 VISION_HISTORY_FRAMES 幀（以前整包 60 多張圖、13 秒）。"""
+    from collections import deque
+    ns = {"latest_screen_cache": [("now", "c")], "SCREEN_TEMPORAL_HISTORY": deque([(time.time(), str(i)) for i in range(60)]),
+          "VISION_HISTORY_FRAMES": 2, "time": time}
+    exec(compile(ast.Module(body=[_fn("get_combined_temporal_screen_snapshot")], type_ignores=[]), "v", "exec"), ns)
+    out = ns["get_combined_temporal_screen_snapshot"]()
+    assert [b for _, b in out] == ["58", "59", "c"]
 
 
 def test_vision_report_does_not_retrigger_vision():

@@ -225,7 +225,7 @@ class Speaker:
 
 ### K. 重件拆程序（中期、可選；這輪沒做，見第 7 節）
 
-鋼琴視窗已經是子程序 + UDP，證明模式可行、而且是整個系統最穩的一塊。GPT-SoVITS、Roformer、RVC、embedder 卻都在主程序：任一個載入卡住或崩潰都拖累 Live；實機腳本要等到「Roformer 預載」完才敢算 READY（2～4 分鐘）。`services/cosyvoice_server.py` 已經是獨立 HTTP 服務的樣板——曉伊照抄成 `xiaoyi_server.py`，`tts_router` 多一個 engine 指過去；翻唱管線同理。收穫：主程序秒開、TTS 掛了重啟不斷 Live、GPU 記憶體隔離。代價：音訊 bytes 走 HTTP 多幾毫秒；兩個程序各吃一份 GPU。
+鋼琴視窗已經是子程序 + UDP，證明模式可行、而且是整個系統最穩的一塊。GPT-SoVITS、Roformer、RVC、embedder 卻都在主程序：任一個載入卡住或崩潰都拖累 Live；實機腳本要等到「Roformer 預載」完才敢算 READY（2～4 分鐘）。以前的 `services/cosyvoice_server.py`（2026-10-29 刪掉，git 歷史裡還有）是獨立 HTTP 服務的樣板——曉伊照抄成 `xiaoyi_server.py`，`tts_router` 多一個 engine 指過去；翻唱管線同理。收穫：主程序秒開、TTS 掛了重啟不斷 Live、GPU 記憶體隔離。代價：音訊 bytes 走 HTTP 多幾毫秒；兩個程序各吃一份 GPU。
 
 ### 順手的小項（2026-10-26 做了提示詞、設定、Firestore 本地優先；鋼琴模組沒拆，見第 7 節）
 
@@ -469,7 +469,7 @@ class Speaker:
 | — | **提示詞收進 `core/promptkit.py`**：主腦、子智能體、看板哨兵、畫面哨兵、神態導演、本能腦各一個函式；原文用語法樹搬、逐一比對一字不差；快照測試 | 主腦、哨兵、本能腦照常連上 |
 | — | **看板哨兵**：送禮、加關注、分享要道謝，按讚、進場不回（G 改寫時漏了直播動態，送禮時好時壞） | Live 實測 18/18；送玫瑰她會道謝 |
 
-**K（重件拆程序）這輪沒做**：要把 GPT-SoVITS 改成獨立服務（照 `cosyvoice_server.py`），牽涉 TTS 主路徑、GPU 記憶體分配和開機流程，而且它解決的是「重件崩潰拖垮 Live」，今天看到的顯卡問題是硬體層的（見下），拆程序也擋不住。上面「先講完應答再分離」先解掉最痛的延遲。
+**K（重件拆程序）這輪沒做**：要把 GPT-SoVITS 改成獨立服務（照已刪的 `cosyvoice_server.py`，在 git 歷史裡），牽涉 TTS 主路徑、GPU 記憶體分配和開機流程，而且它解決的是「重件崩潰拖垮 Live」，今天看到的顯卡問題是硬體層的（見下），拆程序也擋不住。上面「先講完應答再分離」先解掉最痛的延遲。
 
 **鋼琴模組（3,036 行）沒拆**：模組層狀態（`is_piano_active`、目前曲目、隊列…）被主程式、後台、翻唱用 `pe.<名稱>` 直接讀寫，拆成套件要先把這些狀態收成一個物件，跟 C 一樣是一輪的工作量。
 

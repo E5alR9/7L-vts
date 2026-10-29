@@ -142,6 +142,47 @@ def _set_prompt(c, text: str) -> None:
     el.SendKeys(text)
 
 
+def _norm(t: str) -> str:
+    return re.sub(r"\s+", "", t or "")
+
+
+def _reply_to(turns, prompt: str):
+    """對話紀錄裡「最後一句我方的話是 prompt」時，回它後面那則 Gemini 回覆（還沒回回 None）。"""
+    key = _norm(prompt)[:40]
+    users = [i for i, t in enumerate(turns) if t["role"] == "user"]
+    if not key or not users or not _norm(turns[users[-1]]["content"]).startswith(key):
+        return None
+    after = [t["content"] for t in turns[users[-1] + 1:] if t["role"] == "gemini" and t["content"]]
+    return after[-1] if after else None
+
+
+def _ask(c, prompt: str, timeout: float = 60.0, poll_interval: float = 0.8) -> str:
+    """送出問題、等 Gemini 回完（文字連續兩次輪詢沒變）。
+    原廠 ask 數「Gemini 回覆變多了沒」，但桌面版只把最近 5 輪留在畫面上：串一長數量就卡在 5，
+    回答明明出來了還一直等到逾時（2026-10-29 計時實測：每句白等 24 秒）。改認「剛送的那句後面的回覆」。"""
+    import time as _t
+    before = [(t["role"], t["content"]) for t in c.get_conversation_history()]
+    c.send_prompt(prompt)
+    start, last, stable = _t.time(), "", 0
+    while _t.time() - start < timeout:
+        _t.sleep(poll_interval)
+        turns = c.get_conversation_history()
+        if [(t["role"], t["content"]) for t in turns] == before:
+            continue          # 畫面還沒動（同一句問兩次時，舊的回答不能當這次的）
+        text = _reply_to(turns, prompt)
+        if not text:
+            continue
+        if text == last:
+            stable += 1
+            if stable >= 2:
+                return text
+        else:
+            last, stable = text, 0
+    if last:
+        return last
+    raise TimeoutError("等待 Gemini 回覆逾時！")
+
+
 def _patch_controller(c):
     """原廠控制器（根目錄 gemini_desktop_controller.py）只認中文介面：找元件的幾個方法換成中英文都認的。"""
     _orig_get_input = c.get_input_field
@@ -155,6 +196,7 @@ def _patch_controller(c):
     c.set_prompt_text = lambda text: _set_prompt(c, text)
     c.get_send_button = lambda: _send_button(c)
     c.get_conversation_history = lambda: _history(c)
+    c.ask = lambda prompt, timeout=60.0, poll_interval=0.8: _ask(c, prompt, timeout, poll_interval)
     return c
 
 

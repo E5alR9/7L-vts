@@ -117,7 +117,6 @@ def test_mixed_rendezvous_lifecycle():
     acp.arm_mixed_rendezvous("月光")
     acp.stop_singing()
     assert len(acp._MIXED_RENDEZVOUS) == 0
-    acp.disarm_mixed_rendezvous("不存在的歌")  # 不炸
 
 
 def test_clear_prep_halo_only_halo_alone():

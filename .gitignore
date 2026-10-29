@@ -33,11 +33,8 @@ subtitle.txt
 STOP_7L.flag
 
 # --- large binaries / regenerable artifacts ---
-# 模型檔（聲紋、向量、CosyVoice…）不入庫，用 scripts 下載重建
+# 模型檔（聲紋、向量、Roformer、RVC…）不入庫，用 scripts 下載重建
 models/
-# SoundFont 音源（scripts/render_sf.py 用；用下載重建，不入庫，144MB）
-soundfonts/*.sf2
-soundfonts/*.zip
 # 逆向譜面工作區（YT 下載音檔，不入庫）
 data/score_in/
 # RAG 向量庫（用 python scripts/ingest_rag.py 重建）

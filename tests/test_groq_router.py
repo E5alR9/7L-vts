@@ -131,31 +131,6 @@ def test_groqresponse_text_and_truthiness():
 
 
 # ── Gemini contents → OpenAI messages（多模態要交回 Gemini）─────────────────
-def test_contents_to_messages_text_only():
-    contents = [
-        SimpleNamespace(role="user", parts=[SimpleNamespace(text="你好"), SimpleNamespace(text="在嗎")]),
-        SimpleNamespace(role="model", parts=[SimpleNamespace(text="在")]),
-    ]
-    msgs = gr.contents_to_messages(contents)
-    assert msgs == [
-        {"role": "user", "content": "你好\n在嗎"},
-        {"role": "assistant", "content": "在"},
-    ]
-
-
-def test_contents_to_messages_returns_none_for_multimodal():
-    # 含圖片 → 回 None（讓呼叫端退回 Gemini）
-    img = [SimpleNamespace(role="user", parts=[
-        SimpleNamespace(text="看這張", inline_data=SimpleNamespace(mime_type="image/png", data=b"..."))])]
-    assert gr.contents_to_messages(img) is None
-    # 含 function_call 軌跡 → 回 None
-    fc = [SimpleNamespace(role="model", parts=[SimpleNamespace(function_call=SimpleNamespace(name="x", args={}))])]
-    assert gr.contents_to_messages(fc) is None
-    # 空 → None
-    assert gr.contents_to_messages(None) is None
-    assert gr.contents_to_messages([]) is None
-    # 全無文字 → None
-    assert gr.contents_to_messages([SimpleNamespace(role="user", parts=[])]) is None
 
 
 def test_groq_chat_gives_up_at_the_total_deadline(monkeypatch):

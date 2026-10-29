@@ -43,7 +43,7 @@ copy .env.example .env   # 若無範例檔，直接新建 .env
 ## 3. 啟動
 
 ```bash
-V7.bat            # CosyVoice → 主程式 → 看門狗（一鍵）
+V7.bat            # 主程式 → 看門狗（一鍵）
 # 或：python vts_7L_test.py
 # 開播前先開 VTube Studio（8001 埠），再開 OBS 抓窗
 ```
