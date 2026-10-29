@@ -4802,9 +4802,9 @@ async def autonomous_wander_worker():
 
                 if IS_AUTO_WANDER_ENABLED and now - LAST_WANDER_TIME > 60.0 and not pe.is_piano_active:  # 坐在鋼琴前待命時不走位
                     LAST_WANDER_TIME = now
-                    log_print(f"🚶 [自主漫遊] 閒置 {int(idle_seconds)} 秒，隨機換個位置")
-                    await move_vts_spatial(target_pos="random", duration=3.0)
-                    vc.CURRENT_SPATIAL_LOCATION = "自由漫遊"
+                    if await move_vts_spatial(target_pos="random", duration=2.0):   # VTS 最多 2 秒
+                        log_print(f"🚶 [自主漫遊] 閒置 {int(idle_seconds)} 秒，隨機換個位置")
+                        vc.CURRENT_SPATIAL_LOCATION = "自由漫遊"
                     
         except Exception:
             log_swallowed()  # 舊碼整個吞掉，壞了一個月沒人發現

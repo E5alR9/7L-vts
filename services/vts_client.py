@@ -732,8 +732,10 @@ async def move_vts_spatial(
     if clean_pos in ["原位", "回到原位", "原本位置", "復原"] and abs(dest_x - cur_x) < 0.03 and abs(dest_y - cur_y) < 0.03 and abs(dest_sz - cur_sz) < 1.5:
         return True
 
+    # VTS 只收 0～2 秒，超過整個請求被 APIError 302 拒絕、模型不動（2026-10-29 實機：自主漫遊傳 3 秒，
+    # 從匯入那天起一步都沒走過，日誌卻每分鐘寫「隨機換個位置」）
     req_data = {
-        "timeInSeconds": float(duration),
+        "timeInSeconds": max(0.0, min(2.0, float(duration))),
         "valuesAreRelativeToModel": False,
         "positionX": float(dest_x),
         "positionY": float(dest_y),
@@ -743,13 +745,16 @@ async def move_vts_spatial(
     
     async with vts_lock:
         try:
-            await asyncio.wait_for(target_vts.request({
+            resp = await asyncio.wait_for(target_vts.request({
                 "apiName": "VTubeStudioPublicAPI",
                 "apiVersion": "1.0",
                 "requestID": "MoveModelReq",
                 "messageType": "MoveModelRequest",
                 "data": req_data
             }), timeout=1.5)
+            if (resp or {}).get("messageType") == "APIError":   # VTS 拒絕：沒移，別回成功
+                log_print(f"⚠️ [VTS 走位] VTS 拒絕移動：{(resp.get('data') or {}).get('message', '')[:80]}")
+                return False
             CURRENT_VTS_MODEL_X = dest_x
             CURRENT_VTS_MODEL_Y = dest_y
             CURRENT_VTS_MODEL_SIZE = dest_sz
