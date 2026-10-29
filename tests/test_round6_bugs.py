@@ -329,7 +329,7 @@ def test_gemini_36_flash_thinks_minimal_and_deep_think_low(monkeypatch):
     assert seen[1] == ("gemini-3.5-flash-lite", None)
 
 
-def _afterthought_ns(reply_text, origin, later_origin=None, singing=False):
+def _afterthought_ns(reply_text, origin, later_origin=None, singing=False, talking=None):
     import re as _re
     import time as _t
     slips, asked = [], []
@@ -352,7 +352,10 @@ def _afterthought_ns(reply_text, origin, later_origin=None, singing=False):
           "_owner_name": lambda: "E5", "usage": type("U", (), {"as_role": staticmethod(lambda r: _Role())}),
           "live_one_shot": live_one_shot, "promptkit": type("K", (), {"afterthought_system": staticmethod(lambda o: "sys")}),
           "GEMINI_KEYS": ["k"], "DEEP_THINK_LIVE_MODEL": "deep", "send_brain_slip": slips.append,
-          "log_print": lambda *a: None, "log_swallowed": lambda *a: None}
+          "log_print": lambda *a: None, "log_swallowed": lambda *a: None, "asyncio": asyncio,
+          "AFTERTHOUGHT_SPEAK_WAIT_SEC": 60.0,
+          "stage": type("S", (), {"ai_state": staticmethod(lambda: (talking.pop(0) if talking else "IDLE"))}),
+          "speech_queue": type("Q", (), {"empty": staticmethod(lambda: True)})}
     for n in ("_afterthought_wanted", "_afterthought"):
         exec(compile(ast.Module(body=[_fn(n)], type_ignores=[]), n, "exec"), ns)
     return ns, slips, asked
@@ -374,6 +377,16 @@ def test_afterthought_adds_a_line_after_she_answers():
     ns, slips, asked = _afterthought_ns("欸我剛想到，晴天副歌我最喜歡", o2)
     asyncio.run(ns["_afterthought"]("會呀！"))
     assert "觀眾「小美」說" in asked[0][0] and "觀眾「小美」" in slips[0]
+
+
+def test_afterthought_waits_until_she_finished_speaking():
+    """2026-10-29 實機：補充的紙條在她念正題時遞出去，Live 回「被打斷」，正題整段被清掉沒念。先等她念完。"""
+    import time as _t
+    o = {"who": "dad", "said": "幫我想老媽生日點子", "human": True, "ts": _t.time(), "name": ""}
+    talking = ["TALKING", "TALKING", "TALKING"]
+    ns, slips, _ = _afterthought_ns("啊對了，也可以送香氛", o, talking=talking)
+    asyncio.run(ns["_afterthought"]("可以送按摩椅"))
+    assert talking == [] and len(slips) == 1                    # 等到不是 TALKING 才遞
 
 
 def test_afterthought_stays_quiet_when_nothing_to_add_or_stale():
@@ -511,28 +524,6 @@ def test_search_falls_back_to_the_desktop_gemini_before_ddg(monkeypatch):
             return [{"title": "天氣", "body": "台北明天晴"}]
     monkeypatch.setitem(sys.modules, "duckduckgo_search", types.SimpleNamespace(DDGS=FakeDDGS))
     assert ws.search_google("台北明天天氣") == "- 天氣: 台北明天晴"
-
-
-def test_she_only_looks_at_the_screen_when_someone_asks():
-    # 2026-10-27 實機：觀眾叫她「認真想一下」算光速、老爸問機率，她都順手看了老爸螢幕還講出來
-    import re as _re
-    ns = {"re": _re}
-    exec(compile(ast.Module(body=[n for n in TREE.body if isinstance(n, ast.Assign)
-                                  and getattr(n.targets[0], "id", "") == "_VISION_ASK_RE"] + [_fn("_vision_wanted")],
-                            type_ignores=[]), "v", "exec"), ns)
-    import time as _t
-    ns["time"] = _t
-    ns["VISION_ASK_WINDOW_SEC"] = 90.0
-    now = _t.time()
-    for said, want in (("7L 幫我認真想一下：光要跑幾分鐘？", False), ("機率是多少？", False),
-                       ("7L 看一下我的螢幕", True), ("老爸在幹嘛", True)):
-        ns["_BRAIN_INPUT_ORIGIN"] = {"human": True, "said": said, "ts": now - 5}
-        assert ns["_vision_wanted"](now) is want, said
-    # 系統紙條（接著講完、說完又想到）觸發的那輪：還是照最近那句人話（斷線實測她又順手看了螢幕）
-    ns["_BRAIN_INPUT_ORIGIN"] = {"human": False, "said": "7L 幫我認真想一下：一年有幾秒？", "ts": now - 10}
-    assert ns["_vision_wanted"](now) is False
-    ns["_BRAIN_INPUT_ORIGIN"] = {"human": False, "said": "算一年有幾秒", "ts": now - 300}
-    assert ns["_vision_wanted"](now) is True                 # 很久沒人說話（自主閒聊）：她自己想看照舊
 
 
 def test_subagent_result_survives_a_live_reconnect():

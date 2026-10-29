@@ -131,7 +131,7 @@ def test_brain_picks_the_desktop_gemini_or_the_api_subagent():
     """老爸 2026-10-29：查東西用桌面版還是 API 子代理由主腦決定（action ask_desktop／other）。"""
     targets = []
     text, sched = _run_handler((False, "", {}), ("advice", "[API 答案]"), targets=targets,
-                               intent={"action": "ask_desktop"}, desktop=("advice", "[桌面版答案]"))
+                               intent={"action": "ask_desktop"}, desktop=("report", "[桌面版答案]"))
     assert text == "[桌面版答案]" and sched == types.FunctionResponseScheduling.WHEN_IDLE
     assert ("desktop", "幫我查日圓匯率") in targets and not any(t[0] == "nv" for t in targets)
     targets = []                                          # 桌面版沒查成：改走 API 子代理，一句不丟
@@ -141,6 +141,32 @@ def test_brain_picks_the_desktop_gemini_or_the_api_subagent():
     targets = []                                          # 選 other：不碰桌面版
     text, _ = _run_handler((False, "", {}), ("advice", "[API 答案]"), targets=targets, intent={"action": "other"})
     assert text == "[API 答案]" and not any(t[0] == "desktop" for t in targets)
+
+
+def test_desktop_answer_is_condensed_before_the_brain_gets_it():
+    """2026-10-29 實機：桌面版回 700 字、38 行的清單原封不動塞給主腦，她只說「我看看～」還想看螢幕。先提煉成短句。"""
+    import re
+    long_answer = "為老媽準備生日驚喜，\n結合目前的流行趨勢，\n" + "1. 下午茶\n流行趨勢\n：\n" * 30
+    seen = {}
+
+    async def summarize(q, raw, user_role_name=""):
+        seen.update(q=q, raw=raw, who=user_role_name)
+        return "可以帶老媽去吃聯名下午茶，或送永生花相框喔！"
+
+    ns = _load("_desktop_lookup", "_subagent_report_text", re=re, asyncio=asyncio, time=time,
+               _DESKTOP_DOWN_UNTIL=0.0, DESKTOP_ASK_TIMEOUT_SEC=30.0, _note_desktop_error=lambda e: None,
+               usage=SimpleNamespace(as_role=lambda r: __import__("contextlib").nullcontext()),
+               summarize_search_to_speech=summarize, _SUBAGENT_RELAY_RULE=_const("_SUBAGENT_RELAY_RULE"))
+    import services.desktop_helper as dh
+    orig = dh.get_answer
+    dh.get_answer = lambda q, t: long_answer
+    try:
+        kind, text = asyncio.run(ns["_desktop_lookup"]("幫我想老媽生日點子", "E5"))
+    finally:
+        dh.get_answer = orig
+    assert kind == "report" and "聯名下午茶" in text and "不用看畫面" in text
+    assert "流行趨勢\n" not in text and len(text) < 200          # 長文沒有直接塞給主腦
+    assert "\n" not in seen["raw"] and seen["q"] == "幫我想老媽生日點子" and seen["who"] == "E5"
 
 
 def test_dispatched_tool_result_is_silent_after_the_ack():

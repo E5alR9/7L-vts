@@ -156,28 +156,76 @@ def _reply_to(turns, prompt: str):
     return after[-1] if after else None
 
 
-def _ask(c, prompt: str, timeout: float = 60.0, poll_interval: float = 0.8) -> str:
-    """送出問題、等 Gemini 回完（文字連續兩次輪詢沒變）。
+def _send(c, text: str, wait: float = 4.0) -> None:
+    """填進輸入框、等送出鈕出現再按。按不到就拋錯（呼叫端改走 API）。
+    原廠 send_prompt 找不到鈕會改按 Enter：鍵盤送到的是老爸當下在用的視窗，桌面版這邊什麼都沒送，
+    還白等到逾時（2026-10-29 實機：問題卡在輸入框沒送出，等了 40 秒）。"""
+    import time as _t
+    prev = _foreground()
+    try:
+        _set_prompt(c, text)
+        deadline = _t.time() + wait
+        while _t.time() < deadline:
+            btn = _send_button(c)
+            if btn is not None and _press(btn, order=("invoke", "legacy")):
+                return
+            _t.sleep(0.3)
+        raise RuntimeError("桌面版送出鈕按不到，問題沒送出去")
+    finally:
+        _give_back_focus(prev, getattr(c, "hwnd", None))
+
+
+def _foreground():
+    try:
+        import ctypes
+        return ctypes.windll.user32.GetForegroundWindow()
+    except Exception:
+        return None
+
+
+def _give_back_focus(prev, gemini_hwnd) -> None:
+    """寫進輸入框會把焦點搶到 Gemini（2026-10-29 實測：問完 Gemini 跳到最前面擋畫面，老爸打字也會打進去）。
+    送出後把焦點還給原本在用的視窗，Gemini 放回最底下。"""
+    try:
+        import ctypes
+        u, k = ctypes.windll.user32, ctypes.windll.kernel32
+        fg = u.GetForegroundWindow()
+        if prev and fg and fg != prev:
+            me, them = k.GetCurrentThreadId(), u.GetWindowThreadProcessId(fg, None)
+            u.AttachThreadInput(me, them, True)   # 跨程序搶回前景的標準做法
+            try:
+                u.SetForegroundWindow(prev)
+                u.BringWindowToTop(prev)
+            finally:
+                u.AttachThreadInput(me, them, False)
+        if gemini_hwnd:
+            u.SetWindowPos(gemini_hwnd, 1, 0, 0, 0, 0, 0x1 | 0x2 | 0x10)   # HWND_BOTTOM，不搶焦點
+    except Exception:
+        pass
+
+
+def _ask(c, prompt: str, timeout: float = 60.0, poll_interval: float = 0.3) -> str:
+    """送出問題、等 Gemini 回完（連讀兩次文字一樣就算回完；讀一次本身要 0.3 秒，以前要連三次一樣、多等 2～3 秒）。
     原廠 ask 數「Gemini 回覆變多了沒」，但桌面版只把最近 5 輪留在畫面上：串一長數量就卡在 5，
     回答明明出來了還一直等到逾時（2026-10-29 計時實測：每句白等 24 秒）。改認「剛送的那句後面的回覆」。"""
     import time as _t
     before = [(t["role"], t["content"]) for t in c.get_conversation_history()]
-    c.send_prompt(prompt)
-    start, last, stable = _t.time(), "", 0
+    c.send_prompt(prompt)   # _patch_controller 換成 _send（按不到送出鈕就報錯，不亂按 Enter）
+    start, last = _t.time(), ""
     while _t.time() - start < timeout:
         _t.sleep(poll_interval)
-        turns = c.get_conversation_history()
+        try:
+            turns = c.get_conversation_history()
+        except Exception:
+            continue          # 回答一個字一個字長出來時元件會換掉，讀到一半拋 COMError：下一輪再讀
         if [(t["role"], t["content"]) for t in turns] == before:
             continue          # 畫面還沒動（同一句問兩次時，舊的回答不能當這次的）
         text = _reply_to(turns, prompt)
         if not text:
             continue
         if text == last:
-            stable += 1
-            if stable >= 2:
-                return text
-        else:
-            last, stable = text, 0
+            return text
+        last = text
     if last:
         return last
     raise TimeoutError("等待 Gemini 回覆逾時！")
@@ -194,9 +242,10 @@ def _patch_controller(c):
         return _orig_get_input()
     c.get_input_field = _get_input
     c.set_prompt_text = lambda text: _set_prompt(c, text)
+    c.send_prompt = lambda text: _send(c, text)
     c.get_send_button = lambda: _send_button(c)
     c.get_conversation_history = lambda: _history(c)
-    c.ask = lambda prompt, timeout=60.0, poll_interval=0.8: _ask(c, prompt, timeout, poll_interval)
+    c.ask = lambda prompt, timeout=60.0, poll_interval=0.3: _ask(c, prompt, timeout, poll_interval)
     return c
 
 
@@ -222,14 +271,34 @@ def _ensure_model(c) -> bool:
         return False
 
 
+# 視窗縮小、被蓋住時 Chromium 會把頁面暫停：問題送出去後一直停在「正在搜尋網路」，視窗一還原 1 秒就生完
+# （2026-10-29 實測）。開 Gemini 時帶這幾個參數，它在背後也照常跑，就不用把視窗叫到最前面擋老爸的畫面。
+GEMINI_BG_FLAGS = ["--disable-renderer-backgrounding", "--disable-background-timer-throttling",
+                   "--disable-backgrounding-occluded-windows", "--disable-features=CalculateNativeWinOcclusion"]
+
+
+def _gemini_has_bg_flags() -> bool:
+    try:
+        import psutil
+        for p in psutil.process_iter(["exe", "cmdline"]):
+            if (p.info["exe"] or "").lower().startswith(GEMINI_APP_DIR.lower()) and \
+                    "--disable-backgrounding-occluded-windows" in " ".join(p.info["cmdline"] or []):
+                return True
+    except Exception:
+        pass
+    return False
+
+
 def _launch_gemini_app(wait: float = 25.0) -> bool:
-    """打開桌面版 Gemini，等視窗出來、頁面載入。用 explorer 開，免得被沙盒虛擬化。"""
+    """打開桌面版 Gemini（帶 GEMINI_BG_FLAGS），等視窗出來、頁面載入。
+    7L 由 V7.bat 開，不在沙盒裡，直接開就好（以前用 explorer 開是為了沙盒，但 explorer 帶不了參數）。"""
     import subprocess
     import time as _t
     exe = os.path.join(GEMINI_APP_DIR, "Gemini.exe")
     if not os.path.exists(exe):
         return False
-    subprocess.Popen(["explorer.exe", exe])
+    subprocess.Popen([exe] + GEMINI_BG_FLAGS, close_fds=True,
+                     creationflags=getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
     deadline = _t.time() + wait
     while _t.time() < deadline:
         _t.sleep(1.0)
@@ -262,9 +331,22 @@ def restart_gemini_app(wait: float = 25.0) -> bool:
     return ok
 
 
+_BG_RESTARTED = False
+
+
+def _keep_behind(hwnd) -> None:
+    """縮小的視窗讀不到輸入框（UIA 當它不在畫面上）：還原但放到所有視窗最底下、不搶焦點，不擋老爸的畫面。"""
+    import ctypes
+    u = ctypes.windll.user32
+    if u.IsIconic(hwnd):
+        u.ShowWindow(hwnd, 4)   # SW_SHOWNOACTIVATE
+    u.SetWindowPos(hwnd, 1, 0, 0, 0, 0, 0x1 | 0x2 | 0x10)   # HWND_BOTTOM，SWP_NOSIZE|NOMOVE|NOACTIVATE
+
+
 def _connect():
-    """要用桌面版前先看桌面上有沒有（老爸指定 2026-10-27）：沒開就自動打開；最小化就還原（不搶焦點）。
-    打不開才拋「找不到」（調用方 5 分鐘內走 Live／API）。"""
+    """要用桌面版前先看桌面上有沒有（老爸指定 2026-10-27）：沒開就自動打開；最小化就還原到最底層（不搶焦點、不擋畫面）。
+    開著但沒帶背景參數（老爸自己開的）：重開一次帶上，不然在背後會停住。打不開才拋「找不到」（調用方改走 API）。"""
+    global _BG_RESTARTED
     c = _controller()
     try:
         c.ensure_connected()
@@ -274,10 +356,14 @@ def _connect():
             raise RuntimeError("找不到桌面版 Gemini，也打不開")
         c = _controller()
         c.ensure_connected()
+    if not _BG_RESTARTED and not _gemini_has_bg_flags():
+        _BG_RESTARTED = True
+        print("📱 [桌機助手] 桌面版沒帶背景參數（縮小／被蓋住會停住），重開一次帶上")
+        if restart_gemini_app():
+            c = _controller()
+            c.ensure_connected()
     try:
-        import ctypes
-        if ctypes.windll.user32.IsIconic(c.hwnd):
-            ctypes.windll.user32.ShowWindow(c.hwnd, 4)   # SW_SHOWNOACTIVATE：還原但不搶焦點
+        _keep_behind(c.hwnd)
     except Exception:
         pass
     return c

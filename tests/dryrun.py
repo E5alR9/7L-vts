@@ -49,7 +49,7 @@ MAIN_FUNCS = (
     "is_live_brain_active", "live_brain_down_for", "use_rest_brain",
     "rest_slip_worker", "_rest_answer_slip", "_speak_brain_turn", "_rest_speak", "_run_subagent_task",
     "execute_actions", "normalize_silence_token", "_brain_text_for_memory", "_start_marker_tools",
-    "_vision_report_recent", "_vision_wanted", "_start_vision", "_start_mirror",
+    "_vision_report_recent", "_start_vision", "_start_mirror",
     "streamer_mind_loop_worker", "_format_board_batch", "_ping_short_circuit", "_is_bare_ping",
     "_split_fossil_batch", "_viewer_profiles_block", "_save_viewer_updates",
 )
@@ -57,7 +57,7 @@ MAIN_FUNCS = (
 MAIN_CONSTS = (
     "AUDIENCE_STAGE_DECLINE", "UNASKED_STAGE_DECLINE", "_SUBAGENT_VISION_TASK_RE", "_SUBAGENT_MIRROR_TASK_RE",
     "_SUBAGENT_TOTAL_TIMEOUT", "_HARD_CMD_DEDUPE_SEC", "_PLATFORM_LABEL",
-    "_SLIP_DEDUPE_SEC", "LIVE_FALLBACK_AFTER_SEC", "VISION_REPORT_QUIET_SEC", "VISION_FAIL_QUIET_SEC", "_VISION_ASK_RE", "VISION_ASK_WINDOW_SEC",
+    "_SLIP_DEDUPE_SEC", "LIVE_FALLBACK_AFTER_SEC", "VISION_REPORT_QUIET_SEC", "VISION_FAIL_QUIET_SEC",
     "_BARE_PING_NAMES", "_PING_COOLDOWN_SEC", "_PING_QUIET_SEC",
     "_VIEWER_UPDATE_RE", "VIEWER_UPDATE_HINT",
 )

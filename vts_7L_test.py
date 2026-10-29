@@ -2803,25 +2803,7 @@ _SUBAGENT_VISION_TASK_RE = re.compile(r"螢幕|屏幕|畫面|截圖|桌面上")
 _SUBAGENT_MIRROR_TASK_RE = re.compile(r"鏡子|照鏡")
 
 
-# 人觸發的這輪，那句話要跟畫面有關，她話裡的 [TOOL:VISION] 才算數（2026-10-27 實機：觀眾叫她「認真想一下」算光速、
-# 老爸問機率，她都順手看了老爸螢幕還講出來；提示詞加「算數、想問題不用看」A/B 沒用，1/3 → 1/3）
-_VISION_ASK_RE = re.compile(r"螢幕|屏幕|畫面|截圖|桌面|視窗|看一下|看看|看得到|在幹嘛|在幹麻|在做什麼|在忙什麼|在玩什麼|在看什麼")
-
-
-VISION_ASK_WINDOW_SEC = 90.0
-
-
-def _vision_wanted(now: float = None) -> bool:
-    """她話裡帶 [TOOL:VISION] 時要不要真的去看：最近 VISION_ASK_WINDOW_SEC 秒內有人說話，那句話就要跟畫面有關。
-    系統紙條（說完又想到、子智能體回報、斷線後接著講完）觸發的那輪也照這句判斷：2026-10-27 斷線實測，
-    接著講完的那輪她又順手看了老爸螢幕。很久沒人說話（自主閒聊）就照舊，她自己想看看老爸在幹嘛。"""
-    origin = _BRAIN_INPUT_ORIGIN
-    now = time.time() if now is None else now
-    if not origin.get("said") or now - (origin.get("ts") or 0.0) > VISION_ASK_WINDOW_SEC:
-        return True
-    return bool(_VISION_ASK_RE.search(origin.get("said") or ""))
-
-
+# 她話裡帶 [TOOL:VISION] 就去看（2026-10-27 起只在那句人話跟畫面有關時才看，2026-10-29 老爸：改掉，讓她自己決定）
 def _start_vision() -> bool:
     """看畫面：正在看、剛看完（15 秒內）或剛看失敗（90 秒內）就不重看，回 False。標籤和子智能體兩條路都走這裡。"""
     now = time.time()
@@ -2872,9 +2854,7 @@ def _start_marker_tools(text: str) -> str:
             log_print("⚠️ [攔截暗號] 搜尋關鍵字全是雜訊，跳過不搜。")
     if "[TOOL:VISION]" in text:
         text = text.replace("[TOOL:VISION]", "").strip()
-        if not _vision_wanted():
-            log_print("👁️ [視覺] 這輪沒人叫她看畫面，她自己帶的 [TOOL:VISION] 不理")
-        elif _start_vision():
+        if _start_vision():
             log_print("⚡ [攔截暗號] 啟動平行代理人：視覺大腦！")
         else:
             log_print("👁️ [視覺] 正在看、剛看完或剛看失敗，這次的 [TOOL:VISION] 不重看（防看完又看的迴圈）")
@@ -3338,7 +3318,7 @@ async def _run_subagent_task(_task_ins, _intent, _respond):
                     # 主腦自己選了桌面版（老爸 2026-10-29：查東西用桌面版還是 API 子代理由她決定）
                     log_print(f"📱 [子智能體] 主腦選桌面版查：{_task_ins[:40]}")
                     _k2, _t2 = await _desktop_lookup(_task_ins, _req)
-                if _k2 != "advice":
+                if _k2 not in ("advice", "report"):
                     # CPU 沒命中（或桌面版沒查成）→ 副腦解讀（工具判定＋深度思考），整段限時，免得主腦答應後一直等不到結果
                     try:
                         _k2, _t2 = await asyncio.wait_for(
@@ -3472,6 +3452,7 @@ async def _speak_brain_turn(vts, input_queue, text: str, who: str, reply_to: str
 AFTERTHOUGHT_ENABLED = True
 AFTERTHOUGHT_TIMEOUT_SEC = 25.0
 AFTERTHOUGHT_MAX_AGE_SEC = 60.0     # 觸發的那句人話超過這麼久就不想了
+AFTERTHOUGHT_SPEAK_WAIT_SEC = 60.0  # 想到了先等她念完正題才遞，最多等這麼久
 _AFTERTHOUGHT = {"origin_ts": 0.0}  # 每句人話只想一次（她為同一句話講好幾段時不重想）
 
 
@@ -3506,6 +3487,11 @@ async def _afterthought(reply: str) -> None:
     text = re.sub(r'\[(?:SILENCE|PASS|SKIP)\]', '', text or "", flags=re.IGNORECASE).strip()
     if not text:
         return
+    # 等她把剛才那段念完再遞：還在念（或還在合成）時遞紙條，Live 會回「被打斷」，清掉她還沒念出來的正題
+    # （2026-10-29 實機：老媽生日點子那段整段沒念，只念了補充的那句）
+    deadline = time.time() + AFTERTHOUGHT_SPEAK_WAIT_SEC
+    while time.time() < deadline and (stage.ai_state() == "TALKING" or not speech_queue.empty()):
+        await asyncio.sleep(0.3)
     if _BRAIN_INPUT_ORIGIN.get("ts") != origin["ts"]:
         log_print(f"💭 [說完又想到] 想到了但已經有人講下一句，不補：{text[:40]}")
         return
@@ -5683,7 +5669,7 @@ DESKTOP_ASK_TIMEOUT_SEC = 30.0
 
 
 async def _desktop_lookup(task_ins, requester_name):
-    """桌面版 Gemini 查資料／想問題：回 ("advice", text) 或 ("miss", "")（沒開、卡住、沒答）。"""
+    """桌面版 Gemini 查資料／想問題：回 ("report", 要她講的短句) 或 ("miss", "")（沒開、卡住、沒答）。"""
     if time.time() < _DESKTOP_DOWN_UNTIL:
         return "miss", ""
     from services import desktop_helper as _dh
@@ -5699,8 +5685,13 @@ async def _desktop_lookup(task_ins, requester_name):
     ans = (ans or "").strip()
     if not ans:
         return "miss", ""
-    log_print(f"📱 [桌面版] 查到：{ans[:80]}")
-    return "advice", _subagent_advice_text(requester_name, ans)
+    log_print(f"📱 [桌面版] 查到 {len(ans)} 字：{ans[:60]}")
+    # 先提煉成 1～3 句再交給主腦，跟 API 子代理的搜尋結果同一套（summarize_search_to_speech）。
+    # 2026-10-29 實機：桌面版回 700 字、38 行的清單原封不動塞給主腦，她只說「我看看～」還想去看螢幕，一個字都沒講
+    # 畫面上一句話會在粗體處斷成好幾行（「海拔 3,」「193 公尺的」「北岳」），直接接起來，不加空白
+    summary = await summarize_search_to_speech(task_ins, re.sub(r"\s*\n\s*", "", ans), user_role_name=requester_name)
+    log_print(f"📱 [桌面版] 提煉成：{summary[:80]}")
+    return "report", _subagent_report_text(requester_name, summary) + "（資料已經查好了，直接講，不用看畫面。）"
 
 
 async def _gemini_think_pass(task_ins, target, requester_name, system_instruction_text):
