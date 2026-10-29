@@ -206,7 +206,7 @@ from core.llm_engine import (
     GEMINI_KEYS, GEMINI_MODELS, IMAGE_GEN_MODELS, LIVE_MODEL, LIVE_MAIN_MODELS, KEYS_AUDIENCE_LIVE,
     KEYS_VISION, STREAMER_MIND_MODELS, REST_BRAIN_MODELS, HIGH_IQ_GEMINI_MODELS, GROQ_CLIENTS,
     get_dynamic_live_key_candidates, track_key, sort_keys_by_load, key_cooling,
-    report_gemini_key_error, live_one_shot, KEYS_MIC_LIVE, KEYS_PROACTIVE, KEYS_DAD_MAIN, DEEP_THINK_LIVE_MODEL,
+    report_gemini_key_error, live_one_shot, KEYS_MIC_LIVE, KEYS_PROACTIVE, KEYS_DAD_MAIN,
     UNRESTRICTED_SAFETY_SETTINGS, thinking_config,
 )
 from core.input_sources import (parse_input_item, classify, sleep_wake_decision, live_speech_wakes, is_operator, has_wake_word,
@@ -3554,6 +3554,8 @@ async def _handle_invoke_subagent(session, ws_send_lock, _fn_name, _fn_call_id, 
                 await session.send_tool_response(function_responses=[types.FunctionResponse(**_fr)])
             if LIVE_SAY_GATE and not _more and _sched == types.FunctionResponseScheduling.WHEN_IDLE:
                 _RESULT_RELAY["ts"] = time.time()   # 她接著只在腦內講的話，_say_unsaid_result 照念
+                if AFTERTHOUGHT_ENABLED:
+                    _advisor().note(f"（7L 交辦的結果回來了：{_text[:400]}）")   # 軍師下一輪一起看
                 spawn(_nudge_if_unsaid(_text, time.time()))
         except Exception as _se:
             if _more:
@@ -3607,11 +3609,21 @@ async def _speak_brain_turn(vts, input_queue, text: str, who: str, reply_to: str
 # 用低思考在背後再想；她答錯、漏了重要的、或有更有意思的補充，就遞紙條讓她「啊對了」補一句。
 # 實測（低思考）：機率答錯 6.6 秒後補正、閒聊 1 秒回 [SILENCE]；高思考想 46 秒還是空的。
 # 單次連線想完就關：常駐的 Live 沒聲音會被斷。
+# 2026-10-29 老爸：3.8 think 改成常駐的「軍師」（services/advisor.py）——以前每句另開一條單次連線，
+# 不記得前面講過什麼、也看不到她交辦查到的結果；現在同一條連線一直聽，交辦結果也送進去（實測每輪 1 秒內）
 AFTERTHOUGHT_ENABLED = True
-AFTERTHOUGHT_TIMEOUT_SEC = 25.0
+_ADVISOR = None   # 第一次用到才建（services.advisor.ResidentAdvisor）
+
+
+def _advisor():
+    global _ADVISOR
+    if _ADVISOR is None:
+        from services.advisor import ResidentAdvisor
+        _ADVISOR = ResidentAdvisor(lambda: promptkit.advisor_system(_owner_name()))
+    return _ADVISOR
 AFTERTHOUGHT_MAX_AGE_SEC = 60.0     # 觸發的那句人話超過這麼久就不想了
 AFTERTHOUGHT_SPEAK_WAIT_SEC = 60.0  # 想到了先等她念完正題才遞，最多等這麼久
-_AFTERTHOUGHT = {"origin_ts": 0.0}  # 每句人話只想一次（她為同一句話講好幾段時不重想）
+_AFTERTHOUGHT = {"origin_ts": 0.0, "says_ts": 0.0, "says": []}  # 每句人話只想一次；says＝她為這句講的每一段
 
 
 def _afterthought_wanted(origin: dict, now: float) -> bool:
@@ -3628,17 +3640,22 @@ def _afterthought_wanted(origin: dict, now: float) -> bool:
 async def _afterthought(reply: str) -> None:
     """背景再想一次她剛才的回答；有補充、而且這段時間沒人再講話，就遞紙條讓主腦補一句。"""
     origin = dict(_BRAIN_INPUT_ORIGIN)
+    if reply and origin.get("ts"):
+        if _AFTERTHOUGHT["says_ts"] != origin["ts"]:
+            _AFTERTHOUGHT.update(says_ts=origin["ts"], says=[])
+        _AFTERTHOUGHT["says"].append(reply[-300:])
     if not reply or not _afterthought_wanted(origin, time.time()):
+        return
+    if _AWAITING_RESULTS:
+        # 交辦的結果還沒回來：等她講完結果再一起看（2026-10-29 實機：只看了她「我馬上查」那句就問軍師，
+        # 軍師沒看到她後來講的高雄天氣，下一句就建議她「還欠老爸高雄的天氣，記得補上」）
         return
     _AFTERTHOUGHT["origin_ts"] = origin["ts"]
     owner = _owner_name()
     who = owner if origin.get("who") == "dad" else f"觀眾「{origin.get('name') or '觀眾'}」"
-    prompt = f"{who}說：{origin['said'][-600:]}\n7L 剛才回答：{reply[-600:]}"
+    prompt = f"{who}說：{origin['said'][-600:]}\n7L 回：{'／'.join(_AFTERTHOUGHT['says'])[-900:]}"
     try:
-        with usage.as_role("說完又想到"):
-            text = await live_one_shot(promptkit.afterthought_system(owner), prompt, GEMINI_KEYS,
-                                       timeout=AFTERTHOUGHT_TIMEOUT_SEC, max_keys=2,
-                                       model=DEEP_THINK_LIVE_MODEL, thinking_level="low")
+        text = await _advisor().ask(prompt)
     except Exception:
         log_swallowed()
         return
@@ -3651,11 +3668,12 @@ async def _afterthought(reply: str) -> None:
     while time.time() < deadline and (stage.ai_state() == "TALKING" or not speech_queue.empty()):
         await asyncio.sleep(0.3)
     if _BRAIN_INPUT_ORIGIN.get("ts") != origin["ts"]:
-        log_print(f"💭 [說完又想到] 想到了但已經有人講下一句，不補：{text[:40]}")
+        log_print(f"🧭 [軍師] 有建議但已經有人講下一句，不遞：{text[:40]}")
         return
-    log_print(f"💭 [說完又想到] 補一句：{text[:60]}")
-    send_brain_slip(f"[系統提示：妳的深度思考副腦剛想到，關於妳剛才回{who}的那段，可以補一句。"
-                    f"用妳自己的口吻自然地補，像說完話又想到什麼，一兩句講完，不要重複剛才講過的：] {text}")
+    log_print(f"🧭 [軍師] 給她建議：{text[:80]}")
+    send_brain_slip(f"[系統提示：妳的軍師（一直在旁邊聽的第二個腦）對妳剛才回{who}的那段有建議。妳覺得對，"
+                    f"就用自己的口吻 say 一兩句補上或更正（像說完話又想到），不要重複剛才講過的，也不要說「軍師說」；"
+                    f"覺得不用就不講：] {text}")
 
 
 async def _rest_speak(vts, input_queue, raw: str, origin: str) -> str:

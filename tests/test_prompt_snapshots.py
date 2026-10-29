@@ -24,7 +24,7 @@ ROLES = {
     "director": lambda: promptkit.director_system(MENU_NAMES),
     "instinct": lambda: promptkit.instinct_system(vc.EXPRESSION_MENU_TEXT),
     "subagent": lambda: promptkit.subagent_system(),
-    "afterthought": lambda: promptkit.afterthought_system("老爸"),
+    "advisor": lambda: promptkit.advisor_system("老爸"),
 }
 
 

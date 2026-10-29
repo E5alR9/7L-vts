@@ -334,11 +334,12 @@ def _afterthought_ns(reply_text, origin, later_origin=None, singing=False, talki
     import time as _t
     slips, asked = [], []
 
-    async def live_one_shot(system, prompt, pool, **k):
-        asked.append((prompt, k))
-        if later_origin:
-            ns["_BRAIN_INPUT_ORIGIN"].update(later_origin)   # 想的時候又有人講話
-        return reply_text
+    class _Advisor:   # 常駐軍師（services/advisor.py）換成假的
+        async def ask(self, prompt):
+            asked.append(prompt)
+            if later_origin:
+                ns["_BRAIN_INPUT_ORIGIN"].update(later_origin)   # 想的時候又有人講話
+            return "" if "[SILENCE]" in reply_text else reply_text
 
     class _Role:
         def __enter__(self):
@@ -346,12 +347,12 @@ def _afterthought_ns(reply_text, origin, later_origin=None, singing=False, talki
 
         def __exit__(self, *a):
             return False
-    ns = {"re": _re, "time": _t, "AFTERTHOUGHT_ENABLED": True, "AFTERTHOUGHT_TIMEOUT_SEC": 25.0,
-          "AFTERTHOUGHT_MAX_AGE_SEC": 60.0, "_AFTERTHOUGHT": {"origin_ts": 0.0}, "_BRAIN_INPUT_ORIGIN": dict(origin),
+    ns = {"re": _re, "time": _t, "AFTERTHOUGHT_ENABLED": True, "_advisor": lambda: _Advisor(),
+          "AFTERTHOUGHT_MAX_AGE_SEC": 60.0, "_AFTERTHOUGHT": {"origin_ts": 0.0, "says_ts": 0.0, "says": []},
+          "_BRAIN_INPUT_ORIGIN": dict(origin), "_AWAITING_RESULTS": {},
           "IS_SLEEPING": False, "is_singing_active": lambda: singing, "pe": type("P", (), {"is_piano_active": False}),
           "_owner_name": lambda: "E5", "usage": type("U", (), {"as_role": staticmethod(lambda r: _Role())}),
-          "live_one_shot": live_one_shot, "promptkit": type("K", (), {"afterthought_system": staticmethod(lambda o: "sys")}),
-          "GEMINI_KEYS": ["k"], "DEEP_THINK_LIVE_MODEL": "deep", "send_brain_slip": slips.append,
+          "send_brain_slip": slips.append,
           "log_print": lambda *a: None, "log_swallowed": lambda *a: None, "asyncio": asyncio,
           "AFTERTHOUGHT_SPEAK_WAIT_SEC": 60.0,
           "stage": type("S", (), {"ai_state": staticmethod(lambda: (talking.pop(0) if talking else "IDLE"))}),
@@ -362,13 +363,12 @@ def _afterthought_ns(reply_text, origin, later_origin=None, singing=False, talki
 
 
 def test_afterthought_adds_a_line_after_she_answers():
-    # 說完又想到（老爸點的）：主腦回完人話後，長思考 Live 在背後再想，有補充就遞紙條
+    # 說完又想到（老爸點的）：主腦回完人話後，常駐軍師（3.8 think，10-29 起）在背後再想，有建議就遞紙條
     import time as _t
     o = {"who": "dad", "said": "3 紅 2 藍拿 2 顆都紅的機率？", "human": True, "ts": _t.time(), "name": ""}
     ns, slips, asked = _afterthought_ns("啊對了，正確是 30% 才對！", o)
     asyncio.run(ns["_afterthought"]("大概 50% 吧"))
-    assert asked[0][1]["model"] == "deep" and asked[0][1]["thinking_level"] == "low"
-    assert "E5說：3 紅 2 藍" in asked[0][0] and "7L 剛才回答：大概 50% 吧" in asked[0][0]
+    assert "E5說：3 紅 2 藍" in asked[0] and "7L 回：大概 50% 吧" in asked[0]
     assert len(slips) == 1 and slips[0].endswith("啊對了，正確是 30% 才對！")
     asyncio.run(ns["_afterthought"]("又講了一段"))            # 同一句人話只想一次
     assert len(asked) == 1
@@ -376,7 +376,7 @@ def test_afterthought_adds_a_line_after_she_answers():
     o2 = {"who": "audience", "said": "7L 會唱晴天嗎", "human": True, "ts": _t.time(), "name": "小美"}
     ns, slips, asked = _afterthought_ns("欸我剛想到，晴天副歌我最喜歡", o2)
     asyncio.run(ns["_afterthought"]("會呀！"))
-    assert "觀眾「小美」說" in asked[0][0] and "觀眾「小美」" in slips[0]
+    assert "觀眾「小美」說" in asked[0] and "觀眾「小美」" in slips[0]
 
 
 def test_afterthought_waits_until_she_finished_speaking():
@@ -387,6 +387,20 @@ def test_afterthought_waits_until_she_finished_speaking():
     ns, slips, _ = _afterthought_ns("啊對了，也可以送香氛", o, talking=talking)
     asyncio.run(ns["_afterthought"]("可以送按摩椅"))
     assert talking == [] and len(slips) == 1                    # 等到不是 TALKING 才遞
+
+
+def test_advisor_waits_for_the_result_and_sees_every_line_she_said():
+    """2026-10-29 實機：只看了她「我馬上查」那句就問軍師，軍師沒看到她後來講的高雄天氣，
+    下一句就建議她「還欠老爸高雄的天氣，記得補上」。結果還沒回來不問；回來後她講的每一段一起給軍師看。"""
+    import time as _t
+    o = {"who": "dad", "said": "明天高雄會不會下雨", "human": True, "ts": _t.time(), "name": ""}
+    ns, slips, asked = _afterthought_ns("[SILENCE]", o)
+    ns["_AWAITING_RESULTS"]["call-1"] = [_t.time(), 0]
+    asyncio.run(ns["_afterthought"]("好，我馬上查！"))
+    assert asked == []                                          # 結果還沒回來：先不問
+    ns["_AWAITING_RESULTS"].clear()
+    asyncio.run(ns["_afterthought"]("明天高雄降雨機率 10%，不會下雨"))
+    assert len(asked) == 1 and "好，我馬上查！／明天高雄降雨機率 10%" in asked[0]
 
 
 def test_afterthought_stays_quiet_when_nothing_to_add_or_stale():
