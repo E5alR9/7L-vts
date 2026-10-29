@@ -73,7 +73,7 @@ def test_intro_wait_no_core_returns(monkeypatch):
 
 def test_intro_wait_default_timeout():
     """開場等待預設 15 秒（應答約 6 秒，聊不停就硬開唱，不過度禮讓）。"""
-    assert acp.wait_for_intro_speech_complete.__defaults__ == (15.0, 0.0)   # 第二個：剛點的歌等主腦應答的期限（預設不等）
+    assert acp.wait_for_intro_speech_complete.__defaults__ == (15.0, 0.0, 0.0)   # 第二個：剛點的歌等主腦應答的期限（預設不等）；第三個：點歌時間
 
 
 def test_just_requested_song_waits_for_the_brains_reply(monkeypatch):
@@ -95,6 +95,46 @@ def test_just_requested_song_waits_for_the_brains_reply(monkeypatch):
         return time.time() - t0
     el = asyncio.run(go())
     assert 1.6 <= el < 4.5           # 等到回覆排進來、講完；沒等滿 5 秒
+
+
+def test_silent_reply_starts_the_song_right_away(monkeypatch):
+    """2026-10-29：她這輪回 [SILENCE]（不講開場）＝回完了、沒有要講的，備好的歌馬上唱，不乾等到期限。"""
+    core, _ = _make_core(state="IDLE")
+    host = _host(core)
+    done = {"ts": 0.0}
+    host["get_last_reply_done"] = lambda: done["ts"]
+    monkeypatch.setattr(acp, "_HOST", host)
+    monkeypatch.setattr(acp.pygame.mixer, "get_init", lambda: None)
+
+    async def go():
+        asked = time.time()
+
+        async def brain_stays_silent():
+            await asyncio.sleep(1.0)
+            done["ts"] = time.time()
+        asyncio.ensure_future(brain_stays_silent())
+        t0 = time.time()
+        await acp.wait_for_intro_speech_complete(timeout=10.0, reply_deadline=asked + 15.0, asked=asked)
+        return time.time() - t0
+    el = asyncio.run(go())
+    assert 1.0 <= el < 3.0           # 她回完就唱，不等 15 秒
+
+
+def test_reply_finished_before_the_tool_counts(monkeypatch):
+    """她先講再叫工具：點歌前 1 秒內回完的也算（話已經排進佇列，下一步照樣等她講完）。"""
+    core, _ = _make_core(state="IDLE")
+    host = _host(core)
+    asked = time.time()
+    host["get_last_reply_done"] = lambda: asked - 0.5
+    monkeypatch.setattr(acp, "_HOST", host)
+    monkeypatch.setattr(acp.pygame.mixer, "get_init", lambda: None)
+    t0 = time.time()
+    asyncio.run(acp.wait_for_intro_speech_complete(timeout=10.0, reply_deadline=asked + 15.0, asked=asked))
+    assert time.time() - t0 < 2.0
+    host["get_last_reply_done"] = lambda: asked - 30.0   # 半分鐘前的舊回覆不算：照等到期限
+    t0 = time.time()
+    asyncio.run(acp.wait_for_intro_speech_complete(timeout=10.0, reply_deadline=time.time() + 1.0, asked=asked))
+    assert 0.9 <= time.time() - t0 < 3.0
 
 
 def test_reply_wait_gives_up_at_the_deadline(monkeypatch):

@@ -2979,6 +2979,7 @@ async def live_search_tool_task(query):
 LAST_BRAIN_TOOL_TS = 0.0
 # 主腦上次說完一段話（turn_complete）的時間戳（2026-10-11：看門狗只看工具有盲區，說話了也報警）
 LAST_BRAIN_TURN_TS = 0.0
+LAST_BRAIN_REPLY_DONE_TS = 0.0   # 主腦一輪的話處理完（_speak_brain_turn 收尾）
 # Live 服務端上次有任何回包的時間戳（2026-10-11：有回包＝session 活著，只是不緊不慢）
 LAST_LIVE_RX_TS = 0.0
 # 主腦最後一次真的產出（轉寫的字、工具呼叫）的時間。LAST_LIVE_RX_TS 是任何回包都算：
@@ -3431,6 +3432,7 @@ async def _speak_brain_turn(vts, input_queue, text: str, who: str, reply_to: str
     who＝這輪是誰觸發的（標籤照誰的權限跑），reply_to＝這段話對誰講（dad 是私話）。回實際要念的字。
     2026-10-27 以前兩邊各寫一份：Live 一律照老爸的權限跑標籤（觀眾那輪也是）、記憶對象寫 "dad"
     （提示詞裡變成「對dad說」）；REST 不記觀眾資料。"""
+    global LAST_BRAIN_REPLY_DONE_TS
     to_dad = who == "dad"
     spoken = (await execute_actions(vts, text, input_queue, caller_target="dad" if to_dad else "audience",
                                     caller_user=_owner_name() if to_dad else _BRAIN_INPUT_ORIGIN.get("name", ""))).strip()
@@ -3440,6 +3442,7 @@ async def _speak_brain_turn(vts, input_queue, text: str, who: str, reply_to: str
     _save_viewer_updates(text)
     append_to_unified_memory(speaker="7L", target=_owner_name() if reply_to == "dad" else "直播間",
                              content=_brain_text_for_memory(text), role="assistant", source=source)
+    LAST_BRAIN_REPLY_DONE_TS = time.time()   # 這輪回完了（要念的已排進佇列；[SILENCE] 也算）：點歌開唱前看這個，不用乾等開場白
     return spoken
 
 
@@ -7023,7 +7026,8 @@ async def main():
                  get_speaking_target=lambda: CURRENT_SPEAKING_TARGET)
     pe.register_piano_state_callback(_on_piano_liveness_change)
     auto_cover.bind_host(speech_queue=speech_queue,
-                         get_last_tts_end=lambda: LAST_TTS_END_TIME, send_brain_slip=send_brain_slip)
+                         get_last_tts_end=lambda: LAST_TTS_END_TIME, send_brain_slip=send_brain_slip,
+                         get_last_reply_done=lambda: LAST_BRAIN_REPLY_DONE_TS)
     video_watch.bind_host(look=get_lightweight_gemini_vision, post_note=add_to_streamer_mind_board)
 
     #  啟動 7L Web 視覺化即時監控與控制後台 (Port 7860 -> http://localhost:7860)

@@ -265,10 +265,12 @@ _PREPARING_SEQS = set()
 _HOST = {}
 
 
-def bind_host(speech_queue=None, get_last_tts_end=None, send_brain_slip=None):
-    """main() 開機時呼叫：說話佇列、上次講完話的時間、給主腦遞紙條。AI 狀態直接讀寫 core.stage_state。"""
+def bind_host(speech_queue=None, get_last_tts_end=None, send_brain_slip=None, get_last_reply_done=None):
+    """main() 開機時呼叫：說話佇列、上次講完話的時間、給主腦遞紙條、主腦上次回完一輪的時間。
+    AI 狀態直接讀寫 core.stage_state。"""
     _HOST.update({k: v for k, v in dict(speech_queue=speech_queue, get_last_tts_end=get_last_tts_end,
-                                        send_brain_slip=send_brain_slip).items() if v is not None})
+                                        send_brain_slip=send_brain_slip,
+                                        get_last_reply_done=get_last_reply_done).items() if v is not None})
 
 
 def _ai_state() -> str:
@@ -339,10 +341,11 @@ def stop_current_song() -> bool:
     return True
 
 _REQUESTED_AT = {}   # 歌名鍵 → 點歌時間（剛點的歌開唱前等主腦的應答）
-INTRO_REPLY_WAIT_SEC = 5.0
+# 2026-10-29 老爸：5 → 15。重開後第一句主腦常要 20 秒，5 秒就開唱、開場白唱到一半才到（唱歌中到的話本來就不念）
+INTRO_REPLY_WAIT_SEC = 15.0
 
 
-async def wait_for_intro_speech_complete(timeout: float = 15.0, reply_deadline: float = 0.0):
+async def wait_for_intro_speech_complete(timeout: float = 15.0, reply_deadline: float = 0.0, asked: float = 0.0):
     """等候 7L 大腦完成開場白發話，再銜接翻唱開唱。
     2026-10-11：步驟 3 原本無限等——直播間聊不停（Johnny 式連聊）歌就永遠開不了口。
     上限兜底：開場應答約 6 秒，15 秒還在聊就直接開唱（邊唱邊聊好過乾等）。」"""
@@ -356,9 +359,14 @@ async def wait_for_intro_speech_complete(timeout: float = 15.0, reply_deadline: 
     await asyncio.sleep(0.5)
     # 2b. 剛點的歌：應答交給主腦以後（2026-10-26 拿掉罐頭應答），她的回覆要 2～3 秒才到；
     #     有快取的歌 1 秒就備好，不等的話她直接開唱、回覆被壓到唱完才講。等它排進來（最多到 reply_deadline）
+    #     她這輪已經回完、沒有要講的（[SILENCE]）就不用再等（2026-10-29 老爸：備好的歌秒唱，時間都花在等她判斷；
+    #     她選擇不講時以前照樣乾等到期限）。點歌前 1 秒內回完的也算：那是她先講再叫工具，話已經排進佇列了
+    last_done = _HOST.get("get_last_reply_done") or (lambda: 0.0)
     while time.time() < reply_deadline:
         sq = _HOST.get("speech_queue")
         if (sq and not sq.empty()) or _ai_state() == "TALKING":
+            break
+        if asked and last_done() >= asked - 1.0:
             break
         await stage.wait_change(0.2)
     # 3. 等候開場白說完 (佇列清空且發話完畢；超時硬開唱)
@@ -767,7 +775,8 @@ async def play_prepared_song(title: str, vocal_path: str, inst_path: str, gen: i
     _STAGED_VOCAL["path"] = vocal_path or ""
     try:
         _asked = _REQUESTED_AT.pop(key, 0.0)
-        await wait_for_intro_speech_complete(reply_deadline=_asked + INTRO_REPLY_WAIT_SEC if _asked else 0.0)
+        await wait_for_intro_speech_complete(reply_deadline=_asked + INTRO_REPLY_WAIT_SEC if _asked else 0.0,
+                                             asked=_asked)
         if gen != _PIPELINE_GEN:
             log_print(f"🛑 [翻唱隊列] 《{title}》開唱前已被停止，跳過。")
             return f"《{title}》已停止，不開唱。"

@@ -145,7 +145,7 @@ def _speak(raw, origin, singing=False, calls=None):
     async def put(item):
         queued.append(item)
 
-    ns = _load("_speak_brain_turn", "_rest_speak", re=re, _save_viewer_updates=lambda t: 0, normalize_silence_token=lambda t: re.sub(r"\[SILENCE\]", "[PASS]", t),
+    ns = _load("_speak_brain_turn", "_rest_speak", re=re, time=__import__("time"), _save_viewer_updates=lambda t: 0, normalize_silence_token=lambda t: re.sub(r"\[SILENCE\]", "[PASS]", t),
                _start_marker_tools=lambda t: t, _owner_name=lambda: "老爸", _BRAIN_INPUT_ORIGIN={"name": "小明"},
                execute_actions=execute_actions, is_singing_active=lambda: singing,
                speech_queue=pytypes.SimpleNamespace(put=put), _brain_text_for_memory=lambda t: t,
