@@ -33,3 +33,10 @@ def test_registry_is_consistent():
         assert m in le.GEMINI_MODELS
     assert set(le.HIGH_IQ_GEMINI_MODELS) <= set(le.GEMINI_MODELS)
     assert "gemini-2.5-flash" not in str(vars(le))
+
+
+def test_live_main_brain_prefers_3_8():
+    """老爸 2026-10-29：主腦換 3.8 為主、3.1 備用；extended-thinking 實測不叫 say／子智能體，不放進主腦輪替。"""
+    from core import llm_engine as le
+    assert le.LIVE_MAIN_MODELS[0] == "gemini-3.8-live" and "gemini-3.1-flash-live-preview" in le.LIVE_MAIN_MODELS
+    assert le.DEEP_THINK_LIVE_MODEL not in le.LIVE_MAIN_MODELS

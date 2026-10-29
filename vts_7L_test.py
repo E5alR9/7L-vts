@@ -191,7 +191,7 @@ from core.hard_command import (
     asks_to_remember_model_position, parse_hard_command, build_slip_text, display_requester,
     parse_slip_for_song, strip_blob_noise, sanitize_search_query, rescue_claim,
     split_original_request, PIANO_CONTROL_TOOLS, is_stage_control, structured_stage_command,
-    PLAY_TOOLS, stage_request_unasked, offer_accept_command,
+    PLAY_TOOLS, stage_request_unasked, offer_accept_command, STAGE_ACTIONS,
 )
 from core.subagent_router import resolve_subagent_chain
 from core.live_timer_sensor import live_timer_hub
@@ -3303,8 +3303,9 @@ async def _run_subagent_task(_task_ins, _intent, _respond):
             _req = _brain_requester()
             # 主腦填了結構化舞台動作就照欄位直接執行，不再用正則猜她轉述的說法（2026-10-25）
             _cmds = structured_stage_command(**(_intent or {}))
-            if not _cmds and _autonomy_turn(time.time()):
-                # 感知那輪沒人問她事情：不查東西（2026-10-29 實機：她叫桌面版 Gemini「問老爸在做什麼」，桌面版看不到畫面，回一大篇猜的）
+            if not _cmds and (_intent or {}).get("action") not in STAGE_ACTIONS and _autonomy_turn(time.time()):
+                # 感知那輪沒人問她事情：不查東西（2026-10-29 實機：她叫桌面版 Gemini「問老爸在做什麼」，桌面版看不到畫面，回一大篇猜的）。
+                # 舞台動作沒填歌名也照准（同日實機：她想自己彈琴、action 填了 play_piano 沒填歌，被當成查東西擋掉）
                 log_print(f"🫀 [感知] 沒人問她事情，不叫子智能體查：{_task_ins[:40]}")
                 await _respond("[系統底層：沒有人問妳事情，不用查。想知道老爸在做什麼就看紙條上寫的畫面，"
                                "不知道就安靜；想自己彈琴唱歌可以。]", _quiet)
@@ -3494,6 +3495,34 @@ async def _send_say_response(session, ws_send_lock, fn_call_id, result: str) -> 
         log_swallowed()
 
 
+# 交辦結果回來、她只在腦內講完沒 say（2026-10-29 換 3.8 主腦後實機：查明天台北天氣，結果回來她在腦內講了一段完整的
+# 「老爸，明天台北多雲轉晴，最高 32 度…」，提醒她 say 之後又在腦內講一次，一個字都沒念出來）。結果交回去之後
+# RESULT_RELAY_SEC 秒內、她還沒 say 過，腦內那段是完整的話就照念（她就是要講這個，只是沒走 say）。
+RESULT_RELAY_SEC = 30.0
+_RESULT_RELAY = {"ts": 0.0}   # 最近一次要她講出來的子智能體結果交回去的時間
+
+
+def _inner_voice_is_unsaid_result(text: str, now: float) -> bool:
+    t = re.sub(r"\[[^\]]*\]", "", text or "").strip()
+    return bool(LIVE_SAY_GATE and _RESULT_RELAY["ts"] and now - _RESULT_RELAY["ts"] < RESULT_RELAY_SEC
+                and LAST_SAY_TS < _RESULT_RELAY["ts"] and len(re.findall(r"\w", t)) >= 8)
+
+
+async def _say_unsaid_result(vts, text: str) -> None:
+    """把她腦內講完的結果照念（跟 say 同一條鎖、同一個出口）。"""
+    global LAST_SAY_TS, LAST_BRAIN_TURN_TS
+    async with _SAY_LOCK:
+        if LAST_SAY_TS >= _RESULT_RELAY["ts"]:
+            return   # 這段時間她自己 say 了
+        LAST_SAY_TS = LAST_BRAIN_TURN_TS = time.time()
+        log_print(f"🗣️ [結果照念] 結果回來她只在腦內講、沒 say，照念：{text[:80]}")
+        _who = "audience" if _BRAIN_INPUT_ORIGIN.get("who") == "audience" else "dad"
+        spoken = await _speak_brain_turn(vts, input_queue, text, _who, _live_reply_target(), "live_api",
+                                         queue_while_singing=True, from_live=True)
+        if spoken:
+            spawn(_afterthought(spoken))
+
+
 def _note_inner_voice(text: str) -> None:
     """開著 say 閘時 Live 直接輸出的話：她腦內的聲音，只記不念。日誌和流水帳看得到，不進對話記憶（免得被當成她講過的話）。
     不算「她這輪回完了」（點歌開唱前看的那個）：開著 say 閘時一輪結束常常只是她還沒輪到講，
@@ -3524,6 +3553,7 @@ async def _handle_invoke_subagent(session, ws_send_lock, _fn_name, _fn_call_id, 
             async with ws_send_lock:
                 await session.send_tool_response(function_responses=[types.FunctionResponse(**_fr)])
             if LIVE_SAY_GATE and not _more and _sched == types.FunctionResponseScheduling.WHEN_IDLE:
+                _RESULT_RELAY["ts"] = time.time()   # 她接著只在腦內講的話，_say_unsaid_result 照念
                 spawn(_nudge_if_unsaid(_text, time.time()))
         except Exception as _se:
             if _more:
@@ -4015,7 +4045,10 @@ async def continuous_live_worker(vts):
                                             _who = "audience" if _BRAIN_INPUT_ORIGIN.get("who") == "audience" else "dad"
                                             _turn_text = turn_buffer.strip()
                                             if LIVE_SAY_GATE:
-                                                _note_inner_voice(_turn_text)   # 腦內聲音：只記不念（標籤在上面逐段已經觸發過）
+                                                if _inner_voice_is_unsaid_result(_turn_text, time.time()):
+                                                    spawn(_say_unsaid_result(vts, _turn_text))   # 結果回來只在腦內講完：照念
+                                                else:
+                                                    _note_inner_voice(_turn_text)   # 腦內聲音：只記不念（標籤在上面逐段已經觸發過）
                                                 turn_buffer = ""
                                                 chunk_buffer = ""
                                                 turn_vision = False

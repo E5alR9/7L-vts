@@ -142,4 +142,5 @@ def test_perception_turn_does_not_look_things_up():
     ns["_BRAIN_INPUT_ORIGIN"]["ts"] = now - 300
     assert not ns["_autonomy_turn"](now + 120)                                 # 感知早就過了
     sub = ast.get_source_segment(MAIN, _fn("_run_subagent_task"))
-    assert "if not _cmds and _autonomy_turn(time.time()):" in sub              # 舞台動作（_cmds）照准
+    # 舞台動作照准，沒填歌名也一樣（同日實機：她想自己彈琴、填了 play_piano 沒填歌，被當成查東西擋掉）
+    assert 'if not _cmds and (_intent or {}).get("action") not in STAGE_ACTIONS and _autonomy_turn(time.time()):' in sub

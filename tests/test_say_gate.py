@@ -191,3 +191,29 @@ def test_mic_holds_her_own_singing_back_but_lets_dad_through():
     assert "barge.feed(data)" in sing and "await barge.check(_now)" in sing
     assert "interrupt_current_speech" not in sing                         # 不停歌
     assert "sing_dad_open_until = _now + SING_DAD_HOLD_SEC" in sing and r"data = b'\x00' * len(data)" in sing
+
+
+def test_result_she_only_said_in_her_head_is_spoken():
+    """2026-10-29 換 3.8 主腦後實機：查明天台北天氣，結果回來她在腦內講完「老爸，明天台北多雲轉晴，最高 32 度…」，
+    提醒她 say 之後又在腦內講一次，一個字都沒念出來。結果交回去後 30 秒內她還沒 say 過，腦內那段完整的話就照念。"""
+    ns, sess, spoken, logs, _ = _say_ns()
+    exec(compile(ast.Module(body=[_fn("_inner_voice_is_unsaid_result"), _fn("_say_unsaid_result")], type_ignores=[]),
+                 "r", "exec"), ns)
+    now = time.time()
+    ns.update(LIVE_SAY_GATE=True, RESULT_RELAY_SEC=30.0, _RESULT_RELAY={"ts": now - 3}, LAST_SAY_TS=now - 10)
+    f = ns["_inner_voice_is_unsaid_result"]
+    answer = "老爸，明天台北多雲轉晴，最高溫有32度！[EXPRESSION: 眨眼]"
+    assert f(answer, now)
+    assert not f("嗯…", now)                                   # 太短：不是在講結果
+    ns["LAST_SAY_TS"] = now - 1
+    assert not f(answer, now)                                  # 結果回來後她 say 過了
+    ns["LAST_SAY_TS"] = now - 10
+    assert not f(answer, now + 40)                             # 結果早就講過了
+    asyncio.run(ns["_say_unsaid_result"]("V", answer))
+    assert spoken and spoken[0][0] == answer and ns["LAST_SAY_TS"] >= now
+    asyncio.run(ns["_say_unsaid_result"]("V", answer))          # 念過了：不念第二次
+    assert len(spoken) == 1
+    recv = ast.get_source_segment(MAIN, next(n for n in ast.walk(TREE)
+                                             if isinstance(n, ast.AsyncFunctionDef) and n.name == "receive_from_live"))
+    assert "spawn(_say_unsaid_result(vts, _turn_text))" in recv
+    assert '_RESULT_RELAY["ts"] = time.time()' in ast.get_source_segment(MAIN, _fn("_handle_invoke_subagent"))

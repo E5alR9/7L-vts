@@ -42,6 +42,7 @@ def _load(*names, **ns):
     ns.setdefault("_stage_already_handled", _not_handled)
     ns.setdefault("_stage_mark", lambda said, state: None)
     ns.setdefault("_autonomy_turn", lambda now: False)   # 感知那輪不查東西（10-29）
+    ns.setdefault("STAGE_ACTIONS", __import__("core.hard_command", fromlist=["STAGE_ACTIONS"]).STAGE_ACTIONS)
     ns.setdefault("time", __import__("time"))
     for n in names:
         exec(compile(ast.Module(body=[_fn(n)], type_ignores=[]), n, "exec"), ns)

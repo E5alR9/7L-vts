@@ -23,7 +23,10 @@ load_project_env()   # 下面就要讀金鑰：不管誰先 import 本模組，�
 # ── 模型名稱唯一出處（2026-10-25）：Google 下架或改名時只改這一段 ──
 # 以前散在主程式、鋼琴、伴看、麥克風分析各自寫死；作曲一直打已下架的 gemini-2.5-flash，每次 404 都沒人發現
 LIVE_MODEL = "gemini-3.8-live"                    # Live 常駐：哨兵、本能、神態導演、YT 伴看、麥克風情緒
-LIVE_MAIN_MODELS = ["gemini-3.1-flash-live-preview", LIVE_MODEL]   # Live 主腦輪替順序
+# Live 主腦輪替順序（2026-10-29 老爸：3.8 過一陣子應該穩了，換成主力，3.1 備用）。實測同一套主腦設定：3.8 連線 1.5 秒、
+# 首個回應 0.6～1.1 秒，聊天用 say、查天氣叫子智能體都對。3.8-live-extended-thinking 不放：低中高三種思考程度 9 次
+# 沒有一次叫 say 或子智能體（一半根本沒回），開著 say 閘時她會整個不講話、點歌查東西也不會做
+LIVE_MAIN_MODELS = [LIVE_MODEL, "gemini-3.1-flash-live-preview"]
 FAST_TEXT_MODEL = "gemini-3.5-flash-lite"         # 純文字快速回覆
 FAST_MULTIMODAL_MODEL = "gemini-3.6-flash"        # 帶圖／音的快速回覆
 AUDIO_MODEL = "gemini-3.1-flash-lite"             # 系統音、聲音片段辨識
