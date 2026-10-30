@@ -246,6 +246,7 @@ _BRAIN_INPUT_ORIGIN = {"who": "dad", "ts": 0.0, "said": "", "human": False, "nam
 
 UNASKED_STAGE_DECLINE = ("[系統底層：剛才那句話沒有人點歌，系統沒有去彈／唱《{song}》。那是之前的點歌，不要自己翻出來；"
                          "直接回應剛才那句話就好，剛才如果說了要彈要唱，就自然改口。]")
+AUDIENCE_STAGE_DENIED_NOTE = "鋼琴、唱歌只聽老爸的，系統沒有執行；俏皮帶過就好，不用去問老爸要不要照做"
 AUDIENCE_STAGE_DECLINE = ("[系統底層：鋼琴的停止／暫停／繼續和停止唱歌只聽老爸的，觀眾說的不算，系統沒有執行。"
                           "請妳用一句話俏皮帶過；剛才如果說了「好」，就改口說這要老爸點頭。]")
 
@@ -1277,6 +1278,28 @@ def _should_wake_from_screen(input_idle, change_level, state=None) -> bool:
     return bool(state.get("away_seen")) and input_idle <= SCREEN_WAKE_INPUT_SEC and change_level in ("med", "high")
 
 
+# 睡醒要告訴主腦：以前睡著、醒來都沒跟她講，剛被「7L 起床了」叫醒她回「報告老爸，我早就起床準備好囉！」
+# （2026-10-31 Fable 看實機日誌）。醒來後第一張人話紙條前面附一句；麥克風直送 Live 的那條放背景資料
+WAKE_NOTE_SEC = 60.0   # 醒來超過這麼久才有人講話，就不用附了
+
+
+def _sleep_len_text(sec: float) -> str:
+    if sec < 60:
+        return "不到一分鐘"
+    if sec < 3600:
+        return f"{int(sec // 60)} 分鐘"
+    return f"{sec / 3600:.1f} 小時"
+
+
+def _take_wake_note(now: float) -> str:
+    """剛醒來的提示（拿一次就清掉）；醒來太久或沒有就回空字串。"""
+    note = _SLEEP_WAKE.get("woke_note") or ""
+    _SLEEP_WAKE["woke_note"] = ""
+    if not note or now - (_SLEEP_WAKE.get("woke_ts") or 0.0) > WAKE_NOTE_SEC:
+        return ""
+    return note
+
+
 async def set_sleep_mode(enable: bool):
     global IS_SLEEPING, current_ai_status_str
     if enable:
@@ -1287,8 +1310,16 @@ async def set_sleep_mode(enable: bool):
                 return False
         except Exception:
             log_swallowed()
+    was_sleeping = IS_SLEEPING
     IS_SLEEPING = bool(enable)
     _SLEEP_WAKE["away_seen"] = False
+    if IS_SLEEPING and not was_sleeping:
+        _SLEEP_WAKE.update(slept_at=time.time(), woke_note="")
+        add_brain_context("[系統提示：妳睡著了（進入休眠，閉著眼睛）。睡著時聽不到、也不會講話，直到有人把妳叫醒]")
+    elif was_sleeping and not IS_SLEEPING:
+        slept = time.time() - (_SLEEP_WAKE.get("slept_at") or time.time())
+        _SLEEP_WAKE.update(woke_ts=time.time(),
+                           woke_note=f"[系統提示：妳剛才睡了{_sleep_len_text(slept)}，現在剛被叫醒、剛睜開眼睛（不是早就醒了）]")
     if IS_SLEEPING:
         current_ai_status_str = " 閉眼沉睡中 (0 API 消耗)"
         set_ai_state("SLEEP", "進入休眠")
@@ -3080,7 +3111,12 @@ LIVE_SAY_BARGE_IN_SEC = 3.0   # 開著 say 閘：被打斷前這麼久內老爸�
 # 子智能體結果交給她（要她講的那種）之後這麼久還沒 say，提醒一次（2026-10-29 實測：查天氣＋計時器的結果回來，
 # 她只在腦內吐一個「|」就沒下文，天氣結果整個不見）
 SAY_NUDGE_SEC = 10.0
+# 提醒前她還在講別的（送禮道謝、走位）就等她講完，最多等這麼久
+SAY_NUDGE_WAIT_SEC = 60.0
+SAY_NUDGE_QUIET_SEC = 4.0   # 最近一句人話過了這麼久才提醒（剛有人講話她正在處理那件）
+SAY_NUDGE_TRIES = 2         # 真的結果（搜尋、副腦答案）最多提醒幾次
 LAST_SAY_TS = 0.0   # 她最後一次 say 出口的時間
+_RECENT_SAYS = collections.deque(maxlen=30)   # [(時間, 念出來的字)]：交辦結果講了沒，看這個
 # 交辦了、結果還沒回來的子智能體任務。這段時間只准 say 一句（答應那句），
 # 多的擋下不念（2026-10-29 實測：搜尋還沒開始她就 say「查好囉！明天陰天 20～23 度」，結果回來又講一次不一樣的）
 _AWAITING_RESULTS = {}   # {呼叫 id: [交辦時間, 交辦後 say 了幾句]}
@@ -3515,6 +3551,7 @@ async def _handle_say(session, ws_send_lock, fn_call_id, text: str, vts=None) ->
                                              queue_while_singing=True, from_live=True)
             log_print(f"🗣️ [說出口] {raw[:120]}")
             if spoken:
+                _RECENT_SAYS.append((LAST_SAY_TS, spoken))
                 _group_post("主腦", f"說：{spoken}")
                 spawn(_afterthought(spoken))
         await _send_say_response(session, ws_send_lock, fn_call_id,
@@ -3577,6 +3614,8 @@ def _note_inner_voice(text: str) -> None:
 
 async def _handle_invoke_subagent(session, ws_send_lock, _fn_name, _fn_call_id, _task_ins, _intent=None):
     """Live 主腦呼叫 invoke_subagent：每通獨立背景跑 _run_subagent_task，結果用工具回應交回去。"""
+    _requester = _brain_requester()   # 結果回來時可能已經換人講話了，提醒要講給交辦的人聽
+
     async def _respond(_text, _sched, _more=False):
         _fr = {"name": _fn_name, "response": {"result": _text}, "scheduling": _sched}
         if _more:
@@ -3591,7 +3630,7 @@ async def _handle_invoke_subagent(session, ws_send_lock, _fn_name, _fn_call_id, 
             if LIVE_SAY_GATE and not _more and _sched == types.FunctionResponseScheduling.WHEN_IDLE:
                 if AFTERTHOUGHT_ENABLED:
                     _advisor().note(f"（7L 交辦的結果回來了：{_text[:400]}）")   # 軍師下一輪一起看
-                spawn(_nudge_if_unsaid(_text, time.time()))
+                spawn(_nudge_if_unsaid(_text, time.time(), _requester))
         except Exception as _se:
             if _more:
                 return   # 「先答應一聲」換線後不用補（正式結果還會再來）
@@ -3606,16 +3645,60 @@ async def _handle_invoke_subagent(session, ws_send_lock, _fn_name, _fn_call_id, 
             _v[1] = 0
 
 
-async def _nudge_if_unsaid(result_text: str, sent_ts: float) -> None:
-    """開著 say 閘：子智能體的結果要她講，過 SAY_NUDGE_SEC 秒她還沒 say 就提醒一次（只提醒一次，不追）。
-    這段時間她有 say 任何話就算了（可能已經講了、或改講別的）；唱歌中不提醒。"""
-    await asyncio.sleep(SAY_NUDGE_SEC)
-    if LAST_SAY_TS >= sent_ts or is_singing_active() or IS_SLEEPING:
-        return
-    log_print(f"👂 [沒開口] 結果交給她 {SAY_NUDGE_SEC:.0f} 秒還沒 say，提醒一次：{(result_text or '')[:50]}")
-    who = _brain_requester() or "剛才問的人"
-    send_brain_slip(f"[系統提示：剛才交辦的結果妳還沒講出口（只在腦內想不算，要呼叫 say 才念得出來），"
-                    f"現在用 say 簡短講給{who}聽：] {(result_text or '')[:500]}")
+_MENTION_STOP = {"老爸", "今天", "現在", "已經", "一下", "可以", "我們", "這個", "那個", "幫你", "好的", "沒有", "什麼",
+                  "就是", "一個", "時候", "知道", "喔喔", "哈哈", "真的", "不過", "還是", "如果", "因為", "所以", "大家"}
+
+
+def _mention_keys(text: str) -> set:
+    """一段話的內容特徵：相鄰兩個中文字、數字、英文詞（去掉太常見的）。"""
+    t = text or ""
+    keys = {m.group(0).lower() for m in re.finditer(r"[0-9]+(?:\.[0-9]+)?|[A-Za-z]{3,}", t)}
+    for run in re.findall(r"[\u4e00-\u9fff]+", t):
+        keys.update(run[i:i + 2] for i in range(len(run) - 1))
+    return keys - _MENTION_STOP
+
+
+def _result_mentioned(result_text: str, says: list) -> bool:
+    """她 say 的話裡有沒有講到這份交辦結果：任何一句跟結果有 3 個以上相同的內容特徵就算講了（結果很短就 2 個）。"""
+    res = _mention_keys(result_text)
+    need = 2 if len(res) <= 20 else 3
+    return any(len(_mention_keys(s) & res) >= need for s in says)
+
+
+async def _nudge_if_unsaid(result_text: str, sent_ts: float, requester: str = "") -> None:
+    """開著 say 閘：子智能體的結果要她講，過 SAY_NUDGE_SEC 秒她還沒講到這份結果就提醒（真的結果最多 SAY_NUDGE_TRIES 次）。
+    以前這段時間她 say 任何話就算了：查天氣的結果回來時剛好有人送禮、老爸叫她走位，她道謝、回走位，
+    天氣就再也沒講（2026-10-31 Fable 看實機日誌）。現在看她講的話有沒有講到這份結果；
+    她還在講別的、剛有人講話就等場面靜下來再提醒（2026-10-31 實機：提醒剛好撞上「彈小星星」和送禮，她只顧那兩件）；
+    唱歌、睡覺中不提醒。"""
+    # 「[系統底層：…請妳答應一聲]」（點歌、看畫面、沒查到）不是要轉述的內容：她 say 過任何話就算答應了。
+    # 要看有沒有講到的只有真的結果（搜尋結果、副腦想好的答案），不然她答應過點歌還會被叫再答應一次（2026-10-31 Fable 審查）
+    content = not (result_text or "").lstrip().startswith("[系統底層")
+    who = requester or "剛才問的人"
+    for attempt in range(SAY_NUDGE_TRIES if content else 1):
+        await asyncio.sleep(SAY_NUDGE_SEC)
+        deadline = time.time() + SAY_NUDGE_WAIT_SEC
+        while True:
+            if is_singing_active() or IS_SLEEPING:
+                return
+            says = [t for ts, t in list(_RECENT_SAYS) if ts >= sent_ts]
+            if (says or LAST_SAY_TS >= sent_ts) if not content else _result_mentioned(result_text, says):
+                return
+            now = time.time()
+            if (stage.ai_state() != "TALKING" and speech_queue.empty() and not _AWAITING_RESULTS
+                    and not _SAY_LOCK.locked() and now - (_BRAIN_INPUT_ORIGIN.get("ts") or 0.0) >= SAY_NUDGE_QUIET_SEC
+                    and now - LAST_SAY_TS >= 2.0):
+                break
+            if now > deadline:
+                for _v in _AWAITING_RESULTS.values():   # 還有別件在等：不然她照提醒 say 也會被「先別講」擋掉
+                    _v[1] = 0
+                break
+            await asyncio.sleep(0.5)
+        said_other = LAST_SAY_TS >= sent_ts
+        log_print(f"👂 [沒開口] 結果交給她 {time.time() - sent_ts:.0f} 秒還沒講到"
+                  f"{'（講了別的）' if said_other else ''}，提醒第 {attempt + 1} 次：{(result_text or '')[:50]}")
+        send_brain_slip(f"[系統提示：剛才交辦的結果妳還沒講出口（只在腦內想不算，要呼叫 say 才念得出來），"
+                        f"現在用 say 簡短講給{who}聽：] {(result_text or '')[:500]}")
 
 
 async def _speak_brain_turn(vts, input_queue, text: str, who: str, reply_to: str, source: str,
@@ -4096,6 +4179,7 @@ async def continuous_live_worker(vts):
                                         if IS_SLEEPING and live_speech_wakes(to_tw(user_transcription_buffer), operator_input_enabled()):
                                             log_print(f"☀️ [語音喚醒] Live 聽到老爸喊：「{to_tw(user_transcription_buffer.strip())}」，7L 睜眼！")
                                             await set_sleep_mode(False)
+                                            add_brain_context(_take_wake_note(time.time()))
 
                                     if c.output_transcription and c.output_transcription.text:
                                         _brain_output_seen()
@@ -4172,10 +4256,15 @@ async def continuous_live_worker(vts):
                             if not slip:
                                 continue
                             prompt, origin, said, name = slip
-                            log_print(f"📥 [黑板同步] 透過紙條傳送給 Live 大腦: {prompt}")
+                            _send_text = prompt
+                            if origin:
+                                _wake = _take_wake_note(time.time())
+                                if _wake:   # 剛睡醒後第一句人話：讓她知道自己剛醒（只加在送出去的那份，去重、流水帳照原本的）
+                                    _send_text = f"{_wake}\n{prompt}"
+                            log_print(f"📥 [黑板同步] 透過紙條傳送給 Live 大腦: {_send_text}")
                             try:
                                 async with ws_send_lock:
-                                    await session.send_realtime_input(text=prompt)
+                                    await session.send_realtime_input(text=_send_text)
                                     sent_ts = time.time()
                                     if not origin and prompt in _ORIGIN_KEEPING_SLIPS:
                                         pass   # 同一輪人話的延續：不改「這輪算誰的」（斷線重送也一樣，所以不拿掉）
@@ -4897,6 +4986,18 @@ async def autonomous_wander_worker():
             log_swallowed()  # 舊碼整個吞掉，壞了一個月沒人發現
             await asyncio.sleep(5.0)
 
+# 唱歌中排隊等伴奏空白的話，等超過這麼久就不念了：講的是幾分鐘前的事，念出來跟現況不合
+# （2026-10-31 Fable 看實機日誌：「即興創作一首曲子馬上來」等到曲子彈完、鋼琴都收了才念，接著又念「鋼琴收好囉」）
+SING_SPEECH_MAX_WAIT_SEC = 20.0
+
+
+def _stale_sing_speech_note(text: str, waited: float) -> str:
+    """唱歌中等太久沒念的話：告訴主腦這句沒念出來（不用回）。"""
+    t = re.sub(r"\[[^\]]*\]", "", text or "").strip()
+    return (f"[系統提示：妳剛才要講的「{t[:60]}」，唱歌中等了 {waited:.0f} 秒都沒有空檔，已經過時、沒有念出來。"
+            f"還有要緊的就看現在的狀況重新 say，不要照念舊的；不要緊就算了]")
+
+
 # ---  語音合成排隊協程 (老爸優先 / 異步雙軌仲裁器) ---
 async def speech_queue_worker(vts, input_queue):
     global CURRENT_SPEAKING_TARGET, CURRENT_PLAYING_VOICE_TASK
@@ -4959,8 +5060,18 @@ async def speech_queue_worker(vts, input_queue):
             if is_singing():
                 if is_vocal_upcoming(est_duration):
                     log_print(f"🎤 [語音佇列] 檢測到即將有歌聲，TTS 發言 (預估需 {est_duration:.1f} 秒) 已暫停並排入等候區...")
-                    while is_singing() and is_vocal_upcoming(est_duration):
+                    wait_t0 = time.time()
+                    while is_singing() and is_vocal_upcoming(est_duration) and time.time() - wait_t0 < SING_SPEECH_MAX_WAIT_SEC:
                         await stage.wait_change(0.5)   # 唱完就馬上回頭看
+                    waited = time.time() - wait_t0
+                    if waited >= SING_SPEECH_MAX_WAIT_SEC:
+                        log_print(f"⌛ [語音佇列] 唱歌中等了 {waited:.0f} 秒都沒空檔，這句過時了，不念：{text[:40]}")
+                        try:
+                            await asyncio.to_thread(update_subtitle, "")
+                        except Exception:
+                            log_swallowed()
+                        add_brain_context(_stale_sing_speech_note(raw_actions_text or text, waited))
+                        continue
                     if is_singing():
                         log_print(f"🎵 [語音佇列] 遇到夠長的伴奏空白區 ({est_duration:.1f}s+)，抓緊時機插話！")
                     else:
@@ -4997,9 +5108,12 @@ async def speech_queue_worker(vts, input_queue):
                 CURRENT_PLAYING_VOICE_TASK = None
             
             #  發話音訊一播放完畢，立即秒級釋放麥克風狀態，絕不卡死老爸即時接話！
+            # 觸電尖叫還在叫：狀態、表情留給尖叫自己收（以前這裡和下面「表情停留結束」把尖叫中的 TALKING 改回 IDLE，
+            # 狀態在講話中／閒置之間跳，2026-10-31 Fable 看實機日誌）
             if speech_queue.empty():
-                set_ai_state(_state_after_talking(), "發話結束", only_from="TALKING")
                 CURRENT_SPEAKING_TARGET = "none"
+                if not IS_SHOCK_SCREAMING:
+                    set_ai_state(_state_after_talking(), "發話結束", only_from="TALKING")
             
             #  表情停留緩衝：發話完畢後若表情仍在時效內，持續保留一段時間（預設 3.5 秒），讓情緒自然延續
             now = time.time()
@@ -5020,6 +5134,9 @@ async def speech_queue_worker(vts, input_queue):
                 await asyncio.sleep(0.1)
             
             is_singing = is_singing_active()
+            if IS_SHOCK_SCREAMING:
+                CURRENT_SPEAKING_TARGET = "none"
+                continue
             if input_queue.empty() and speech_queue.empty() and not pe.is_piano_active and not is_singing:
                 await set_vts_expression(vts, "_RESET_")
             
@@ -5121,9 +5238,10 @@ _PLATFORM_LABEL = {"twitch": "Twitch", "youtube": "YouTube"}   # 其他（tiktok
 
 
 def add_to_streamer_mind_board(user_display: str, unique_id: str, content: str, source: str = "tiktok",
-                               handled: bool = False):
+                               handled: bool = False, note: str = ""):
     """將接收到的彈幕/留言/事件寫入 7L 記憶腦袋，一排一排排列記錄，由主播自主排程讀取與發話。
-    handled：呼叫端自己會處理（老爸的話），只記下來、不給看板哨兵再接一次。"""
+    handled：呼叫端自己會處理（老爸的話），只記下來、不給看板哨兵再接一次。
+    note：系統對這則的說明（接在這行後面給哨兵和主腦看，例如觀眾想停鋼琴、系統沒執行）。"""
     if source in VIEWER_SOURCES:
         # 觀眾原文中和：看板與記憶之後都會進 prompt，不能讓觀眾偽造【老爸】或 [系統標籤] 格式
         user_display = neutralize_viewer_text(user_display, 60)
@@ -5138,6 +5256,8 @@ def add_to_streamer_mind_board(user_display: str, unique_id: str, content: str, 
         "source": source,
         "status": "read" if handled else "unread"
     }
+    if note:
+        item["note"] = note
     STREAMER_MIND_BOARD.append(item)
     
     #  寫入全集中記憶中樞（確保老爸輸入與觀眾彈幕統一匯流，精準辨別對話目標）
@@ -5624,7 +5744,8 @@ def _format_board_batch(batch_to_process: list):
         elif u_source == "video_watch":
             board_lines.append(f"- [{m['time_str']}] 【點播看片筆記（{u_name}）】：{m['content']}")
         else:
-            board_lines.append(f"- [{m['time_str']}] 【{_PLATFORM_LABEL.get(u_source, 'TikTok')} 直播觀眾「{u_name}」】：{m['content']}")
+            board_lines.append(f"- [{m['time_str']}] 【{_PLATFORM_LABEL.get(u_source, 'TikTok')} 直播觀眾「{u_name}」】：{m['content']}"
+                               + (f"　（系統：{m['note']}）" if m.get("note") else ""))
             if u_name not in users_involved:
                 users_involved.append(u_name)
 
@@ -5650,10 +5771,14 @@ def _save_viewer_updates(text: str) -> int:
         vu_call = v_match.group(2).strip() if v_match.group(2) else None
         vu_rel = v_match.group(3).strip() if v_match.group(3) else None
         vu_imp = v_match.group(4).strip() if v_match.group(4) else None
-        spawn(save_viewer_profile(vu_name, call=vu_call, relationship=vu_rel, impression=vu_imp))
-        log_print(f"👥 [認人] 記住觀眾 {vu_name}：稱={vu_call} 關係={vu_rel} 印象={vu_imp}")
+        spawn(_save_one_viewer_update(vu_name, vu_call, vu_rel, vu_imp))
         n += 1
     return n
+
+
+async def _save_one_viewer_update(name, call, rel, imp) -> None:
+    if await save_viewer_profile(name, call=call, relationship=rel, impression=imp):   # 都沒變就不寫、不記
+        log_print(f"👥 [認人] 記住觀眾 {name}：稱={call} 關係={rel} 印象={imp}")
 
 
 async def _viewer_profiles_block(users_involved: list) -> str:
@@ -7245,8 +7370,11 @@ async def chat_processor_worker(vts, input_queue):
                         _hit, _tool = False, ""
                     # 寫入 7L 滾動記憶腦袋，由 streamer_mind_loop_worker 自主排程讀取與發話；
                     # 點歌已經執行、紙條也遞給 Live 主腦了，這則就不用看板哨兵再轉一次
+                    # 觀眾想停鋼琴／停歌被擋：註明給哨兵看，不然哨兵叫她回頭請示老爸要不要收
+                    # （2026-10-31 Fable 看實機日誌：她停下來問「老爸，你說這鋼琴該不該收呀？」）
                     add_to_streamer_mind_board(id_display, v_unique_id, aud_c, source,
-                                               handled=bool(_hit) and _tool != "audience_denied" and is_live_brain_active())
+                                               handled=bool(_hit) and _tool != "audience_denied" and is_live_brain_active(),
+                                               note=AUDIENCE_STAGE_DENIED_NOTE if _tool == "audience_denied" else "")
 
             # -------------------------------------------------------------
             #  擁有者公開插話（owner_interject）：走觀眾軌道公開播出，不私聊、走觀眾工具牆

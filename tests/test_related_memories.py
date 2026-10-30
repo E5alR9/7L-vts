@@ -188,3 +188,20 @@ def test_board_slip_asks_for_the_regulars_in_the_batch():
             return d
     d = asyncio.run(go())
     assert d.related_viewers == [["小明"], []] and d.problems == []
+
+
+def test_her_own_old_lines_are_capped_strong_only_and_labelled():
+    """她自己說過的以前不分誰說的都當舊記憶，她照抄（「好的老爸，鋼琴暫停！是要先休息一下…」一字不差，2026-10-31 Fable）。"""
+    def own(text, score):
+        h = _hit(text, score, 86400 * 3)
+        h["metadata"]["source"] = "assistant"
+        return h
+    hits = [own("好的老爸，鋼琴暫停！是要先休息一下，還是有別的事要跟我說嗎", 0.80),
+            own("鋼琴暫停了，老爸要喝水休息一下嗎", 0.78),
+            own("鋼琴暫停囉，休息一下", 0.62),
+            _hit("鋼琴先暫停，我要去休息一下", 0.66, 86400 * 3)]
+    got = rag.pick_related(hits, "鋼琴暫停一下休息")
+    assert [p["mine"] for p in got].count(True) == 1 and any(not p["mine"] for p in got)
+    block = rag.format_related(got)
+    assert "（妳自己說過的）" in block and "不要照抄" in block
+    assert "不要照抄" not in rag.format_related([p for p in got if not p["mine"]])

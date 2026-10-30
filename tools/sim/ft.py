@@ -45,8 +45,11 @@ def act(a):
         return _req("POST", D + "/api/interject", {"text": a[1]})
     if kind == "viewer":
         return _req("POST", SIM + "/viewer", {"user": a[1], "text": a[2], "uid": a[1] + "01"})
-    if kind == "event":
-        return _req("POST", SIM + "/event", {"text": a[1], "source": a[2]})
+    if kind == "event":   # ("event", 文字, 來源[, 觀眾名, 內容])：送禮要帶觀眾名，跟真的監聽器一樣（沒帶會冒出假觀眾「直播觀眾」）
+        body = {"text": a[1], "source": a[2]}
+        if len(a) > 3:
+            body.update(viewer=a[3], content=a[4] if len(a) > 4 else a[1])
+        return _req("POST", SIM + "/event", body)
     if kind == "tool":
         return _req("POST", D + "/api/tools/execute", {"tool": a[1], "args": a[2]}, timeout=120)
     if kind == "get":
@@ -111,7 +114,8 @@ GROUPS = {
         ("老爸打字（喚醒＋回話）", ("op", "7L 早安，今天心情怎麼樣"), [r"收到輸入 \(web_console\)", SPOKE], [], 60, 5, r"."),
         ("主持公開插話", ("ij", "大家晚安，今天先陪 7L 測試一下"), [SPOKE], [], 60, 5, r"."),
         ("觀眾留言", ("viewer", "小明", "7L 妳今天好可愛"), [r"記憶腦袋 寫入", SPOKE], [], 70, 5, r"."),
-        ("觀眾送禮", ("event", "【TikTok 直播動態】：小明 送出了 玫瑰 x5", "tiktok_gift"), [SPOKE], [], 70, 5, r"."),
+        ("觀眾送禮", ("event", "【TikTok 直播觀眾 小明 送禮】：連續送出了 5 個 玫瑰！請向他熱情道謝並給予即時互動！", "tiktok_gift", "小明",
+                  "連續送出了 5 個 玫瑰！請向他熱情道謝並給予即時互動！"), [SPOKE], [], 70, 5, r"."),
     ],
     "piano": [
         ("點曲彈琴", ("op", "7L 彈小星星"), [r"play_virtual_piano", r"鋼琴舞台\]"], [], 60, 15, r"."),

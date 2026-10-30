@@ -625,6 +625,12 @@ def save_persisted_piano_settings(vol, spd):
         log_swallowed()
 
 GLOBAL_PIANO_VOLUME, GLOBAL_PIANO_SPEED = load_persisted_piano_settings()
+# 彈唱同步那首倍速固定 1.0：視窗心跳回報的 1.0 不能蓋掉老爸設的倍速
+# （2026-10-31 Fable 看實機日誌：老爸設 1.2 倍，彈加唱一次之後一直是 1 倍，下一首作曲也照 1 倍彈）
+# False／"pending"（已送 play，視窗還沒回報在彈）／"playing"（看過在彈的回報）：看過在彈、之後停了才算彈完。
+# 視窗收到 play 會先廣播 speed_changed（is_playing 還是 False），只看「停了」會在開彈前就解鎖（2026-10-31 Fable 審查）
+_SPEED_FORCED_FOR_SYNC = False
+_SPEED_RESTORE_UNTIL = 0.0   # 剛送 set_speed 改回去：這段時間視窗回報的還是舊倍速，不要記
 PIANO_NOTE_FOCUS_X = 0.0
 
 GLOBAL_PIANO_REALTIME_STATE = {
@@ -1003,9 +1009,10 @@ async def set_piano_volume(volume: int) -> str:
 
 async def set_piano_speed(speed: float) -> str:
     """調整 88 鍵鋼琴的演奏倍速 (0.05 ~ 50.0)。"""
-    global GLOBAL_PIANO_SPEED
+    global GLOBAL_PIANO_SPEED, _SPEED_FORCED_FOR_SYNC
     spd = max(0.05, min(50.0, round(float(speed), 2)))
     GLOBAL_PIANO_SPEED = spd
+    _SPEED_FORCED_FOR_SYNC = False   # 老爸彈唱中自己改倍速：照他的
     if is_piano_window_alive():
         send_piano_ipc_command({"cmd": "set_speed", "speed": spd})
     log_print(f"⚡ [鋼琴倍速] 88 鍵鋼琴倍速已設定為 {spd}x")
@@ -1058,6 +1065,7 @@ async def piano_focus_udp_worker():
     2. 鋼琴即時全量狀態 (正在彈奏的曲目、進度、倍速、音量、音色、播放/結束狀態、心跳包)
     """
     global PIANO_NOTE_FOCUS_X, GLOBAL_PIANO_REALTIME_STATE, is_piano_active, current_piano_song_title, GLOBAL_PIANO_VOLUME, GLOBAL_PIANO_SPEED, GLOBAL_PIANO_INSTRUMENT_NAME, LAST_PIANO_HEARTBEAT_TIME
+    global _SPEED_FORCED_FOR_SYNC, _SPEED_RESTORE_UNTIL
     loop = asyncio.get_running_loop()
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
@@ -1092,6 +1100,8 @@ async def piano_focus_udp_worker():
                             is_playing = pkg.get("is_playing", False)
                             song_title = pkg.get("title", "")
                             
+                            if is_playing and _SPEED_FORCED_FOR_SYNC == "pending":
+                                _SPEED_FORCED_FOR_SYNC = "playing"
                             if is_playing and song_title:
                                 was_inactive = not is_piano_active
                                 is_piano_active = True
@@ -1107,10 +1117,15 @@ async def piano_focus_udp_worker():
                                 current_piano_song_title = ""
                                 if not pkg.get("is_window_open", True) or not is_piano_window_alive():
                                     _mark_piano_offline("曲目停止且視窗已關閉")
+                                if _SPEED_FORCED_FOR_SYNC == "playing":   # 彈唱那首彈完：視窗倍速改回老爸設的
+                                    _SPEED_FORCED_FOR_SYNC = False
+                                    _SPEED_RESTORE_UNTIL = time.time() + 3.0
+                                    if is_piano_window_alive():
+                                        send_piano_ipc_command({"cmd": "set_speed", "speed": GLOBAL_PIANO_SPEED})
                                     
                             if "volume" in pkg:
                                 GLOBAL_PIANO_VOLUME = pkg["volume"]
-                            if "speed" in pkg:
+                            if "speed" in pkg and not _SPEED_FORCED_FOR_SYNC and time.time() >= _SPEED_RESTORE_UNTIL:
                                 GLOBAL_PIANO_SPEED = pkg["speed"]
                             if "instrument" in pkg and pkg["instrument"]:
                                 GLOBAL_PIANO_INSTRUMENT_NAME = pkg["instrument"]
@@ -2060,6 +2075,7 @@ async def generate_dynamic_piano_chatter(song_title: str, target: str = "dad", r
 async def play_piano_worker(song_title: str, sheet_text: str, bpm: int, mode: str, midi_file: str = None, session_id: int = 0, start_at: float = 0.0):
     """背景鋼琴演奏與 Live2D 姿態連動協程 (自動喚出視覺化 88 鍵瀑布流視窗並支援點播隊列與連續隨機電台自動接續)"""
     global is_piano_active, current_piano_song_title, current_piano_midi_file, current_piano_process, PIANO_SESSION_ID, IS_PIANO_AUTO_RADIO_MODE, LAST_PIANO_OPEN_TIME
+    global _SPEED_FORCED_FOR_SYNC
     if session_id != PIANO_SESSION_ID:
         return
         
@@ -2116,6 +2132,7 @@ async def play_piano_worker(song_title: str, sheet_text: str, bpm: int, mode: st
                 # 彈唱同步只管第一首：照起點開彈、倍速固定 1.0（不然對不上原曲）；接續的曲目照常
                 sync_at, start_at = start_at, 0.0
                 play_speed = 1.0 if sync_at else GLOBAL_PIANO_SPEED
+                _SPEED_FORCED_FOR_SYNC = "pending" if sync_at and play_speed != GLOBAL_PIANO_SPEED else False
                 play_payload = {
                     "cmd": "play",
                     "title": song_title,

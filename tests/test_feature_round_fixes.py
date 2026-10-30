@@ -15,13 +15,43 @@ def _node(name):
 
 def test_viewer_update_tags_are_saved():
     saved, logs = [], []
-    ns = {"re": re, "spawn": lambda c: (c.close(), None), "log_print": logs.append,
-          "save_viewer_profile": lambda name, **k: saved.append((name, k)) or _coro()}
-    for n in ("_VIEWER_UPDATE_RE", "_save_viewer_updates"):
+    import asyncio
+
+    async def save(name, **k):
+        saved.append((name, k))
+        return name == "小明"
+    ns = {"re": re, "spawn": lambda c: asyncio.run(c), "log_print": logs.append, "save_viewer_profile": save}
+    for n in ("_VIEWER_UPDATE_RE", "_save_viewer_updates", "_save_one_viewer_update"):
         exec(compile(ast.Module(body=[_node(n)], type_ignores=[]), "x", "exec"), ns)
     n = ns["_save_viewer_updates"]("謝謝明哥！[VIEWER_UPDATE:小明|CALL:明哥|REL:頭號粉絲|IMP:很熱情] 晚安～")
     assert n == 1 and saved == [("小明", {"call": "明哥", "relationship": "頭號粉絲", "impression": "很熱情"})]
     assert ns["_save_viewer_updates"]("沒有標籤") == 0
+    assert len(logs) == 1 and "小明" in logs[0]
+    ns["_save_viewer_updates"]("[VIEWER_UPDATE:小美|CALL:美美]")    # 都沒變（save 回 False）：不記「記住觀眾」
+    assert len(logs) == 1
+
+
+def test_unchanged_viewer_profile_is_not_rewritten(monkeypatch):
+    """她每句回話都帶一樣的 [VIEWER_UPDATE:…]，以前每次都寫本地檔＋雲端（2026-10-31 Fable 看實機日誌）。"""
+    import asyncio
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    import core.memory as mem
+    stored = []
+    prof = {"call": "明哥", "relationship": "頭號粉絲", "impression": "很熱情",
+            "last_seen": datetime.now(ZoneInfo("Asia/Taipei")).strftime("%Y-%m-%d %H:%M")}
+
+    async def get(name):
+        return dict(prof)
+    monkeypatch.setattr(mem, "get_viewer_profile", get)
+    monkeypatch.setattr(mem, "_store_viewer_profile_local", lambda n, p: stored.append(dict(p)))
+    monkeypatch.setattr(mem.db_module, "db", None)
+    assert asyncio.run(mem.save_viewer_profile("小明", call="明哥", relationship="頭號粉絲", impression="很熱情")) is False
+    assert stored == []
+    assert asyncio.run(mem.save_viewer_profile("小明", impression="很熱情，常送玫瑰")) is True   # 有變：寫
+    assert stored[-1]["impression"] == "很熱情，常送玫瑰"
+    prof["last_seen"] = "2026-10-01 12:00"                                                      # 很久沒見：更新見到時間
+    assert asyncio.run(mem.save_viewer_profile("小明", call="明哥")) is True
 
 
 async def _noop():

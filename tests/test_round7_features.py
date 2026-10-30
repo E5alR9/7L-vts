@@ -343,3 +343,24 @@ def test_local_match_by_canonical_title(monkeypatch):
 def test_auto_piano_note_says_no_tool_needed():
     src = ast.get_source_segment(MAIN, main_def("autonomous_wander_worker"))
     assert "不用叫工具" in src
+
+
+def test_she_is_told_she_slept_and_just_woke():
+    """以前睡著、醒來都沒跟主腦講：剛被「7L 起床了」叫醒她回「我早就起床準備好囉！」（2026-10-31 Fable 看實機日誌）。"""
+    ctx = []
+    ns = load_main("set_sleep_mode", "_take_wake_note", "_sleep_len_text", time=time, IS_SLEEPING=False,
+                   _SLEEP_WAKE={"away_seen": False}, add_brain_context=ctx.append, set_ai_state=lambda *a: None,
+                   interrupt_current_speech=lambda **k: asyncio.sleep(0), current_ai_status_str="",
+                   vc=type("VC", (), {"GLOBAL_VTS": None}), log_swallowed=lambda *a: None, WAKE_NOTE_SEC=60.0)
+    asyncio.run(ns["set_sleep_mode"](True))
+    assert len(ctx) == 1 and "睡著" in ctx[0]
+    ns["_SLEEP_WAKE"]["slept_at"] -= 300
+    asyncio.run(ns["set_sleep_mode"](False))
+    note = ns["_take_wake_note"](time.time())
+    assert "5 分鐘" in note and "剛被叫醒" in note
+    assert ns["_take_wake_note"](time.time()) == ""                     # 只附一次
+    asyncio.run(ns["set_sleep_mode"](False))                            # 本來就醒著：不用附
+    assert ns["_take_wake_note"](time.time()) == ""
+    src = ast.get_source_segment(MAIN, next(n for n in ast.walk(ast.parse(MAIN))
+                                            if isinstance(n, ast.AsyncFunctionDef) and n.name == "send_system_prompts_to_live"))
+    assert "_take_wake_note(time.time())" in src

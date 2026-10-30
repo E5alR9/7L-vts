@@ -552,7 +552,7 @@ def test_subagent_result_survives_a_live_reconnect():
             silent.append(x)
     ns = {"types": NS(FunctionResponseScheduling=Sched, FunctionResponse=lambda **k: k), "log_print": logs.append,
           "send_brain_slip": slips.append, "LIVE_SILENT_CONTEXT_QUEUE": Q(), "log_swallowed": lambda *a: None,
-          "_AWAITING_RESULTS": {}, "LIVE_SAY_GATE": False}
+          "_AWAITING_RESULTS": {}, "LIVE_SAY_GATE": False, "_brain_requester": lambda: "老爸"}
     for n in ("_subagent_result_by_slip", "_handle_invoke_subagent"):
         exec(compile(ast.Module(body=[_fn(n)], type_ignores=[]), n, "exec"), ns)
     old, new = object(), object()

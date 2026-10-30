@@ -41,7 +41,7 @@ def _say_ns(singing=False, vision_busy=False):
 
     sess = _Session()
     ns = _load("_handle_say", "_send_say_response", "_note_inner_voice", re=re, time=time, asyncio=asyncio, types=types,
-               _AWAITING_RESULTS={}, AWAIT_RESULT_MAX_SEC=75.0, LAST_SAY_TS=0.0,
+               _AWAITING_RESULTS={}, AWAIT_RESULT_MAX_SEC=75.0, LAST_SAY_TS=0.0, _RECENT_SAYS=[],
                _autonomy_note_say=lambda t, now: "", AUTONOMY_SAY_MIN_GAP=60.0,
                _SAY_LOCK=asyncio.Lock(), GLOBAL_LIVE_SESSION=sess, _speak_brain_turn=speak, input_queue=None,
                _start_marker_tools=lambda t: t.replace("[TOOL:VISION]", "").strip(),
@@ -101,7 +101,7 @@ def test_two_tasks_at_once_each_result_can_be_said():
         await respond(f"[{task}的結果]", types.FunctionResponseScheduling.WHEN_IDLE)
 
     exec(compile(ast.Module(body=[_fn("_handle_invoke_subagent")], type_ignores=[]), "h", "exec"), ns)
-    ns.update(_run_subagent_task=run_task, LIVE_SAY_GATE=False, _subagent_result_by_slip=lambda *a: None)
+    ns.update(_run_subagent_task=run_task, LIVE_SAY_GATE=False, _subagent_result_by_slip=lambda *a: None, _brain_requester=lambda: "老爸")
 
     async def go():
         lock = asyncio.Lock()
@@ -142,27 +142,90 @@ def test_inner_voice_is_logged_not_spoken_and_ends_the_turn():
     assert '_note_inner_voice("")' not in recv
 
 
-def _nudge_ns(said_after=False, singing=False):
+def _nudge_ns(says=(), singing=False, talking_for=0.0, tries=1):
+    import collections
     slips = []
-    ns = _load("_nudge_if_unsaid", asyncio=asyncio, SAY_NUDGE_SEC=0.05, LAST_SAY_TS=0.0, IS_SLEEPING=False,
-               is_singing_active=lambda: singing, log_print=lambda *a: None, _brain_requester=lambda: "老爸",
-               send_brain_slip=slips.append)
-    if said_after:
-        ns["LAST_SAY_TS"] = time.time() + 1
+    t_end = time.time() + talking_for
+    ns = _load("_nudge_if_unsaid", "_mention_keys", "_result_mentioned", asyncio=asyncio, re=re, time=time,
+               SAY_NUDGE_SEC=0.05, SAY_NUDGE_WAIT_SEC=2.0, SAY_NUDGE_QUIET_SEC=0.0, SAY_NUDGE_TRIES=tries,
+               _BRAIN_INPUT_ORIGIN={"ts": 0.0}, LAST_SAY_TS=0.0, IS_SLEEPING=False,
+               is_singing_active=lambda: singing, log_print=lambda *a: None, send_brain_slip=slips.append,
+               _MENTION_STOP={"老爸", "今天"}, _RECENT_SAYS=collections.deque(), _AWAITING_RESULTS={},
+               stage=SimpleNamespace(ai_state=lambda: "TALKING" if time.time() < t_end else "IDLE"),
+               speech_queue=asyncio.Queue(), _SAY_LOCK=asyncio.Lock())
+    for t in says:
+        ns["_RECENT_SAYS"].append((time.time() + 1, t))
+        ns["LAST_SAY_TS"] = time.time() - 3   # 講完一陣子了（算在交辦之後：sent_ts 給更早的）
     return ns, slips
+
+
+_WEATHER = "[搜尋結果，要告訴老爸：台北今天多雲時晴，氣溫 21 到 27 度，下午降雨機率 30%]"
 
 
 def test_result_that_was_never_said_gets_one_reminder():
     # 2026-10-29 實測：查天氣＋計時器的結果回來，她只在腦內吐一個「|」，天氣結果整個不見
     ns, slips = _nudge_ns()
-    asyncio.run(ns["_nudge_if_unsaid"]("[搜尋結果，要告訴老爸：明天多雲 20% 降雨]", time.time()))
-    assert len(slips) == 1 and "say" in slips[0] and "明天多雲" in slips[0] and "老爸" in slips[0]
-    ns, slips = _nudge_ns(said_after=True)                       # 她講了：不提醒
-    asyncio.run(ns["_nudge_if_unsaid"]("[搜尋結果]", time.time()))
+    asyncio.run(ns["_nudge_if_unsaid"](_WEATHER, time.time(), "老爸"))
+    assert len(slips) == 1 and "say" in slips[0] and "台北今天多雲" in slips[0] and "老爸" in slips[0]
+    ns, slips = _nudge_ns(says=["老爸，台北今天多雲，21 到 27 度，下午可能下雨要帶傘喔"])   # 她講了：不提醒
+    asyncio.run(ns["_nudge_if_unsaid"](_WEATHER, time.time(), "老爸"))
     assert slips == []
     ns, slips = _nudge_ns(singing=True)                          # 唱歌中：不提醒
-    asyncio.run(ns["_nudge_if_unsaid"]("[搜尋結果]", time.time()))
+    asyncio.run(ns["_nudge_if_unsaid"](_WEATHER, time.time(), "老爸"))
     assert slips == []
+
+
+def test_result_still_owed_after_she_talked_about_something_else():
+    # 2026-10-31 Fable 看實機日誌：天氣結果回來時有人送禮、老爸叫她走位，她道謝、回走位，天氣就再也沒講
+    ns, slips = _nudge_ns(says=["哇！明哥太狠了吧，一口氣送了五朵玫瑰花，謝謝明哥！", "好啦好啦，我往左邊站一點～"])
+    asyncio.run(ns["_nudge_if_unsaid"](_WEATHER, time.time(), "老爸"))
+    assert len(slips) == 1 and "台北" in slips[0]
+
+
+def test_reminder_waits_until_she_finishes_talking():
+    ns, slips = _nudge_ns(talking_for=0.4)
+    t0 = time.time()
+    asyncio.run(ns["_nudge_if_unsaid"](_WEATHER, time.time(), "老爸"))
+    assert len(slips) == 1 and time.time() - t0 >= 0.4
+
+
+def test_instruction_results_count_as_answered_once_she_said_anything():
+    # 點歌、看畫面這種「[系統底層：…請妳答應一聲]」：她 say 過「好～馬上彈給你聽」就算了，不用跟內容對（2026-10-31 Fable 審查）
+    slip = "[系統底層：收到老爸的點歌請求，已經在背景排《小星星》，請妳口頭答應一聲。]"
+    ns, slips = _nudge_ns(says=["好～馬上彈給你聽！"])
+    asyncio.run(ns["_nudge_if_unsaid"](slip, time.time(), "老爸"))
+    assert slips == []
+    ns, slips = _nudge_ns()                                      # 什麼都沒講：照樣提醒
+    asyncio.run(ns["_nudge_if_unsaid"](slip, time.time(), "老爸"))
+    assert len(slips) == 1
+
+
+def test_reminder_unblocks_the_say_gate_when_another_task_is_still_pending():
+    ns, slips = _nudge_ns()
+    ns["SAY_NUDGE_WAIT_SEC"] = 0.2
+    ns["_AWAITING_RESULTS"]["timer"] = [time.time(), 1]           # 另一件還在等、已經答應過：不清掉她 say 會被擋
+    asyncio.run(ns["_nudge_if_unsaid"](_WEATHER, time.time(), "老爸"))
+    assert len(slips) == 1 and ns["_AWAITING_RESULTS"]["timer"][1] == 0
+
+
+def test_result_gets_a_second_reminder_but_waits_for_a_quiet_moment():
+    # 2026-10-31 實機：提醒剛好撞上「彈小星星」和送禮，她只顧那兩件，天氣還是沒講
+    ns, slips = _nudge_ns(tries=2)
+    asyncio.run(ns["_nudge_if_unsaid"](_WEATHER, time.time() - 5, "老爸"))
+    assert len(slips) == 2
+    ns, slips = _nudge_ns()
+    ns["SAY_NUDGE_QUIET_SEC"], ns["SAY_NUDGE_WAIT_SEC"] = 0.3, 2.0
+    ns["_BRAIN_INPUT_ORIGIN"]["ts"] = time.time()                  # 剛有人講話：等靜下來
+    t0 = time.time()
+    asyncio.run(ns["_nudge_if_unsaid"](_WEATHER, time.time() - 5, "老爸"))
+    assert len(slips) == 1 and time.time() - t0 >= 0.3
+
+
+def test_mention_check():
+    ns, _ = _nudge_ns()
+    m = ns["_result_mentioned"]
+    assert m("已經設好 1 分鐘的計時器（測試計時）", ["好的，一分鐘計時開始囉，時間到叫你"])
+    assert not m(_WEATHER, ["接下來你想做什麼呢？"])
 
 
 def test_live_brain_gets_the_say_tool_and_rule_only_when_the_gate_is_on():

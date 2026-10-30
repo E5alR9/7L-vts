@@ -285,3 +285,23 @@ def test_play_prepared_song_hands_start_time_to_playback(monkeypatch):
     assert got["start_at"] and rv["start_at"] == got["start_at"] and rv["sing"].is_set()
     got["on_start"](777.0)                                                 # 人聲實際開播 → 鋼琴照它校時
     assert synced == [(777.0, "y_piano.mid")]
+
+
+def test_sync_speed_does_not_overwrite_dads_speed_setting():
+    """彈唱那首倍速固定 1.0，視窗心跳回報 1.0 以前會蓋掉老爸設的 1.2，之後每首都 1 倍（2026-10-31 Fable 看實機日誌）。"""
+    src = open(os.path.join(ROOT, "services", "piano_engine.py"), encoding="utf-8").read()
+    assert 'if "speed" in pkg and not _SPEED_FORCED_FOR_SYNC and time.time() >= _SPEED_RESTORE_UNTIL:' in src
+    assert '_SPEED_FORCED_FOR_SYNC = "pending" if sync_at and play_speed != GLOBAL_PIANO_SPEED else False' in src
+    # 視窗收到 play 先廣播 speed_changed（還沒在彈）：要看過「在彈」才算開始，停了才算彈完（Fable 審查）
+    assert 'if is_playing and _SPEED_FORCED_FOR_SYNC == "pending":' in src
+    hb = src[src.index("elif not is_playing:"):]
+    hb = hb[:hb.index('if "volume" in pkg')]
+    assert 'if _SPEED_FORCED_FOR_SYNC == "playing":' in hb
+    assert '"set_speed", "speed": GLOBAL_PIANO_SPEED' in hb           # 彈完那首：視窗改回老爸的倍速
+    old_spd, old_flag = pe.GLOBAL_PIANO_SPEED, pe._SPEED_FORCED_FOR_SYNC
+    try:
+        pe._SPEED_FORCED_FOR_SYNC = True
+        asyncio.run(pe.set_piano_speed(1.3))                            # 彈唱中老爸自己改：照他的
+        assert pe.GLOBAL_PIANO_SPEED == 1.3 and pe._SPEED_FORCED_FOR_SYNC is False
+    finally:
+        pe.GLOBAL_PIANO_SPEED, pe._SPEED_FORCED_FOR_SYNC = old_spd, old_flag

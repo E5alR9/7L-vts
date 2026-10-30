@@ -624,3 +624,40 @@ def test_mirror_report_does_not_retrigger_the_mirror():
     ns["_VISION_STATE"]["mirror_ts"] = time.time()
     assert ns["_start_marker_tools"]("白髮紅眼超可愛[TOOL:MIRROR]") == "白髮紅眼超可愛" and started == ["mirror"]
     assert ns["_start_marker_tools"]("我看看～[TOOL:VISION]") == "我看看～" and started == ["mirror", "vision"]
+
+
+def test_speech_queued_while_singing_goes_stale_instead_of_being_said_minutes_later():
+    """唱歌中排隊的話以前沒有上限：「即興創作一首曲子馬上來」等到曲子彈完、鋼琴都收了才念（2026-10-31 Fable 看實機日誌）。"""
+    src = _src("speech_queue_worker")
+    assert "time.time() - wait_t0 < SING_SPEECH_MAX_WAIT_SEC" in src
+    drop = src[src.index("if waited >= SING_SPEECH_MAX_WAIT_SEC:"):]
+    assert drop.index("add_brain_context(_stale_sing_speech_note(") < drop.index("continue")
+    assert drop.index("continue") < drop.index('set_ai_state("TALKING"')
+    ns = {"re": __import__("re")}
+    exec(compile(ast.Module(body=[_fn("_stale_sing_speech_note")], type_ignores=[]), "x", "exec"), ns)
+    note = ns["_stale_sing_speech_note"]("[EXPRESSION: 笑] 即興創作一首曲子馬上來", 21.4)
+    assert "即興創作一首曲子馬上來" in note and "EXPRESSION" not in note and "21 秒" in note and "say" in note
+
+
+def test_shock_scream_state_is_not_reset_by_the_previous_sentence():
+    """上一句的「發話結束」「表情停留結束」把尖叫中的 TALKING 改回 IDLE，狀態一直跳（2026-10-31 Fable 看實機日誌）。"""
+    src = _src("speech_queue_worker")
+    end = src[src.index("if speech_queue.empty():"):src.index('"發話結束"')]
+    assert 'CURRENT_SPEAKING_TARGET = "none"' in end and "if not IS_SHOCK_SCREAMING:" in end
+    tail = src[src.index("hold_steps = int("):]
+    assert tail.index("if IS_SHOCK_SCREAMING:") < tail.index('"表情停留結束"')
+    assert 'CURRENT_SPEAKING_TARGET = "none"\n                continue' in tail   # 對象照樣清（Fable 審查）
+
+
+def test_viewer_stage_stop_that_was_refused_is_annotated_for_the_sentry():
+    """觀眾叫她收琴被擋，哨兵不知道，叫她回頭問老爸「這鋼琴該不該收呀？」（2026-10-31 Fable 看實機日誌）。"""
+    import re as _re
+    ns = {"re": _re, "is_operator": lambda s: False, "_PLATFORM_LABEL": {}}
+    exec(compile(ast.Module(body=[_fn("_format_board_batch")], type_ignores=[]), "x", "exec"), ns)
+    ctx, users, _ = ns["_format_board_batch"]([
+        {"time_str": "10:00:00", "user": "阿呆", "unique_id": "a", "source": "tiktok", "content": "別彈了收起鋼琴",
+         "note": "鋼琴、唱歌只聽老爸的，系統沒有執行；俏皮帶過就好"},
+        {"time_str": "10:00:01", "user": "小美", "unique_id": "b", "source": "tiktok", "content": "好好聽"}])
+    lines = ctx.splitlines()
+    assert "（系統：鋼琴、唱歌只聽老爸的" in lines[0] and "系統" not in lines[1] and users == ["阿呆", "小美"]
+    assert 'note=AUDIENCE_STAGE_DENIED_NOTE if _tool == "audience_denied" else ""' in MAIN

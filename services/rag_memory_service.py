@@ -130,22 +130,31 @@ def _parse_ts(iso):
         return None
 
 
+# 她自己以前講過的話（source=assistant）：最多一句、要很像才給，標成「妳說過的」。以前不分誰說的都當「相關的舊記憶」，
+# 她拿來當範本照抄（2026-10-31 Fable 看實機日誌：「好的老爸，鋼琴暫停！是要先休息一下…」跟 10/27 那句一字不差）
+OWN_LINES_MAX = 1
+
+
 def pick_related(hits, query: str, now=None, k=RELATED_MAX, min_score=RELATED_MIN_SCORE,
                  strong_score=RELATED_STRONG_SCORE, skip_recent_sec=RELATED_SKIP_RECENT_SEC,
                  min_query_content=MIN_CONTENT, need_overlap=True):
     """純函數：檢索結果 → 值得附給主腦的幾筆（規則見檔頭）。最後照時間排（好讀）。
-    只查某個熟客說過的（hits 已經是他的）時，放寬：一個實字就查、不用共同實字（本來就是他的話）。"""
+    只查某個熟客說過的（hits 已經是他的）時，放寬：一個實字就查、不用共同實字（本來就是他的話）。
+    她自己說過的最多 OWN_LINES_MAX 句、要 ≥ strong_score，標 mine。"""
     qg = content_chars(query)
     if len(qg) < min_query_content:
         return []   # 「早安」「幫我數到三」：沒東西可查
     now = time.time() if now is None else now
     qn = _norm(query)
-    out, seen = [], set()
+    out, seen, own = [], set(), 0
     for h in sorted(hits or [], key=lambda x: -float(x.get("score") or 0)):
         score = float(h.get("score") or 0)
         if score < min_score:
             continue
         text = (h.get("text") or "").strip()
+        mine = (h.get("metadata") or {}).get("source") == "assistant"
+        if mine and (own >= OWN_LINES_MAX or score < strong_score):
+            continue
         ts = _parse_ts((h.get("metadata") or {}).get("timestamp"))
         if ts and now - ts < skip_recent_sec:
             continue
@@ -156,7 +165,8 @@ def pick_related(hits, query: str, now=None, k=RELATED_MAX, min_score=RELATED_MI
         if len(hg) < MIN_CONTENT or (need_overlap and score < strong_score and not (qg & hg)):
             continue   # 記憶本身沒內容（「他自己彈的」）、或只是表面像
         seen.add(key)
-        out.append({"text": text, "ts": ts, "score": score})
+        own += mine
+        out.append({"text": text, "ts": ts, "score": score, "mine": mine})
         if len(out) >= k:
             break
     out.sort(key=lambda x: x["ts"] or 0)
@@ -167,11 +177,14 @@ def format_related(picked) -> str:
     """挑好的幾筆 → 接在紙條後面的一段；空的回空字串。"""
     if not picked:
         return ""
-    lines = []
+    lines, any_mine = [], False
     for p in picked:
         when = datetime.fromtimestamp(p["ts"]).strftime("%m/%d %H:%M") if p.get("ts") else "以前"
-        lines.append(f"- {when} {_TIME_PREFIX.sub('', p['text'])[:160]}")
-    return "[相關的舊記憶（向量比對找的，可能不相關，自己判斷要不要提）：\n" + "\n".join(lines) + "]"
+        mark = "（妳自己說過的）" if p.get("mine") else ""
+        any_mine |= bool(p.get("mine"))
+        lines.append(f"- {when} {mark}{_TIME_PREFIX.sub('', p['text'])[:160]}")
+    tail = "；妳自己說過的只是讓妳記得講過什麼，這次要換新的說法，不要照抄" if any_mine else ""
+    return f"[相關的舊記憶（向量比對找的，可能不相關，自己判斷要不要提{tail}）：\n" + "\n".join(lines) + "]"
 
 
 VIEWER_MIN_SCORE = 0.50     # 只在熟客自己的話裡找：本來就是他說的，門檻放低

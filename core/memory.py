@@ -146,9 +146,24 @@ async def get_viewer_profile(tiktok_name: str) -> dict:
         prof["call"] = tiktok_name
     return prof
 
-async def save_viewer_profile(tiktok_name: str, call: str = None, relationship: str = None, impression: str = None):
-    """儲存 TikTok 觀眾資料到 Firebase viewer_profiles + 本地 viewer_profiles_local.json"""
+# 稱呼、關係、印象都沒變：上次見到不到這麼久就不寫（她每句回話都會帶一樣的 [VIEWER_UPDATE:…]，
+# 以前每次都寫本地檔＋雲端，2026-10-31 Fable 看實機日誌）
+VIEWER_SEEN_REFRESH_SEC = 1800
+
+
+def _seen_recently(last_seen: str, now: datetime) -> bool:
+    try:
+        t = datetime.strptime(last_seen or "", "%Y-%m-%d %H:%M").replace(tzinfo=now.tzinfo)
+    except (ValueError, TypeError):
+        return False
+    return 0 <= (now - t).total_seconds() < VIEWER_SEEN_REFRESH_SEC
+
+
+async def save_viewer_profile(tiktok_name: str, call: str = None, relationship: str = None, impression: str = None) -> bool:
+    """儲存 TikTok 觀眾資料到 Firebase viewer_profiles + 本地 viewer_profiles_local.json。
+    回有沒有真的寫（都沒變、剛見過就不寫）。"""
     profile = await get_viewer_profile(tiktok_name)
+    before = {k: profile.get(k) for k in ("call", "relationship", "impression")}
     if call:
         clean_c = str(call).strip().strip('"\'')
         if clean_c and clean_c not in ["稱呼", "名字", "暱稱", "CALL", "none", "null", "None", "Null"]:
@@ -168,7 +183,10 @@ async def save_viewer_profile(tiktok_name: str, call: str = None, relationship: 
         clean_i = str(impression).strip().strip('"\'')
         if clean_i and clean_i not in ["印象", "IMP", "none", "null", "None", "Null"]:
             profile["impression"] = clean_i
-    profile["last_seen"] = datetime.now(ZoneInfo("Asia/Taipei")).strftime("%Y-%m-%d %H:%M")
+    now = datetime.now(ZoneInfo("Asia/Taipei"))
+    if before == {k: profile.get(k) for k in before} and _seen_recently(profile.get("last_seen", ""), now):
+        return False
+    profile["last_seen"] = now.strftime("%Y-%m-%d %H:%M")
     _store_viewer_profile_local(tiktok_name, profile)
     if db_module.db is not None:
         try:
@@ -177,6 +195,7 @@ async def save_viewer_profile(tiktok_name: str, call: str = None, relationship: 
             await db_module.db.collection("viewer_profiles").document(tiktok_name).set(cloud, merge=True)
         except Exception:
             log_swallowed()
+    return True
 
 def _read_local_knowledge() -> Optional[dict]:
     if not os.path.exists(CLOUD_KNOWLEDGE_FILE):

@@ -325,7 +325,7 @@ def test_screen_task_is_handed_to_the_vision_brain():
 
     def run(recent):
         sess = _FakeSession()
-        ns = _load("_run_subagent_task", "_handle_invoke_subagent", _AWAITING_RESULTS={}, LIVE_SAY_GATE=False, types=types, asyncio=asyncio, time=time, GLOBAL_LIVE_SESSION=sess,
+        ns = _load("_run_subagent_task", "_handle_invoke_subagent", _brain_requester=lambda: "老爸", _AWAITING_RESULTS={}, LIVE_SAY_GATE=False, types=types, asyncio=asyncio, time=time, GLOBAL_LIVE_SESSION=sess,
                    background_tool_executor=never, nv_interpret_task=never, build_slip_text=build_slip_text,
                    _SUBAGENT_TOTAL_TIMEOUT=45.0, _SUBAGENT_VISION_TASK_RE=_re.compile(_const_pattern("_SUBAGENT_VISION_TASK_RE")),
                    _start_vision=lambda: not recent and (looked.append(True) or True),   # 剛看過／正在看就回 False
@@ -376,7 +376,7 @@ def test_brain_slips_have_one_exit_and_origin_is_noted_on_send():
     assert ns["_BRAIN_INPUT_ORIGIN"]["who"] == "dad"          # 排隊中不改身分，送出那一刻才記
     assert MAIN.count("LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait(") == 1   # 只剩出口裡那一處
     sender = ast.get_source_segment(MAIN, _fn("send_system_prompts_to_live"))
-    assert sender.index("send_realtime_input(text=prompt)") < sender.index("_note_brain_origin(origin, said, name)")
+    assert sender.index("send_realtime_input(text=_send_text)") < sender.index("_note_brain_origin(origin, said, name)")
 
 
 def test_structured_stage_action_skips_text_parsing():
@@ -492,7 +492,7 @@ def test_mirror_task_is_handed_to_the_mirror_once():
 
     def run(can_start):
         sess = _FakeSession()
-        ns = _load("_run_subagent_task", "_handle_invoke_subagent", _AWAITING_RESULTS={}, LIVE_SAY_GATE=False, types=types, asyncio=asyncio, time=time, GLOBAL_LIVE_SESSION=sess,
+        ns = _load("_run_subagent_task", "_handle_invoke_subagent", _brain_requester=lambda: "老爸", _AWAITING_RESULTS={}, LIVE_SAY_GATE=False, types=types, asyncio=asyncio, time=time, GLOBAL_LIVE_SESSION=sess,
                    background_tool_executor=never, nv_interpret_task=never,
                    _SUBAGENT_VISION_TASK_RE=__import__("re").compile(_const_pattern("_SUBAGENT_VISION_TASK_RE")),
                    _start_mirror=lambda: started.append(1) or can_start)
