@@ -232,7 +232,8 @@ async def youtube_live_worker(input_queue):
                 log_print(f"⚠️ [YouTube] 打開頻道 {channel} 的直播頁失敗：{type(e).__name__} {str(e)[:80]}")
                 return None, False, "", False
 
-        if channel and not vid:
+        async def wait_for_live():
+            nonlocal vid
             while not vid:                            # 離線/解析失敗就待命重查，不直接 return（開播自動跟進）
                 video_id, is_live, title, ok = await resolve_channel()
                 if not ok or not video_id:
@@ -250,13 +251,25 @@ async def youtube_live_worker(input_queue):
                 log_print(f"📺 [YouTube] 頻道 {channel} 正在直播：{title or vid}（ID={vid}），開始輪詢聊天室")
             cs.report_chat_status("youtube", "connecting", vid)
 
+        channel_mode = bool(channel and not vid)
+        if channel_mode:
+            await wait_for_live()
+
         cont = None
+        no_cont_tries = 0
         while True:                                   # 外層：取得（或重新取得）continuation
             try:
                 if not cont:
                     page = await cli.get(f"https://www.youtube.com/live_chat?v={vid}&is_popout=1")
                     cont = extract_continuation(page.text)
                     if not cont:
+                        no_cont_tries += 1
+                        if channel_mode and no_cont_tries >= 4:
+                            # 這部已經不是直播了（下播又開新的一場）：回頭查頻道現在在播哪一部
+                            log_print(f"📺 [YouTube] {vid} 一分鐘都拿不到聊天室，回頭查頻道 {channel} 現在播哪一部")
+                            vid, no_cont_tries, warned_no_cont = None, 0, False
+                            await wait_for_live()
+                            continue
                         if not warned_no_cont:
                             log_print(f"⚠️ [YouTube] 取不到 continuation（ID={vid} —— 該影片正在直播嗎？），15 秒後重試")
                             warned_no_cont = True
@@ -264,6 +277,7 @@ async def youtube_live_worker(input_queue):
                         await asyncio.sleep(15)
                         continue
                     warned_no_cont = False
+                    no_cont_tries = 0
                     log_print(f"📺 [YouTube] 已連線 live_chat：{vid}")
                     cs.report_chat_status("youtube", "connecting", vid)
 
@@ -299,6 +313,11 @@ async def youtube_live_worker(input_queue):
                         cont = None
                         live_reported = False
                         await asyncio.sleep(20)
+                        if channel_mode:
+                            # 以前只在啟動時查一次頻道：老爸下播再開新的一場（新影片 ID），這裡一直重抓舊影片，
+                            # 新直播的聊天室永遠讀不到（2026-10-30 健檢）
+                            vid = None
+                            await wait_for_live()
                         break
                     cont = next_cont
                     await asyncio.sleep(wait)

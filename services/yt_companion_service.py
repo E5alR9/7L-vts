@@ -243,7 +243,9 @@ async def _yt_companion_session_loop(target_hwnd, initial_rect, initial_title):
         output_audio_transcription=types.AudioTranscriptionConfig(),
         system_instruction=types.Content(
             parts=[types.Part.from_text(text=EYE_EAR_SYSTEM_INSTRUCTION)]
-        )
+        ),
+        # 影音一起送的 Live 連線沒開壓縮只撐約 2 分鐘就被伺服器關掉（2026-10-30 健檢）
+        context_window_compression=types.ContextWindowCompressionConfig(sliding_window=types.SlidingWindow()),
     )
 
     try:
@@ -353,6 +355,13 @@ async def _yt_companion_session_loop(target_hwnd, initial_rect, initial_title):
 
             # 視窗持續存在性檢查
             while session_running and IS_YT_WATCHER_ENABLED:
+                if r_task.done():
+                    # 收筆記的那條斷了（伺服器關連線）：以前沒人發現，送畫面和聲音的照樣對著死連線送、
+                    # 整部片後面都沒筆記，還一直顯示「陪看中」。結束這輪，讓自動偵測重新開一條
+                    err = None if r_task.cancelled() else r_task.exception()
+                    log_print(f"⚠️ [YT 眼耳] 連線被關掉了（{type(err).__name__ if err else '正常結束'}：{str(err)[:120] if err else ''}），收掉這輪重連")
+                    session_running = False
+                    break
                 hwnd, rect, title = find_youtube_window()
                 now = time.time()
                 if hwnd:

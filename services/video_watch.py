@@ -222,7 +222,10 @@ async def digest_video(video_id: str, requester: str) -> dict:
                 frames_desc = "\n".join(f"【畫面{i+1}】{d}" for i, d in enumerate(descs))
             except Exception as e:
                 log_print(f"⚠️ [看片] 關鍵畫面描述失敗，只用字幕／音軌：{type(e).__name__} {str(e)[:80]}")
-    material = (text[:12000] + ("\n\n【關鍵畫面】\n" + frames_desc[:3000] if frames_desc else "")).strip()
+    # 濃縮只吃得下 8000 字（Groq 每分鐘輸入上限）：以前字幕給 12000 字，整份被 Groq 拒絕，只剩開頭 400 字當心得；
+    # 字幕放前面的話，超過的部分會把後面的關鍵畫面切掉，所以字幕讓出畫面的位置（2026-10-30）
+    material = (text[:8000 - (len(frames_desc[:2500]) + 10 if frames_desc else 0)]
+                + ("\n\n【關鍵畫面】\n" + frames_desc[:2500] if frames_desc else "")).strip()
     if not material:
         return {"ok": False, "error": "抓不到字幕/音軌/畫面（可能地區限制或需登入）"}
     try:

@@ -31,7 +31,8 @@ from core.utils import log_print, to_tw, log_swallowed, spawn
 from core.identity import get_owner_name
 from core.paths import ROOT_DIR
 from core.llm_engine import (GEMINI_KEYS, HIGH_IQ_GEMINI_MODELS, UNRESTRICTED_SAFETY_SETTINGS, model_cooling, thinking_config,
-                             get_pingpong_alternating_index, get_pingpong_ring_indices)
+                             get_pingpong_alternating_index, get_pingpong_ring_indices, report_gemini_key_error)
+from core.rest_brain import gemini_pairs
 
 # —— 主程式交進來的東西（2026-10-25）——
 # 以前用 MainProxy 從 __main__ 動態撈：撈不到（改名、換啟動方式）就默默變成什麼都不做的空函式。
@@ -1744,13 +1745,13 @@ async def resolve_piano_intent_by_ai(
         for m in HIGH_IQ_GEMINI_MODELS:
             if model_cooling(m, active_keys):   # 每把 key 在這個模型上都被限流了：換下一個模型
                 continue
-            ring_indices = get_pingpong_ring_indices(len(active_keys), CURRENT_GEMINI_KEY_STEP)[:3]
-            for idx in ring_indices:
+            # 以前用 CURRENT_GEMINI_KEY_STEP 挑 key，但它從來沒加過：永遠是同樣三把，那三把限流了好幾十把好的也不會用到。
+            # 改跟 REST 大腦同一套：閒的先、冷卻中的排後面（2026-10-30 健檢）
+            for g_key, _m in gemini_pairs([m], 3, active_keys):
                 remaining = deadline - time.time()
                 if remaining <= 0.5:
                     log_print(f"⌛ [鋼琴意圖] Groq 和 Gemini 都沒在 {PIANO_INTENT_GEMINI_BUDGET_SEC:.0f} 秒內判斷完，照曲名直接找《{clean_q}》")
                     return default_res
-                g_key = active_keys[idx]
                 try:
                     temp_client = genai.Client(api_key=g_key)
                     resp = await asyncio.wait_for(
@@ -1765,12 +1766,21 @@ async def resolve_piano_intent_by_ai(
                     )
                     if resp and resp.text:
                         data = json.loads(resp.text.strip())
+                        if not isinstance(data, dict):
+                            raise ValueError(f"回的不是物件：{type(data).__name__}")
                         data["_from_ai"] = True
                         for _k in ("song_title", "search_query"):
                             if isinstance(data.get(_k), str):
                                 data[_k] = to_tw(data[_k])
                         return data
-                except Exception:
+                except asyncio.TimeoutError:
+                    # 這個模型太慢（3.8-flash 照預設思考常常 4 秒想不完）：換把 key 也一樣慢，直接換下一個模型。
+                    # 以前三把都等滿，12 秒用完還沒輪到快的 3.6-flash
+                    log_print(f"⌛ [鋼琴意圖] {m} 4 秒內沒判斷完，換下一個模型")
+                    break
+                except Exception as e:
+                    report_gemini_key_error(g_key, e, m)   # 以前錯誤全吞：限流沒記冷卻、什麼日誌都沒有
+                    log_print(f"⚠️ [鋼琴意圖] {m} 沒判斷成：{type(e).__name__} {str(e)[:80]}")
                     continue
 
     return default_res
@@ -2961,11 +2971,12 @@ async def compose_and_play_original_piano(theme_or_title: str = "", mood_or_styl
         log_print(f"⚠️ [7L 原創作曲] Groq 沒寫成（{type(e).__name__} {str(e)[:60]}），改問 Gemini")
     active_keys = get_piano_gemini_keys()
     compose_deadline = time.time() + COMPOSE_BUDGET_SEC
-    for model_name in [m for m in HIGH_IQ_GEMINI_MODELS if not model_cooling(m, active_keys)][:3]:
+    models = [m for m in HIGH_IQ_GEMINI_MODELS if not model_cooling(m, active_keys)][:3]
+    # 以前三個模型都打 GEMINI_KEYS[0]（CURRENT_GEMINI_KEY_STEP 從來沒加過）：那把限流就三次全掛、退回保底和弦
+    for compose_key, model_name in gemini_pairs(models, len(models), active_keys):
         if data or not active_keys or compose_deadline - time.time() < 3.0:
             break
-        target_k_idx = get_pingpong_alternating_index(len(active_keys), CURRENT_GEMINI_KEY_STEP)
-        client = genai.Client(api_key=active_keys[target_k_idx])
+        client = genai.Client(api_key=compose_key)
         cfg = dict(temperature=0.85, response_mime_type="application/json",
                    max_output_tokens=8192)   # 40~100 個音符要三四千 token，2500 會在半路截斷
         if "lite" not in model_name:
@@ -2977,6 +2988,7 @@ async def compose_and_play_original_piano(theme_or_title: str = "", mood_or_styl
                 timeout=min(45.0, compose_deadline - time.time()))
             data = _parse_score(resp.text or "")
         except Exception as e:
+            report_gemini_key_error(compose_key, e, model_name)
             log_print(f"⚠️ [7L 原創作曲] {model_name} 沒寫成（{type(e).__name__} {str(e)[:60]}），換下一個")
     if data:
         raw_t = str(data.get("title", clean_theme)).strip()

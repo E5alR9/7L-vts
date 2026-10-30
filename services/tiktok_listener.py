@@ -44,6 +44,9 @@ def get_tiktok_live_telemetry() -> str:
     tid_display = current_username if current_username.startswith("@") else f"@{current_username}"
     return f"【📱 TikTok 直播間實時數據】：\n- 當前在線觀看人數：👥 {TIKTOK_VIEWER_COUNT} 人（若觀眾或老爸問起人數請直接依此真實數字回答）\n- 累計按讚數：❤️ {TIKTOK_LIKE_COUNT} 次\n- 當前主播帳號：{tid_display} (7L)"
 
+_PROBE_LAST_ERR = {}   # 巡檢：每個帳號上次查失敗的原因
+
+
 async def tiktok_live_worker(input_queue):
     """📱 TikTok 直播聊天室實時監聽協程 (支援雙/多帳號自動巡檢，哪個開播就秒連哪個)"""
     global IS_STREAMING, ACTIVE_TIKTOK_ID, current_tiktok_status_str
@@ -170,12 +173,25 @@ async def tiktok_live_worker(input_queue):
             else:
                 # 🎯 雙/多帳號自動巡檢：快篩偵測哪一個帳號正在開台
                 async def _probe(uid):
+                    probe_client = None
                     try:
                         probe_client = TikTokLiveClient(unique_id=uid)
                         is_up = await probe_client.is_live()
+                        _PROBE_LAST_ERR.pop(uid, None)
                         return uid, is_up
-                    except Exception:
+                    except Exception as e:
+                        # 以前錯誤全吞、當成沒開台：被擋、限流、網路斷都顯示「尚未開播」，老爸開台了也連不上（2026-10-30 健檢）
+                        msg = f"{type(e).__name__} {str(e)[:100]}"
+                        if _PROBE_LAST_ERR.get(uid) != msg:   # 同一個錯誤只記一次，每 15 秒洗版沒用
+                            _PROBE_LAST_ERR[uid] = msg
+                            log_print(f"⚠️ [TikTok 巡檢] 查 {uid} 有沒有開台失敗：{msg}")
                         return uid, False
+                    finally:
+                        if probe_client is not None:
+                            try:
+                                await probe_client.close()   # 每次巡檢都新建兩個 HTTP 連線、從來沒關，沒開台時每小時漏幾百個
+                            except Exception:
+                                pass
 
                 probe_results = await asyncio.gather(*[_probe(uid) for uid in target_ids])
                 for uid, is_up in probe_results:
@@ -502,6 +518,8 @@ async def tiktok_live_worker(input_queue):
             try:
                 if client and client.connected:
                     await client.disconnect()
+                if client is not None:
+                    await client.close()   # disconnect() 預設不關 HTTP 連線；沒連上的也要關
             except Exception:
                 pass
             IS_STREAMING = False

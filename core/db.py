@@ -113,9 +113,12 @@ def firestore_to_val(val_dict: Any) -> Any:
     return val_dict
 
 class PureFirestoreDocumentSnapshot:
-    def __init__(self, exists: bool, data: dict):
+    def __init__(self, exists: bool, data: dict, failed: bool = False):
         self.exists = exists
         self._data = data
+        # 讀失敗（逾時、5xx、權限）≠ 文件不存在：以前兩個長一樣，呼叫端當成「雲端沒有」，
+        # 下次存檔就用空白欄位蓋掉雲端真正的資料（2026-10-30 健檢）
+        self.failed = failed
     def to_dict(self) -> Optional[dict]:
         return self._data if self.exists else None
 
@@ -125,7 +128,10 @@ class PureFirestoreDocumentRef:
         self.collection_id = collection_id
         self.document_id = document_id
         self.doc_path = f"projects/{client.project_id}/databases/(default)/documents/{collection_id}/{document_id}"
-        self.url = f"https://firestore.googleapis.com/v1/{self.doc_path}"
+        # 文件 ID 是觀眾暱稱，原樣塞進網址的話 # 或 ? 之後整段被當成錨點／查詢字串切掉，不同觀眾會寫進同一份（2026-10-30 健檢）
+        from urllib.parse import quote
+        self.url = (f"https://firestore.googleapis.com/v1/projects/{client.project_id}/databases/(default)/documents/"
+                    f"{quote(collection_id, safe='')}/{quote(document_id, safe='')}")
 
     async def get(self) -> PureFirestoreDocumentSnapshot:
         try:
@@ -142,10 +148,10 @@ class PureFirestoreDocumentRef:
                 else:
                     err_txt = await resp.text()
                     log_print(f"❌ [Firestore GET 錯誤] HTTP {resp.status}: {err_txt}")
-                    return PureFirestoreDocumentSnapshot(False, {})
+                    return PureFirestoreDocumentSnapshot(False, {}, failed=True)
         except Exception as e:
             log_print(f"❌ [Firestore GET 異常]: {e}")
-            return PureFirestoreDocumentSnapshot(False, {})
+            return PureFirestoreDocumentSnapshot(False, {}, failed=True)
 
     async def set(self, data: dict, merge: bool = False):
         try:

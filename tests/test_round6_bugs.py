@@ -347,7 +347,7 @@ def _afterthought_ns(reply_text, origin, later_origin=None, singing=False, talki
 
         def __exit__(self, *a):
             return False
-    ns = {"re": _re, "time": _t, "AFTERTHOUGHT_ENABLED": True, "_advisor": lambda: _Advisor(),
+    ns = {"re": _re, "time": _t, "AFTERTHOUGHT_ENABLED": True, "_advisor": lambda: _Advisor(), "SUBMINDS_ENABLED": False,
           "AFTERTHOUGHT_MAX_AGE_SEC": 60.0, "_AFTERTHOUGHT": {"origin_ts": 0.0, "says_ts": 0.0, "says": []},
           "_BRAIN_INPUT_ORIGIN": dict(origin), "_AWAITING_RESULTS": {},
           "IS_SLEEPING": False, "is_singing_active": lambda: singing, "pe": type("P", (), {"is_piano_active": False}),
@@ -613,3 +613,19 @@ def test_unanswered_slip_is_resent_soon_after_a_disconnect():
     ns["_LAST_LIVE_SLIP"] = {"slip": "回過了", "ts": now - 2}
     ns["LAST_BRAIN_TURN_TS"] = now - 1                                     # 斷線前已經回了：不重送
     assert ns["_resend_unanswered_slip"](now) is False
+
+
+def test_submind_suggestions_reach_her_as_one_slip():
+    """2026-10-30 老爸：軍師換成副意識群，幾個副意識的建議併成一張紙條，要不要講由主意識（她）決定。"""
+    import time as _t
+    o = {"who": "dad", "said": "加班好累，高雄明天天氣？", "human": True, "ts": _t.time(), "name": ""}
+    ns, slips, asked = _afterthought_ns("unused", o)
+
+    class _Minds:
+        async def ask(self, prompt):
+            asked.append(prompt)
+            return [("查核", "建議：明天是晴天 31 度", 7.6), ("情緒", "建議：先關心老爸加班很累", 7.8)]
+    ns.update(_advisor=lambda: _Minds(), SUBMINDS_ENABLED=True)
+    asyncio.run(ns["_afterthought"]("會下雨喔"))
+    assert len(slips) == 1 and "副意識" in slips[0] and "主意識" in slips[0]
+    assert slips[0].endswith("【查核】明天是晴天 31 度\n【情緒】先關心老爸加班很累")

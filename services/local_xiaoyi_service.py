@@ -627,11 +627,29 @@ def synthesize_xiaoyi_bytes(text: str) -> bytes:
             traceback.print_exc()
             return b""
 
+_INFLIGHT = {}   # 執行緒裡還在跑的合成：id -> 開始時間
+_STUCK_SEC = 60.0
+
+
 async def get_xiaoyi_audio_bytes(text: str) -> bytes:
     """
     非同步調用封裝，防止阻塞主線程
     """
-    return await asyncio.to_thread(synthesize_xiaoyi_bytes, text)
+    # 推理卡死時外層 90 秒逾時只放棄等待，執行緒還抱著 _thread_lock 卡在那裡。以前路由器每 120 秒又來試一次，
+    # 每次再卡一條執行緒、那句又等滿 90 秒，久了把共用的執行緒池塞滿（2026-10-30 健檢）。
+    # 有一句卡超過 _STUCK_SEC 秒還沒回來，就直接報錯讓路由器換引擎
+    oldest = min(_INFLIGHT.values(), default=0.0)
+    if oldest and time.time() - oldest > _STUCK_SEC:
+        raise RuntimeError(f"GPT-SoVITS 上一句卡了 {time.time() - oldest:.0f} 秒還沒回來，先不排新的")
+    token = object()
+    _INFLIGHT[id(token)] = time.time()
+
+    def run():
+        try:
+            return synthesize_xiaoyi_bytes(text)
+        finally:
+            _INFLIGHT.pop(id(token), None)   # 執行緒真的結束才算（外面放棄等待不算）
+    return await asyncio.to_thread(run)
 
 if __name__ == "__main__":
     import asyncio

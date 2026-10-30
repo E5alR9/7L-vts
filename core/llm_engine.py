@@ -186,6 +186,16 @@ def parse_cooldown_seconds(error_text: str, headers=None) -> float:
         
     error_lower = error_text.lower()
 
+    # 0. 先看是不是「今天的額度用完了」或「模型不在了」：Google 的每日額度 429 照樣附一句 retry in 26.9s，
+    #    以前先抓秒數，用完的 key 只冷卻半分鐘，整天一直撞（2026-10-30 健檢）
+    if "perday" in error_lower or any(k in error_lower for k in ["per day", "requests per day", "daily requests", "tokens per day"]):
+        return get_seconds_until_pt_midnight()
+    if re.search(r"\b404\b", error_lower) or "not_found" in error_lower or "is not found" in error_lower \
+            or "no longer available" in error_lower:
+        return get_seconds_until_pt_midnight()
+    if "api_key_invalid" in error_lower or "api key not valid" in error_lower or "permission_denied" in error_lower:
+        return get_seconds_until_pt_midnight()
+
     # 1. 優先精準捕獲 Google GenAI / Groq API 返回的重試秒數或時間字串 (如 "retry in 53.5s", "retryDelay: '53s'")
     match_retry_in = re.search(r'retry (?:in|after|delay)[:\s\']*([0-9.]+)\s*s', error_lower)
     if match_retry_in:
@@ -204,14 +214,10 @@ def parse_cooldown_seconds(error_text: str, headers=None) -> float:
         try: return max(10.0, float(match_sec.group(1)) + 5.0)
         except ValueError: pass
 
-    # 2. 404 或未開通 / 下架模型，鎖定至 PT 午夜 
-    if "404" in error_lower or "not_found" in error_lower or "no longer available" in error_lower:
-        return get_seconds_until_pt_midnight()
-
-    # 3. 每日總配額耗盡 (Per Day / Daily / RequestsPerDay / RPD / Quota Exceeded) 封印至 PT 午夜 (隔天重置)
-    is_daily_exhausted = any(k in error_lower for k in ["per day", "requests per day", "daily requests", "rpd", "tokens per day", "tpd", "exceeded your current quota", "quota exceeded"]) and not any(k in error_lower for k in ["per minute", "minute", "rpm", "tpm"])
-    if is_daily_exhausted:
-        return get_seconds_until_pt_midnight()
+    # 2. 只說「超過額度」沒說每天還是每分鐘的（Live 斷線原因最多 123 字，常常只剩這句）：以前一律當每天用完、
+    #    冷卻到半夜，一次每分鐘限流就把這把 key 的 Live 整天廢掉。改冷卻 10 分鐘，真的用完下次再撞也只多試一次
+    if "exceeded your current quota" in error_lower or "quota exceeded" in error_lower:
+        return 600.0
 
     # 4. 503 暫時性伺服器超載 (鎖定 3 分鐘 / 180 秒)
     if "503" in error_lower or "unavailable" in error_lower or "high demand" in error_lower:
@@ -225,7 +231,12 @@ def parse_cooldown_seconds(error_text: str, headers=None) -> float:
 
 
 _KEY_LIMIT_MARKERS = ("429", "resource_exhausted", "resource exhausted", "rate limit", "quota",
-                      "per day", "503", "unavailable", "high demand")
+                      "per day", "503", "unavailable", "high demand",
+                      # 模型下架、key 失效：以前不在名單裡，parse_cooldown_seconds 的 404 那條根本走不到，
+                      # 每次呼叫都白白再撞一次（2026-10-30 健檢）
+                      "404", "not_found", "is not found", "api_key_invalid", "api key not valid", "permission_denied")
+# key 本身壞了：整把冷卻，不只這個模型
+_DEAD_KEY_MARKERS = ("api_key_invalid", "api key not valid", "permission_denied")
 
 
 def report_gemini_key_error(key: str, err, model: str = "") -> bool:
@@ -235,6 +246,8 @@ def report_gemini_key_error(key: str, err, model: str = "") -> bool:
     if not key or not any(m in err_low for m in _KEY_LIMIT_MARKERS):
         return False
     secs = parse_cooldown_seconds(err_low)
+    if any(m in err_low for m in _DEAD_KEY_MARKERS):
+        model = ""
     cool_key(key, secs, model)
     log_print(f"🔒 [金鑰冷卻] ...{key[-6:]} {model or '(整把)'} 冷卻 {int(secs)}s：{err_low[:80]}")
     return True

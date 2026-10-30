@@ -560,7 +560,8 @@ async def get_tts_audio_bytes(text: str) -> bytes:
             # 實測（「老爸。30秒到囉。快快，記得喝水喔…」）單次失敗率可到 1/3～5/8，所以最多抽 3 次
             for _attempt in range(QUALITY_RETRIES + 1):
                 data = await asyncio.wait_for(fn(text), timeout=ENGINE_TIMEOUT_SEC)
-                quality_err = _quality_problem(text, data)
+                # 品質檢查要跑 ffmpeg 解碼加逐點算音量，以前直接在主迴圈跑：每段都卡住嘴型、表情和聊天室（2026-10-30 健檢）
+                quality_err = await asyncio.to_thread(_quality_problem, text, data)
                 if not quality_err:
                     break
                 if _attempt < QUALITY_RETRIES:

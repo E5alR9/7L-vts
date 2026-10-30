@@ -101,3 +101,30 @@ def test_key_pools_and_locks_not_left_in_main():
     for name in ("API_LOCKS = ", "KEYS_MIC_LIVE = ", "KEYS_PROACTIVE = ", "KEYS_DAD_MAIN = ", "DualHotStandbyLiveManager("):
         assert name not in main
     assert not hasattr(le, "DualHotStandbyLiveManager") and not hasattr(le, "KEYS_MIND_LIVE")
+
+
+def test_daily_quota_wins_over_the_short_retry_hint(monkeypatch):
+    """Google 的每日額度 429 照樣附「retry in 26.9s」：以前先抓秒數只冷卻半分鐘，用完的 key 整天一直撞（2026-10-30）。"""
+    monkeypatch.setattr(le, "get_seconds_until_pt_midnight", lambda: 5 * 3600.0)
+    err = ("429 RESOURCE_EXHAUSTED. You exceeded your current quota. Quota exceeded for metric: "
+           "generate_content_free_tier_requests, limit: 250 'quotaId': 'GenerateRequestsPerDayPerProjectPerModel-FreeTier' "
+           "Please retry in 26.9s.")
+    assert le.parse_cooldown_seconds(err.lower()) == 5 * 3600.0
+    assert le.parse_cooldown_seconds("429 per minute limit. please retry in 26.9s.") < 60
+
+
+def test_vague_live_quota_close_is_not_a_whole_day(monkeypatch):
+    """Live 斷線原因最多 123 字常只剩「超過額度」：以前當每天用完、冷卻到半夜，一次每分鐘限流就廢掉一整天。"""
+    monkeypatch.setattr(le, "get_seconds_until_pt_midnight", lambda: 5 * 3600.0)
+    assert le.parse_cooldown_seconds("1011 none. you exceeded your current quota, please check your plan") == 600.0
+
+
+def test_retired_model_and_dead_key_are_cooled(monkeypatch):
+    """以前 404、key 失效不在名單裡：每次呼叫都白白再撞一次。"""
+    monkeypatch.setattr(le, "log_print", lambda *a: None)
+    assert le.report_gemini_key_error("K1", Exception("404 NOT_FOUND. models/gemini-x is not found for API version v1beta"), "gemini-x")
+    assert le.key_cooling("K1", "gemini-x") and not le.key_cooling("K1", "flash")
+    assert le.report_gemini_key_error("K2", Exception("400 INVALID_ARGUMENT. API key not valid. reason: API_KEY_INVALID"), "flash")
+    assert le.key_cooling("K2", "pro")   # 整把冷卻
+    # 參數錯誤（例如思考等級不支援）不是 key 或模型的問題，不冷卻
+    assert not le.report_gemini_key_error("K3", Exception("400 INVALID_ARGUMENT. Thinking level MINIMAL is not supported for this model."), "flash")

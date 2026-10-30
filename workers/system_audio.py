@@ -167,7 +167,8 @@ async def identify_system_music_and_sound(wav_bytes: bytes) -> str:
         # 若 API 短暫異常，由 GSMTC 底層精確線索保底
         try:
             from mic_live_plugin.os_desktop_sensor import os_desktop_sensor
-            sessions = os_desktop_sensor.get_windows_media_info()
+            # 這支會同步跑 PowerShell（最多 2 秒）：以前直接在主迴圈呼叫，整個 7L 每十幾秒凍一下（2026-10-30 健檢）
+            sessions = await asyncio.to_thread(os_desktop_sensor.get_windows_media_info)
             if sessions and sessions[0].get("title"):
                 first_m = sessions[0]
                 t = first_m["title"]

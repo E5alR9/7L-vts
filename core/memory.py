@@ -137,7 +137,7 @@ async def get_viewer_profile(tiktok_name: str) -> dict:
                 if doc.exists:
                     prof = {**default, **doc.to_dict()}
                     _store_viewer_profile_local(tiktok_name, prof)
-                else:
+                elif not getattr(doc, "failed", False):   # 讀失敗不算「雲端沒有」，下次再問
                     _CLOUD_PROFILE_MISSES.add(tiktok_name)
             except Exception:
                 log_swallowed()
@@ -172,7 +172,9 @@ async def save_viewer_profile(tiktok_name: str, call: str = None, relationship: 
     _store_viewer_profile_local(tiktok_name, profile)
     if db_module.db is not None:
         try:
-            await db_module.db.collection("viewer_profiles").document(tiktok_name).set(profile, merge=True)
+            # 空白欄位不送：雲端讀失敗時這裡拿到的是空白預設值，merge 會照欄位清單把雲端真正的稱呼、印象蓋成空的
+            cloud = {k: v for k, v in profile.items() if v is not None}
+            await db_module.db.collection("viewer_profiles").document(tiktok_name).set(cloud, merge=True)
         except Exception:
             log_swallowed()
 

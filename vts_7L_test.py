@@ -250,6 +250,11 @@ AUDIENCE_STAGE_DECLINE = ("[系統底層：鋼琴的停止／暫停／繼續和�
                           "請妳用一句話俏皮帶過；剛才如果說了「好」，就改口說這要老爸點頭。]")
 
 
+# 提醒她「剛才只在腦內回、要用 say 講出來」的紙條：是同一輪人話的延續，送出時不能把這輪改記成系統通知。
+# 以前會改，她照提醒 say 出來的那段就不算回人，副意識（以前的軍師）整輪都不看（2026-10-30 實機：被主管罵的觀眾那輪）
+_ORIGIN_KEEPING_SLIPS: set = set()
+
+
 def _note_brain_origin(who: str, said: str = "", name: str = "") -> None:
     if not who:   # 系統通知：權限照舊，只記「最近一則不是人話」
         _BRAIN_INPUT_ORIGIN["human"] = False
@@ -1969,6 +1974,14 @@ async def live_api_direct_sentence_emotions(clean_text: str, total_duration: flo
                             break
                         if getattr(c, 'generation_complete', False):
                             break
+        except asyncio.CancelledError:
+            # 這句講完或被插話，導演還沒答完就被取消：這一輪的尾巴還留在常駐連線上，留著的話下一句會讀到它、
+            # 之後每句都錯位一輪（2026-10-24 那個問題從取消這條路又回來了，2026-10-30 健檢）。當場丟掉，下一句重連
+            _cm = _DIRECTOR_STATE.pop("cm", None)
+            _DIRECTOR_STATE["session"] = None
+            if _cm is not None:
+                spawn(_cm.__aexit__(None, None, None), "導演連線收掉")
+            raise
         except Exception as e:
             usage.note(LIVE_MODEL, False, role="神態導演", rate_limited=usage.is_rate_limited(e),
                        ms=(time.perf_counter() - _t0) * 1000)
@@ -3205,6 +3218,17 @@ def _rotate_live_key(k_idx: int, m_idx: int, n_keys: int, n_models: int):
     return k_idx, m_idx
 
 
+def _skip_cooling_live_keys(k_idx: int, m_idx: int, live_models) -> tuple:
+    """從 (k_idx, m_idx) 往後找第一把沒在這個模型上冷卻的 key；整個矩陣都在冷卻就原地不動（不餓死）。"""
+    n_keys, n_models = len(GEMINI_KEYS), len(live_models)
+    k, m = k_idx, m_idx
+    for _ in range(max(1, n_keys * n_models)):
+        if not key_cooling(GEMINI_KEYS[k % n_keys], live_models[m]):
+            return k, m
+        k, m = _rotate_live_key(k, m, n_keys, n_models)
+    return k_idx, m_idx
+
+
 def _next_live_key(quota_hit: bool, clean_fails: int, k_idx: int, m_idx: int,
                    n_keys: int, n_models: int):
     """Live 斷線後鑰匙決策（純函數，2026-10-11：乾淨斷開≠鑰匙耗盡）。
@@ -3607,15 +3631,22 @@ async def _speak_brain_turn(vts, input_queue, text: str, who: str, reply_to: str
 # 單次連線想完就關：常駐的 Live 沒聲音會被斷。
 # 2026-10-29 老爸：3.8 think 改成常駐的「軍師」（services/advisor.py）——以前每句另開一條單次連線，
 # 不記得前面講過什麼、也看不到她交辦查到的結果；現在同一條連線一直聽，交辦結果也送進去（實測每輪 1 秒內）
+# 2026-10-30 老爸：參考人腦，軍師的位置換成「副意識群」（services/subminds.py）——查核、記憶、情緒、話題、分寸
+# 各一條常駐 3.8／3.8 think，每輪同時想，建議併成一張紙條；開口、做決定的還是只有 Live 主腦。SUBMINDS=0 退回單一軍師
 AFTERTHOUGHT_ENABLED = True
-_ADVISOR = None   # 第一次用到才建（services.advisor.ResidentAdvisor）
+SUBMINDS_ENABLED = (os.getenv("SUBMINDS", "1") or "1").strip().lower() not in ("0", "false", "no", "off")
+_ADVISOR = None   # 第一次用到才建（services.subminds.SubMinds，或關掉時的 services.advisor.ResidentAdvisor）
 
 
 def _advisor():
     global _ADVISOR
     if _ADVISOR is None:
-        from services.advisor import ResidentAdvisor
-        _ADVISOR = ResidentAdvisor(lambda: promptkit.advisor_system(_owner_name()))
+        if SUBMINDS_ENABLED:
+            from services.subminds import SubMinds
+            _ADVISOR = SubMinds(lambda role: promptkit.submind_system(_owner_name(), role))
+        else:
+            from services.advisor import ResidentAdvisor
+            _ADVISOR = ResidentAdvisor(lambda: promptkit.advisor_system(_owner_name()))
     return _ADVISOR
 AFTERTHOUGHT_MAX_AGE_SEC = 60.0     # 觸發的那句人話超過這麼久就不想了
 AFTERTHOUGHT_SPEAK_WAIT_SEC = 60.0  # 想到了先等她念完正題才遞，最多等這麼久
@@ -3651,25 +3682,30 @@ async def _afterthought(reply: str) -> None:
     who = owner if origin.get("who") == "dad" else f"觀眾「{origin.get('name') or '觀眾'}」"
     prompt = f"{who}說：{origin['said'][-600:]}\n7L 回：{'／'.join(_AFTERTHOUGHT['says'])[-900:]}"
     try:
-        text = await _advisor().ask(prompt)
+        got = await _advisor().ask(prompt)
     except Exception:
         log_swallowed()
         return
-    text = re.sub(r'\[(?:SILENCE|PASS|SKIP)\]', '', text or "", flags=re.IGNORECASE).strip()
+    if isinstance(got, list):   # 副意識群：幾個副意識的建議併成一段
+        from services.subminds import merge_suggestions
+        got = merge_suggestions(got)
+    text = re.sub(r'\[(?:SILENCE|PASS|SKIP)\]', '', got or "", flags=re.IGNORECASE).strip()
     if not text:
         return
+    source = "副意識" if SUBMINDS_ENABLED else "軍師"
+    source_desc = "腦中在背後一起想的幾個副意識" if SUBMINDS_ENABLED else "軍師（一直在旁邊聽的第二個腦）"
     # 等她把剛才那段念完再遞：還在念（或還在合成）時遞紙條，Live 會回「被打斷」，清掉她還沒念出來的正題
     # （2026-10-29 實機：老媽生日點子那段整段沒念，只念了補充的那句）
     deadline = time.time() + AFTERTHOUGHT_SPEAK_WAIT_SEC
     while time.time() < deadline and (stage.ai_state() == "TALKING" or not speech_queue.empty()):
         await asyncio.sleep(0.3)
     if _BRAIN_INPUT_ORIGIN.get("ts") != origin["ts"]:
-        log_print(f"🧭 [軍師] 有建議但已經有人講下一句，不遞：{text[:40]}")
+        log_print(f"🧭 [{source}] 有建議但已經有人講下一句，不遞：{text[:40]}")
         return
-    log_print(f"🧭 [軍師] 給她建議：{text[:80]}")
-    send_brain_slip(f"[系統提示：妳的軍師（一直在旁邊聽的第二個腦）對妳剛才回{who}的那段有建議。妳覺得對，"
-                    f"就用自己的口吻 say 一兩句補上或更正（像說完話又想到），不要重複剛才講過的，也不要說「軍師說」；"
-                    f"覺得不用就不講：] {text}")
+    log_print(f"🧭 [{source}] 給她建議：{text[:160]}")
+    send_brain_slip(f"[系統提示：{source_desc}對妳剛才回{who}的那段有想法。妳是主意識，要不要採用由妳決定：覺得對，"
+                    f"就用自己的口吻 say 一兩句補上或更正（像說完話又想到），幾條都對的話挑最重要的講，不要重複剛才講過的，"
+                    f"也不要說「{source}說」；覺得不用就不講：] {text}")
 
 
 async def _rest_speak(vts, input_queue, raw: str, origin: str) -> str:
@@ -4063,6 +4099,7 @@ async def continuous_live_worker(vts):
                                                 _note_inner_voice(_turn_text)   # 腦內聲音：只記不念（標籤在上面逐段已經觸發過）
                                                 if _nudge:   # 回人只在腦內回：提醒她用 say（老爸：講話專門用 say）
                                                     log_print(f"👂 [沒開口] 有人跟她講話，她只在腦內回，提醒她用 say：{_turn_text[:60]}")
+                                                    _ORIGIN_KEEPING_SLIPS.add(_nudge)
                                                     send_brain_slip(_nudge)
                                                 turn_buffer = ""
                                                 chunk_buffer = ""
@@ -4111,7 +4148,10 @@ async def continuous_live_worker(vts):
                                 async with ws_send_lock:
                                     await session.send_realtime_input(text=prompt)
                                     sent_ts = time.time()
-                                    _note_brain_origin(origin, said, name)
+                                    if not origin and prompt in _ORIGIN_KEEPING_SLIPS:
+                                        _ORIGIN_KEEPING_SLIPS.discard(prompt)   # 同一輪人話的延續：不改「這輪算誰的」
+                                    else:
+                                        _note_brain_origin(origin, said, name)
                                     _record_slip(prompt, origin, name, "live", sent_ts)
                                     _LAST_LIVE_SLIP.update(slip=(prompt, origin, said, name) if origin else prompt, ts=sent_ts)
                                     #  所有紙條都掛看門狗（聊天紙條裸奔會靜默丟失）；
@@ -4195,7 +4235,12 @@ async def continuous_live_worker(vts):
             # 舊連線清掉：留著的話 Live 不在時看門狗還會對它記「不回話」、立 rotate 旗標（2026-10-27）
             GLOBAL_LIVE_SESSION = None
             err_str = str(e).lower()
-            _quota_hit = any(w in err_str for w in ["limit", "exceed", "quota", "403", "429"])
+            # 以前連 "limit"、"exceed" 都算超限：「frame exceeds limit」這類也會換 key、丟掉續接 handle（2026-10-30 健檢）
+            _quota_hit = any(w in err_str for w in ["quota", "403", "429", "resource_exhausted", "rate limit", "permission"])
+            # 1007／1008 加上「找不到、不支援、參數錯」：模型或設定本身的問題，換哪把 key 都一樣。
+            # 以前 1008 一律當 15 分鐘 GoAway，同一個壞模型把每把 key 各試 4 次才換模型，好幾分鐘都連不上
+            _model_broken = ("1007" in err_str or "1008" in err_str) and any(
+                w in err_str for w in ["not found", "not_found", "not supported", "unsupported", "invalid"])
             if _LIVE_MUTE["rotate"]:
                 log_print(f"🔇 [Live 主腦不回話] {_LIVE_MUTE['rotate']}：模型 {live_models[current_m_idx]} 通道 G{current_k_idx} 冷卻，換下一把")
                 if GEMINI_KEYS:
@@ -4207,6 +4252,10 @@ async def continuous_live_worker(vts):
                 log_print(f"⚠️ [Live 連線超限 429] 模型 {live_models[current_m_idx]} 通道 G{current_k_idx} 耗盡。")
                 if GEMINI_KEYS:
                     report_gemini_key_error(GEMINI_KEYS[current_k_idx % len(GEMINI_KEYS)], e, live_models[current_m_idx])
+            elif _model_broken:
+                log_print(f"❌ [Live 模型不能用] {live_models[current_m_idx]}：{str(e)[:160]}，直接換下一個模型")
+                if GEMINI_KEYS:
+                    report_gemini_key_error(GEMINI_KEYS[current_k_idx % len(GEMINI_KEYS)], e, live_models[current_m_idx])
             elif "goaway" in err_str or "1008" in err_str:
                 log_print(f"⏱️ [Live 週期重置] 模型 {live_models[current_m_idx]} 達到 15 分鐘安全連線上限 (GoAway)，準備無縫重連...")
             else:
@@ -4214,9 +4263,17 @@ async def continuous_live_worker(vts):
             #  2026-10-11：乾淨斷開≠鑰匙耗盡（Google 會主動做負載關閉）。
             #  同一把連打 3 次才輪轉，不再 G2→G6 燒鑰匙矩陣；配額超限才立刻輪轉。
             _prev_k, _prev_m = current_k_idx, current_m_idx
-            current_k_idx, current_m_idx, clean_fail_count, _rot, _wait = _next_live_key(
-                _quota_hit, clean_fail_count, current_k_idx, current_m_idx,
-                len(GEMINI_KEYS), len(live_models))
+            if _model_broken and len(live_models) > 1:
+                current_k_idx, current_m_idx, clean_fail_count, _rot, _wait = 0, (current_m_idx + 1) % len(live_models), 0, True, 5
+            else:
+                current_k_idx, current_m_idx, clean_fail_count, _rot, _wait = _next_live_key(
+                    _quota_hit, clean_fail_count, current_k_idx, current_m_idx,
+                    len(GEMINI_KEYS), len(live_models))
+            if _rot and GEMINI_KEYS:
+                # 換 key 時跳過冷卻中的（以前直接走到下一個編號，常常撞進被限流到半夜的 key）
+                current_k_idx, current_m_idx = _skip_cooling_live_keys(current_k_idx, current_m_idx, live_models)
+            if "goaway" in err_str and not _rot:
+                _wait = 0.2   # 伺服器預告的換線：馬上接回去，以前也等 2 秒，那段時間老爸講的話都沒人聽
             if _rot and not _quota_hit:
                 log_print(f"♻️ [Live 同鑰重試耗盡] G{_prev_k} 連掛多次，輪轉下一把。")
                 
@@ -5934,10 +5991,40 @@ def _nv_subagent_down() -> bool:
     return time.time() < _NV_SUBAGENT_DOWN_UNTIL
 
 
-def _nv_subagent_note_error(e, model: str):
-    """模型回 404（下架或改名）就停用 NV 子智能體 10 分鐘；其他錯誤（逾時、限流）不停。"""
+_NV_CLIENTS = {}       # 每把 NV key 一個用戶端，連線重用（以前每次呼叫都新建、重新握手）
+_NV_KEY_COOL = {}      # NV key -> 冷卻到何時
+
+
+def _nv_pick_key() -> str:
+    """空閒、沒在冷卻的 NV key 先用；全部冷卻就照樣挑（不餓死）。"""
+    import random
+    pool = [k for k in NV_KEYS if k]
+    random.shuffle(pool)
+    now = time.time()
+    return sort_keys_by_load([k for k in pool if _NV_KEY_COOL.get(k, 0) <= now] or pool)[0]
+
+
+def _nv_client(key: str):
+    c = _NV_CLIENTS.get(key)
+    if c is None:
+        from openai import AsyncOpenAI
+        # max_retries=0：SDK 預設會自己重試、照 Retry-After 等，429 一來就把外層 12／25 秒等滿，
+        # 不如馬上報錯換下一顆腦（2026-10-30 健檢）
+        c = _NV_CLIENTS[key] = AsyncOpenAI(api_key=key, base_url="https://integrate.api.nvidia.com/v1", max_retries=0)
+    return c
+
+
+def _nv_subagent_note_error(e, model: str, key: str = ""):
+    """模型回 404（下架或改名）就停用 NV 子智能體 10 分鐘；key 失效（401/403）冷卻一小時、限流（429）冷卻一分鐘，
+    以前這兩種都不記，壞掉的 key 一直被挑到。"""
     global _NV_SUBAGENT_DOWN_UNTIL
-    if getattr(e, "status_code", None) == 404:
+    status = getattr(e, "status_code", None)
+    if key and status in (401, 403):
+        _NV_KEY_COOL[key] = time.time() + 3600
+        log_print(f"⚠️ [NV 子智能體] key ...{key[-4:]} 回 {status}（失效或沒權限），冷卻一小時")
+    elif key and status == 429:
+        _NV_KEY_COOL[key] = time.time() + 60
+    if status == 404:
         _NV_SUBAGENT_DOWN_UNTIL = time.time() + _NV_SUBAGENT_DOWN_SEC
         log_print(f"⚠️ [NV 子智能體] 模型 {model} 回 404，先停用 NV {_NV_SUBAGENT_DOWN_SEC / 60:.0f} 分鐘；請檢查 _NV_SUBAGENT_MODEL。")
 
@@ -5980,10 +6067,8 @@ async def _nv_tool_pass(task_ins, target, requester_name, system_instruction_tex
     import random
     from openai import AsyncOpenAI
     import core.groq_router as gr
-    nv_pool = [k for k in NV_KEYS if k]
-    random.shuffle(nv_pool)
-    nv_key = sort_keys_by_load(nv_pool)[0] # 空閒優先（NV 工具判定與深思共用 3 把，一樣互斥）
-    nv_client = AsyncOpenAI(api_key=nv_key, base_url="https://integrate.api.nvidia.com/v1")
+    nv_key = _nv_pick_key()   # 空閒優先（NV 工具判定與深思共用 3 把，一樣互斥）
+    nv_client = _nv_client(nv_key)
     openai_tools = gr.to_openai_tools(GENAI_TOOLS)
     # NVIDIA 不允許函數名稱包含點號 (.)，先 wire
     for wt in openai_tools:
@@ -6001,7 +6086,7 @@ async def _nv_tool_pass(task_ins, target, requester_name, system_instruction_tex
                 temperature=0.0
             ), timeout=_NV_SUBAGENT_TOOL_TIMEOUT)
     except Exception as e:
-        _nv_subagent_note_error(e, nv_model)
+        _nv_subagent_note_error(e, nv_model, nv_key)
         raise
     choice = nv_resp.choices[0]
     if not choice.message.tool_calls:
@@ -6029,10 +6114,8 @@ async def _nv_think_pass(task_ins, target, requester_name, system_instruction_te
         return "miss", ""
     import random
     from openai import AsyncOpenAI
-    nv_pool = [k for k in NV_KEYS if k]
-    random.shuffle(nv_pool)
-    nv_key = sort_keys_by_load(nv_pool)[0]
-    nv_client = AsyncOpenAI(api_key=nv_key, base_url="https://integrate.api.nvidia.com/v1")
+    nv_key = _nv_pick_key()
+    nv_client = _nv_client(nv_key)
     # 強制先寫思考步驟再給結論（step-by-step 推理顯著提升複雜問題正確率）：
     # 不掛 tools（掛著它只會想著調用，不會好好想），temp 0.8 保證想得開
     log_print("🧠 [NV 深思] 第一棒無工具調用，轉深度思考模式重想一次...")
@@ -6048,7 +6131,7 @@ async def _nv_think_pass(task_ins, target, requester_name, system_instruction_te
                 temperature=0.8
             ), timeout=_NV_SUBAGENT_THINK_TIMEOUT)
     except Exception as e:
-        _nv_subagent_note_error(e, nv_model)
+        _nv_subagent_note_error(e, nv_model, nv_key)
         raise
     think_choice = think_resp.choices[0]
     think_raw = (getattr(think_choice.message, "content", "") or "").strip()
@@ -6087,6 +6170,14 @@ async def _gemini_tool_pass(task_ins, target, requester_name, system_instruction
                     ), timeout=_SUBAGENT_GEMINI_TOOL_TIMEOUT)
             calls = list(getattr(resp, "function_calls", None) or [])
             if not calls:
+                # 工具呼叫寫壞、被擋、沒有候選，以前都當成「不用工具」：該查天氣卻沒查，直接憑印象講（2026-10-30 健檢）
+                try:
+                    fr = resp.candidates[0].finish_reason
+                    fr = str(getattr(fr, "name", fr) or "")
+                except Exception:
+                    fr = "NO_CANDIDATE"
+                if fr not in ("STOP", ""):
+                    raise RuntimeError(f"工具判定沒正常收尾（{fr}）")
                 return None, None
             fc = calls[0]
             fn_name = (getattr(fc, "name", "") or "").strip()

@@ -20,7 +20,7 @@ from google.genai import types
 
 from core import usage
 from core.llm_engine import DEEP_THINK_LIVE_MODEL, GEMINI_KEYS, key_cooling, report_gemini_key_error
-from core.utils import log_print, log_swallowed
+from core.utils import log_print, log_swallowed, spawn
 
 THINKING_LEVEL = "low"
 ASK_TIMEOUT_SEC = 15.0     # 一輪最多等這麼久（實測 1 秒內）
@@ -29,11 +29,15 @@ NOTE_KEEP = 6              # 下一輪一起帶上的背景（交辦結果）最
 
 class ResidentAdvisor:
     def __init__(self, system_fn: Callable[[], str], keys: Optional[List[str]] = None,
-                 model: str = DEEP_THINK_LIVE_MODEL, connect=None):
+                 model: str = DEEP_THINK_LIVE_MODEL, connect=None, thinking_level: Optional[str] = THINKING_LEVEL,
+                 label: str = "軍師"):
         """system_fn() → 系統提示詞（連線時才拿）；connect(key, model, config) → live.connect 的 async context manager（測試換假的）。"""
         self.system_fn = system_fn
         self.keys = keys if keys is not None else GEMINI_KEYS
         self.model = model
+        # 一般 3.8 Live 帶思考設定會直接被拒（2026-10-30 實測 minimal、low 都連不上），傳 None 就不帶
+        self.thinking_level = thinking_level
+        self.label = label   # 日誌和用量表上的名字（副意識群裡每個各有分工）
         self._connect = connect or (lambda key, model, cfg: genai.Client(api_key=key).aio.live.connect(model=model, config=cfg))
         self._lock = asyncio.Lock()
         self._cm = self._session = None
@@ -54,40 +58,52 @@ class ResidentAdvisor:
             self._notes = []
             for attempt in range(2):
                 t0 = time.perf_counter()
+                opening = self._session is None
                 try:
-                    if self._session is None:
+                    if opening:
                         await self._open()
                     out = await asyncio.wait_for(self._turn(body), timeout=ASK_TIMEOUT_SEC)
-                    usage.note(self.model, True, role="軍師", ms=(time.perf_counter() - t0) * 1000)
+                    usage.note(self.model, True, role=self.label, ms=(time.perf_counter() - t0) * 1000)
                     if self._reconnect:
                         await self._close()
                     return out
                 except Exception as e:
-                    usage.note(self.model, False, role="軍師", rate_limited=usage.is_rate_limited(e),
+                    usage.note(self.model, False, role=self.label, rate_limited=usage.is_rate_limited(e),
                                ms=(time.perf_counter() - t0) * 1000)
                     if self._key:
                         report_gemini_key_error(self._key, e, self.model)
-                    log_print(f"⚠️ [軍師] 連線出錯（{type(e).__name__}），{'換一條重問' if attempt == 0 else '這輪放棄'}")
+                    log_print(f"⚠️ [{self.label}] 連線出錯（{type(e).__name__}），{'換一條重問' if attempt == 0 else '這輪放棄'}")
                     await self._close()
-                    if isinstance(e, asyncio.TimeoutError):
-                        self._handle = None   # 卡住的那段對話不接回去
+                    if isinstance(e, asyncio.TimeoutError) or opening:
+                        # 卡住的那段對話不接回去；連線一開就失敗也多半是 handle 過期或不屬於這把 key，
+                        # 以前留著，之後每次都拿同一個壞 handle 連、整場軍師都回空的（2026-10-30 健檢）
+                        self._handle = None
+                except asyncio.CancelledError:
+                    # 呼叫端不等了，這一輪還在常駐連線上沒讀完：留著下一輪會先讀到它的尾巴。丟掉，下一輪重連接回
+                    cm, self._cm, self._session = self._cm, None, None
+                    if cm is not None:
+                        spawn(cm.__aexit__(None, None, None), f"{self.label}連線收掉")
+                    raise
             return ""
 
     async def _open(self) -> None:
         pool = [k for k in self.keys if not key_cooling(k, self.model)] or list(self.keys)
-        self._key = random.choice(pool)
+        # 續接 handle 綁在原本那把 key 上（主腦也是這樣）：換別把接不回去
+        if not (self._handle and self._key in pool):
+            self._key = random.choice(pool)
         cfg = types.LiveConnectConfig(
             response_modalities=[types.Modality.AUDIO],
             system_instruction=types.Content(parts=[types.Part.from_text(text=self.system_fn())]),
             output_audio_transcription=types.AudioTranscriptionConfig(),
             session_resumption=types.SessionResumptionConfig(handle=self._handle),
             context_window_compression=types.ContextWindowCompressionConfig(sliding_window=types.SlidingWindow()),
-            thinking_config=types.ThinkingConfig(thinking_level=THINKING_LEVEL),
         )
+        if self.thinking_level:
+            cfg.thinking_config = types.ThinkingConfig(thinking_level=self.thinking_level)
         self._cm = self._connect(self._key, self.model, cfg)
         self._session = await self._cm.__aenter__()
         self._reconnect = False
-        log_print(f"🧭 [軍師] 常駐連線好了（{self.model}{'，接回前面的對話' if self._handle else ''}）")
+        log_print(f"🧭 [{self.label}] 常駐連線好了（{self.model}{'，接回前面的對話' if self._handle else ''}）")
 
     async def _close(self) -> None:
         cm, self._cm, self._session = self._cm, None, None

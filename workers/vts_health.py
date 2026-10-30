@@ -33,13 +33,16 @@ _VTS_PING_MSG = {
 }
 
 
+_VTS_PING_MISSES = 0   # 連續幾次心跳沒回應
+
+
 async def _vts_real_ping(vts):
     """真實 WebSocket ping：送 APIStateRequest 並等待回應。
     回傳 None = 連線已死；回傳 True/False = 連線活著，且本 session 是否已通過認證
     （APIStateRequest 不需認證也會回應，所以光「有回應」不代表 token 有效）"""
     try:
         async with vc.vts_lock:
-            resp = await asyncio.wait_for(vts.request(_VTS_PING_MSG), timeout=1.5)
+            resp = await asyncio.wait_for(vts.request(_VTS_PING_MSG), timeout=3.0)   # 以前 1.5 秒，比 request() 自己的 2 秒還短
         if not isinstance(resp, dict) or resp.get("messageType") != "APIStateResponse":
             return None
         return bool(resp.get("data", {}).get("currentSessionAuthenticated", False))
@@ -48,7 +51,7 @@ async def _vts_real_ping(vts):
 
 
 async def vts_health_worker(vts):
-    global _VTS_LAST_AUTH_TIME, _VTS_LAST_RECONNECT_TIME, _VTS_IS_RECONNECTING
+    global _VTS_LAST_AUTH_TIME, _VTS_LAST_RECONNECT_TIME, _VTS_IS_RECONNECTING, _VTS_PING_MISSES
     while True:
         await asyncio.sleep(5.0)  # 5 秒心跳（比原本 3 秒寬鬆，減少 ping 佔用）
         if _VTS_IS_RECONNECTING:
@@ -57,6 +60,13 @@ async def vts_health_worker(vts):
             now = time.time()
             #  真實 ping 測試：不靠 is_connected() 假狀態，直接送 APIStateRequest
             authed = await _vts_real_ping(vts)
+            # 一次 ping 慢（VTS 在載模型、主迴圈剛好卡一下）以前就當斷線：把好好的連線關掉重連，表情跟著中斷。
+            # 連兩次沒回應、或底層連線真的斷了才重連（2026-10-30 健檢）
+            if authed is None and vts.is_connected():
+                _VTS_PING_MISSES += 1
+                if _VTS_PING_MISSES < 2:
+                    continue
+            _VTS_PING_MISSES = 0
             if not authed:
                 #  斷線，或連著但沒認證（token 失效 / request() 自動重連後沒重新認證）：10 秒冷卻
                 if now - _VTS_LAST_RECONNECT_TIME >= 10.0:

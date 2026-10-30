@@ -211,12 +211,13 @@ async def fold_summary(texts: List[str], max_chars: int = 1200) -> str:
     key = hashlib.md5("\n".join(items).encode("utf-8")).hexdigest()[:16]
     if key in _SUMMARY_CACHE:
         return _SUMMARY_CACHE[key]
-    contrato = "\n".join(items)[:20000]
+    # Groq 每把金鑰輸入每分鐘最多 7000 token（2026-10-30 實測，中文約 0.7 token 一字），塞 20000 字一定被拒
+    contrato = "\n".join(items)[:8000]
     try:
         from core.groq_router import groq_chat
         resp = await groq_chat(
-            [{"role": "user", "content": "把以下過往記憶濃縮成一段精簡摘要（保留人名、偏好、承诺與關鍵事件，不超过 600 字）：\n" + contrato}],
-            timeout=15.0,
+            [{"role": "user", "content": "把以下過往記憶濃縮成一段精簡摘要（保留人名、偏好、承諾與關鍵事件，不超過 600 字）：\n" + contrato}],
+            max_tokens=1000, timeout=15.0,   # 預設 500 寫不完 600 字，會斷在半句
         )
         summary = (getattr(resp, "text", "") or "").strip()[:max_chars]
     except Exception:

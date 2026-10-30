@@ -20,6 +20,9 @@ from core.llm_engine import (GEMINI_KEYS, UNRESTRICTED_SAFETY_SETTINGS, key_cool
 from core.utils import log_print
 
 
+THINK_EXTRA_TOKENS = 2048   # 照預設思考的模型（3.8-flash）想的份；上限 500 時會想光、一個字都沒寫（2026-10-30 健檢）
+
+
 @dataclass
 class RestReply:
     text: str = ""
@@ -57,7 +60,17 @@ async def _gemini_once(key: str, model: str, parts, cfg, timeout: float):
             resp = await asyncio.wait_for(client.aio.models.generate_content(
                 model=model, contents=[types.Content(role="user", parts=parts)], config=cfg), timeout=timeout)
         u.tokens = getattr(getattr(resp, "usage_metadata", None), "total_token_count", 0) or 0
+        r = _reply_from(resp, model)
+        u.ok = bool(r.text or r.calls)   # 空回覆以前也記成成功，用量表看不出來
     return resp
+
+
+def _finish_reason(resp) -> str:
+    try:
+        fr = resp.candidates[0].finish_reason
+        return str(getattr(fr, "name", fr) or "")
+    except Exception:
+        return "沒有候選（可能被擋）"
 
 
 def _reply_from(resp, model: str) -> RestReply:
@@ -97,10 +110,20 @@ async def rest_chat(system_text: str, user_text: str, *, models, keys=None, tool
                                               safety_settings=UNRESTRICTED_SAFETY_SETTINGS, tools=tools or None)
             for key, model in gemini_pairs(models, attempts, keys):
                 try:
-                    m_cfg = cfg.model_copy(update={"thinking_config": thinking_config(model)})
-                    r = _reply_from(await _gemini_once(key, model, parts, m_cfg, timeout), model)
+                    think = thinking_config(model)
+                    m_cfg = cfg.model_copy(update={"thinking_config": think,
+                                                   # 沒調低思考的模型照預設想，想的也算在上限裡：多給一段想的空間
+                                                   "max_output_tokens": max_tokens + (THINK_EXTRA_TOKENS if think is None else 0)})
+                    resp = await _gemini_once(key, model, parts, m_cfg, timeout)
+                    r = _reply_from(resp, model)
+                    reason = _finish_reason(resp)
+                    if reason == "MAX_TOKENS":
+                        # 會思考的模型連想帶寫都算在上限裡：想光了就只剩空的或半句（2026-10-30 健檢）
+                        log_print(f"⚠️ [REST 大腦] {model} 寫到上限 {max_tokens} 被切斷"
+                                  f"{'，什麼都沒寫出來' if not r.text and not r.calls else '，只念得到半句'}")
                     if r.text or r.calls:
                         return r
+                    log_print(f"⚠️ [REST 大腦] {model} 回了空的（{reason or '原因不明'}），換下一組")
                 except Exception as e:
                     report_gemini_key_error(key, e, model)
                     log_print(f"⚠️ [REST 大腦] {model} 這次不行：{type(e).__name__} {str(e)[:60]}")

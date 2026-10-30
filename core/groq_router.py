@@ -114,8 +114,9 @@ MODEL_LADDER: List[str] = _load_ladder()
 
 _clients: List[Any] = []
 _client_error: Optional[str] = None
-# 冷卻表：key -> 何時解除
-_key_cooldown: Dict[str, float] = {}
+# 冷卻表：(key, model) -> 何時解除。每把金鑰是各自的組織、額度各算，而且額度是一個模型一份
+# （2026-10-30 實測：每把每天 1000 次、每分鐘 8000 token，互不影響），所以一把撞限流不該連累別把或別的模型
+_key_cooldown: Dict[tuple, float] = {}
 # 模型鎖：model -> 何時解除（整台模型暫時下架）
 _model_cooldown: Dict[str, float] = {}
 _call_step = 0
@@ -152,7 +153,7 @@ def is_available() -> bool:
     if not GROQ_KEYS:
         return False
     now = time.time()
-    return any(_key_cooldown.get(k, 0) < now for k in GROQ_KEYS)
+    return any(_key_cooldown.get((k, m), 0) < now for k in GROQ_KEYS for m in MODEL_LADDER)
 
 
 def reset():
@@ -190,7 +191,11 @@ def _fetch_available_models_sync() -> Optional[set]:
             timeout=10.0,
         )
         if r.status_code == 200:
-            ids = {m.get("id") for m in (r.json().get("data") or []) if m.get("id")}
+            data = r.json().get("data") or []
+            ids = {m.get("id") for m in data if m.get("id")}
+            # 每個模型一次最多能生多少（2026-10-30 實測：qwen3.8-27b 16384、gpt-oss 65536），超過 Groq 直接回 400
+            _models_cache["caps"] = {m["id"]: int(m["max_completion_tokens"]) for m in data
+                                     if m.get("id") and isinstance(m.get("max_completion_tokens"), int)}
             return ids or None
     except Exception:
         pass
@@ -215,9 +220,9 @@ def get_available_models(force: bool = False) -> Optional[set]:
 
 async def _filter_unavailable(ladder: List[str]) -> List[str]:
     """把當前帳號上不存在的模型名從梯隊剔除（查證失敗時維持原梯隊）"""
+    avail = await asyncio.to_thread(get_available_models)   # 只指定一個模型也要抓：生成上限的天花板從這裡來
     if len(ladder) <= 1:
         return ladder
-    avail = await asyncio.to_thread(get_available_models)
     if not avail:
         return ladder
     kept = [m for m in ladder if m in avail]
@@ -384,6 +389,72 @@ def _wire_name(original: str) -> str:
     return _DOT_SAFE.sub("_", original) if original else original
 
 
+# ── 串流收字：卡住馬上知道 ───────────────────────────────────────────────────
+# 2026-10-30 老爸：一次拿整段的話，Groq 卡住要等到時限才知道，中間分不出是還在跑還是卡死了。
+# 串流一塊一塊來，多久沒來就是卡了（平常第一塊 0.2～0.4 秒、之後幾乎連續）
+FIRST_CHUNK_SEC = 3.0   # 送出後這麼久連第一塊都沒來
+STALL_SEC = 2.0         # 開始吐字以後，中間停這麼久
+
+
+class _Stalled(Exception):
+    pass
+
+
+async def _stream_reply(client: Any, kwargs: Dict[str, Any], hard_timeout: float) -> Any:
+    """用串流拿一次回覆，收完拼成跟非串流一樣的形狀（.choices[0].message.content、.usage.total_tokens）。
+    沒在 FIRST_CHUNK_SEC／STALL_SEC 內等到下一塊就丟 _Stalled；整段超過 hard_timeout 照舊丟 TimeoutError。"""
+    end = time.monotonic() + hard_timeout
+
+    async def within(aw, limit: float, what: str):
+        left = end - time.monotonic()
+        if left <= 0:
+            if asyncio.iscoroutine(aw):
+                aw.close()   # 沒等就丟掉，免得跳「coroutine was never awaited」
+            raise asyncio.TimeoutError
+        try:
+            return await asyncio.wait_for(aw, timeout=min(limit, left))
+        except asyncio.TimeoutError:
+            if limit + 0.05 < left:   # 留點餘裕：兩個一樣長時，浮點誤差會讓「時限到了」被誤報成卡住
+                raise _Stalled(what) from None
+            raise
+
+    stream = await within(client.chat.completions.create(**kwargs, stream=True), FIRST_CHUNK_SEC,
+                          f"送出 {FIRST_CHUNK_SEC:.0f} 秒都沒回應")
+    parts: List[str] = []
+    finish = None
+    tokens = 0
+    got_any = False
+    try:
+        it = stream.__aiter__()
+        while True:
+            try:
+                chunk = await within(it.__anext__(), STALL_SEC if got_any else FIRST_CHUNK_SEC,
+                                     f"吐了 {len(''.join(parts))} 字後卡住 {STALL_SEC:.0f} 秒" if got_any
+                                     else f"{FIRST_CHUNK_SEC:.0f} 秒都沒吐出第一塊")
+            except StopAsyncIteration:
+                break
+            got_any = True   # 推理模型先吐的思考內容也算有在動
+            for ch in (getattr(chunk, "choices", None) or []):
+                piece = getattr(getattr(ch, "delta", None), "content", None)
+                if piece:
+                    parts.append(piece)
+                finish = getattr(ch, "finish_reason", None) or finish
+            used = getattr(chunk, "usage", None) or getattr(getattr(chunk, "x_groq", None), "usage", None)
+            tokens = getattr(used, "total_tokens", 0) or tokens
+    finally:
+        try:
+            await stream.close()
+        except Exception:
+            pass
+
+    from types import SimpleNamespace
+    if not got_any:
+        return SimpleNamespace(choices=[], usage=None)
+    message = SimpleNamespace(content="".join(parts), tool_calls=None)
+    return SimpleNamespace(choices=[SimpleNamespace(message=message, finish_reason=finish)],
+                           usage=SimpleNamespace(total_tokens=tokens))
+
+
 # ── 主呼叫函式 ───────────────────────────────────────────────────────────────
 async def groq_chat(
     messages: List[Dict[str, str]],
@@ -428,6 +499,8 @@ async def groq_chat(
     budget = total_timeout if total_timeout is not None else max(timeout * 3, 10.0)
     deadline = time.monotonic() + budget
 
+    stalls: Dict[str, int] = {}   # 這次呼叫裡每個模型卡住幾次
+
     # 依序嘗試：模型梯隊 × 金鑰輪詢
     for m_name in ladder:
         if _model_cooldown.get(m_name, 0) > now:
@@ -435,7 +508,7 @@ async def groq_chat(
         for offset in range(len(clients)):
             idx = (_call_step + offset) % len(clients)
             key = GROQ_KEYS[idx] if idx < len(GROQ_KEYS) else ""
-            if key and _key_cooldown.get(key, 0) > now:
+            if key and _key_cooldown.get((key, m_name), 0) > now:
                 continue
             remaining = deadline - time.monotonic()
             if remaining <= 0.3:
@@ -443,22 +516,27 @@ async def groq_chat(
                 return None
             client = clients[idx]
             try:
+                # max_tokens 是 Groq 標示淘汰的舊名，送新名 max_completion_tokens
+                limit = max_tokens + (REASONING_EXTRA_TOKENS if _is_reasoning_model(m_name) else 0)
+                cap = (_models_cache.get("caps") or {}).get(m_name)
                 kwargs: Dict[str, Any] = {
                     "model": m_name,
                     "messages": messages,
                     "temperature": temperature,
-                    "max_tokens": max_tokens,
+                    "max_completion_tokens": min(limit, cap) if cap else limit,
                 }
                 if _is_reasoning_model(m_name):
-                    kwargs["max_tokens"] = max_tokens + REASONING_EXTRA_TOKENS
                     kwargs["extra_body"] = {"reasoning_effort": REASONING_EFFORT}
                 if wire_tools:
                     kwargs["tools"] = wire_tools
 
                 await asyncio.wait_for(throttle_rpm(), timeout=remaining)   # 每分鐘請求上限（GROQ_REQUESTS_PER_MINUTE）
+                hard = max(0.3, min(timeout, deadline - time.monotonic()))
                 with usage.timed(f"Groq/{m_name}", default_role="Groq") as u:
-                    raw = await asyncio.wait_for(client.chat.completions.create(**kwargs),
-                                                 timeout=max(0.3, min(timeout, deadline - time.monotonic())))
+                    if wire_tools:   # 工具呼叫串流要自己拼參數，目前也沒人帶工具走 Groq：照舊一次拿
+                        raw = await asyncio.wait_for(client.chat.completions.create(**kwargs), timeout=hard)
+                    else:
+                        raw = await _stream_reply(client, kwargs, hard)
                     u.ok = bool(raw and raw.choices)
                     u.tokens = getattr(getattr(raw, "usage", None), "total_tokens", 0) or 0
 
@@ -493,13 +571,26 @@ async def groq_chat(
 
                 if not text and not fcs:
                     break   # 這個模型回空的：換下一個模型（以前換下一把金鑰、同一個模型，全空時把金鑰輪完才換）
+                if getattr(choice, "finish_reason", "") == "length":
+                    # 到生成上限被切斷：講話會斷在半句、JSON 會解析失敗，至少留個紀錄找得到原因
+                    _log(f"[Groq Router] {m_name} 寫到上限 {kwargs['max_completion_tokens']} 被切斷，呼叫端該給大一點")
                 return GroqResponse(text=text, function_calls=fcs, raw=raw, model=m_name)
 
+            except _Stalled as e:
+                # 串流卡住馬上就知道，不用等到整段時限。偶爾一次是那台伺服器抖，換把金鑰；
+                # 同一個模型這次卡第二次，多半是這個模型整個慢下來了，換下一個模型
+                stalls[m_name] = stalls.get(m_name, 0) + 1
+                gave_up = stalls[m_name] >= 2
+                _log(f"[Groq Router] {m_name} {e}，{'換下一個模型' if gave_up else '換一把金鑰再試'}")
+                if gave_up:
+                    break
+                continue
             except asyncio.TimeoutError:
                 # 超時通常是單次抖動，換下一組金鑰即可
                 continue
             except Exception as e:
-                _note_failure(m_name, key, str(e))
+                if _note_failure(m_name, key, e) == "next_model":
+                    break
                 continue
 
     return None
@@ -511,19 +602,52 @@ async def groq_chat(
 # ── Google GenAI 內容 -> OpenAI 訊息（純文字） ───────────────────────────────
 
 
-def _note_failure(model: str, key: str, err: str):
-    """依錯誤內容施加短冷卻（429 冷卻較長、其他短暫冷卻）"""
+_RETRY_IN = re.compile(r"try again in\s+(?:(\d+)h)?(?:(\d+)m(?!s))?(?:([\d.]+)s|([\d.]+)ms)?", re.I)
+
+
+def _retry_after(e: Exception, err: str) -> float:
+    """Groq 叫我們等多久：先看 retry-after 標頭，再看訊息裡的「try again in 1m26.4s」；都沒有就 30 秒。"""
+    try:
+        v = getattr(getattr(e, "response", None), "headers", {}).get("retry-after")
+        if v:
+            return min(max(float(v), 1.0), 6 * 3600.0)
+    except Exception:
+        pass
+    m = _RETRY_IN.search(err)
+    if m and any(m.groups()):
+        h, mi, se, ms = m.groups()
+        wait = int(h or 0) * 3600 + int(mi or 0) * 60 + float(se or 0) + float(ms or 0) / 1000
+        return min(max(wait, 1.0), 6 * 3600.0)
+    return 30.0
+
+
+def _note_failure(model: str, key: str, e: Any) -> str:
+    """依錯誤施加冷卻，回 "next_key"（換一把金鑰再試同一個模型）或 "next_model"（這個模型這次別試了）。"""
+    err = str(e)
     now = time.time()
     low = err.lower()
-    if "429" in err or "rate limit" in low or "rate_limit" in low:
+    status = getattr(e, "status_code", None)
+    if status == 413 or "request too large" in low:
+        # 一次塞的字超過這個模型每分鐘的上限（2026-10-30 實測 qwen 輸入每分鐘 7000 token）：每把都一樣，換把只是再被拒一次。
+        # 以前當成限流：29 把輪流撞完全部冷卻，Groq 整個停擺半分鐘，哨兵、點歌判斷一起掛
+        _log(f"[Groq Router] {model} 一次塞太多字被拒，換下一個模型：{err[:160]}")
+        return "next_model"
+    if status == 429 or "429" in err or "rate limit" in low or "rate_limit" in low:
         if key:
-            _key_cooldown[key] = now + 30.0
-        _model_cooldown[model] = now + 60.0
-    elif "timeout" in low or "timed out" in low or "connection" in low:
-        if key:
-            _key_cooldown[key] = now + 3.0
-    elif "model" in low and ("not found" in low or "does not exist" in low or "invalid" in low):
+            _key_cooldown[(key, model)] = now + _retry_after(e, err)
+        return "next_key"
+    if status == 404 or "model_not_found" in low or "model_decommissioned" in low or "does not exist" in low:
         # 模型名稱過期：整台下架 10 分鐘，避免每次都撞
         _model_cooldown[model] = now + 600.0
+        return "next_model"
+    if status == 400 or "invalid_request_error" in low:
+        # 請求本身有問題（參數不支援、上限給太大）：換金鑰也一樣，也不是模型下架。
+        # 以前訊息裡有 model 和 invalid 就整台冷卻 10 分鐘，生成上限給太大也會中
+        _log(f"[Groq Router] {model} 不接受這個請求，換下一個模型：{err[:160]}")
+        return "next_model"
+    if "timeout" in low or "timed out" in low or "connection" in low:
+        if key:
+            _key_cooldown[(key, model)] = now + 3.0
+    return "next_key"
 
 
