@@ -14,7 +14,7 @@ from core.prompts import PromptTemplateEngine
 from core.utils import get_current_time_string, log_print, log_swallowed
 
 HOST_ATTRS = (
-    "LATEST_SYSTEM_MUSIC_INFO",
+    "LATEST_SYSTEM_MUSIC_INFO", "is_singing_active",
     "execute_actions",
     "speech_queue",
     "touch_interaction",
@@ -68,6 +68,20 @@ async def live_timer_sensor_worker(vts, input_queue):
                         
                     fg_hint = f"（老爸當前正在使用視窗：{curr_fg_title} - {curr_fg_app}）" if curr_fg_title else ""
                     music_hint = f"（電腦音樂：{host.LATEST_SYSTEM_MUSIC_INFO}）" if host.LATEST_SYSTEM_MUSIC_INFO else ""
+                    # 舞台上是她在彈／唱：以前只給視窗標題和「電腦音樂」（聽到的其實是她自己的琴），她說「老爸你正在彈《小星星》」、
+                    # 還說曲子彈完了，其實正彈到一半（2026-10-31 Fable 看實機日誌）
+                    stage_hint = ""
+                    try:
+                        import services.piano_engine as _pe
+                        if getattr(_pe, "is_piano_active", False):
+                            title = getattr(_pe, "current_piano_song_title", "") or ""
+                            stage_hint = f"（現在是妳 7L 自己在彈鋼琴{f'《{title}》' if title else ''}，還沒彈完；不是老爸在彈）"
+                            music_hint = ""
+                        if host.is_singing_active():
+                            stage_hint += "（妳正在唱歌）"
+                            music_hint = ""
+                    except Exception:
+                        log_swallowed()
                     
                     reminder_messages = [
                         {"role": "system", "content": PromptTemplateEngine.HARD_TECHNICAL_RULES},
@@ -75,7 +89,8 @@ async def live_timer_sensor_worker(vts, input_queue):
 【 API Live 定時感測到期提醒】：
 {caller or '你'}剛才交代的時間提醒到了！
 - 預定提醒事項：『{task_msg}』
-- 當前現場環境：{fg_hint} {music_hint}
+- 當前現場環境：{fg_hint} {music_hint} {stage_hint}
+只講時間到了、提醒的事；環境沒寫的不要自己編（例如沒寫曲子彈完就不要說彈完了）。
 
 請妳依循妳的人設性格，主動開口提醒{caller or '你'}時間到了！（直接給出一兩句自然生動的發言，可附帶 [EXPRESSION: 瞇眼/笑/WINK] 表情與 [SPEED:...] 語調標籤，請務必發出聲音提醒！）"""}
                     ]

@@ -399,6 +399,18 @@ def _clean_brain_title(t) -> str:
     return t if t and len(t) <= 80 and _has_content_char(t) else ""
 
 
+# 要她自己作一首新的（不是彈現成的曲子）。「原創」不算：彈她以前的原創曲是彈現成的檔案
+_COMPOSE_RE = re.compile(r"即興|作曲|創作一首|寫一首|自己作一首|自創一首")
+
+
+def compose_instead_of_play(action: str, task_instruction: str, song: str = "") -> list:
+    """主腦填 play_piano、交代的事其實是叫她作曲（2026-10-31 實機：「即興創作一首開心的鋼琴曲」她填 play_piano、
+    曲名「快樂即興曲」，結果去彈了舊檔案，嘴上還說在即興）→ 改成作曲；不是就回 []。"""
+    if (action or "").strip().lower() == "play_piano" and _COMPOSE_RE.search(task_instruction or ""):
+        return [("pe.compose_and_play_original_piano", {"theme_or_title": _clean_brain_title(song), "mood_or_style": ""})]
+    return []
+
+
 def structured_stage_command(action: str = "", song: str = "", song2: str = "", url: str = "", **_) -> list:
     """主腦填的結構化動作 → [(工具名, 參數), ...]；不是舞台動作或缺必要欄位回 []（照舊走文字流程）。"""
     a = (action or "").strip().lower()

@@ -193,7 +193,7 @@ class DryRun:
             "parse_input_item": ins.parse_input_item, "classify": ins.classify, "is_operator": ins.is_operator,
             "sleep_wake_decision": ins.sleep_wake_decision, "VIEWER_SOURCES": ins.VIEWER_SOURCES,
             "WAKE_WORDS": ins.WAKE_WORDS,
-            **{n: getattr(hc, n) for n in ("parse_hard_command", "build_slip_text", "structured_stage_command",
+            **{n: getattr(hc, n) for n in ("parse_hard_command", "build_slip_text", "structured_stage_command", "compose_instead_of_play",
                                             "stage_request_unasked", "offer_accept_command", "is_stage_control", "PLAY_TOOLS",
                                             "PIANO_CONTROL_TOOLS", "split_original_request", "display_requester",
                                             "asks_to_remember_model_position", "strip_blob_noise",
@@ -231,7 +231,7 @@ class DryRun:
             "live_vision_tool_task": lambda: d._record_vision("vision"),
             "live_mirror_tool_task": lambda: d._record_vision("mirror"),
             "live_search_tool_task": lambda q: d._record_vision("search"),
-            "_owner_name": lambda: "老爸", "_SUBAGENT_GEMINI_TOOL_TIMEOUT": 5.0, "_group_post": lambda *a: None,   # 副意識工作群（10-30）
+            "_owner_name": lambda: "老爸", "_SUBAGENT_GEMINI_TOOL_TIMEOUT": 5.0, "_group_post": lambda *a: None, "_ORIGIN_KEEPING_SLIPS": set(),   # 副意識工作群、延續紙條（10-30、10-31）
             "to_tw": lambda s: s, "_judge_stage_request": stage_judge, "_autonomy_turn": lambda now: False, "STAGE_ACTIONS": hc.STAGE_ACTIONS,   # 有唱／彈直接判斷（10-29）：預設判成不用做
         }
         for node in _main_nodes(MAIN_CONSTS + MAIN_FUNCS):

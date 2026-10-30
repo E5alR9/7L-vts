@@ -190,7 +190,7 @@ from core.barge_in import BargeInDetector
 from core.hard_command import (
     asks_to_remember_model_position, parse_hard_command, build_slip_text, display_requester,
     parse_slip_for_song, strip_blob_noise, sanitize_search_query, rescue_claim,
-    split_original_request, PIANO_CONTROL_TOOLS, is_stage_control, structured_stage_command,
+    split_original_request, PIANO_CONTROL_TOOLS, is_stage_control, structured_stage_command, compose_instead_of_play,
     PLAY_TOOLS, stage_request_unasked, offer_accept_command, STAGE_ACTIONS,
 )
 from core.subagent_router import resolve_subagent_chain
@@ -2185,16 +2185,26 @@ async def play_voice_complete(text, target: str = "dad", raw_actions_text: str =
                             final_tl = parse_action_timeline(raw_actions_text, est_duration)
                             if target_vts:
                                 timeline_task = asyncio.create_task(execute_action_timeline(target_vts, final_tl, timeline_cancel_event))
-                        elif director_task and not director_task.done():
+                        elif director_task:
+                            # 以前只在導演「還沒排好」時才接：導演常常 1 秒就排好、比語音合成快，排好的整份被丟掉；
+                            # 她自己標的單一表情（[EXPRESSION: 眨眼]）也從來沒執行，被導演的蓋掉（2026-10-31 Fable 看實機日誌）
                             async def _attach_live_timeline():
+                                live_tl = []
                                 try:
-                                    live_tl = await asyncio.wait_for(asyncio.shield(director_task), timeout=2.0)
-                                    if live_tl and target_vts and not timeline_cancel_event.is_set():
-                                        spawn(execute_action_timeline(target_vts, live_tl, timeline_cancel_event))
+                                    live_tl = await asyncio.wait_for(asyncio.shield(director_task), timeout=2.0) or []
                                 except asyncio.TimeoutError:
                                     pass   # 神態導演 2 秒內沒排好：這句就不加句中表情（正常情況，不算錯）
-                                except Exception: log_swallowed()
+                                except Exception:
+                                    log_swallowed()
+                                # 她自己標的先照做，導演排的跟她的標籤差不到 0.8 秒的讓給她
+                                tl = sorted(list(pre_timeline) + [x for x in live_tl
+                                                                  if all(abs(x[0] - p[0]) >= 0.8 for p in pre_timeline)],
+                                            key=lambda x: x[0])
+                                if tl and target_vts and not timeline_cancel_event.is_set():
+                                    spawn(execute_action_timeline(target_vts, tl, timeline_cancel_event))
                             spawn(_attach_live_timeline())
+                        elif pre_timeline and target_vts:   # 句子太短沒請導演：她標的那一個照做
+                            timeline_task = asyncio.create_task(execute_action_timeline(target_vts, pre_timeline, timeline_cancel_event))
 
                     #  無縫播放：使用 Sound Channel + queue() 消除分段拼接停頓感
                     # 首段直接播，後續段等待前段結束前 0.1s 預先 queue 進去
@@ -3326,7 +3336,8 @@ async def _run_subagent_task(_task_ins, _intent, _respond):
             # 點播者照觸發這輪的人；系統通知觸發或不知道是誰就留空，紙條走中性文案
             _req = _brain_requester()
             # 主腦填了結構化舞台動作就照欄位直接執行，不再用正則猜她轉述的說法（2026-10-25）
-            _cmds = structured_stage_command(**(_intent or {}))
+            _cmds = (compose_instead_of_play((_intent or {}).get("action", ""), _task_ins, (_intent or {}).get("song", ""))
+                     or structured_stage_command(**(_intent or {})))
             if not _cmds and (_intent or {}).get("action") not in STAGE_ACTIONS and _autonomy_turn(time.time()):
                 # 感知那輪沒人問她事情：不查東西（2026-10-29 實機：她叫桌面版 Gemini「問老爸在做什麼」，桌面版看不到畫面，回一大篇猜的）。
                 # 舞台動作沒填歌名也照准（同日實機：她想自己彈琴、action 填了 play_piano 沒填歌，被當成查東西擋掉）
@@ -6574,6 +6585,7 @@ _STAGE_JUDGE_SYSTEM = """妳是 7L（AI 主播）的唱歌／彈琴指令判斷�
 - pause_piano：琴先暫停；resume_piano：繼續彈（暫停後接著彈）。
 - none：只是聊到唱歌彈琴（我昨天唱了一首歌、妳彈得好好聽、唱得好爛、要不要學彈琴、妳會唱稻香嗎），沒有要她現在做；
   或沒講歌名（唱首歌、彈一首來聽），讓她自己挑。
+- none：要她自己作一首新的（即興創作一首開心的鋼琴曲、幫我寫一首曲子彈給我聽）：那是作曲，不是彈現成的曲子，交給她自己去作。
 歌名照原話寫，不要加書名號、歌手名、「這首」「那首」「一下」。"""
 _STAGE_JUDGE_ACTIONS = ("sing", "play_piano", "play_and_sing", "stop_singing", "stop_piano", "pause_piano", "resume_piano")
 STAGE_JUDGE_WAIT_SEC = 4.0      # 主腦的 invoke_subagent 遇到這句還在判斷中，最多等這麼久
@@ -6717,6 +6729,9 @@ def _send_stage_slip(slip_text: str, target: str, said: str, requester_name: str
     if target == "audience":
         send_brain_slip(slip_text, origin="audience", said=said, name=requester_name)
     else:
+        # 老爸那句的延續：送出時不能把這輪改記成系統通知，不然她只在腦內答應時沒人提醒她講出來
+        #（2026-10-31 Fable 看實機日誌：唱 Faded、停止唱歌、彈加唱三次都只在腦內回，老爸什麼都沒聽到）
+        _ORIGIN_KEEPING_SLIPS.add(slip_text)
         send_brain_slip(slip_text)
 
 

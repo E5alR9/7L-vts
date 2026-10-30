@@ -102,14 +102,14 @@ def _run_handler(cpu, nv, total_timeout=45.0, task="幫我查日圓匯率", orig
         targets.append(("desktop", task_ins))
         return desktop
 
-    from core.hard_command import build_slip_text, structured_stage_command
+    from core.hard_command import build_slip_text, structured_stage_command, compose_instead_of_play
     sess = _FakeSession()
     ns = _load("_run_subagent_task", "_handle_invoke_subagent", _AWAITING_RESULTS={}, LIVE_SAY_GATE=False, types=types, asyncio=asyncio, session=sess, GLOBAL_LIVE_SESSION=sess,
                ws_send_lock=asyncio.Lock(), _desktop_lookup=desktop_lookup,
                background_tool_executor=background_tool_executor, nv_interpret_task=nv_interpret_task,
                build_slip_text=build_slip_text, _SUBAGENT_TOTAL_TIMEOUT=total_timeout,
                _BRAIN_INPUT_ORIGIN={"who": origin, "ts": 0.0}, _brain_requester=lambda: requester,
-               structured_stage_command=structured_stage_command, run_stage_commands=run_stage_commands,
+               structured_stage_command=structured_stage_command, compose_instead_of_play=compose_instead_of_play, run_stage_commands=run_stage_commands,
                AUDIENCE_STAGE_DECLINE=_const("AUDIENCE_STAGE_DECLINE"),
                UNASKED_STAGE_DECLINE=_const("UNASKED_STAGE_DECLINE"),
                _SUBAGENT_VISION_TASK_RE=__import__('re').compile(_const_pattern('_SUBAGENT_VISION_TASK_RE')))

@@ -506,3 +506,13 @@ def test_stage_request_unasked_only_when_nobody_asked_for_music():
     assert unasked("好啊", ["小星星"], her_last="要不要我彈小星星給你聽？") is False
     assert unasked("好啊", ["小星星"], her_last="今天天氣真好") is True
     assert unasked("好啊我等一下要去洗澡然後就要睡覺了喔", ["小星星"], her_last="要不要聽我彈琴？") is True
+
+
+def test_play_piano_that_is_really_a_compose_request_composes():
+    """2026-10-31 實機：「即興創作一首開心的鋼琴曲彈給我聽」主腦填 play_piano＋「快樂即興曲」，去彈了舊檔案還說在即興。"""
+    from core.hard_command import compose_instead_of_play
+    assert compose_instead_of_play("play_piano", "即興創作一首開心的鋼琴曲彈給老爸聽", "快樂即興曲") == [
+        ("pe.compose_and_play_original_piano", {"theme_or_title": "快樂即興曲", "mood_or_style": ""})]
+    assert compose_instead_of_play("play_piano", "幫老爸彈晴天", "晴天") == []              # 現成的曲子照彈
+    assert compose_instead_of_play("play_piano", "彈妳的原創曲星空", "7L原創_星空") == []   # 原創曲是現成檔案
+    assert compose_instead_of_play("sing", "即興唱一首", "") == []

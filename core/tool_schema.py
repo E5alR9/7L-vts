@@ -445,7 +445,7 @@ def _invoke_subagent_declaration(non_blocking: bool) -> types.FunctionDeclaratio
                     type="STRING",
                     enum=["play_piano", "sing", "play_and_sing", "stop_singing",
                           "stop_piano", "pause_piano", "resume_piano", "watch_video", "ask_desktop", "other"],
-                    description="play_piano 彈琴／sing 唱歌／play_and_sing 邊彈邊唱／stop_singing 停止唱歌／"
+                    description="play_piano 彈現成的曲子（要她自己即興作一首新的不是這個，用 other）／sing 唱歌／play_and_sing 邊彈邊唱／stop_singing 停止唱歌／"
                                 "stop_piano 收起鋼琴／pause_piano 暫停鋼琴／resume_piano 繼續彈／"
                                 "watch_video 看 YouTube 影片／ask_desktop 請桌面版 Gemini 查資料或想問題／"
                                 "other 交給 API 子代理（查資料、計時、作曲…）"
