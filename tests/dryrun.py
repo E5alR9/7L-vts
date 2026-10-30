@@ -231,7 +231,7 @@ class DryRun:
             "live_vision_tool_task": lambda: d._record_vision("vision"),
             "live_mirror_tool_task": lambda: d._record_vision("mirror"),
             "live_search_tool_task": lambda q: d._record_vision("search"),
-            "_owner_name": lambda: "老爸", "_SUBAGENT_GEMINI_TOOL_TIMEOUT": 5.0,
+            "_owner_name": lambda: "老爸", "_SUBAGENT_GEMINI_TOOL_TIMEOUT": 5.0, "_group_post": lambda *a: None,   # 副意識工作群（10-30）
             "to_tw": lambda s: s, "_judge_stage_request": stage_judge, "_autonomy_turn": lambda now: False, "STAGE_ACTIONS": hc.STAGE_ACTIONS,   # 有唱／彈直接判斷（10-29）：預設判成不用做
         }
         for node in _main_nodes(MAIN_CONSTS + MAIN_FUNCS):

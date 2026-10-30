@@ -86,6 +86,8 @@ def _load(fx):
         "types": fake_types,
         "log_print": logs.append,
         "get_dynamic_live_key_candidates": lambda keys: list(keys),
+        # 2026-10-30 起 Live 都經 held_live_connect（記佔用中的 key）；測試照舊走假的 genai
+        "held_live_connect": lambda key, model, cfg: fake_genai.Client(api_key=key).aio.live.connect(model=model, config=cfg),
         "report_gemini_key_error": lambda *a, **k: False,
         "KEYS_AUDIENCE_LIVE": [],
         "GEMINI_KEYS": ["K1", "K2", "K3"],

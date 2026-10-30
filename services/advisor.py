@@ -19,7 +19,8 @@ from google import genai
 from google.genai import types
 
 from core import usage
-from core.llm_engine import DEEP_THINK_LIVE_MODEL, GEMINI_KEYS, key_cooling, report_gemini_key_error
+from core.llm_engine import (DEEP_THINK_LIVE_MODEL, GEMINI_KEYS, held_live_connect, key_cooling, pick_live_key,
+                              report_gemini_key_error)
 from core.utils import log_print, log_swallowed, spawn
 
 THINKING_LEVEL = "low"
@@ -38,7 +39,7 @@ class ResidentAdvisor:
         # 一般 3.8 Live 帶思考設定會直接被拒（2026-10-30 實測 minimal、low 都連不上），傳 None 就不帶
         self.thinking_level = thinking_level
         self.label = label   # 日誌和用量表上的名字（副意識群裡每個各有分工）
-        self._connect = connect or (lambda key, model, cfg: genai.Client(api_key=key).aio.live.connect(model=model, config=cfg))
+        self._connect = connect or held_live_connect   # 連線期間把 key 記成佔用中，別條 Live 會避開
         self._lock = asyncio.Lock()
         self._cm = self._session = None
         self._key = ""
@@ -88,9 +89,10 @@ class ResidentAdvisor:
 
     async def _open(self) -> None:
         pool = [k for k in self.keys if not key_cooling(k, self.model)] or list(self.keys)
-        # 續接 handle 綁在原本那把 key 上（主腦也是這樣）：換別把接不回去
+        # 續接 handle 綁在原本那把 key 上（主腦也是這樣）：換別把接不回去。
+        # 換 key 時挑沒被別條 Live（主腦、導演、哨兵…）佔著的（2026-10-30 老爸：不要用同一把 key 開）
         if not (self._handle and self._key in pool):
-            self._key = random.choice(pool)
+            self._key = pick_live_key(pool, self.model)
         cfg = types.LiveConnectConfig(
             response_modalities=[types.Modality.AUDIO],
             system_instruction=types.Content(parts=[types.Part.from_text(text=self.system_fn())]),

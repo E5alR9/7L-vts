@@ -34,7 +34,7 @@ except Exception:
 
 # WebSocket 握手補丁
 import core.websocket_patch
-from core.llm_engine import GEMINI_KEYS, LIVE_MODEL, key_cooling, report_gemini_key_error
+from core.llm_engine import GEMINI_KEYS, LIVE_MODEL, held_live_connect, key_cooling, pick_live_key, report_gemini_key_error
 from core.utils import log_print, sys_notify, log_swallowed, spawn
 from google import genai
 from google.genai import types
@@ -226,7 +226,7 @@ async def _yt_companion_session_loop(target_hwnd, initial_rect, initial_title):
     # 舊碼永遠用第一把金鑰：那把被限流就整個伴看連不上。挑一把沒在冷卻的
     import random
     model = LIVE_MODEL
-    api_key = random.choice([k for k in GEMINI_KEYS if not key_cooling(k, model)] or GEMINI_KEYS)
+    api_key = pick_live_key(GEMINI_KEYS, model)   # 沒冷卻、沒被別條 Live 佔著的先
     client = genai.Client(api_key=api_key)
 
     CURRENT_YT_TITLE = initial_title
@@ -249,7 +249,7 @@ async def _yt_companion_session_loop(target_hwnd, initial_rect, initial_title):
     )
 
     try:
-        async with client.aio.live.connect(model=model, config=config) as session:
+        async with held_live_connect(api_key, model, config) as session:
             _live_session = session
             log_print(f"✅ [YT 眼耳] 感官神經連線就緒！開始默默吸收畫面與聲音。")
 

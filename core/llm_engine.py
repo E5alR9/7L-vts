@@ -6,7 +6,7 @@ import contextlib
 import json
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-from typing import List, Dict, Tuple, AsyncIterator
+from typing import Any, List, Dict, Tuple, AsyncIterator
 from google import genai
 from google.genai import types
 
@@ -157,7 +157,8 @@ def get_dynamic_live_key_candidates(preferred_pool: List[str]) -> List[str]:
         if k and k not in seen:
             candidates.append(k)
             seen.add(k)
-    candidates.sort(key=key_cooling_any)  # 穩定排序：健康的保持原順序在前
+    # 穩定排序：健康的保持原順序在前；沒被別條 Live 佔著的排前面（同一把 key 開太多條會被拒）
+    candidates.sort(key=lambda k: (key_cooling_any(k), live_load(k) > 0))
     return candidates
 
 
@@ -283,7 +284,7 @@ async def live_one_shot(system_text: str, prompt: str, pool: List[str], image_jp
                 cfg.thinking_config = types.ThinkingConfig(thinking_level=thinking_level)
             text = ""
             async with asyncio.timeout(timeout):
-                async with client.aio.live.connect(model=model, config=cfg) as session:
+                async with held_live_connect(g_key, model, cfg) as session:
                     if image_jpeg:
                         await session.send_realtime_input(video={"data": image_jpeg, "mime_type": "image/jpeg"})
                     await session.send_realtime_input(text=prompt)
@@ -364,6 +365,43 @@ async def track_key(key: str) -> AsyncIterator[None]:
             _KEY_INFLIGHT.pop(k, None)
         else:
             _KEY_INFLIGHT[k] = left
+
+
+# 每把 key 正被幾條 Live 連線佔著（2026-10-30 老爸：不要用同一把 key 開，key 很多）。
+# 主腦、本能、導演、副意識、YT 陪看、一問一答都經 held_live_connect 連線，挑 key 時先挑沒人佔的；
+# 同一把 key 同時開太多條會被拒（實測 10 條有一部分回 1011 超過額度）
+_LIVE_IN_USE: Dict[str, int] = {}
+
+
+def live_load(key: str) -> int:
+    return _LIVE_IN_USE.get(key or "", 0)
+
+
+@contextlib.asynccontextmanager
+async def held_live_connect(key: str, model: str, config) -> AsyncIterator[Any]:
+    """client.aio.live.connect 的替身：連線開著的期間把這把 key 記成佔用中。"""
+    k = key or ""
+    _LIVE_IN_USE[k] = _LIVE_IN_USE.get(k, 0) + 1
+    try:
+        async with genai.Client(api_key=key).aio.live.connect(model=model, config=config) as session:
+            yield session
+    finally:
+        left = _LIVE_IN_USE.get(k, 1) - 1
+        if left <= 0:
+            _LIVE_IN_USE.pop(k, None)
+        else:
+            _LIVE_IN_USE[k] = left
+
+
+def pick_live_key(pool: List[str], model: str = "") -> str:
+    """從 pool 挑一把：沒冷卻的先、沒被別條 Live 佔著的先，同樣空的隨機挑；pool 空回 ""。"""
+    import random
+    keys = [k for k in pool if k]
+    if not keys:
+        return ""
+    fresh = [k for k in keys if not key_cooling(k, model)] or keys
+    least = min(live_load(k) for k in fresh)
+    return random.choice([k for k in fresh if live_load(k) == least])
 
 
 def sort_keys_by_load(keys: List[str]) -> List[str]:

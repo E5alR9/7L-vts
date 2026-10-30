@@ -207,7 +207,7 @@ from core.llm_engine import (
     KEYS_VISION, STREAMER_MIND_MODELS, REST_BRAIN_MODELS, HIGH_IQ_GEMINI_MODELS, GROQ_CLIENTS,
     get_dynamic_live_key_candidates, track_key, sort_keys_by_load, key_cooling,
     report_gemini_key_error, live_one_shot, KEYS_MIC_LIVE, KEYS_PROACTIVE, KEYS_DAD_MAIN,
-    UNRESTRICTED_SAFETY_SETTINGS, thinking_config,
+    UNRESTRICTED_SAFETY_SETTINGS, thinking_config, held_live_connect, pick_live_key,
 )
 from core.input_sources import (parse_input_item, classify, sleep_wake_decision, live_speech_wakes, is_operator, has_wake_word,
                                 VIEWER_SOURCES, WAKE_WORDS)
@@ -1873,7 +1873,7 @@ async def _director_ensure_session():
                 output_audio_transcription=types.AudioTranscriptionConfig(),
                 system_instruction=types.Content(parts=[types.Part(text=promptkit.director_system(_menu_names))])
             )
-            cm = client.aio.live.connect(model=LIVE_MODEL, config=live_cfg)
+            cm = held_live_connect(g_key, LIVE_MODEL, live_cfg)
             session = await cm.__aenter__()
             st["session"] = session
             st["cm"] = cm
@@ -3088,7 +3088,7 @@ async def instinct_live_worker():
                 log_print("⚠️ [本能大腦] 沒有可用的 Gemini 金鑰，1 分鐘後再試")
                 await asyncio.sleep(60)
                 continue
-            live_key = random.choice([k for k in _pool if not key_cooling(k, LIVE_MODEL)] or _pool)
+            live_key = pick_live_key(_pool, LIVE_MODEL)   # 沒冷卻、沒被別條 Live 佔著的先
             client = genai.Client(api_key=live_key)
             
             import services.vts_client as _vc_menu
@@ -3100,7 +3100,7 @@ async def instinct_live_worker():
                 output_audio_transcription=types.AudioTranscriptionConfig()
             )
             
-            async with client.aio.live.connect(model=LIVE_MODEL, config=live_cfg) as session:
+            async with held_live_connect(live_key, LIVE_MODEL, live_cfg) as session:
                 INSTINCT_LIVE_SESSION = session
                 log_print("🦊 [本能大腦] 連線成功，開始平行監聽環境...")
                 
@@ -3501,6 +3501,7 @@ async def _handle_say(session, ws_send_lock, fn_call_id, text: str, vts=None) ->
                                              queue_while_singing=True, from_live=True)
             log_print(f"🗣️ [說出口] {raw[:120]}")
             if spoken:
+                _group_post("主腦", f"說：{spoken}")
                 spawn(_afterthought(spoken))
         await _send_say_response(session, ws_send_lock, fn_call_id,
                                  "已說出口" if spoken else "沒有念（唱歌中或內容是空的）")
@@ -3636,6 +3637,16 @@ async def _speak_brain_turn(vts, input_queue, text: str, who: str, reply_to: str
 AFTERTHOUGHT_ENABLED = True
 SUBMINDS_ENABLED = (os.getenv("SUBMINDS", "1") or "1").strip().lower() not in ("0", "false", "no", "off")
 _ADVISOR = None   # 第一次用到才建（services.subminds.SubMinds，或關掉時的 services.advisor.ResidentAdvisor）
+
+
+def _group_post(source: str, text: str) -> None:
+    """貼到副意識的工作群（主腦、哨兵；交辦結果走 _advisor().note）。單一軍師模式沒有工作群。"""
+    if not SUBMINDS_ENABLED:
+        return
+    try:
+        _advisor().post(source, text)
+    except Exception:
+        log_swallowed()
 
 
 def _advisor():
@@ -3828,7 +3839,7 @@ async def continuous_live_worker(vts):
                 context_window_compression=types.ContextWindowCompressionConfig(sliding_window=types.SlidingWindow()),
             )
             
-            async with client.aio.live.connect(model=live_m, config=live_cfg) as session:
+            async with held_live_connect(api_key, live_m, live_cfg) as session:
                 GLOBAL_LIVE_SESSION = session
                 _set_live_active(True)
                 log_print(f"✅ 已成功連線至 Live API！模型: {live_m} (通道 G{current_k_idx}) 麥克風持續收音中...")
@@ -4003,6 +4014,8 @@ async def continuous_live_worker(vts):
                                     fn_args = getattr(_fc, 'args', {}) or {}
                                     fn_call_id = getattr(_fc, 'id', None)
                                     log_print(f"🤖 [Live 主腦決策] 呼叫工具: {fn_name}({fn_args})")
+                                    if fn_name != "say":   # say 講出口那邊另外貼
+                                        _group_post("主腦", f"叫了工具 {fn_name}：{json.dumps(dict(fn_args), ensure_ascii=False)[:150]}")
                                     try:
                                         eventlog.get().record("tool_call", fn_name, who="live_brain", args=dict(fn_args))
                                     except Exception:
@@ -5845,6 +5858,7 @@ async def streamer_mind_loop_worker(vts, input_queue):
 
             log_focus = sentry_decision.get("focus") or "精彩互動"
             log_print(f"🚨 [Live 潛意識哨兵 喚醒主力] 判定應開口！目標: {log_target} | 焦點: {log_focus}")
+            _group_post("哨兵", f"判斷她該開口，對象 {log_target}，重點：{log_focus}")
             
             # 4. Live 主腦在（或剛斷、一兩秒就回來）：把情報化作紙條塞給它，由主腦負責發言
             #    以前看 GLOBAL_LIVE_SESSION，它斷線後不會清掉，Live 斷多久都還是遞紙條、沒人回

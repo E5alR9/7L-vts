@@ -128,3 +128,38 @@ def test_retired_model_and_dead_key_are_cooled(monkeypatch):
     assert le.key_cooling("K2", "pro")   # 整把冷卻
     # 參數錯誤（例如思考等級不支援）不是 key 或模型的問題，不冷卻
     assert not le.report_gemini_key_error("K3", Exception("400 INVALID_ARGUMENT. Thinking level MINIMAL is not supported for this model."), "flash")
+
+
+def test_live_connections_spread_over_keys(monkeypatch):
+    """2026-10-30 老爸：用 key 的地方盡量分開，不夠才同一把多開。連著的 Live 會記成佔用，挑 key 先挑沒人佔的。"""
+    import asyncio
+
+    class _Live:
+        def __init__(self, api_key):
+            self.aio = type("A", (), {"live": type("L", (), {"connect": staticmethod(lambda model, config: _CM())})})()
+
+    class _CM:
+        async def __aenter__(self):
+            return "session"
+
+        async def __aexit__(self, *a):
+            return False
+    monkeypatch.setattr(le.genai, "Client", _Live)
+    picked = []
+
+    async def go():
+        held = []
+        for _ in range(3):
+            k = le.pick_live_key(["K1", "K2", "K3"], "m")
+            picked.append(k)
+            cm = le.held_live_connect(k, "m", None)
+            await cm.__aenter__()
+            held.append(cm)
+        assert sorted(picked) == ["K1", "K2", "K3"]                 # 三條各用一把，不重複
+        assert le.pick_live_key(["K1", "K2", "K3"], "m") in picked  # 都佔了才同一把多開
+        assert le.get_dynamic_live_key_candidates(["K1"])[0] != "K1" or not le.GEMINI_KEYS
+        for cm in held:
+            await cm.__aexit__(None, None, None)
+        assert le.live_load("K1") == le.live_load("K2") == le.live_load("K3") == 0   # 斷線就還回去
+    monkeypatch.setattr(le, "GEMINI_KEYS", ["K1", "K4"])
+    asyncio.run(go())

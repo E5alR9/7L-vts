@@ -48,7 +48,7 @@ def _say_ns(singing=False, vision_busy=False):
                _VISION_STATE={"busy": vision_busy}, _vision_wait_text=lambda t: t.split("～")[0] + "～",
                _BRAIN_INPUT_ORIGIN={"who": "dad"}, _live_reply_target=lambda: "dad",
                log_print=logs.append, log_swallowed=lambda *a: None, spawn=lambda c: (after.append(c), c.close()),
-               _afterthought=lambda t: asyncio.sleep(0), LAST_BRAIN_TURN_TS=0.0, LAST_BRAIN_REPLY_DONE_TS=0.0,
+               _afterthought=lambda t: asyncio.sleep(0), _group_post=lambda *a: None, LAST_BRAIN_TURN_TS=0.0, LAST_BRAIN_REPLY_DONE_TS=0.0,
                eventlog=SimpleNamespace(get=lambda: SimpleNamespace(record=lambda *a, **k: logs.append(("ev", a)))))
     return ns, sess, spoken, logs, after
 
