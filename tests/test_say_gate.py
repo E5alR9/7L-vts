@@ -218,3 +218,20 @@ def test_reply_only_in_her_head_gets_one_reminder_to_say_it():
     recv = ast.get_source_segment(MAIN, next(n for n in ast.walk(TREE)
                                              if isinstance(n, ast.AsyncFunctionDef) and n.name == "receive_from_live"))
     assert "send_brain_slip(_nudge)" in recv and "_say_unsaid_result" not in MAIN   # 不再幫她念腦內的話
+
+
+def test_a_new_task_can_be_acknowledged_while_an_older_one_is_still_running():
+    """2026-10-31 實測：還在查天氣時老爸又叫她設計時器，連「好，幫你設」都被當成第二句擋掉。"""
+    ns, sess, spoken, _, _ = _say_ns()
+    waiting = ns["_AWAITING_RESULTS"]
+
+    async def go():
+        lock = asyncio.Lock()
+        waiting["weather"] = [time.time() - 5, 0]
+        await ns["_handle_say"](sess, lock, "a", "我去查天氣！")
+        await ns["_handle_say"](sess, lock, "b", "明天晴天喔")            # 天氣還沒回來：擋
+        waiting["timer"] = [time.time(), 0]                              # 又交辦了一件
+        await ns["_handle_say"](sess, lock, "c", "好，計時器幫你設！")   # 新的這件可以答應
+        await ns["_handle_say"](sess, lock, "d", "計時器設好了")         # 還沒回來：擋
+    asyncio.run(go())
+    assert [s[0] for s in spoken] == ["我去查天氣！", "好，計時器幫你設！"]

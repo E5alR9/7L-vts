@@ -3336,7 +3336,7 @@ async def _run_subagent_task(_task_ins, _intent, _respond):
                 return
             _said = _BRAIN_INPUT_ORIGIN.get("said", "")
             if (_cmds or _SING_PLAY_RE.search(_task_ins)) and _SING_PLAY_RE.search(_said or "") \
-                    and await _stage_already_handled(_said):
+                    and await _stage_already_handled(_said, since=(_BRAIN_INPUT_ORIGIN.get("ts") or 0.0) - 3.0):
                 log_print(f"⏭️ [子智能體] 這句的唱／彈已經直接判斷排好了，不再做一次：{_said[:30]}")
                 await _respond("[系統底層：這句要唱／彈的已經排好了，妳口頭答應就好，不要再叫工具。]"
                                + _if_said, _quiet)
@@ -3476,7 +3476,10 @@ async def _handle_say(session, ws_send_lock, fn_call_id, text: str, vts=None) ->
         for _k, (_ts, _n) in list(_AWAITING_RESULTS.items()):
             if now - _ts > AWAIT_RESULT_MAX_SEC:   # 保險：撤銷漏掉的不要永遠擋住她
                 _AWAITING_RESULTS.pop(_k, None)
-        if any(_n >= 1 for _ts, _n in _AWAITING_RESULTS.values()):
+        # 擋「交辦結果還沒回來就講第二句」；但最新一件交辦還沒答應過，就讓她答應這件。
+        # 以前只要有任何一件在等就擋：還在查天氣時老爸又叫她設計時器，連「好，幫你設」都不能講（2026-10-31 實測）
+        _newest = max(_AWAITING_RESULTS.values(), key=lambda v: v[0], default=None)
+        if _newest is not None and _newest[1] >= 1:
             log_print(f"🤐 [先別講] 交辦的結果還沒回來就要講第二句，不念：{raw[:80]}")
             await _send_say_response(session, ws_send_lock, fn_call_id,
                                      "沒有念：交辦的結果還沒回來，不要先講結果、也不要猜；等結果回來再 say。")
@@ -4112,6 +4115,8 @@ async def continuous_live_worker(vts):
                                                 _note_inner_voice(_turn_text)   # 腦內聲音：只記不念（標籤在上面逐段已經觸發過）
                                                 if _nudge:   # 回人只在腦內回：提醒她用 say（老爸：講話專門用 say）
                                                     log_print(f"👂 [沒開口] 有人跟她講話，她只在腦內回，提醒她用 say：{_turn_text[:60]}")
+                                                    if len(_ORIGIN_KEEPING_SLIPS) > 50:   # 只留最近的，別一直長
+                                                        _ORIGIN_KEEPING_SLIPS.clear()
                                                     _ORIGIN_KEEPING_SLIPS.add(_nudge)
                                                     send_brain_slip(_nudge)
                                                 turn_buffer = ""
@@ -4162,7 +4167,7 @@ async def continuous_live_worker(vts):
                                     await session.send_realtime_input(text=prompt)
                                     sent_ts = time.time()
                                     if not origin and prompt in _ORIGIN_KEEPING_SLIPS:
-                                        _ORIGIN_KEEPING_SLIPS.discard(prompt)   # 同一輪人話的延續：不改「這輪算誰的」
+                                        pass   # 同一輪人話的延續：不改「這輪算誰的」（斷線重送也一樣，所以不拿掉）
                                     else:
                                         _note_brain_origin(origin, said, name)
                                     _record_slip(prompt, origin, name, "live", sent_ts)
@@ -4253,7 +4258,8 @@ async def continuous_live_worker(vts):
             # 1007／1008 加上「找不到、不支援、參數錯」：模型或設定本身的問題，換哪把 key 都一樣。
             # 以前 1008 一律當 15 分鐘 GoAway，同一個壞模型把每把 key 各試 4 次才換模型，好幾分鐘都連不上
             _model_broken = ("1007" in err_str or "1008" in err_str) and any(
-                w in err_str for w in ["not found", "not_found", "not supported", "unsupported", "invalid"])
+                w in err_str for w in ["not found", "not_found", "not supported", "unsupported"])
+            # "invalid" 不算：續接 handle 過期、設定參數錯也回 1007 invalid argument，換模型會把主腦降級一整場（Fable 審查）
             if _LIVE_MUTE["rotate"]:
                 log_print(f"🔇 [Live 主腦不回話] {_LIVE_MUTE['rotate']}：模型 {live_models[current_m_idx]} 通道 G{current_k_idx} 冷卻，換下一把")
                 if GEMINI_KEYS:
@@ -6587,13 +6593,19 @@ def _stage_mark(said: str, state: str) -> None:
         _STAGE_JUDGED[key] = {"state": state, "ts": now}
 
 
-async def _stage_already_handled(said: str) -> bool:
-    """主腦叫子智能體時：這句話的唱／彈是不是已經處理了（判斷中就等一下結果）。"""
+async def _stage_already_handled(said: str, since: float = 0.0) -> bool:
+    """主腦叫子智能體時：這句話的唱／彈是不是已經處理了（判斷中就等一下結果）。
+    since：這次這句話是什麼時候來的，比它早的判斷是上一次講一樣的話，不算。以前只認字：老爸一分鐘內講兩次
+    「停止唱歌」，第二次兩邊都以為處理過了，歌一直沒停（2026-10-31 實機全功能測試）。"""
     key = _stage_said_key(said)
+
+    def fresh():
+        e = _STAGE_JUDGED.get(key)
+        return e if e and e["ts"] >= since else None
     deadline = time.time() + STAGE_JUDGE_WAIT_SEC
-    while key in _STAGE_JUDGED and _STAGE_JUDGED[key]["state"] == "pending" and time.time() < deadline:
+    while fresh() and fresh()["state"] == "pending" and time.time() < deadline:
         await asyncio.sleep(0.1)
-    e = _STAGE_JUDGED.get(key)
+    e = fresh()
     return bool(e and e["state"] == "hit" and time.time() - e["ts"] < 60.0)
 
 
@@ -6634,7 +6646,7 @@ async def background_tool_executor(user_text: str, target: str = "dad", requeste
         if not from_brain and _SING_PLAY_RE.search(user_text or ""):
             # 有唱／彈：CPU 不猜，整句交給 Groq（老爸 2026-10-29）
             if not voice:   # 語音那條收尾時已經記了「判斷中」（不能等自己）
-                if await _stage_already_handled(user_text):   # 主腦已經照這句排了
+                if await _stage_already_handled(user_text, since=time.time() - 1.0):   # 主腦已經照這句排了
                     return False, "", {}
                 _stage_mark(user_text, "pending")
             _t0 = time.time()

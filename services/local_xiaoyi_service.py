@@ -629,6 +629,7 @@ def synthesize_xiaoyi_bytes(text: str) -> bytes:
 
 _INFLIGHT = {}   # 執行緒裡還在跑的合成：id -> 開始時間
 _STUCK_SEC = 60.0
+_STUCK_WARNED = {"on": False}
 
 
 async def get_xiaoyi_audio_bytes(text: str) -> bytes:
@@ -640,7 +641,13 @@ async def get_xiaoyi_audio_bytes(text: str) -> bytes:
     # 有一句卡超過 _STUCK_SEC 秒還沒回來，就直接報錯讓路由器換引擎
     oldest = min(_INFLIGHT.values(), default=0.0)
     if oldest and time.time() - oldest > _STUCK_SEC:
+        # 卡住的執行緒還抱著推理鎖，排新的也只會跟著卡；它自己回來就恢復，回不來只能重開 7L（Fable 審查：以前沒講）
+        if not _STUCK_WARNED["on"]:
+            _STUCK_WARNED["on"] = True
+            print(f"🛑 [GPT-SoVITS 卡死] 有一句推理 {time.time() - oldest:.0f} 秒都沒回來，先改用備用語音；"
+                  f"它自己回來就會恢復，一直沒恢復要重開 7L")
         raise RuntimeError(f"GPT-SoVITS 上一句卡了 {time.time() - oldest:.0f} 秒還沒回來，先不排新的")
+    _STUCK_WARNED["on"] = False
     token = object()
     _INFLIGHT[id(token)] = time.time()
 

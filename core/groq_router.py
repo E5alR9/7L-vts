@@ -127,7 +127,9 @@ def make_async_clients(keys) -> List[Any]:
     26 把要 6 秒，而且是在第一次 groq_chat 裡同步建、整個程式凍住（2026-10-26 量的）；共用只要 0.5 秒。"""
     from groq import AsyncGroq, DefaultAsyncHttpxClient
     shared = DefaultAsyncHttpxClient()
-    return [AsyncGroq(api_key=k, http_client=shared) for k in keys if k]
+    # max_retries=0：SDK 預設遇 429／5xx 會自己照 retry-after 睡（最多 60 秒）再重試，睡在 create() 裡面，
+    # 卡住偵測 3 秒就把它當成卡住，429 永遠浮不上來、冷卻也不會記（2026-10-31 Fable 審查）
+    return [AsyncGroq(api_key=k, http_client=shared, max_retries=0) for k in keys if k]
 
 
 def _get_clients() -> List[Any]:
@@ -218,9 +220,17 @@ def get_available_models(force: bool = False) -> Optional[set]:
     return cached
 
 
+MODELS_FETCH_WAIT = 2.0   # 抓 /models 最多等這麼久（抓不到就照原梯隊、不壓上限，背景執行緒抓完下次就有）
+
+
 async def _filter_unavailable(ladder: List[str]) -> List[str]:
-    """把當前帳號上不存在的模型名從梯隊剔除（查證失敗時維持原梯隊）"""
-    avail = await asyncio.to_thread(get_available_models)   # 只指定一個模型也要抓：生成上限的天花板從這裡來
+    """把當前帳號上不存在的模型名從梯隊剔除（查證失敗時維持原梯隊）。
+    只指定一個模型也要抓：生成上限的天花板從這裡來。以前直接等抓完（最多 10 秒），而且在算時限之前，
+    哨兵、點歌判斷這種只給 2～4 秒的呼叫在開機第一次或 /models 慢的時候整個逾時（2026-10-31 Fable 審查）。"""
+    try:
+        avail = await asyncio.wait_for(asyncio.to_thread(get_available_models), timeout=MODELS_FETCH_WAIT)
+    except asyncio.TimeoutError:
+        avail = _models_cache.get("set")
     if len(ladder) <= 1:
         return ladder
     if not avail:

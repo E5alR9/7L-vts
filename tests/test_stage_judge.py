@@ -116,5 +116,15 @@ def test_voice_is_judged_before_the_brains_tool_call():
 
 def test_wiring():
     sub = ast.get_source_segment(MAIN, _fn("_run_subagent_task"))
-    assert "await _stage_already_handled(_said)" in sub and '_stage_mark(_said, "hit")' in sub
+    assert "await _stage_already_handled(_said, since=" in sub and '_stage_mark(_said, "hit")' in sub
     assert "background_tool_executor(user_spoken, target=\"dad\", requester_name=owner, voice=True)" in MAIN
+
+
+def test_saying_the_same_command_again_is_not_treated_as_already_done():
+    """2026-10-31 實機全功能測試：一分鐘內老爸講兩次「停止唱歌」，第二次兩邊都以為處理過了，歌一直沒停。"""
+    import time as _t
+    ns, _, _ = _ns()
+    ns["_stage_mark"]("停止唱歌", "hit")                                # 上一次的判斷
+    _t.sleep(0.05)
+    assert not asyncio.run(ns["_stage_already_handled"]("停止唱歌", since=_t.time()))   # 這次是新的一句
+    assert asyncio.run(ns["_stage_already_handled"]("停止唱歌", since=_t.time() - 5))   # 同一句：算處理過

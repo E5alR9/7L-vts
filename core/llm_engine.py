@@ -194,8 +194,12 @@ def parse_cooldown_seconds(error_text: str, headers=None) -> float:
     if re.search(r"\b404\b", error_lower) or "not_found" in error_lower or "is not found" in error_lower \
             or "no longer available" in error_lower:
         return get_seconds_until_pt_midnight()
-    if "api_key_invalid" in error_lower or "api key not valid" in error_lower or "permission_denied" in error_lower:
+    if "api_key_invalid" in error_lower or "api key not valid" in error_lower:
         return get_seconds_until_pt_midnight()
+    if "permission_denied" in error_lower:
+        # 403 常常只是這把 key 不能用某個模型／功能（預覽模型沒開、地區不支援生圖），不是整把壞了：
+        # 只冷卻這個模型一小時（Fable 審查：以前整把停到半夜，主腦、副意識、哨兵都少一把）
+        return 3600.0
 
     # 1. 優先精準捕獲 Google GenAI / Groq API 返回的重試秒數或時間字串 (如 "retry in 53.5s", "retryDelay: '53s'")
     match_retry_in = re.search(r'retry (?:in|after|delay)[:\s\']*([0-9.]+)\s*s', error_lower)
@@ -235,16 +239,17 @@ _KEY_LIMIT_MARKERS = ("429", "resource_exhausted", "resource exhausted", "rate l
                       "per day", "503", "unavailable", "high demand",
                       # 模型下架、key 失效：以前不在名單裡，parse_cooldown_seconds 的 404 那條根本走不到，
                       # 每次呼叫都白白再撞一次（2026-10-30 健檢）
-                      "404", "not_found", "is not found", "api_key_invalid", "api key not valid", "permission_denied")
-# key 本身壞了：整把冷卻，不只這個模型
-_DEAD_KEY_MARKERS = ("api_key_invalid", "api key not valid", "permission_denied")
+                      "not_found", "is not found", "api_key_invalid", "api key not valid", "permission_denied")
+# key 本身壞了：整把冷卻，不只這個模型（403 不算，見 parse_cooldown_seconds）
+_DEAD_KEY_MARKERS = ("api_key_invalid", "api key not valid")
 
 
 def report_gemini_key_error(key: str, err, model: str = "") -> bool:
     """所有 Gemini 呼叫點遇錯時呼叫：限流／配額／過載就把 (key, model) 冷卻，
     之後候選池會把這把 key 排到最後，其他呼叫點不會再先撞它。回傳是否有冷卻。"""
     err_low = str(err).lower()
-    if not key or not any(m in err_low for m in _KEY_LIMIT_MARKERS):
+    # 404 要是獨立的數字才算（錯誤內文裡剛好有 "4040" 之類的不算）
+    if not key or not (any(m in err_low for m in _KEY_LIMIT_MARKERS) or re.search(r"\b404\b", err_low)):
         return False
     secs = parse_cooldown_seconds(err_low)
     if any(m in err_low for m in _DEAD_KEY_MARKERS):

@@ -251,6 +251,7 @@ def test_token_limit_is_capped_at_what_the_model_can_generate(monkeypatch):
     monkeypatch.setattr(gr, "_get_clients", lambda: [_Client()])
     monkeypatch.setattr(gr, "GROQ_KEYS", ["k0"])
     monkeypatch.setitem(gr._models_cache, "caps", {"qwen/qwen3.8-27b": 16384})
+    monkeypatch.setattr(gr, "get_available_models", lambda force=False: {"qwen/qwen3.8-27b"})   # 不打網路（Fable 審查）
     monkeypatch.setattr(gr, "_log", lambda *a: None)
     asyncio.run(gr.groq_chat([{"role": "user", "content": "hi"}], model="qwen/qwen3.8-27b", max_tokens=50000))
     asyncio.run(gr.groq_chat([{"role": "user", "content": "hi"}], model="qwen/qwen3.8-27b", max_tokens=300))
@@ -424,3 +425,9 @@ def test_the_callers_overall_time_limit_still_holds(monkeypatch):
     calls, _, logs = _stream_clients(monkeypatch, lambda i, m: _FakeStream(["好"], gaps=[5]))
     assert _ask(timeout=0.25, total_timeout=0.6) is None
     assert not any("卡住" in line or "第一塊" in line for line in logs), logs
+
+
+def test_groq_sdk_does_not_retry_on_its_own():
+    """Fable 審查：SDK 預設遇 429 會自己睡 retry-after 再重試，睡在 create() 裡，卡住偵測把它當卡住、冷卻永遠記不到。"""
+    cs = gr.make_async_clients(["k1", "k2"])
+    assert all(c.max_retries == 0 for c in cs)

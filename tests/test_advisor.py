@@ -77,3 +77,10 @@ def test_a_dropped_connection_is_retried_once_then_gives_up_quietly():
     assert asyncio.run(a.ask("這輪")) == "建議：補一句" and len(opened) == 2
     a, opened = _advisor([("boom", ""), ("boom", "")])
     assert asyncio.run(a.ask("這輪")) == "" and len(opened) == 2          # 兩次都斷：這輪放棄，不拋錯
+
+
+def test_transcript_noise_is_not_a_suggestion():
+    """2026-10-30 實測：一般 3.8 沒話說時轉寫出「<no speech>{pause}」，差點被當成建議遞給她。"""
+    assert adv.clean_reply("<no speech>{pause}") == ""
+    assert adv.clean_reply("  [SILENCE] ") == ""
+    assert adv.clean_reply("建議：週三降溫到 22 度<noise>") == "建議：週三降溫到 22 度"

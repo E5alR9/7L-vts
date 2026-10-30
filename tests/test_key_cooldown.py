@@ -163,3 +163,12 @@ def test_live_connections_spread_over_keys(monkeypatch):
         assert le.live_load("K1") == le.live_load("K2") == le.live_load("K3") == 0   # 斷線就還回去
     monkeypatch.setattr(le, "GEMINI_KEYS", ["K1", "K4"])
     asyncio.run(go())
+
+
+def test_permission_denied_benches_only_that_model_for_an_hour(monkeypatch):
+    """Fable 審查：403 常常只是這把 key 不能用某個模型（預覽沒開、地區不支援），不是整把壞了。"""
+    monkeypatch.setattr(le, "log_print", lambda *a: None)
+    assert le.report_gemini_key_error("K5", Exception("403 PERMISSION_DENIED. The caller does not have permission"), "img")
+    assert le.key_cooling("K5", "img") and not le.key_cooling("K5", "flash")
+    assert 3500 < le._KEY_COOLDOWN[("K5", "img")] - time.time() <= 3600
+    assert not le.report_gemini_key_error("K6", Exception("400 INVALID_ARGUMENT: 40404 tokens"), "flash")   # 不是獨立的 404

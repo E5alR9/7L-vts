@@ -12,6 +12,7 @@ Live 只能回音訊，回答從音訊轉寫拿；15 分鐘換線、斷線都帶
 """
 import asyncio
 import random
+import re
 import time
 from typing import Callable, List, Optional
 
@@ -59,10 +60,12 @@ class ResidentAdvisor:
             self._notes = []
             for attempt in range(2):
                 t0 = time.perf_counter()
-                opening = self._session is None
+                opening = False   # 只有「連線本身」失敗才算 handle 有問題；連上之後這輪出錯不算（Fable 審查）
                 try:
-                    if opening:
+                    if self._session is None:
+                        opening = True
                         await self._open()
+                        opening = False
                     out = await asyncio.wait_for(self._turn(body), timeout=ASK_TIMEOUT_SEC)
                     usage.note(self.model, True, role=self.label, ms=(time.perf_counter() - t0) * 1000)
                     if self._reconnect:
@@ -130,5 +133,14 @@ class ResidentAdvisor:
                 out += c.output_transcription.text
             if c and c.turn_complete:   # 只認 turn_complete：在 generation_complete 就停，剩下那則會被下一輪當成「回完了」
                 break
-        out = out.strip()
-        return "" if not out or "[SILENCE]" in out.upper() else out
+        return clean_reply(out)
+
+
+_TRANSCRIPT_NOISE = re.compile(r"<[^<>]{0,40}>|\{[^{}]{0,40}\}")
+
+
+def clean_reply(out: str) -> str:
+    """Live 只回音訊，回答是音訊轉寫：沒講話時偶爾轉出 <no speech>、{pause} 這種雜訊（2026-10-30 實測一般 3.8
+    回了「<no speech>{pause}」，差點被當成建議遞給她）。清掉雜訊；剩下空的或 [SILENCE] 就當沒話說。"""
+    out = _TRANSCRIPT_NOISE.sub("", out or "").strip()
+    return "" if not out or "[SILENCE]" in out.upper() else out
