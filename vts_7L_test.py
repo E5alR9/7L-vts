@@ -4968,6 +4968,8 @@ face_tracking.bind(sys.modules[__name__])
 from workers.face_tracking import ai_face_tracking_loop
 import workers.gaze_cursor as gaze_cursor  # 視線游標
 gaze_cursor.bind(sys.modules[__name__])
+import workers.gaze_brain as gaze_brain    # 視線副腦：Live 看螢幕決定她想看什麼
+gaze_brain.bind(sys.modules[__name__])
 
 WATERMARK_REASSERT_SEC = 60.0  # 水印守護間隔：每分鐘重申一次常駐（冪等，開著再開一次無害）
 
@@ -7907,6 +7909,7 @@ async def main():
         print(f"⚠️ VTS 啟動連線未完成 ({e})，已啟動背景自動重連守護（程式正常運作中，開啟 VTS 後將自動連線）。\n")
         spawn(vts_health_worker(vts))
     spawn(gaze_cursor.gaze_cursor_worker())   # 視線游標：跟著「顯示視線位置」開關開關
+    spawn(gaze_brain.gaze_brain_worker())     # 視線副腦：餘光視覺開著時用 Live 看螢幕挑她想看的
 
     recognizer = sr.Recognizer()
     recognizer.pause_threshold = MIC_PAUSE_THRESHOLD   # 門檻都在 listen_once_fast 上面

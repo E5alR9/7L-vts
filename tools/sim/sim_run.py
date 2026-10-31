@@ -201,8 +201,12 @@ def _no_grab(*a, **k):
     raise RuntimeError("測試包裝：不截老爸的螢幕")
 
 
-_sc.grab_screen = _no_screen
-_sc.gdi_capture_screen = _no_screen
-_ig.grab = _no_grab
+if os.environ.get("SIM_ALLOW_SCREEN") == "1":
+    # 看圖的測試（例如視線副腦）要看得到螢幕才測得出來：老爸同意時才開（2026-10-29：完整測試、看圖測試不用擋）
+    print("👀 [測試包裝] 這次允許看螢幕（SIM_ALLOW_SCREEN=1）", flush=True)
+else:
+    _sc.grab_screen = _no_screen
+    _sc.gdi_capture_screen = _no_screen
+    _ig.grab = _no_grab
 sys.argv = [os.path.abspath(__file__)]   # 重開（shutdown_7l(restart=True)、/api/restart）照 sys.argv 再開：要開回測試包裝
 runpy.run_path(os.path.join(ROOT, "vts_7L_test.py"), run_name="__main__")

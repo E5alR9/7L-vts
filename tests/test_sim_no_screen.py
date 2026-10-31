@@ -12,7 +12,10 @@ def test_sim_run_blocks_every_screenshot_entry_before_starting_7l():
     src = open(os.path.join(ROOT, "tools", "sim", "sim_run.py"), encoding="utf-8").read()
     tree = ast.parse(src)
     start = next(n.lineno for n in ast.walk(tree) if isinstance(n, ast.Call) and ast.unparse(n.func) == "runpy.run_path")
-    patched = {ast.unparse(t): n.lineno for n in tree.body if isinstance(n, ast.Assign) for t in n.targets}
+    # 預設一定擋；只有明確設 SIM_ALLOW_SCREEN=1（老爸同意的看圖測試，例如視線副腦）才不擋（2026-10-31）
+    gate = next(n for n in tree.body if isinstance(n, ast.If) and "SIM_ALLOW_SCREEN" in ast.unparse(n.test))
+    assert ast.unparse(gate.test) == "os.environ.get('SIM_ALLOW_SCREEN') == '1'"
+    patched = {ast.unparse(t): n.lineno for n in gate.orelse if isinstance(n, ast.Assign) for t in n.targets}
     for entry in ("_sc.grab_screen", "_sc.gdi_capture_screen", "_ig.grab"):
         assert entry in patched and patched[entry] < start, entry
 

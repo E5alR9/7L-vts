@@ -35,7 +35,8 @@ AI_FACE_TRACKING_RUNNING = False
 
 
 def _foreground_rect(sw: int, sh: int):
-    """前景視窗的範圍（比例座標）；是她自己的 VTS、最小化、太小、拿不到就回 None。"""
+    """前景視窗的範圍（比例座標）；是她自己的 VTS、桌面、最小化、太小、拿不到就回 None。
+    桌面（Program Manager）以前也算：整個螢幕都是「前景視窗」，她在全螢幕隨機挑點看，像亂晃（2026-10-31 實機）。"""
     try:
         import ctypes
         import ctypes.wintypes as wt
@@ -45,7 +46,9 @@ def _foreground_rect(sw: int, sh: int):
             return None
         buf = ctypes.create_unicode_buffer(256)
         user32.GetWindowTextW(hwnd, buf, 256)
-        if "vtube studio" in (buf.value or "").lower():
+        cls = ctypes.create_unicode_buffer(64)
+        user32.GetClassNameW(hwnd, cls, 64)
+        if "vtube studio" in (buf.value or "").lower() or cls.value in ("Progman", "WorkerW", "Shell_TrayWnd"):
             return None
         r = wt.RECT()
         if not user32.GetWindowRect(hwnd, ctypes.byref(r)) or r.right - r.left < 150 or r.bottom - r.top < 100:
@@ -83,6 +86,7 @@ async def _ai_face_tracking_loop_impl(vts):
     last_mouse = None
     last_win_poll = 0.0
     seen_hotspot_ts = 0.0
+    seen_intent_ts = 0.0
     micro_x = micro_y = micro_until = 0.0
 
     while True:
@@ -111,6 +115,10 @@ async def _ai_face_tracking_loop_impl(vts):
             if hs and hs[2] > seen_hotspot_ts:
                 seen_hotspot_ts = hs[2]
                 gaze.note_hotspot((hs[0], hs[1]), hs[2])
+            gi = vc.gaze_intent   # 視線副腦（Live 看螢幕）挑的
+            if gi and gi["ts"] > seen_intent_ts:
+                seen_intent_ts = gi["ts"]
+                gaze.note_intent(gi["kind"], gi["point"], gi["rect"], gi["ts"])
 
             state = stage.ai_state()
             gaze_mode = (not vc.is_tracking_mouse and not host.IS_SLEEPING and not pe.is_piano_active_and_alive()
@@ -121,6 +129,7 @@ async def _ai_face_tracking_loop_impl(vts):
             elif gaze_mode:
                 vc.target_look_x, vc.target_look_y = look_angles(
                     gaze.update(now, talking=is_playing or state == "TALKING"), vc._vts_win_cx, vc._vts_win_cy)
+                vc.gaze_kind = gaze.kind   # 她現在為什麼看那裡（後台、除錯看）
             else:
                 vc.target_look_x, vc.target_look_y = 0.0, 0.0
 

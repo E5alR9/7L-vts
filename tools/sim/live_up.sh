@@ -19,10 +19,12 @@ sleep 3
 # 確認截圖入口真的換掉了、畫面快取是空的；沒擋住就關掉 7L
 GUARD=$(PYTHONIOENCODING=utf-8 python "$SIM/ex.py" 'import services.screen_capture as sc
 result = [sc.grab_screen.__name__, sc.gdi_capture_screen.__name__, len(getattr(m, "latest_screen_cache", "") or "")]' 2>&1)
-if ! echo "$GUARD" | grep -q "'_no_screen', '_no_screen', 0"; then
+if [ "$SIM_ALLOW_SCREEN" = "1" ]; then
+  echo "👀 這次允許看螢幕（SIM_ALLOW_SCREEN=1），不檢查截圖入口"
+elif ! echo "$GUARD" | grep -q "'_no_screen', '_no_screen', 0"; then
   echo "❌ 截圖沒擋住，立刻關掉 7L：$GUARD"
   curl -s -m 5 -X POST http://127.0.0.1:7860/api/shutdown >/dev/null
   exit 1
 fi
-echo "🙈 截圖入口已擋、畫面快取是空的"
+[ "$SIM_ALLOW_SCREEN" = "1" ] || echo "🙈 截圖入口已擋、畫面快取是空的"
 curl -s -m 10 -X POST http://127.0.0.1:7860/api/switches/toggle -H "Content-Type: application/json" -d '{"key":"IS_STREAM_CHAT_ENABLED","value":true}' -o /dev/null -w "彈幕開關 %{http_code}\n"
