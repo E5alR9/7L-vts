@@ -2388,7 +2388,7 @@ class SevenLMonitorApp {
       <div class="cat-icon">🎬</div>
       <div class="cat-body">
         <div class="cat-title">偵測到影片視窗</div>
-        <div class="cat-desc">《${title}》<br>是否允許 7L 啟動伴看感官串流？</div>
+        <div class="cat-desc">《${this.escapeHtml(title)}》<br>是否允許 7L 啟動伴看感官串流？</div>
         <div class="cat-actions">
           <button class="cat-btn cat-allow" id="btnCompanionAllow">✅ 允許</button>
           <button class="cat-btn cat-deny" id="btnCompanionDeny">❌ 拒絕</button>
@@ -3048,7 +3048,7 @@ class SevenLMonitorApp {
             <span class="${statusTagClass}">${statusText}</span>
           </div>
           <div class="item-time-meta font-mono">
-            <span class="item-time">${record.time_str || ''}</span>
+            <span class="item-time">${this.escapeHtml(record.time_str || '')}</span>
             <span class="item-duration">${record.duration_ms ? record.duration_ms + 'ms' : ''}</span>
           </div>
         </div>

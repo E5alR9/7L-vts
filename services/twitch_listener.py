@@ -55,6 +55,7 @@ def parse_irc_line(line: str):
         "message": m2.group("msg").strip(),
         "badges": tags.get("badges", ""),
         "id": tags.get("id", "") or "",
+        "user_id": tags.get("user-id", "") or "",   # 不會變的數字 ID（登入名可以改）
     }
 
 
@@ -63,11 +64,14 @@ def parse_channels(raw: str) -> list:
     return [c.strip().lower().lstrip("#") for c in re.split(r"[,\s;]+", raw or "") if c.strip()]
 
 
-def build_queue_item(user: str, display: str, message: str, message_id: str = "") -> dict:
-    """Twitch 留言 → 佇列項目（格式在 chat_source.make_chat_item）。顯示名跟登入名不同時叫「顯示名 (@登入名)」；
-    認老爸只信登入名（唯一）。"""
+def build_queue_item(user: str, display: str, message: str, message_id: str = "", user_id: str = "") -> dict:
+    """Twitch 留言 → 佇列項目（格式在 chat_source.make_chat_item）。顯示名跟登入名不同時叫「顯示名 (@登入名)」。
+    認人、認老爸用不會變的數字 ID（user-id 標籤）；登入名可以改、舊名別人能再註冊（2026-10-31 Fable 審查），
+    沒有數字 ID 才退回登入名。"""
     who = f"{display} (@{user})" if display and display.lower() != user.lower() else user
-    return cs.make_chat_item("twitch", who, message, platform_uid=user or "", user=user, message_id=message_id)
+    uid = f"id:{user_id}" if user_id else (user or "")
+    return cs.make_chat_item("twitch", who, message, platform_uid=uid, platform_handle=user or "", user=user,
+                             message_id=message_id)
 
 
 async def twitch_live_worker(input_queue):
@@ -110,7 +114,7 @@ async def twitch_live_worker(input_queue):
                             continue                    # 重連/重送的舊留言，直接丟
                         await input_queue.put(build_queue_item(
                             msg["user"], msg["display"], msg["message"],
-                            message_id=msg.get("id", "")))
+                            message_id=msg.get("id", ""), user_id=msg.get("user_id", "")))
                         try:
                             import services.web_dashboard as wd
                             wd.broadcast_event("twitch_comment", {

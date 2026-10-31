@@ -302,6 +302,17 @@ class TextCleanEngine:
         return res
 
     @classmethod
+    def strip_cross_tag_spans(cls, text: str) -> str:
+        """整句先拿掉可能跨過表情／語氣標籤的整塊（<think>、心想括號、動作括號、程式碼），標籤以外的不動。
+        語氣分段照標籤切組、各組分開清洗：這些整塊被切開後括號不成對，就清不掉、會被念出來（2026-10-31 Fable 審查）。"""
+        if not text:
+            return ""
+        t = cls.RE_THINK_BLOCK.sub('', text)
+        t = cls.RE_PAREN_THINK.sub('', t)
+        t = cls.RE_STAGE_HINTS.sub('', t)
+        return cls.RE_CODE_BLOCKS.sub('', t)
+
+    @classmethod
     def clean_speech_text(cls, text: str) -> str:
         """完整清洗 AI 輸出文字，剔除大腦心想標籤、動作標籤、代碼、系統提示，保留並智慧調校自然標點"""
         if not text:

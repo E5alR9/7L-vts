@@ -126,12 +126,38 @@ def punctuation_at(speech: str, pos: int) -> tuple:
     return None
 
 
+MIN_GROUP_CHARS = 4   # 一組語氣念的字少於這麼多就併進旁邊那組（不單獨念一段）
+
+
+def _visible_len(texts: List[str]) -> int:
+    return len(re.sub(r"[\W_]+", "", "".join(texts)))
+
+
+def _merge_tiny_groups(groups: list) -> list:
+    """「[EXPRESSION: 笑] 嗯 [EXPRESSION: 臉紅] 好啦」以前每換表情就斷：「嗯」自己一段，
+    一段就是一次完整推理（約 2 秒）加品質檢查，太短還容易不合格重抽，一句話多等好幾秒（Fable 審查）。
+    太短的組併進前一組、照前一組的語氣；開頭就太短的併進下一組。"""
+    out = []
+    for key, texts in groups:
+        if out and _visible_len(texts) < MIN_GROUP_CHARS:
+            out[-1][1].extend(texts)
+        elif out and _visible_len(out[-1][1]) < MIN_GROUP_CHARS:
+            out[-1] = (key, out[-1][1] + list(texts))
+        else:
+            out.append((key, list(texts)))
+    return out
+
+
 def build_chunks(raw_text: str, clean_tts: Callable[[str], str], clean_speech: Callable[[str], str],
-                 split: Callable[[str], List[str]]) -> List[tuple]:
+                 split: Callable[[str], List[str]], strip_spans: Callable[[str], str] = None) -> List[tuple]:
     """她的話 → [(要念的一段, 這段的語氣)]。
     語氣一樣的連續幾塊併成一組、各組分開切段（語氣不同的地方一定斷開：以前「過來一下。[悄悄話] 我跟你說」
     併成同一段，整段都變悄悄話）。每段再照那組台詞裡對應位置的句尾標點微調
-    （TTS 清洗會把！換成。，所以看清洗前的台詞）。"""
+    （TTS 清洗會把！換成。，所以看清洗前的台詞）。
+    strip_spans：切組前先對整句拿掉跨過標籤的整塊（心想括號、程式碼、<think>），
+    不然切開後括號不成對、各組清不掉，心想會被念出來（Fable 審查）。"""
+    if strip_spans is not None:
+        raw_text = strip_spans(raw_text or "")
     groups = []
     for p in pieces(raw_text):
         key = (p["emotion"], p["explicit"])
@@ -139,6 +165,7 @@ def build_chunks(raw_text: str, clean_tts: Callable[[str], str], clean_speech: C
             groups[-1][1].append(p["text"])
         else:
             groups.append((key, [p["text"]]))
+    groups = _merge_tiny_groups(groups)
     out = []
     for (emotion, explicit), texts in groups:
         g_text = "".join(texts)

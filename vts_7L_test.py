@@ -217,7 +217,7 @@ from core.memory import (
     get_recent_100_memory_context, get_viewer_profile, save_viewer_profile, record_bot_message,
     get_cloud_knowledge, update_cloud_prompt_field, STREAMER_MIND_BOARD, DEFAULT_CHANNEL_ID,
     get_unified_memory_context, RECENT_BOT_MESSAGES, USER_PROFILE_FILE, is_known_viewer,
-    viewer_key, resolve_viewer_key, note_viewer_seen, viewer_seen_this_session,
+    viewer_key, resolve_viewer_key, note_viewer_seen, viewer_seen_this_session, namesake_of, namesakes,
 )
 
 
@@ -279,7 +279,10 @@ def _note_brain_origin(who: str, said: str = "", name: str = "") -> None:
 def _turn_who(now: float = None) -> str:
     """主腦這一輪用誰的權限：上一輪結束之後進來的人話裡有觀眾的就是觀眾（分不清就照觀眾，老爸再講一次就好）；
     這輪沒有新的人話（系統通知觸發）就照最後一則。"""
-    since = (globals().get("LAST_BRAIN_ANY_TURN_TS") or 0.0) - TURN_INPUT_MARGIN_SEC
+    last_turn = globals().get("LAST_BRAIN_ANY_TURN_TS") or 0.0
+    if not last_turn:   # 還沒有任何一輪結束（剛開機、REST 大腦以前不記）：照最後一則，不要把開機以來的人話全算進來（Fable 審查）
+        return _BRAIN_INPUT_ORIGIN.get("who") or "dad"
+    since = last_turn - TURN_INPUT_MARGIN_SEC
     if any(w == "audience" for ts, w in list(_RECENT_HUMAN_INPUTS) if ts >= since):
         return "audience"
     return _BRAIN_INPUT_ORIGIN.get("who") or "dad"
@@ -290,11 +293,12 @@ def _vision_allowed(who: str = "") -> bool:
     return (who or _turn_who()) != "audience"
 
 
-def _live_reply_target() -> str:
+def _live_reply_target(who: str = "") -> str:
     """Live 主腦這段話對誰講：這輪是觀眾觸發的就對觀眾（公開播出）；VTuber 模式沒有私話對象，一律對觀眾。
-    以前一律標「老爸」：VTuber 模式老爸發聲是關的，主腦的話全被當私話不播；伴侶模式老爸插話時也丟不掉排隊中的觀眾回話。"""
+    以前一律標「老爸」：VTuber 模式老爸發聲是關的，主腦的話全被當私話不播；伴侶模式老爸插話時也丟不掉排隊中的觀眾回話。
+    who：這一輪的權限（_turn_who）；沒給照最後一則。"""
     from core.identity import is_vtuber
-    if is_vtuber() or _BRAIN_INPUT_ORIGIN.get("who") == "audience":
+    if is_vtuber() or (who or _BRAIN_INPUT_ORIGIN.get("who")) == "audience":
         return "audience"
     return "dad"
 
@@ -2153,7 +2157,8 @@ async def play_voice_complete(text, target: str = "dad", raw_actions_text: str =
                     _planned = prosody.build_chunks(
                         source_text,
                         lambda s: TextCleanEngine.clean_for_tts(TextCleanEngine.clean_speech_text(s), apply_phonetics=True),
-                        TextCleanEngine.clean_speech_text, _tts_router.split_for_streaming)
+                        TextCleanEngine.clean_speech_text, _tts_router.split_for_streaming,
+                        strip_spans=TextCleanEngine.strip_cross_tag_spans)
                 except Exception:
                     log_swallowed()
                     _planned = []
@@ -3669,8 +3674,10 @@ async def _handle_say(session, ws_send_lock, fn_call_id, text: str, vts=None) ->
         if raw:
             global LAST_BRAIN_TURN_TS, LAST_SAY_TS
             LAST_BRAIN_TURN_TS = LAST_SAY_TS = time.time()
-            _who = "audience" if _BRAIN_INPUT_ORIGIN.get("who") == "audience" else "dad"
-            spoken = await _speak_brain_turn(vts, input_queue, raw, _who, _live_reply_target(), "live_api",
+            # 這一輪的權限（叫 say 這一刻定下來）：以前照「最後一則」，觀眾紙條的回話剛好碰上老爸開口，
+            # 回話裡的控制標籤就用老爸的權限跑（Fable 審查）
+            _who = _turn_who()
+            spoken = await _speak_brain_turn(vts, input_queue, raw, _who, _live_reply_target(_who), "live_api",
                                              queue_while_singing=True, from_live=True)
             log_print(f"🗣️ [說出口] {raw[:120]}")
             if spoken:
@@ -3733,6 +3740,9 @@ def _unsaid_reply_nudge(text: str, now: float) -> str:
             f"決定不回就不用。]")
 
 
+_RECENT_THOUGHTS = deque(maxlen=20)   # (時間, 她腦內講的話)：提醒到最後還沒 say 時，代念講到結果的那段
+
+
 def _note_inner_voice(text: str) -> None:
     """開著 say 閘時 Live 直接輸出的話：她腦內的聲音，只記不念。日誌和流水帳看得到，不進對話記憶（免得被當成她講過的話）。
     不算「她這輪回完了」（點歌開唱前看的那個）：開著 say 閘時一輪結束常常只是她還沒輪到講，
@@ -3742,6 +3752,7 @@ def _note_inner_voice(text: str) -> None:
     if not re.search(r"\w", t):
         return   # 空的、或只有符號（她沒話想時吐的「|」）：不算她回了，紙條看門狗、不回話偵測照舊
     LAST_BRAIN_TURN_TS = time.time()
+    _RECENT_THOUGHTS.append((LAST_BRAIN_TURN_TS, t[:600]))
     log_print(f"💭 [腦內] {t[:160]}")
     try:
         eventlog.get().record("thought", t[:500], who="live_brain")
@@ -3770,7 +3781,7 @@ async def _handle_invoke_subagent(session, ws_send_lock, _fn_name, _fn_call_id, 
             if LIVE_SAY_GATE and not _more and _sched == types.FunctionResponseScheduling.WHEN_IDLE:
                 if AFTERTHOUGHT_ENABLED:
                     _advisor().note(f"（7L 交辦的結果回來了：{_text[:400]}）")   # 軍師下一輪一起看
-                spawn(_nudge_if_unsaid(_text, time.time(), _requester))
+                spawn(_nudge_if_unsaid(_text, time.time(), _requester, _live_reply_target(_turn_owner)))
         except Exception as _se:
             if _more:
                 return   # 「先答應一聲」換線後不用補（正式結果還會再來）
@@ -3805,7 +3816,7 @@ def _result_mentioned(result_text: str, says: list) -> bool:
     return any(len(_mention_keys(s) & res) >= need for s in says)
 
 
-async def _nudge_if_unsaid(result_text: str, sent_ts: float, requester: str = "") -> None:
+async def _nudge_if_unsaid(result_text: str, sent_ts: float, requester: str = "", reply_to: str = "dad") -> None:
     """開著 say 閘：子智能體的結果要她講，過 SAY_NUDGE_SEC 秒她還沒講到這份結果就提醒（真的結果最多 SAY_NUDGE_TRIES 次）。
     以前這段時間她 say 任何話就算了：查天氣的結果回來時剛好有人送禮、老爸叫她走位，她道謝、回走位，
     天氣就再也沒講（2026-10-31 Fable 看實機日誌）。現在看她講的話有沒有講到這份結果；
@@ -3837,8 +3848,31 @@ async def _nudge_if_unsaid(result_text: str, sent_ts: float, requester: str = ""
         said_other = LAST_SAY_TS >= sent_ts
         log_print(f"👂 [沒開口] 結果交給她 {time.time() - sent_ts:.0f} 秒還沒講到"
                   f"{'（講了別的）' if said_other else ''}，提醒第 {attempt + 1} 次：{(result_text or '')[:50]}")
-        send_brain_slip(f"[系統提示：剛才交辦的結果妳還沒講出口（只在腦內想不算，要呼叫 say 才念得出來），"
+        # 標第幾次：兩次提醒剛好隔 10 秒、全文一樣，第二次被紙條去重吃掉（2026-10-31 實機）
+        send_brain_slip(f"[系統提示（第 {attempt + 1} 次提醒）：剛才交辦的結果妳還沒講出口（只在腦內想不算，要呼叫 say 才念得出來），"
                         f"現在用 say 簡短講給{who}聽：] {(result_text or '')[:500]}")
+    if content:
+        await _say_thought_if_still_unsaid(result_text, sent_ts, reply_to)
+
+
+async def _say_thought_if_still_unsaid(result_text: str, sent_ts: float, reply_to: str) -> None:
+    """提醒到最後她還是只在腦內講結果（2026-10-31 實機：查天氣，三次腦內都講了台北幾度，就是沒 say，老爸什麼都沒聽到）：
+    再等一下，還是沒講就直接念她腦內講到這份結果的那段（是她自己的話，不是系統代講）。"""
+    await asyncio.sleep(SAY_NUDGE_SEC)
+    if is_singing_active() or IS_SLEEPING:
+        return
+    if _result_mentioned(result_text, [t for ts, t in list(_RECENT_SAYS) if ts >= sent_ts]):
+        return
+    thought = next((t for ts, t in reversed(list(_RECENT_THOUGHTS))
+                    if ts >= sent_ts and _result_mentioned(result_text, [t])), "")
+    spoken = TextCleanEngine.clean_speech_text(thought) if thought else ""
+    if not spoken:
+        return
+    log_print(f"🗣️ [代念腦內] 提醒過了她還是只在腦內講結果，直接念她腦內那段：{spoken[:80]}")
+    await speech_queue.put({"text": spoken, "target": reply_to, "raw_text": thought, "private": reply_to == "dad"})
+    _RECENT_SAYS.append((time.time(), spoken))
+    append_to_unified_memory(speaker="7L", target=_owner_name() if reply_to == "dad" else "直播間",
+                             content=spoken, role="assistant", source="live_api")
 
 
 async def _speak_brain_turn(vts, input_queue, text: str, who: str, reply_to: str, source: str,
@@ -3928,7 +3962,10 @@ async def _afterthought(reply: str) -> None:
     _AFTERTHOUGHT["origin_ts"] = origin["ts"]
     owner = _owner_name()
     who = owner if origin.get("who") == "dad" else f"觀眾「{origin.get('name') or '觀眾'}」"
-    prompt = f"{who}說：{origin['said'][-600:]}\n7L 回：{'／'.join(_AFTERTHOUGHT['says'])[-900:]}"
+    _twin = namesake_of(origin.get("name") or "") if origin.get("who") != "dad" else ""
+    # 同名不同帳號：副意識看記憶只看到名字，會說「妳記錯了，他是頭號粉絲」把她帶去認冒牌貨（2026-10-31 實機）
+    _who_note = f"（⚠️ 他跟觀眾「{_twin}」同名，但不是同一個帳號、不是同一個人）" if _twin else ""
+    prompt = f"{who}{_who_note}說：{origin['said'][-600:]}\n7L 回：{'／'.join(_AFTERTHOUGHT['says'])[-900:]}"
     try:
         got = await _advisor().ask(prompt)
     except Exception:
@@ -4000,7 +4037,8 @@ async def _rest_answer_slip(vts, input_queue, slip: str, origin: str) -> None:
 
         await _run_subagent_task(args.get("task_instruction", ""),
                                  {k: args.get(k, "") for k in ("action", "song", "song2", "url")}, _respond,
-                                 who="audience" if origin == "audience" else "")   # REST 一張紙條一張回：誰的紙條就誰的權限
+                                 who=origin if origin in ("dad", "audience") else "")   # REST 一張紙條一張回：誰的紙條就誰的權限
+    # （老爸的紙條以前傳空的，回頭問 _turn_who：REST 不記「一輪結束」，直播間來過一則留言後老爸的紙條全被當觀眾；Fable 審查）
 
 
 async def rest_slip_worker(vts, input_queue):
@@ -4022,6 +4060,9 @@ async def rest_slip_worker(vts, input_queue):
             await _rest_answer_slip(vts, input_queue, prompt, origin)
         except Exception as e:
             log_print(f"⚠️ [REST 大腦] 這張紙條沒回成：{e}")
+        finally:
+            global LAST_BRAIN_ANY_TURN_TS
+            LAST_BRAIN_ANY_TURN_TS = time.time()   # REST 一張紙條就是一輪（_turn_who 才分得出這輪之後進來的人話）
 
 
 async def continuous_live_worker(vts):
@@ -4373,6 +4414,7 @@ async def continuous_live_worker(vts):
                                             chunk_buffer += text_chunk
                                             turn_buffer += text_chunk
                                             
+                                    _who_this_turn = _turn_who()   # 先定這一輪的權限，再記「這輪結束」（記了就看不到這輪進來的人話）
                                     if c.turn_complete:
                                         global LAST_BRAIN_ANY_TURN_TS
                                         LAST_BRAIN_ANY_TURN_TS = time.time()
@@ -4383,7 +4425,7 @@ async def continuous_live_worker(vts):
                                             LAST_BRAIN_TURN_TS = time.time()
                                             usage.note(live_m, True, role="主腦")
                                             # 跟 REST 大腦同一份收尾；標籤照觸發這輪的人的權限跑
-                                            _who = "audience" if _BRAIN_INPUT_ORIGIN.get("who") == "audience" else "dad"
+                                            _who = _who_this_turn
                                             _turn_text = turn_buffer.strip()
                                             if LIVE_SAY_GATE:
                                                 _nudge = _unsaid_reply_nudge(_turn_text, time.time())
@@ -4403,7 +4445,7 @@ async def continuous_live_worker(vts):
                                             if turn_vision and _VISION_STATE.get("busy"):
                                                 _turn_text = _vision_wait_text(_turn_text)   # 還沒看到畫面：只念「我看看～」
                                             _spoken = await _speak_brain_turn(vts, input_queue, _turn_text, _who,
-                                                                              _live_reply_target(), "live_api", from_live=True)
+                                                                              _live_reply_target(_who), "live_api", from_live=True)
                                             if _spoken:
                                                 spawn(_afterthought(_spoken))   # 背後再想一次，有補充就補一句
                                             log_print(f"📝 [黑板紀錄] 7L Live 大腦: {turn_buffer.strip()}")
@@ -5465,7 +5507,7 @@ _PLATFORM_LABEL = {"twitch": "Twitch", "youtube": "YouTube"}   # 其他（tiktok
 
 
 def add_to_streamer_mind_board(user_display: str, unique_id: str, content: str, source: str = "tiktok",
-                               handled: bool = False, note: str = "", account_key: str = ""):
+                               handled: bool = False, note: str = "", account_key: str = "", handle_key: str = ""):
     """將接收到的彈幕/留言/事件寫入 7L 記憶腦袋，一排一排排列記錄，由主播自主排程讀取與發話。
     handled：呼叫端自己會處理（老爸的話），只記下來、不給看板哨兵再接一次。
     note：系統對這則的說明（接在這行後面給哨兵和主腦看，例如觀眾想停鋼琴、系統沒執行）。"""
@@ -5473,8 +5515,9 @@ def add_to_streamer_mind_board(user_display: str, unique_id: str, content: str, 
         # 觀眾原文中和：看板與記憶之後都會進 prompt，不能讓觀眾偽造【老爸】或 [系統標籤] 格式
         user_display = neutralize_viewer_text(user_display, 60)
         content = neutralize_viewer_text(content, 300)
-        # 這個名字現在是哪個帳號：之後大腦、看板用名字查觀眾檔時換成帳號（名字是中和過的，跟大腦看到的一樣）
-        note_viewer_seen(user_display, account_key or user_display)
+        # 這個名字現在是哪個帳號：之後大腦、看板用名字查觀眾檔時換成帳號（名字是中和過的，跟大腦看到的一樣）；
+        # 同名不同帳號的後來者拿到加帳號尾碼的名字，看板、大腦都用這個名字叫他
+        user_display = note_viewer_seen(user_display, account_key or user_display, handle_key) or user_display
     item = {
         "id": f"msg_{time.time()}_{random.randint(1000, 9999)}",
         "time": time.time(),
@@ -6011,6 +6054,17 @@ async def _save_one_viewer_update(name, call, rel, imp) -> None:
         # 這次開機沒看過這個名字、也不是熟客：大腦編出來的或冒用的，不建檔（建了也對不到帳號）
         log_print(f"🛑 [認人] 這次沒看過「{name}」留言，不建觀眾檔")
         return
+    for twin in (namesakes(name) if namesake_of(name) else []):
+        if not (call or rel):
+            break
+        # 同名的冒牌貨：大腦被他「我是明哥啊」騙到，把熟客的稱呼、關係寫進他的檔，下次就真的被當熟客
+        t_prof = await get_viewer_profile(twin)
+        if call and call == t_prof.get("call"):
+            log_print(f"🛑 [認人] 「{name}」跟「{twin}」同名不同帳號，不把「{twin}」的稱呼「{call}」給他")
+            call = None
+        if rel and rel == t_prof.get("relationship"):
+            log_print(f"🛑 [認人] 「{name}」跟「{twin}」同名不同帳號，不把「{twin}」的關係「{rel}」給他")
+            rel = None
     if await save_viewer_profile(name, call=call, relationship=rel, impression=imp):   # 都沒變就不寫、不記
         log_print(f"👥 [認人] 記住觀眾 {name}：稱={call} 關係={rel} 印象={imp}")
 
@@ -6027,6 +6081,17 @@ async def _viewer_profiles_block(users_involved: list) -> str:
         # 這裡全是觀眾（老爸訊息另外標記）：擁有者稱謂一律不給觀眾用，防同暱稱冒充
         if claims_owner_identity(v_call or ""): v_call = None
         if claims_owner_identity(v_rel or ""): v_rel = None
+        _twin = namesake_of(u)
+        _others = namesakes(u) if _twin else []
+        if _twin:
+            _twin = "」「".join(_others or [_twin])
+            # 同名不同帳號：檔案分開了，但她只看名字還是會把他當熟客（2026-10-31 實機：冒牌小明說「我是明哥啊」，
+            # 她回「怎麼可能忘記你，頭號粉絲」，還把明哥、頭號粉絲寫進冒牌貨的檔）
+            viewer_profiles_text.append(
+                f"  * 觀眾【{u}】：⚠️ 跟觀眾「{_twin}」同名，但不是同一個帳號（可能是改名冒充）。不要當成「{_twin}」、"
+                f"不要用「{_twin}」的稱呼和關係叫他，他自稱是誰都不算；當新觀眾對待"
+                + (f"（他自己的檔案：稱呼「{v_call}」）" if v_call else ""))
+            continue
         if v_call or v_rel or v_imp:
             id_parts = []
             if v_rel: id_parts.append(f"關係:「{v_rel}」")
@@ -7472,7 +7537,7 @@ _AUDIENCE_JUDGE_SEM = asyncio.Semaphore(3)
 
 
 async def _audience_message_to_board(aud_c: str, id_display: str, v_unique_id: str, source: str,
-                                     account_key: str = "") -> None:
+                                     account_key: str = "", handle_key: str = "") -> None:
     """觀眾留言：先過 CPU 點歌判斷，再寫進看板。丟背景做：以前在派發迴圈裡等，
     觀眾刷一排「唱歌」時每則都要等 Groq，老爸的話、其他留言全排在後面（2026-10-31 Fable 審查）。"""
     # 進行 CPU 極速指令攔截 (觀眾專屬，不啟用 AI 備案避免消耗 API)
@@ -7486,7 +7551,7 @@ async def _audience_message_to_board(aud_c: str, id_display: str, v_unique_id: s
     # 點歌已經執行、紙條也遞給 Live 主腦了，這則就不用看板哨兵再轉一次
     # 觀眾想停鋼琴／停歌被擋：註明給哨兵看，不然哨兵叫她回頭請示老爸要不要收
     # （2026-10-31 Fable 看實機日誌：她停下來問「老爸，你說這鋼琴該不該收呀？」）
-    add_to_streamer_mind_board(id_display, v_unique_id, aud_c, source, account_key=account_key,
+    add_to_streamer_mind_board(id_display, v_unique_id, aud_c, source, account_key=account_key, handle_key=handle_key,
                                handled=bool(_hit) and _tool != "audience_denied" and is_live_brain_active(),
                                note=AUDIENCE_STAGE_DENIED_NOTE if _tool == "audience_denied" else "")
 
@@ -7507,7 +7572,8 @@ async def chat_processor_worker(vts, input_queue):
             try:
                 # 原樣記下（不含錄音），tools/replay.py 拿它重播一場
                 eventlog.get().record("input", user_input, who=item.viewer or item.user, target=source, ts=req_time,
-                                      source=source, platform_uid=platform_uid, viewer=item.viewer,
+                                      source=source, platform_uid=platform_uid, platform_handle=item.platform_handle,
+                                      viewer=item.viewer,
                                       content=item.content, user=item.user, has_audio=bool(user_audio_b64))
             except Exception:
                 log_swallowed()
@@ -7619,7 +7685,7 @@ async def chat_processor_worker(vts, input_queue):
 
                 #  判斷是否為老爸帳號在直播間打字 (最高特權立即搶先處理)
                 #  只認監聽器給的平台帳號（OWNER_ACCOUNT_IDS）；暱稱、文字裡的 (@id) 觀眾都能偽造
-                is_dad_account = is_owner_account(platform_uid)
+                is_dad_account = is_owner_account(platform_uid, item.platform_handle)
 
                 # VTuber 模式：擁有者公開帳號留言視同觀眾（無特權；插話請走 /api/interject）
                 if is_dad_account and operator_input_enabled():
@@ -7632,8 +7698,11 @@ async def chat_processor_worker(vts, input_queue):
                     )
                 else:
                     # 觀眾檔照平台帳號認人（監聽器給的 platform_uid，觀眾改不到）；沒帳號才用名字
+                    # 數字 ID 是 2026-10-31 才開始用的：以前用 @帳號名當 key 的觀眾檔，第一次配到數字 ID 時接過來
+                    _handle = item.platform_handle
                     spawn(_audience_message_to_board(aud_c, id_display, v_unique_id, source,
-                                                     account_key=viewer_key(source, platform_uid, id_display)))
+                                                     account_key=viewer_key(source, platform_uid, id_display),
+                                                     handle_key=viewer_key(source, _handle, "") if _handle and _handle != platform_uid else ""))
 
             # -------------------------------------------------------------
             #  擁有者公開插話（owner_interject）：走觀眾軌道公開播出，不私聊、走觀眾工具牆

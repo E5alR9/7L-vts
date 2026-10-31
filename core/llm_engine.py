@@ -279,7 +279,7 @@ async def live_one_shot(system_text: str, prompt: str, pool: List[str], image_jp
             continue
         t0 = time.perf_counter()
         try:
-            client = genai.Client(api_key=g_key)
+            # （以前這裡多建一個 genai.Client 沒用到也沒關：視線副腦每 3 秒一次，一天幾萬個連線池丟給 GC；Fable 審查）
             cfg = types.LiveConnectConfig(
                 response_modalities=[types.Modality.AUDIO],
                 output_audio_transcription=types.AudioTranscriptionConfig(),
@@ -308,8 +308,24 @@ async def live_one_shot(system_text: str, prompt: str, pool: List[str], image_jp
         except Exception as e:
             usage.note(model, False, default_role="Live 單次", rate_limited=usage.is_rate_limited(e),
                        ms=(time.perf_counter() - t0) * 1000)
-            report_gemini_key_error(g_key, e, model)
+            if not report_gemini_key_error(g_key, e, model):
+                _log_one_shot_error(e)
     return ""
+
+
+_ONE_SHOT_ERR_LOGGED: dict = {}   # 錯誤種類 → 上次記日誌的時間
+
+
+def _log_one_shot_error(e: Exception) -> None:
+    """不是限流的錯（斷網、DNS、連線被拒、逾時）以前完全不記：Live 壞掉時副腦、哨兵每幾秒失敗一次也看不出來。
+    同一種錯一分鐘記一次（Fable 審查）。"""
+    from core import usage
+    kind = type(e).__name__
+    now = time.time()
+    if now - _ONE_SHOT_ERR_LOGGED.get(kind, 0.0) < 60:
+        return
+    _ONE_SHOT_ERR_LOGGED[kind] = now
+    log_print(f"⚠️ [Live 單次] {usage.current_role('Live 單次')} 沒問到：{kind} {str(e)[:100]}")
 
 
 

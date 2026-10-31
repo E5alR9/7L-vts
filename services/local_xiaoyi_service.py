@@ -490,8 +490,21 @@ def apply_voice_prosody(audio, sr: int, pitch: float = 0.0, gain_db: float = 0.0
     if abs(gain_db) >= 0.1:
         out = out * (10 ** (gain_db / 20.0))
         if gain_db > 0:
-            out = np.tanh(out * 1.2) / np.tanh(1.2)   # 柔性限幅：大聲但不削波
+            out = _soft_limit(out)
     return out.astype(np.float32)
+
+
+_LIMIT_KNEE = 0.6      # 這以下原樣放大
+_LIMIT_CEILING = 0.95  # 峰值最多到這裡（後面「峰值超過 0.95 整段縮小」就不會觸發）
+
+
+def _soft_limit(x):
+    """大聲時只壓高的地方：膝點以下照放大、以上柔性壓到 0.95 內。
+    以前用 tanh(x*1.2)/tanh(1.2)：小聲的地方多放大 3 dB、峰值還是會到 1.2，
+    接著「峰值超過 0.95 整段縮回 0.92」又把整段縮回去，生氣、[大聲] 大多被抵銷（Fable 審查）。"""
+    a = np.abs(x)
+    span = _LIMIT_CEILING - _LIMIT_KNEE
+    return np.where(a > _LIMIT_KNEE, np.sign(x) * (_LIMIT_KNEE + span * np.tanh((a - _LIMIT_KNEE) / span)), x)
 
 
 def synthesize_xiaoyi_bytes(text: str, speed: float = 1.0, pitch: float = 0.0, gain_db: float = 0.0) -> bytes:

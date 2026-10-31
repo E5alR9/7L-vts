@@ -351,7 +351,7 @@ def _afterthought_ns(reply_text, origin, later_origin=None, singing=False, talki
           "AFTERTHOUGHT_MAX_AGE_SEC": 60.0, "_AFTERTHOUGHT": {"origin_ts": 0.0, "says_ts": 0.0, "says": []},
           "_BRAIN_INPUT_ORIGIN": dict(origin), "_AWAITING_RESULTS": {},
           "IS_SLEEPING": False, "is_singing_active": lambda: singing, "pe": type("P", (), {"is_piano_active": False}),
-          "_owner_name": lambda: "E5", "usage": type("U", (), {"as_role": staticmethod(lambda r: _Role())}),
+          "_owner_name": lambda: "E5", "namesake_of": lambda n: "", "namesakes": lambda n: [], "usage": type("U", (), {"as_role": staticmethod(lambda r: _Role())}),
           "send_brain_slip": slips.append,
           "log_print": lambda *a: None, "log_swallowed": lambda *a: None, "asyncio": asyncio,
           "AFTERTHOUGHT_SPEAK_WAIT_SEC": 60.0,
@@ -575,7 +575,7 @@ def test_unfinished_turn_is_salvaged_after_a_disconnect():
     # 收話迴圈斷掉時，老爸剛說的、她說到一半的以前整段丟掉（2026-10-27）
     slips = []
     import time as _t
-    ns = {"to_tw": lambda t: t, "_brain_text_for_memory": lambda t: t.strip(), "_owner_name": lambda: "E5", "_RUNNING_SUBAGENT_TASKS": set(),
+    ns = {"to_tw": lambda t: t, "_brain_text_for_memory": lambda t: t.strip(), "_owner_name": lambda: "E5", "namesake_of": lambda n: "", "namesakes": lambda n: [], "_RUNNING_SUBAGENT_TASKS": set(),
           "time": _t, "_BRAIN_INPUT_ORIGIN": {"said": "講一個小狐狸的故事", "ts": _t.time() - 3},
           "log_print": lambda *a: None, "send_brain_slip": lambda *a, **k: slips.append((a, k))}
     exec(compile(ast.Module(body=[_fn("_salvage_unfinished_turn")], type_ignores=[]), "s", "exec"), ns)

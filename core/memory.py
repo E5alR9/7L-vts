@@ -136,11 +136,17 @@ _CLOUD_PROFILE_MISSES = set()   # 這次開機問過雲端、雲端也沒有的�
 # 以前觀眾檔用顯示名稱當 key：暱稱誰都能改，改成熟客的名字就繼承熟客的稱呼、關係、印象和舊對話，
 # 大腦替他寫的 [VIEWER_UPDATE] 還會蓋掉熟客的檔（Fable 審查）。現在 key 是「平台:帳號」（tiktok:unique_id、
 # twitch:login、youtube:channel_id），名字只是檔案裡的一欄。大腦、看板、提示詞照樣用名字講話：
-# 這次開機看過的「名字 → 帳號」對照表（最新的為準）把名字換成帳號；同名的冒牌貨查到的是他自己的空檔案。
-# 沒有帳號的（舊資料對不上帳號、測試沒帶帳號）照舊用名字當 key；那位觀眾下次帶帳號出現時把舊檔接過去。
+# 這次開機看過的「名字 → 帳號」對照表把名字換成帳號；同名的冒牌貨查到的是他自己的空檔案。
+# 同一個名字這次開機已經是別的帳號：後來的那位看板、大腦看到的名字後面加帳號尾碼（「小明(#ab12)」），
+# 大腦替誰寫 [VIEWER_UPDATE] 才分得開（以前名字表最新的為準：真小明的更新會寫進剛講話的冒牌小明；Fable 審查）。
+# 沒有帳號的（舊資料對不上帳號、測試沒帶帳號）照舊用名字當 key。舊的名字檔不會因為「有帳號用了這個名字」就被接走
+# （暱稱誰都能改：以前冒牌貨改名成「阿呆」講一句，就永久拿走阿呆的檔和舊對話；Fable 審查），
+# 只記進待確認清單（viewer_adopt_pending_<模式>.json），老爸確認後用 tools/migrate_viewer_keys.py --adopt 接。
 VIEWER_PLATFORMS = ("tiktok", "twitch", "youtube")
 _DISPLAY_TO_KEY: Dict[str, str] = {}
 _DISPLAY_TO_KEY_MAX = 5000
+VIEWER_ADOPT_PENDING_FILE = mode_path("viewer_adopt_pending.json")
+_NAMESAKE_OF: Dict[str, str] = {}   # 加了帳號尾碼的名字 → 原本的名字（同名的另一個人）
 
 
 def viewer_key(source: str, platform_uid: str, display: str) -> str:
@@ -170,44 +176,136 @@ def viewer_seen_this_session(name_or_key: str) -> bool:
     return k in _DISPLAY_TO_KEY or k in _DISPLAY_TO_KEY.values()
 
 
-def note_viewer_seen(display: str, key: str) -> None:
-    """觀眾留言進來時記下「名字 → 帳號」；帶帳號第一次出現、又有同名的舊檔（用名字當 key）就把舊檔接過去。"""
-    display, key = (display or "").strip(), (key or "").strip()
-    if not display or not key:
-        return
+def namesake_of(name: str) -> str:
+    """這個名字是「跟別人同名、加了帳號尾碼」的話，回原本的名字（他跟叫這個名字的那位不是同一個人）；不是回 ""。"""
+    return _NAMESAKE_OF.get((name or "").strip(), "")
+
+
+def namesakes(name: str) -> list:
+    """跟這個名字同名的其他人（這次開機看過的、不同帳號）：原本的名字和其他加了尾碼的。三個人同名時，
+    只說「他不是小明」不夠，她會把冒牌貨當成另一個加了尾碼的熟客（2026-10-31 實機）。"""
+    n = (name or "").strip()
+    base = _NAMESAKE_OF.get(n, n)
+    group = [base] + [t for t, b in _NAMESAKE_OF.items() if b == base]
+    me = _DISPLAY_TO_KEY.get(n)
+    return [d for d in dict.fromkeys(group) if d != n and _DISPLAY_TO_KEY.get(d) not in (None, me)]
+
+
+def _remember_display(display: str, key: str) -> None:
     if len(_DISPLAY_TO_KEY) >= _DISPLAY_TO_KEY_MAX and display not in _DISPLAY_TO_KEY:
         _DISPLAY_TO_KEY.pop(next(iter(_DISPLAY_TO_KEY)))
     _DISPLAY_TO_KEY[display] = key
+
+
+def _namesake_tag(display: str, key: str) -> str:
+    uid = key.split(":", 1)[1]
+    tagged = f"{display}(#{uid[-4:]})"
+    if _DISPLAY_TO_KEY.get(tagged) not in (None, key):
+        tagged = f"{display}(#{uid})"
+    return tagged
+
+
+def _namesake_rank(key: str, display: str) -> int:
+    """同名的兩個帳號，誰比較「本來就是這個名字的熟客」：有檔、檔裡記過這個名字、又有稱呼或關係的最高。"""
+    try:
+        prof = _load_viewer_profiles().get(key)
+    except Exception:
+        return 0
+    if not isinstance(prof, dict):
+        return 0
+    named = display in (prof.get("names") or []) or display in (prof.get("name"), prof.get("tiktok_name"))
+    known = bool(prof.get("call") or prof.get("relationship"))
+    return (2 if named else 0) + (1 if known else 0)
+
+
+def note_viewer_seen(display: str, key: str, handle_key: str = "") -> str:
+    """觀眾留言進來時記下「名字 → 帳號」，回這則要用的名字（同名不同帳號的後來者加帳號尾碼）。
+    名字跟帳號跟上次一樣就什麼都不做（以前每則留言都讀一次整個觀眾檔；Fable 審查）。
+    handle_key：同一個人的「平台:@帳號名」（帳號 key 改用數字 ID 之前的舊 key），有舊檔就接過來。"""
+    display, key = (display or "").strip(), (key or "").strip()
+    if not display or not key:
+        return display
+    prev = _DISPLAY_TO_KEY.get(display)
+    if prev == key:
+        return display
+    if prev is not None and is_account_key(prev) and not is_account_key(key):
+        # 這次只有名字（沒帶帳號的事件）、這個名字這次開機已經對到帳號：照那個帳號，不要蓋掉
+        # （以前蓋成名字 key：熟客之後的 [VIEWER_UPDATE] 寫進名字 key 的舊檔；2026-10-31 實機）
+        return display
+    if prev is not None and is_account_key(prev) and is_account_key(key):
+        # 誰留著原本的名字：照誰本來就是叫這個名字的熟客，不是誰先講話（2026-10-31 實機：路人小明先講話，
+        # 熟客小明後來才到，結果熟客被加尾碼、被當成冒充的新觀眾）
+        if _namesake_rank(key, display) > _namesake_rank(prev, display):
+            prev_tag = _namesake_tag(display, prev)
+            _remember_display(prev_tag, prev)
+            _NAMESAKE_OF[prev_tag] = display
+            _remember_display(display, key)
+            log_print(f"👥 [認人] 「{display}」是熟客 {key} 的名字：先前用這個名字的 {prev} 改顯示成「{prev_tag}」")
+            _note_account_name(display, key, handle_key)
+            return display
+        tagged = _namesake_tag(display, key)
+        if tagged not in _DISPLAY_TO_KEY:
+            log_print(f"👥 [認人] 「{display}」這次開機已經是 {prev}，{key} 也叫這個名字：他顯示成「{tagged}」")
+        _remember_display(tagged, key)
+        _NAMESAKE_OF[tagged] = display
+        _note_account_name(display, key, handle_key)
+        return tagged
+    _remember_display(display, key)
     if is_account_key(key):
-        _adopt_legacy_profile(display, key)
+        _note_account_name(display, key, handle_key)
+    return display
 
 
-def _adopt_legacy_profile(display: str, key: str) -> None:
+def _note_account_name(display: str, key: str, handle_key: str = "") -> None:
+    """帳號用了一個名字：他的檔記下新名字；有同名的舊檔（用名字當 key）不自動接，記進待確認清單。
+    帳號 key 是數字 ID、還沒有檔，而他的 @帳號名有舊檔：接過來（2026-10-31：@名可以改、舊名別人能再註冊，
+    key 改用不會變的數字 ID）。同一個 @名之後換成別的數字 ID 就接不到了（舊檔已經搬走）。"""
     try:
         profiles = _load_viewer_profiles(strict=True)
     except _UnreadableFile:
         return
+    changed = False
+    if (key not in profiles and handle_key and handle_key != key and is_account_key(handle_key)
+            and isinstance(profiles.get(handle_key), dict)):
+        plat, uid = key.split(":", 1)
+        profiles[key] = {**profiles.pop(handle_key), "platform": plat, "uid": uid, "handle": handle_key.split(":", 1)[1]}
+        changed = True
+        log_print(f"👥 [認人] {handle_key} 的觀眾檔接到不會變的數字 ID {key}")
+        if db_module.db is not None:
+            _schedule_on_loop(db_module.db.collection("viewer_profiles").document(key).set(
+                {k: v for k, v in profiles[key].items() if v is not None}, merge=True))
+        if _RAG is not None and hasattr(_RAG, "retag_viewer"):
+            _schedule_on_loop(_RAG.retag_viewer(handle_key, key))
     if key in profiles:
         names = profiles[key].get("names") or []
         if display not in names:   # 改了名字：記下新名字（顯示用最新的）
             profiles[key]["names"] = (names + [display])[-5:]
             profiles[key]["name"] = profiles[key]["tiktok_name"] = display
-            _dump_json_atomic(VIEWER_PROFILES_FILE, profiles)
-        return
+            changed = True
+    if changed:
+        _dump_json_atomic(VIEWER_PROFILES_FILE, profiles)
     legacy = profiles.get(display)
-    if not isinstance(legacy, dict) or is_account_key(display):
+    if isinstance(legacy, dict) and not is_account_key(display):
+        _add_adopt_pending(display, key)
+
+
+def _add_adopt_pending(display: str, key: str) -> None:
+    try:
+        with open(VIEWER_ADOPT_PENDING_FILE, encoding="utf-8") as f:
+            pending = json.load(f)
+        if not isinstance(pending, list):
+            pending = []
+    except (OSError, ValueError):
+        pending = []
+    if any(p.get("name") == display and p.get("key") == key for p in pending if isinstance(p, dict)):
         return
-    plat, uid = key.split(":", 1)
-    adopted = {**legacy, "name": display, "tiktok_name": display, "names": [display], "platform": plat, "uid": uid}
-    profiles[key] = adopted
-    profiles.pop(display, None)
-    _dump_json_atomic(VIEWER_PROFILES_FILE, profiles)
-    log_print(f"👥 [認人] 舊觀眾檔「{display}」接到帳號 {key}")
-    if db_module.db is not None:
-        cloud = {k: v for k, v in adopted.items() if v is not None}
-        _schedule_on_loop(db_module.db.collection("viewer_profiles").document(key).set(cloud, merge=True))
-    if _RAG is not None and hasattr(_RAG, "retag_viewer"):
-        _schedule_on_loop(_RAG.retag_viewer(display, key))
+    pending.append({"name": display, "key": key, "seen": datetime.now(ZoneInfo("Asia/Taipei")).strftime("%Y-%m-%d %H:%M")})
+    try:
+        _dump_json_atomic(VIEWER_ADOPT_PENDING_FILE, pending[-200:])
+    except Exception:
+        log_swallowed()
+    log_print(f"👥 [認人] 帳號 {key} 用了舊觀眾檔「{display}」的名字：不自動接（可能是冒牌貨），記進待確認清單；"
+              f"確定是同一個人再用 tools/migrate_viewer_keys.py --adopt 接")
 
 
 async def get_viewer_profile(tiktok_name: str) -> dict:
@@ -299,6 +397,7 @@ async def save_viewer_profile(tiktok_name: str, call: str = None, relationship: 
     if before == {k: profile.get(k) for k in before} and _seen_recently(profile.get("last_seen", ""), now):
         return False
     profile["last_seen"] = now.strftime("%Y-%m-%d %H:%M")
+    key = resolve_viewer_key(tiktok_name)   # 上面 await 的時候這個名字可能剛對到帳號：照最新的寫，別讓名字 key 的檔復活
     _store_viewer_profile_local(key, profile)
     if db_module.db is not None:
         try:

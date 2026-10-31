@@ -57,13 +57,32 @@ def test_a_turn_with_any_viewer_input_runs_with_viewer_authority():
     assert ns["_turn_who"]() == "dad" and ns["_vision_allowed"]()
 
 
+def test_before_any_turn_ends_only_the_last_input_counts():
+    """REST 大腦以前不記「一輪結束」：直播間來過一則留言，老爸之後的話全被當觀眾（叫她看螢幕被擋；Fable 審查）。"""
+    ns = _turn_ns()
+    ns["_note_brain_origin"]("audience", "哈囉", "路人")
+    ns["_note_brain_origin"]("dad", "幫我看一下螢幕")
+    assert ns["_turn_who"]() == "dad" and ns["_vision_allowed"]()
+
+
+def test_say_and_turn_end_use_this_turns_authority_and_rest_passes_its_own():
+    say = _src("_handle_say")
+    assert '_who = "audience" if _BRAIN_INPUT_ORIGIN.get("who") == "audience" else "dad"' not in MAIN   # 不再照最後一則
+    assert "_who = _turn_who()" in say and "_live_reply_target(_who)" in say
+    live = _src("continuous_live_worker")
+    assert live.index("_who_this_turn = _turn_who()") < live.index("LAST_BRAIN_ANY_TURN_TS = time.time()")
+    assert "_who = _who_this_turn" in live and "_live_reply_target(_who)" in live
+    assert 'who=origin if origin in ("dad", "audience") else ""' in _src("_rest_answer_slip")
+    assert "finally:\n            global LAST_BRAIN_ANY_TURN_TS\n            LAST_BRAIN_ANY_TURN_TS = time.time()" in _src("rest_slip_worker")
+
+
 def test_subagent_uses_the_authority_fixed_when_the_brain_called_it():
     """子智能體以前做的時候才看「最後一則是誰」，交辦後換人講話權限就跟著換。"""
     handle = _src("_handle_invoke_subagent")
     assert "_turn_owner = _turn_who()" in handle and "who=_turn_owner" in handle
     run = _src("_run_subagent_task")
     assert '_who = who or _BRAIN_INPUT_ORIGIN["who"]' in run and "not _vision_allowed(who)" in run
-    assert 'who="audience" if origin == "audience" else ""' in _src("_rest_answer_slip")
+    assert 'who=origin if origin in ("dad", "audience") else ""' in _src("_rest_answer_slip")
 
 
 def test_viewer_cannot_make_her_look_at_dads_screen():
@@ -109,30 +128,55 @@ def test_viewer_profiles_are_keyed_by_platform_account(tmp_path, monkeypatch):
     monkeypatch.setattr(mem.db_module, "db", None)
     assert mem.viewer_key("tiktok_gift", "jaded_jjj", "J") == "tiktok:jaded_jjj"
     assert mem.viewer_key("tiktok", "", "路人") == "路人"          # 沒帳號照舊用名字
-    mem.note_viewer_seen("J", "tiktok:jaded_jjj")
+    assert mem.note_viewer_seen("J", "tiktok:jaded_jjj") == "J"
     assert asyncio.run(mem.get_viewer_profile("J"))["call"] == "阿J" and mem.is_known_viewer("J")
-    mem.note_viewer_seen("J", "tiktok:impostor99")                # 冒牌貨改名成 J
-    assert asyncio.run(mem.get_viewer_profile("J"))["call"] is None and not mem.is_known_viewer("J")   # 冒牌貨拿不到熟客的稱呼
-    asyncio.run(mem.save_viewer_profile("J", call="我才是J", relationship="頭號粉絲"))
+    fake = mem.note_viewer_seen("J", "tiktok:impostor99")         # 冒牌貨改名成 J：看板、大腦看到的是加尾碼的名字
+    assert fake == "J(#or99)"
+    assert asyncio.run(mem.get_viewer_profile(fake))["call"] is None and not mem.is_known_viewer(fake)   # 冒牌貨拿不到熟客的稱呼
+    assert asyncio.run(mem.get_viewer_profile("J"))["call"] == "阿J"                                       # 「J」還是熟客
+    asyncio.run(mem.save_viewer_profile(fake, call="我才是J", relationship="頭號粉絲"))
+    asyncio.run(mem.save_viewer_profile("J", impression="今天也很準時"))   # 大腦替真的 J 寫的，寫進熟客的檔
     data = json.loads(f.read_text(encoding="utf-8"))
-    assert data["tiktok:jaded_jjj"]["call"] == "阿J"              # 熟客的檔沒被蓋
+    assert data["tiktok:jaded_jjj"]["call"] == "阿J" and data["tiktok:jaded_jjj"]["impression"] == "今天也很準時"
     assert data["tiktok:impostor99"]["call"] == "我才是J" and data["tiktok:impostor99"]["uid"] == "impostor99"
 
 
-def test_legacy_name_profile_moves_to_the_account_the_first_time_it_shows_up(tmp_path, monkeypatch):
+def test_legacy_name_profile_is_not_handed_to_whoever_takes_the_name(tmp_path, monkeypatch):
+    """暱稱誰都能改：帳號用了舊觀眾檔的名字不自動接走（以前冒牌貨改名成「阿呆」講一句就永久拿走阿呆的檔；Fable 審查），
+    記進待確認清單；同一個帳號、同一個名字再講話不再讀檔。"""
     import json
     import core.memory as mem
     f = tmp_path / "viewers.json"
+    pend = tmp_path / "pending.json"
     f.write_text(json.dumps({"阿呆": {"tiktok_name": "阿呆", "call": "呆呆", "impression": "說活著就開罵"}},
                             ensure_ascii=False), encoding="utf-8")
     monkeypatch.setattr(mem, "VIEWER_PROFILES_FILE", str(f))
+    monkeypatch.setattr(mem, "VIEWER_ADOPT_PENDING_FILE", str(pend))
     monkeypatch.setattr(mem, "_DISPLAY_TO_KEY", {})
     monkeypatch.setattr(mem.db_module, "db", None)
     monkeypatch.setattr(mem, "_RAG", None)
-    mem.note_viewer_seen("阿呆", "tiktok:adai_real")
+    mem.note_viewer_seen("阿呆", "tiktok:who_knows")
     data = json.loads(f.read_text(encoding="utf-8"))
-    assert "阿呆" not in data and data["tiktok:adai_real"]["call"] == "呆呆" and data["tiktok:adai_real"]["names"] == ["阿呆"]
-    mem.note_viewer_seen("阿呆二號", "tiktok:adai_real")          # 他改名：記下新名字
+    assert data["阿呆"]["call"] == "呆呆" and "tiktok:who_knows" not in data              # 舊檔還在、沒被搬走
+    assert asyncio.run(mem.get_viewer_profile("阿呆"))["call"] is None                    # 這個帳號拿不到舊檔的稱呼
+    assert json.loads(pend.read_text(encoding="utf-8"))[0] | {"seen": ""} == {"name": "阿呆", "key": "tiktok:who_knows", "seen": ""}
+    reads = []
+    monkeypatch.setattr(mem, "_load_viewer_profiles", lambda strict=False: reads.append(1) or {})
+    mem.note_viewer_seen("阿呆", "tiktok:who_knows")
+    assert reads == []                                                                     # 一樣的名字、帳號不再讀檔
+
+
+def test_a_regular_who_renames_gets_the_new_name_recorded(tmp_path, monkeypatch):
+    import json
+    import core.memory as mem
+    f = tmp_path / "viewers.json"
+    f.write_text(json.dumps({"tiktok:adai_real": {"name": "阿呆", "names": ["阿呆"], "call": "呆呆"}}, ensure_ascii=False),
+                 encoding="utf-8")
+    monkeypatch.setattr(mem, "VIEWER_PROFILES_FILE", str(f))
+    monkeypatch.setattr(mem, "VIEWER_ADOPT_PENDING_FILE", str(tmp_path / "pending.json"))
+    monkeypatch.setattr(mem, "_DISPLAY_TO_KEY", {})
+    monkeypatch.setattr(mem.db_module, "db", None)
+    mem.note_viewer_seen("阿呆二號", "tiktok:adai_real")
     data = json.loads(f.read_text(encoding="utf-8"))
     assert data["tiktok:adai_real"]["name"] == "阿呆二號" and data["tiktok:adai_real"]["names"] == ["阿呆", "阿呆二號"]
 
@@ -148,3 +192,56 @@ def test_rag_looks_up_a_regulars_lines_by_account():
     import services.rag_memory_service as rs
     assert rs.viewer_where("tiktok:jaded_jjj") == {"$and": [{"viewer_key": "tiktok:jaded_jjj"}, {"source": "user"}]}
     assert 'meta["viewer_key"] = resolve_viewer_key(viewer)' in inspect.getsource(mem.rag_memory_entry)
+
+
+def test_namesake_is_flagged_to_the_brain_and_cannot_inherit_the_regulars_title(monkeypatch):
+    """2026-10-31 實機：冒牌小明說「我是明哥啊」，她回「怎麼可能忘記你，頭號粉絲」，還把明哥寫進冒牌貨的檔。"""
+    import core.memory as mem
+    saved = []
+    profiles = {"小明": {"call": "明哥", "relationship": "頭號粉絲"}, "小明(#r_99)": {}}
+
+    async def get_prof(n):
+        return dict(profiles.get(n, {}))
+
+    async def save(n, call=None, relationship=None, impression=None):
+        saved.append((n, call, relationship, impression))
+        return True
+    ns = load_main("_save_one_viewer_update", "_viewer_profiles_block", log_print=lambda *a: None,
+                   viewer_seen_this_session=lambda n: True, is_known_viewer=lambda n: True,
+                   namesake_of=lambda n: "小明" if n == "小明(#r_99)" else "", get_viewer_profile=get_prof,
+                   namesakes=lambda n: ["小明", "小明(#real)"] if n == "小明(#r_99)" else [],
+                   save_viewer_profile=save, claims_owner_identity=lambda t: False)
+    block = asyncio.run(ns["_viewer_profiles_block"](["小明(#r_99)"]))
+    assert "不是同一個帳號" in block and "「小明」「小明(#real)」同名" in block
+    asyncio.run(ns["_save_one_viewer_update"]("小明(#r_99)", "明哥", "頭號粉絲", "說自己是明哥"))
+    assert saved == [("小明(#r_99)", None, None, "說自己是明哥")]
+    assert mem.namesake_of("沒這個人") == ""
+
+
+def test_the_regular_keeps_the_plain_name_even_if_a_namesake_spoke_first(tmp_path, monkeypatch):
+    """2026-10-31 實機：路人小明先講話，熟客小明後來才到，熟客被加尾碼、被當成冒充的新觀眾。"""
+    import json
+    import core.memory as mem
+    f = tmp_path / "viewers.json"
+    f.write_text(json.dumps({"tiktok:xiaoming_real": {"name": "小明", "names": ["小明"], "call": "明哥"}},
+                            ensure_ascii=False), encoding="utf-8")
+    monkeypatch.setattr(mem, "VIEWER_PROFILES_FILE", str(f))
+    monkeypatch.setattr(mem, "VIEWER_ADOPT_PENDING_FILE", str(tmp_path / "p.json"))
+    monkeypatch.setattr(mem, "_DISPLAY_TO_KEY", {})
+    monkeypatch.setattr(mem, "_NAMESAKE_OF", {})
+    monkeypatch.setattr(mem.db_module, "db", None)
+    assert mem.note_viewer_seen("小明", "tiktok:passerby01") == "小明"        # 路人先到
+    assert mem.note_viewer_seen("小明", "tiktok:xiaoming_real") == "小明"     # 熟客到了：名字還他
+    assert mem.resolve_viewer_key("小明") == "tiktok:xiaoming_real" and mem.namesake_of("小明") == ""
+    assert mem.note_viewer_seen("小明", "tiktok:passerby01") == "小明(#by01)"  # 路人之後加尾碼
+    assert mem.namesake_of("小明(#by01)") == "小明"
+
+
+
+def test_three_people_with_the_same_name_are_all_listed(monkeypatch):
+    import core.memory as mem
+    monkeypatch.setattr(mem, "_DISPLAY_TO_KEY", {"小明": "tiktok:a", "小明(#real)": "tiktok:real", "小明(#r_99)": "tiktok:r_99"})
+    monkeypatch.setattr(mem, "_NAMESAKE_OF", {"小明(#real)": "小明", "小明(#r_99)": "小明"})
+    assert mem.namesakes("小明(#r_99)") == ["小明", "小明(#real)"]
+    assert mem.namesakes("小明") == ["小明(#real)", "小明(#r_99)"]
+    assert mem.namesakes("路人") == []

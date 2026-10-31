@@ -24,6 +24,17 @@ EULER_SIGN_KEY = os.getenv("SIGN_API_KEY") or os.getenv("EULERSTREAM_API_KEY")
 TIKTOK_VIEWER_COUNT = 0
 TIKTOK_LIKE_COUNT = 0
 
+
+def tiktok_account(user) -> dict:
+    """TikTok 觀眾 → make_chat_item 的帳號欄位：platform_uid 用不會變的數字 ID（「id:123…」），
+    platform_handle 是 @帳號名。@名可以改、改掉的舊名別人能再註冊，以前拿它認人、認老爸（2026-10-31 Fable 審查）。
+    拿不到數字 ID 才退回 @名。"""
+    if user is None:
+        return {"platform_uid": "", "platform_handle": ""}
+    handle = (getattr(user, "unique_id", "") or "").strip()
+    num = str(getattr(user, "id_str", "") or getattr(user, "id", "") or "").strip()
+    return {"platform_uid": f"id:{num}" if num and num != "0" else handle, "platform_handle": handle}
+
 def get_target_tiktok_ids() -> list:
     """取得所有欲監聽的 TikTok 帳號清單（支援逗號、分號或空格隔開多個帳號，例如 'userA, userB'）"""
     raw = os.getenv("TIKTOK_USERNAMES") or os.getenv("TIKTOK_USERNAME") or TIKTOK_UNIQUE_ID
@@ -284,7 +295,7 @@ async def tiktok_live_worker(input_queue):
                         pass
                     await input_queue.put(cs.make_chat_item(
                         "tiktok", user_name, comment_text,
-                        platform_uid=getattr(event.user, "unique_id", "") or ""))   # 平台唯一帳號，認老爸只信這個
+                        **tiktok_account(event.user)))   # 平台唯一帳號（數字 ID），認老爸只信這個
 
             @client.on(BarrageEvent)
             async def on_barrage(event: BarrageEvent):
@@ -304,8 +315,7 @@ async def tiktok_live_worker(input_queue):
                     current_tiktok_status_str = f"[💬 {u_name}: {b_text[:12]}]"
                     log_print(f"💬 [TikTok 飄屏彈幕] {u_name}: {b_text}")
                     await input_queue.put(cs.make_chat_item(
-                        "tiktok", u_name, b_text,
-                        platform_uid=(getattr(user_name, "unique_id", "") or "") if user_name else ""))
+                        "tiktok", u_name, b_text, **tiktok_account(user_name)))
 
             @client.on(EmoteChatEvent)
             async def on_emote_chat(event: EmoteChatEvent):
@@ -320,8 +330,7 @@ async def tiktok_live_worker(input_queue):
                 current_tiktok_status_str = f"[💬 {u_name}: {e_text[:12]}]"
                 log_print(f"💬 [TikTok 表情] {u_name}: {e_text}")
                 await input_queue.put(cs.make_chat_item(
-                    "tiktok", u_name, e_text,
-                    platform_uid=(getattr(user_name, "unique_id", "") or "") if user_name else ""))
+                    "tiktok", u_name, e_text, **tiktok_account(user_name)))
 
             @client.on(JoinEvent)
             async def on_join(event: JoinEvent):
@@ -394,7 +403,7 @@ async def tiktok_live_worker(input_queue):
                     if q_text:
                         log_print(f"❓ [TikTok 提問箱] {user_name} 提問: {q_text}")
                         await input_queue.put(cs.make_chat_item(
-                            "tiktok", user_name, f"（官方提問箱）{q_text}",
+                            "tiktok", user_name, f"（官方提問箱）{q_text}", **tiktok_account(getattr(event, 'user', None)),
                             text=f"【TikTok 官方提問箱】：觀眾「{user_name}」提問：『{q_text}』。（是否回答由妳自由決定）"))
                 except Exception:
                     pass
@@ -407,6 +416,7 @@ async def tiktok_live_worker(input_queue):
                     sys_notify(f"👑 [TikTok 訂閱] {user_name} 訂閱成為會員！")
                     await input_queue.put(cs.make_chat_item(
                         "tiktok_gift", user_name, "付費訂閱成為專屬會員！（是否慶祝/感謝由妳自由決定）",
+                        **tiktok_account(getattr(event, 'user', None)),
                         text=f"【TikTok 直播動態】：觀眾「{user_name}」付費訂閱成為專屬會員！（是否慶祝/感謝由妳自由決定）"))
                 except Exception:
                     pass
@@ -432,6 +442,7 @@ async def tiktok_live_worker(input_queue):
                         gift_desc = f"連續送出了 {tot_count} 個 {g_name}！" if tot_count > 1 else f"送出了 1 個 {g_name}！"
                         await input_queue.put(cs.make_chat_item(
                             "tiktok_gift", u_name, f"{gift_desc}請向他熱情道謝並給予即時互動！",
+                            **info.get("acct", {}),
                             text=f"【TikTok 直播觀眾 {u_name} 送禮】：{gift_desc}請向他熱情道謝並給予即時互動！"))
                 except asyncio.CancelledError:
                     pass
@@ -454,6 +465,8 @@ async def tiktok_live_worker(input_queue):
                     user_name = "觀眾"
                     if hasattr(event, 'user') and event.user:
                         user_name = event.user.nickname or event.user.unique_id or "觀眾"
+                    # 送禮也帶帳號：以前只有名字，同名的人連擊會算在一起，觀眾檔也照名字認（2026-10-31 實機）
+                    acct = tiktok_account(getattr(event, 'user', None))
                     
                     gift_obj = getattr(event, 'gift', None)
                     if not gift_obj:
@@ -465,7 +478,7 @@ async def tiktok_live_worker(input_queue):
                         gift_name = getattr(gift_obj, 'name', '禮物')
                     gift_count = getattr(gift_obj, 'count', 1)
                     
-                    combo_key = (user_name, gift_name)
+                    combo_key = (acct["platform_uid"] or user_name, gift_name)
                     if combo_key in TIKTOK_GIFT_COMBO_BUFFER:
                         combo_info = TIKTOK_GIFT_COMBO_BUFFER[combo_key]
                         combo_info["count"] += gift_count
@@ -476,6 +489,7 @@ async def tiktok_live_worker(input_queue):
                             "count": gift_count,
                             "user_name": user_name,
                             "gift_name": gift_name,
+                            "acct": acct,
                             "task": None
                         }
                         combo_info = TIKTOK_GIFT_COMBO_BUFFER[combo_key]

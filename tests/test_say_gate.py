@@ -47,7 +47,8 @@ def _say_ns(singing=False, vision_busy=False):
                _SAY_LOCK=asyncio.Lock(), GLOBAL_LIVE_SESSION=sess, _speak_brain_turn=speak, input_queue=None,
                _start_marker_tools=lambda t: t.replace("[TOOL:VISION]", "").strip(),
                _VISION_STATE={"busy": vision_busy}, _vision_wait_text=lambda t: t.split("～")[0] + "～",
-               _BRAIN_INPUT_ORIGIN={"who": "dad"}, _live_reply_target=lambda: "dad",
+               _BRAIN_INPUT_ORIGIN={"who": "dad"}, _live_reply_target=lambda who="": "dad", _turn_who=lambda: "dad",
+               _RECENT_THOUGHTS=__import__("collections").deque(maxlen=20),
                log_print=logs.append, log_swallowed=lambda *a: None, spawn=lambda c: (after.append(c), c.close()),
                _afterthought=lambda t: asyncio.sleep(0), _group_post=lambda *a: None, LAST_BRAIN_TURN_TS=0.0, LAST_BRAIN_REPLY_DONE_TS=0.0,
                eventlog=SimpleNamespace(get=lambda: SimpleNamespace(record=lambda *a, **k: logs.append(("ev", a)))))
@@ -156,7 +157,10 @@ def _nudge_ns(says=(), singing=False, talking_for=0.0, tries=1):
     import collections
     slips = []
     t_end = time.time() + talking_for
-    ns = _load("_nudge_if_unsaid", "_mention_keys", "_result_mentioned", asyncio=asyncio, re=re, time=time,
+    ns = _load("_nudge_if_unsaid", "_mention_keys", "_result_mentioned", "_say_thought_if_still_unsaid",
+               asyncio=asyncio, re=re, time=time, _RECENT_THOUGHTS=collections.deque(),
+               TextCleanEngine=__import__("core.prompts", fromlist=["TextCleanEngine"]).TextCleanEngine,
+               _owner_name=lambda: "老爸", append_to_unified_memory=lambda **k: None,
                SAY_NUDGE_SEC=0.05, SAY_NUDGE_WAIT_SEC=2.0, SAY_NUDGE_QUIET_SEC=0.0, SAY_NUDGE_TRIES=tries,
                _BRAIN_INPUT_ORIGIN={"ts": 0.0}, LAST_SAY_TS=0.0, IS_SLEEPING=False,
                is_singing_active=lambda: singing, log_print=lambda *a: None, send_brain_slip=slips.append,
@@ -308,3 +312,18 @@ def test_a_new_task_can_be_acknowledged_while_an_older_one_is_still_running():
         await ns["_handle_say"](sess, lock, "d", "計時器設好了")         # 還沒回來：擋
     asyncio.run(go())
     assert [s[0] for s in spoken] == ["我去查天氣！", "好，計時器幫你設！"]
+
+
+
+def test_reminders_are_numbered_and_her_own_thought_is_spoken_if_she_never_says_it():
+    """2026-10-31 實機：查天氣，她三次在腦內講了台北幾度、就是沒 say；第二次提醒跟第一次全文一樣、剛好隔 10 秒被紙條去重吃掉。"""
+    ns, slips = _nudge_ns(tries=2)
+    ns["_RECENT_THOUGHTS"].append((time.time() + 1, "[EXPRESSION: 眨眼] 報告老爸，台北今天多雲時晴，21 到 27 度，下午可能下雨喔"))
+    asyncio.run(ns["_nudge_if_unsaid"](_WEATHER, time.time(), "老爸"))
+    assert len(slips) == 2 and slips[0] != slips[1] and "第 2 次提醒" in slips[1]
+    item = ns["speech_queue"].get_nowait()
+    assert "台北今天多雲" in item["text"] and "EXPRESSION" not in item["text"] and item["private"] is True
+    ns, slips = _nudge_ns(tries=2)                                # 腦內也沒講到結果：不代念
+    ns["_RECENT_THOUGHTS"].append((time.time() + 1, "嗯讓我想想"))
+    asyncio.run(ns["_nudge_if_unsaid"](_WEATHER, time.time(), "老爸"))
+    assert ns["speech_queue"].empty()

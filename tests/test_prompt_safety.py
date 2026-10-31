@@ -44,7 +44,7 @@ def test_claims_owner_identity(monkeypatch):
 def test_main_no_longer_trusts_nickname_or_relationship():
     assert '"7l主播", "老爸"]' not in MAIN_SRC                     # 暱稱白名單拿掉了
     assert 'v_rel in ["老爸", "父親", "爸爸"]' not in MAIN_SRC       # 模型寫的關係不再當身分
-    assert "is_dad_account = is_owner_account(platform_uid)" in MAIN_SRC
+    assert "is_dad_account = is_owner_account(platform_uid, item.platform_handle)" in MAIN_SRC
 
 
 def test_listeners_carry_platform_uid():

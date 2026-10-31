@@ -81,3 +81,36 @@ def test_xiaoyi_pitch_and_volume_post_processing():
     quieter = apply_voice_prosody(tone, sr, gain_db=-6.0)
     assert np.abs(louder).max() <= 1.0 and np.abs(louder).mean() > np.abs(tone).mean() > np.abs(quieter).mean()
     assert apply_voice_prosody(tone, sr).dtype == np.float32
+
+
+def test_louder_is_still_louder_after_the_peak_guard():
+    """Fable 審查：以前 tanh 限幅後峰值到 1.2，接著「峰值超過 0.95 整段縮回 0.92」把大聲抵銷掉。"""
+    import numpy as np
+    from services.local_xiaoyi_service import apply_voice_prosody
+    sr = 32000
+    t = np.arange(sr) / sr
+    voice = (0.85 * np.sin(2 * np.pi * 220 * t) * (0.3 + 0.7 * np.abs(np.sin(2 * np.pi * 3 * t)))).astype(np.float32)
+
+    def after_guard(a):
+        peak = np.abs(a).max()
+        return a * (0.92 / peak) if peak > 0.95 else a
+
+    def rms_db(a):
+        return 20 * np.log10(np.sqrt(np.mean(np.square(a))))
+    loud = apply_voice_prosody(voice, sr, gain_db=4.0)
+    assert np.abs(loud).max() <= 0.95 + 1e-6                          # 不會再被整段縮回去
+    assert rms_db(after_guard(loud)) - rms_db(after_guard(voice)) > 2.0
+    quiet = (0.2 * np.sin(2 * np.pi * 220 * t)).astype(np.float32)   # 小聲的地方照放大，不多給
+    assert abs(rms_db(apply_voice_prosody(quiet, sr, gain_db=3.0)) - rms_db(quiet) - 3.0) < 0.1
+
+
+def test_tiny_expression_bits_join_the_neighbour_instead_of_being_their_own_segment():
+    out = _chunks("[EXPRESSION: 笑] 嗯 [EXPRESSION: 臉紅] 好啦，下次再一起去吃吧")
+    assert len(out) == 1 and "嗯" in out[0][0] and "好啦" in out[0][0]
+
+
+def test_thought_brackets_split_by_a_tag_are_still_removed():
+    raw = "（心想：老爸今天 [EXPRESSION: 笑] 好像很累）好啦，我陪你喔"
+    out = P.build_chunks(raw, _ct, T.clean_speech_text, R.split_for_streaming, strip_spans=T.strip_cross_tag_spans)
+    spoken = "".join(t for t, _ in out)
+    assert "老爸今天" not in spoken and "好像很累" not in spoken and "我陪你" in spoken

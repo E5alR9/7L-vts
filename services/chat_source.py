@@ -23,11 +23,13 @@ DEDUP_MAXSIZE = 256
 PLATFORM_LABEL = {"tiktok": "TikTok", "twitch": "Twitch", "youtube": "YouTube"}
 
 
-def make_chat_item(source, viewer="", content="", *, platform_uid="", text="", user="", message_id=""):
+def make_chat_item(source, viewer="", content="", *, platform_uid="", text="", user="", message_id="", platform_handle=""):
     """直播間輸入丟進 input_queue 的統一格式（TikTok／Twitch／YouTube 三個監聽器共用；以前各自拼 dict，TikTok 拼了九處）。
     主程式只讀 viewer／content／platform_uid／source（core/input_sources.parse_input_item）；
     text 給日誌和後台看，沒給就照「【平台 直播觀眾 名字】：內容」拼。
-    platform_uid 是平台唯一帳號（觀眾改不到），認老爸只信這個，顯示名稱可以亂取。"""
+    platform_uid 是平台唯一帳號（觀眾改不到），認老爸只信這個，顯示名稱可以亂取。
+    2026-10-31 起 TikTok／Twitch 的 platform_uid 是平台不會變的數字 ID（「id:123…」）；@帳號名可以改、
+    舊名別人能再註冊（Fable 審查），放在 platform_handle，只用來把舊的 @名觀眾檔接過來、認老爸綁定。"""
     if not text:
         label = PLATFORM_LABEL.get(source.split("_")[0], source)
         tail = " 留言" if source == "tiktok" else ""
@@ -37,6 +39,7 @@ def make_chat_item(source, viewer="", content="", *, platform_uid="", text="", u
         "viewer": viewer or "",
         "content": content or "",
         "platform_uid": platform_uid or "",
+        "platform_handle": platform_handle or "",
         "user": user or viewer or "",
         "message_id": message_id or "",
         "audio_base64": None,

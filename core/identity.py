@@ -55,10 +55,56 @@ def get_owner_account_ids() -> frozenset:
     return frozenset(_norm_account(x) for x in raw.split(",") if _norm_account(x))
 
 
-def is_owner_account(unique_id: str) -> bool:
-    """平台帳號 ID 是否為擁有者本人。只看 unique_id，絕不看顯示名稱或觀眾檔案。"""
-    uid = _norm_account(unique_id)
-    return bool(uid) and uid in get_owner_account_ids()
+def _owner_bindings_file() -> str:
+    from core import paths   # 執行時才讀：測試包裝會把 DATA_DIR 換成副本
+    return os.path.join(paths.DATA_DIR, "owner_account_bindings.json")
+
+
+def _load_owner_bindings() -> dict:
+    import json
+    try:
+        with open(_owner_bindings_file(), encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_owner_bindings(data: dict) -> None:
+    import json
+    path = _owner_bindings_file()
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
+
+
+def is_owner_account(platform_uid: str, handle: str = "") -> bool:
+    """平台帳號是否為擁有者本人。只看監聽器給的帳號，絕不看顯示名稱或觀眾檔案。
+    platform_uid：平台不會變的數字 ID（「id:123…」，2026-10-31 起）或舊的 @帳號名；handle：@帳號名。
+    @帳號名可以改、改掉的舊名別人能再註冊（Fable 審查）：老爸的 @名第一次帶數字 ID 出現就綁定這個 ID，
+    之後同一個 @名換了數字 ID 不算老爸。OWNER_ACCOUNT_IDS 也可以直接寫「id:數字」。"""
+    owners = get_owner_account_ids()
+    uid = _norm_account(platform_uid)
+    if uid and uid in owners:
+        return True
+    h = _norm_account(handle)
+    if not h or h not in owners:
+        return False
+    if not uid.startswith("id:"):
+        return uid == h   # 沒有數字 ID（舊格式）：照舊認 @名
+    bound = _load_owner_bindings()
+    if h not in bound:
+        bound[h] = uid
+        try:
+            _save_owner_bindings(bound)
+            from core.utils import log_print
+            log_print(f"🔐 [認老爸] @{handle} 第一次帶數字 ID 出現，綁定（之後同名不同 ID 不算老爸）")
+        except Exception:
+            from core.utils import log_swallowed
+            log_swallowed()
+            return False   # 綁不起來就先不認：寧可老爸再講一次，也不要放過冒牌貨
+    return bound.get(h) == uid
 
 
 def claims_owner_identity(text: str) -> bool:

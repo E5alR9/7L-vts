@@ -222,7 +222,7 @@ class DryRun:
             "save_viewer_profile": anoop, "get_viewer_profile": viewer_profile, "record_bot_message": lambda *a: None, "update_subtitle": lambda *a: None,
             "check_immediate_shutdown": lambda t: False, "execute_punish_action": anoop,
             "execute_reward_action": anoop, "set_sleep_mode": anoop, "operator_input_enabled": lambda: True,
-            "is_owner_account": lambda uid: uid in d.owner_uids, "claims_owner_identity": claims_owner_identity, "touch_interaction": lambda: None,
+            "is_owner_account": lambda uid, handle="": uid in d.owner_uids, "claims_owner_identity": claims_owner_identity, "touch_interaction": lambda: None,
             "tk_listener": pytypes.SimpleNamespace(current_tiktok_status_str=""),
             "web_dash": pytypes.SimpleNamespace(broadcast_event=lambda *a, **k: None),
             "live_timer_hub": pytypes.SimpleNamespace(detect_timer_intent=lambda t: None),
@@ -230,7 +230,7 @@ class DryRun:
             "_related_memories_block": related_block, "is_known_viewer": lambda n: n in d.known_viewers,
             # 觀眾帳號 key：測試裡名字就是 key（真的對照表在 core.memory，測試不碰它的全域狀態）
             "viewer_key": __import__("core.memory", fromlist=["viewer_key"]).viewer_key,
-            "resolve_viewer_key": lambda n: n, "note_viewer_seen": lambda d_, k: None, "viewer_seen_this_session": lambda n: True,
+            "resolve_viewer_key": lambda n: n, "note_viewer_seen": lambda d_, k, h="": d_, "namesake_of": lambda n: "", "namesakes": lambda n: [], "viewer_seen_this_session": lambda n: True,
             "_RECENT_HUMAN_INPUTS": collections.deque(maxlen=50), "LAST_BRAIN_ANY_TURN_TS": 0.0,
             "set_timer": anoop, "interrupt_current_speech": anoop, "execute_speech_visual_actions": anoop,
             "is_singing_active": lambda: False, "save_local_audio_clip": lambda *a: "",

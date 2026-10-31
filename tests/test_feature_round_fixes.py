@@ -20,7 +20,7 @@ def test_viewer_update_tags_are_saved():
     async def save(name, **k):
         saved.append((name, k))
         return name == "小明"
-    ns = {"re": re, "spawn": lambda c: asyncio.run(c), "log_print": logs.append, "save_viewer_profile": save,
+    ns = {"re": re, "spawn": lambda c: asyncio.run(c), "log_print": logs.append, "save_viewer_profile": save, "namesake_of": lambda n: "", "namesakes": lambda n: [],
           "viewer_seen_this_session": lambda n: True, "is_known_viewer": lambda n: True}
     for n in ("_VIEWER_UPDATE_RE", "_save_viewer_updates", "_save_one_viewer_update"):
         exec(compile(ast.Module(body=[_node(n)], type_ignores=[]), "x", "exec"), ns)

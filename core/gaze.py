@@ -2,7 +2,7 @@
 
 以前待命、說話時的眼睛照兩條正弦波飄、頭照正弦波擺，跟螢幕上有什麼無關；只有平均每 10 秒看滑鼠 2～4 秒。
 現在照真人的看法：盯住一個地方（注視）一會兒，再快速跳到下一個（跳視），要看的地方從桌面上真的發生的事挑——
-- 滑鼠在動：老爸在操作，最常看滑鼠，滑鼠一直動就跟著看；
+- 滑鼠在動：老爸在操作，有時候會瞄過去、看一陣子（不是一動就被拉過去：老爸 2026-10-31「不強制我動滑鼠她就看我滑鼠」）；
 - 剛換前景視窗、或老爸在那個視窗裡做事：看那個視窗（在視窗裡跳幾個點，像在看內容）；
 - 畫面上剛有變化的地方（影片、跳出來的通知；餘光比對截圖時找出來的，已遮掉她自己的 VTS 視窗）：瞄一下；
 - 她在講話、或沒什麼好看的：看鏡頭（觀眾）。
@@ -20,7 +20,10 @@ FIX_SEC = {"camera": (1.8, 4.0), "mouse": (0.8, 2.0), "window": (1.0, 2.5), "hot
            "intent": (1.5, 3.5)}   # 實機 20 秒跳 27 次太忙（2026-10-31），盯久一點
 INTENT_FRESH_SEC = 7.0      # 視線副腦（Live 看螢幕挑的）多久內算數
 MOUSE_RECENT_SEC = 5.0      # 滑鼠這麼久內動過，才算「老爸在操作」
-MOUSE_ONSET_STILL_SEC = 1.0  # 滑鼠停了這麼久又開始動：馬上看過去
+MOUSE_ONSET_STILL_SEC = 1.0  # 滑鼠停了這麼久又開始動：算一次「滑鼠開始動」
+MOUSE_REFLEX_CHANCE = 0.3   # 滑鼠開始動時瞄過去的機會（副腦正挑著東西 0.15、講話時 0.1）
+MOUSE_REFLEX_GAP_SEC = 8.0  # 被滑鼠拉過去最多這麼久一次
+MOUSE_PURSUIT_MAX_SEC = 3.0  # 跟著滑鼠看最多這麼久，之後照平常挑下一個地方
 WINDOW_RECENT_SEC = 3.0     # 剛換前景視窗
 HOTSPOT_RECENT_SEC = 2.5    # 剛有變化的地方
 HOTSPOT_REFLEX_GAP_SEC = 6.0   # 畫面變化的反射最多這麼久一次（實機每 2～3 秒被拉走一次，跟副腦挑的輪流搶）
@@ -46,6 +49,8 @@ class GazeDirector:
         self.intent = None          # 視線副腦挑的：{"kind", "point", "rect", "ts"}
         self._seen_intent_ts = 0.0
         self._last_hotspot_reflex = -1e9
+        self._last_mouse_reflex = -1e9
+        self._pursuit_start = 0.0
 
     # ── 外面餵進來的事 ──
     def note_mouse(self, pt: Point, now: float, moved_px: float = 0.0) -> None:
@@ -110,6 +115,10 @@ class GazeDirector:
         self.kind, self.target, self.until = kind, target, now + self.rng.uniform(lo, hi)
         return target
 
+    def _fix_mouse(self, now: float) -> Point:
+        self._pursuit_start = now
+        return self._fix("mouse", self.mouse, now)
+
     def _window_point(self) -> Point:
         """視窗裡的一個點：偏上半部（標題、內容開頭），像在看內容。"""
         l, t, r, b = self.window
@@ -119,11 +128,14 @@ class GazeDirector:
     def update(self, now: float = None, talking: bool = False) -> Point:
         now = time.time() if now is None else now
         mouse_active = self.mouse is not None and now - self.mouse_moved_ts < 0.6
-        # 1. 突然的事：馬上跳過去（跳視）
+        # 1. 突然的事：跳過去（跳視）。滑鼠開始動只是「有時候」瞄過去，不是一動就看（老爸 2026-10-31）
         if mouse_active and self._mouse_onset:
             self._mouse_onset = False
-            if self.kind != "mouse":
-                return self._fix("mouse", self.mouse, now)
+            chance = 0.1 if talking else (0.15 if self._intent_fresh(now) else MOUSE_REFLEX_CHANCE)
+            if (self.kind != "mouse" and now - self._last_mouse_reflex >= MOUSE_REFLEX_GAP_SEC
+                    and self.rng.random() < chance):
+                self._last_mouse_reflex = now
+                return self._fix_mouse(now)
         if self.hotspot is not None and self.hotspot_ts > self._seen_hotspot_ts and now - self.hotspot_ts < HOTSPOT_RECENT_SEC:
             self._seen_hotspot_ts = self.hotspot_ts
             # 講話時、副腦正在挑的時候比較少被分心（副腦自己也看得到「剛有變化的地方」，要看它會挑）
@@ -140,7 +152,7 @@ class GazeDirector:
             self._seen_intent_ts = self.intent["ts"]
             return self._fix("intent", self._intent_point(now), now)
         # 2. 正在看滑鼠、滑鼠還在動：跟著看
-        if self.kind == "mouse" and mouse_active:
+        if self.kind == "mouse" and mouse_active and now - self._pursuit_start < MOUSE_PURSUIT_MAX_SEC:
             self.target = self.mouse
             self.until = max(self.until, now + 0.5)
             return self.target
@@ -160,9 +172,9 @@ class GazeDirector:
                 choices.append(("window", 0.2))
         else:
             if mouse_recent:
-                choices.append(("mouse", 0.4))
+                choices.append(("mouse", 0.2))
             if self.window is not None:
-                choices.append(("window", 0.35))
+                choices.append(("window", 0.45))
             if self.hotspot is not None and now - self.hotspot_ts < 10.0:
                 choices.append(("hotspot", 0.1))
             choices.append(("camera", 0.15))
@@ -170,7 +182,7 @@ class GazeDirector:
         kinds, weights = zip(*choices)
         kind = self.rng.choices(kinds, weights)[0]
         if kind == "mouse":
-            return self._fix("mouse", self.mouse, now)
+            return self._fix_mouse(now)
         if kind == "window":
             return self._fix("window", self._window_point(), now)
         if kind == "hotspot":

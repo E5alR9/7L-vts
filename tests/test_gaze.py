@@ -19,14 +19,32 @@ def test_she_holds_a_look_then_jumps_instead_of_drifting():
     assert len(targets) > 5                                         # 一分鐘內會換好幾個地方看
 
 
-def test_mouse_starting_to_move_grabs_her_eyes_and_she_follows_it():
+def test_moving_the_mouse_does_not_always_pull_her_eyes():
+    """老爸 2026-10-31：不要我一動滑鼠她就看滑鼠。滑鼠開始動只是有時候瞄過去。"""
+    grabbed = 0
+    for seed in range(200):
+        g = _g(seed)
+        g.note_window((0.5, 0.0, 1.0, 0.5), -100.0)
+        g.note_mouse((0.2, 0.3), 0.0)
+        g.update(0.0)
+        g.note_mouse((0.25, 0.3), 5.0, moved_px=40)
+        grabbed += g.update(5.0) == (0.25, 0.3)
+    assert 0 < grabbed / 200 < 0.45
+
+
+def test_when_she_does_look_at_the_mouse_she_follows_it_for_a_while_not_forever():
     g = _g()
     g.note_mouse((0.2, 0.3), 0.0)
-    g.update(0.0)
-    g.note_mouse((0.25, 0.3), 5.0, moved_px=40)                     # 停了 5 秒又動：馬上看過去
-    assert g.update(5.0) == (0.25, 0.3) and g.kind == "mouse"
-    g.note_mouse((0.4, 0.35), 5.2, moved_px=60)                     # 繼續動：跟著看
-    assert g.update(5.2) == (0.4, 0.35)
+    g._fix_mouse(0.0)
+    g.note_mouse((0.4, 0.35), 0.2, moved_px=60)                     # 繼續動：跟著看
+    assert g.update(0.2) == (0.4, 0.35)
+    t, seen_other = 0.2, False
+    while t < 8.0:                                                  # 一直動也不會永遠盯著
+        t += 0.1
+        g.note_mouse((0.4 + (t % 1) * 0.1, 0.35), t, moved_px=30)
+        g.update(t)
+        seen_other |= g.kind != "mouse"
+    assert seen_other
 
 
 def test_new_window_and_screen_change_draw_a_glance():
@@ -100,7 +118,9 @@ def test_director_follows_the_brains_pick_but_reflexes_still_win():
             n += 1
             t += 0.1
     assert inside / n > 0.8
-    g.note_mouse((0.1, 0.9), 16.0, moved_px=50)                       # 滑鼠突然動：反射照樣看過去
+    g.note_hotspot((0.1, 0.9), 16.0)                                  # 畫面突然跳東西：反射照樣能把她拉過去
+    g._last_hotspot_reflex = -1e9
+    g.rng.random = lambda: 0.0
     assert g.update(16.0) == (0.1, 0.9)
 
 
@@ -137,3 +157,13 @@ def test_a_video_that_keeps_playing_stops_pulling_her_eyes():
     g.until = 0.0
     g.note_hotspot((0.5, 0.1), 17.0)                                   # 再過幾秒又有新東西：瞄過去
     assert g.update(17.0) == (0.5, 0.1)
+
+
+def test_gaze_brain_spreads_keys_and_backs_off_when_live_keeps_failing():
+    """Fable 審查：副腦以前永遠打全池第一把空著的 key、每次試兩把；Live 壞掉時每 3 秒照樣燒、沒日誌。"""
+    import inspect
+    import workers.gaze_brain as gb
+    src = inspect.getsource(gb.gaze_brain_worker)
+    assert "random.sample(le.GEMINI_KEYS, len(le.GEMINI_KEYS))" in src and "max_keys=1" in src
+    assert "GAZE_BRAIN_SEC * (2 ** min(misses, 5))" in src and "misses += 1" in src and "misses = 0" in src
+    assert min(gb.GAZE_BRAIN_BACKOFF_MAX, gb.GAZE_BRAIN_SEC * 2 ** 5) == 60.0

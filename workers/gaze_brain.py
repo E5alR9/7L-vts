@@ -13,6 +13,7 @@
 import asyncio
 import io
 import json
+import random
 import re
 import time
 
@@ -35,6 +36,7 @@ def bind(main_module) -> None:
 
 GAZE_BRAIN_SEC = 3.0          # 多久問一次（Live 回一次約 3 秒，等於一直有一題在問）
 GAZE_BRAIN_TIMEOUT = 8.0
+GAZE_BRAIN_BACKOFF_MAX = 60.0  # 連續問不到（Live 壞了、key 都被限流）最多隔這麼久再問
 MAX_WINDOWS = 8
 _PARTS_Y = {"上": 0.2, "中": 0.5, "下": 0.8}
 _PARTS_X = {"左": 0.2, "中": 0.5, "右": 0.8}
@@ -144,9 +146,11 @@ async def gaze_brain_worker() -> None:
     import core.usage as usage
     import services.screen_capture as screen_capture
     last_pick = None
+    misses = 0
     while True:
         try:
-            await asyncio.sleep(GAZE_BRAIN_SEC)
+            # 連續問不到就拉長間隔（3→6→12…最多 60 秒）：以前每 3 秒照樣試兩把 key，Live 壞掉時一直燒、也沒日誌（Fable 審查）
+            await asyncio.sleep(min(GAZE_BRAIN_BACKOFF_MAX, GAZE_BRAIN_SEC * (2 ** min(misses, 5))))
             if not (host.IS_PERIPHERAL_VISION_ENABLED and host.IS_FACE_TRACKING_ENABLED) or host.IS_SLEEPING:
                 continue
             img = await asyncio.to_thread(screen_capture.grab_screen)
@@ -160,13 +164,17 @@ async def gaze_brain_worker() -> None:
             wins = await asyncio.to_thread(visible_windows, sw, sh)
             menu, items = build_menu(wins, (mx / sw, my / sh), hotspot, talking)
             jpg = await asyncio.to_thread(_jpeg, img)
+            # key 每次隨機排（挑 key 是穩定排序，以前永遠打全池第一把空著的，負載全壓在同一把；Fable 審查），一次只試一把
             with usage.as_role("視線副腦"):   # 後台模型用量表才分得出來（以前算在「Live 單次」）
                 text = await le.live_one_shot(
                     SYSTEM, f"{menu}\n回 {{\"pick\": 編號, \"part\": \"上中\", \"what\": \"那裡在顯示什麼\", \"why\": \"為什麼想看\"}}",
-                    le.GEMINI_KEYS, image_jpeg=jpg, timeout=GAZE_BRAIN_TIMEOUT, max_keys=2)
+                    random.sample(le.GEMINI_KEYS, len(le.GEMINI_KEYS)), image_jpeg=jpg,
+                    timeout=GAZE_BRAIN_TIMEOUT, max_keys=1)
             picked = parse_pick(text, items)
             if picked is None:
+                misses += 1
                 continue
+            misses = 0
             idx, kind, point, rect, why = picked
             vc.gaze_intent = {"kind": kind, "point": point, "rect": rect, "why": why, "ts": time.time()}
             name = next((ln.split("：", 1)[1] for ln in menu.splitlines() if ln.startswith(f"{idx + 1}：")), kind)
