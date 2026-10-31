@@ -132,29 +132,108 @@ def _store_viewer_profile_local(tiktok_name: str, profile: dict) -> None:
 
 _CLOUD_PROFILE_MISSES = set()   # 這次開機問過雲端、雲端也沒有的觀眾（新觀眾每則留言不再各問一次）
 
+# ── 觀眾身分：平台帳號當 key（老爸 2026-10-31）────────────────────────────────────
+# 以前觀眾檔用顯示名稱當 key：暱稱誰都能改，改成熟客的名字就繼承熟客的稱呼、關係、印象和舊對話，
+# 大腦替他寫的 [VIEWER_UPDATE] 還會蓋掉熟客的檔（Fable 審查）。現在 key 是「平台:帳號」（tiktok:unique_id、
+# twitch:login、youtube:channel_id），名字只是檔案裡的一欄。大腦、看板、提示詞照樣用名字講話：
+# 這次開機看過的「名字 → 帳號」對照表（最新的為準）把名字換成帳號；同名的冒牌貨查到的是他自己的空檔案。
+# 沒有帳號的（舊資料對不上帳號、測試沒帶帳號）照舊用名字當 key；那位觀眾下次帶帳號出現時把舊檔接過去。
+VIEWER_PLATFORMS = ("tiktok", "twitch", "youtube")
+_DISPLAY_TO_KEY: Dict[str, str] = {}
+_DISPLAY_TO_KEY_MAX = 5000
+
+
+def viewer_key(source: str, platform_uid: str, display: str) -> str:
+    """這位觀眾的觀眾檔 key：有平台帳號就是「平台:帳號」，沒有就是名字。"""
+    plat = (source or "").split("_")[0].lower()
+    uid = (platform_uid or "").strip()
+    if plat in VIEWER_PLATFORMS and uid:
+        return f"{plat}:{uid}"
+    return (display or "").strip()
+
+
+def is_account_key(key: str) -> bool:
+    k = key or ""
+    return ":" in k and k.split(":", 1)[0] in VIEWER_PLATFORMS
+
+
+def resolve_viewer_key(name_or_key: str) -> str:
+    """名字或 key → 觀眾檔 key（這次開機看過這個名字就換成他的帳號；沒看過就照舊用名字）。"""
+    k = (name_or_key or "").strip()
+    if is_account_key(k):
+        return k
+    return _DISPLAY_TO_KEY.get(k, k)
+
+
+def viewer_seen_this_session(name_or_key: str) -> bool:
+    k = (name_or_key or "").strip()
+    return k in _DISPLAY_TO_KEY or k in _DISPLAY_TO_KEY.values()
+
+
+def note_viewer_seen(display: str, key: str) -> None:
+    """觀眾留言進來時記下「名字 → 帳號」；帶帳號第一次出現、又有同名的舊檔（用名字當 key）就把舊檔接過去。"""
+    display, key = (display or "").strip(), (key or "").strip()
+    if not display or not key:
+        return
+    if len(_DISPLAY_TO_KEY) >= _DISPLAY_TO_KEY_MAX and display not in _DISPLAY_TO_KEY:
+        _DISPLAY_TO_KEY.pop(next(iter(_DISPLAY_TO_KEY)))
+    _DISPLAY_TO_KEY[display] = key
+    if is_account_key(key):
+        _adopt_legacy_profile(display, key)
+
+
+def _adopt_legacy_profile(display: str, key: str) -> None:
+    try:
+        profiles = _load_viewer_profiles(strict=True)
+    except _UnreadableFile:
+        return
+    if key in profiles:
+        names = profiles[key].get("names") or []
+        if display not in names:   # 改了名字：記下新名字（顯示用最新的）
+            profiles[key]["names"] = (names + [display])[-5:]
+            profiles[key]["name"] = profiles[key]["tiktok_name"] = display
+            _dump_json_atomic(VIEWER_PROFILES_FILE, profiles)
+        return
+    legacy = profiles.get(display)
+    if not isinstance(legacy, dict) or is_account_key(display):
+        return
+    plat, uid = key.split(":", 1)
+    adopted = {**legacy, "name": display, "tiktok_name": display, "names": [display], "platform": plat, "uid": uid}
+    profiles[key] = adopted
+    profiles.pop(display, None)
+    _dump_json_atomic(VIEWER_PROFILES_FILE, profiles)
+    log_print(f"👥 [認人] 舊觀眾檔「{display}」接到帳號 {key}")
+    if db_module.db is not None:
+        cloud = {k: v for k, v in adopted.items() if v is not None}
+        _schedule_on_loop(db_module.db.collection("viewer_profiles").document(key).set(cloud, merge=True))
+    if _RAG is not None and hasattr(_RAG, "retag_viewer"):
+        _schedule_on_loop(_RAG.retag_viewer(display, key))
+
 
 async def get_viewer_profile(tiktok_name: str) -> dict:
     """取得觀眾資料：本機 viewer_profiles_local_<模式>.json 優先（2026-10-26：Firestore 只當備份）。
     本機沒有這個人才問一次雲端，問到就存回本機。以前每則留言都先等一次 Firestore，本機的再蓋過去。"""
-    default = {"tiktok_name": tiktok_name, "call": None, "relationship": None, "impression": None}
+    key = resolve_viewer_key(tiktok_name)   # 名字照這次開機看過的換成帳號 key
+    display = tiktok_name if not is_account_key(tiktok_name) else ""
+    default = {"tiktok_name": display or key, "call": None, "relationship": None, "impression": None}
     local = _load_viewer_profiles()
-    if tiktok_name in local:
-        prof = {**default, **local[tiktok_name]}
+    if key in local:
+        prof = {**default, **local[key]}
     else:
         prof = dict(default)
-        if db_module.db is not None and tiktok_name not in _CLOUD_PROFILE_MISSES:
+        if db_module.db is not None and key not in _CLOUD_PROFILE_MISSES:
             try:
-                doc = await db_module.db.collection("viewer_profiles").document(tiktok_name).get()
+                doc = await db_module.db.collection("viewer_profiles").document(key).get()
                 if doc.exists:
                     prof = {**default, **doc.to_dict()}
-                    _store_viewer_profile_local(tiktok_name, prof)
+                    _store_viewer_profile_local(key, prof)
                 elif not getattr(doc, "failed", False):   # 讀失敗不算「雲端沒有」，下次再問
-                    _CLOUD_PROFILE_MISSES.add(tiktok_name)
+                    _CLOUD_PROFILE_MISSES.add(key)
             except Exception:
                 log_swallowed()
     # 🛡️ 清理佔位符防護 (避免將「稱呼」、「關係」等字詞當作真名)
     if prof.get("call") in ["稱呼", "名字", "暱稱", "CALL", "none", "null", "None", "Null", ""]:
-        prof["call"] = tiktok_name
+        prof["call"] = display or prof.get("name") or prof.get("tiktok_name") or key
     return prof
 
 # 稱呼、關係、印象都沒變：上次見到不到這麼久就不寫（她每句回話都會帶一樣的 [VIEWER_UPDATE:…]，
@@ -182,7 +261,16 @@ async def save_viewer_profile(tiktok_name: str, call: str = None, relationship: 
         # [VIEWER_UPDATE:老爸|…]：觀眾騙大腦替「老爸」建一份觀眾檔（Fable 審查）
         log_print(f"🛑 [認人] 不替「{tiktok_name}」建觀眾檔（名字在冒充擁有者）")
         return False
+    key = resolve_viewer_key(tiktok_name)
     profile = await get_viewer_profile(tiktok_name)
+    if is_account_key(key):
+        plat, uid = key.split(":", 1)
+        profile.update(platform=plat, uid=uid)
+        if not is_account_key(tiktok_name):
+            profile["name"] = profile["tiktok_name"] = tiktok_name
+            names = profile.get("names") or []
+            if tiktok_name not in names:
+                profile["names"] = (names + [tiktok_name])[-5:]
     before = {k: profile.get(k) for k in ("call", "relationship", "impression")}
     if call:
         clean_c = str(call).strip().strip('"\'')
@@ -211,12 +299,12 @@ async def save_viewer_profile(tiktok_name: str, call: str = None, relationship: 
     if before == {k: profile.get(k) for k in before} and _seen_recently(profile.get("last_seen", ""), now):
         return False
     profile["last_seen"] = now.strftime("%Y-%m-%d %H:%M")
-    _store_viewer_profile_local(tiktok_name, profile)
+    _store_viewer_profile_local(key, profile)
     if db_module.db is not None:
         try:
             # 空白欄位不送：雲端讀失敗時這裡拿到的是空白預設值，merge 會照欄位清單把雲端真正的稱呼、印象蓋成空的
             cloud = {k: v for k, v in profile.items() if v is not None}
-            await db_module.db.collection("viewer_profiles").document(tiktok_name).set(cloud, merge=True)
+            await db_module.db.collection("viewer_profiles").document(key).set(cloud, merge=True)
         except Exception:
             log_swallowed()
     return True
@@ -587,7 +675,7 @@ _VIEWER_NAME_RE = re.compile(r"「(.+?)」")                 # 記憶裡觀眾�
 
 def is_known_viewer(name: str) -> bool:
     """熟客：本機觀眾檔（viewer_profiles_local_<模式>.json）裡有這個人。"""
-    return bool(name) and name in _load_viewer_profiles()
+    return bool(name) and resolve_viewer_key(name) in _load_viewer_profiles()
 
 
 def rag_memory_entry(speaker: str, target: str, content: str, role: str, source: str, t_str: str) -> Optional[tuple]:
@@ -618,6 +706,7 @@ def rag_memory_entry(speaker: str, target: str, content: str, role: str, source:
     meta = {"source": role}
     if viewer:
         meta["viewer"] = viewer
+        meta["viewer_key"] = resolve_viewer_key(viewer)   # 查「他說過的話」照帳號查，同名的冒牌貨查不到
     return f"[{t_str}] {speaker}對{to}說: {body}", meta
 
 
@@ -682,7 +771,8 @@ def append_to_unified_memory(speaker: str, target: str, content: str, role: str 
     # 向量記憶庫（老爸的話、她的回覆、熟客的留言；規則在 rag_memory_entry）
     rag_entry = rag_memory_entry(speaker, target, clean_c, role, source, t_str)
     if rag_entry and _RAG is not None:
-        _schedule_on_loop(_RAG.add_rag_memory(rag_entry[0], source=role, viewer=rag_entry[1].get("viewer", "")))
+        _schedule_on_loop(_RAG.add_rag_memory(rag_entry[0], source=role, viewer=rag_entry[1].get("viewer", ""),
+                                              viewer_key=rag_entry[1].get("viewer_key", "")))
 
 def init_unified_memory():
     """啟動時載入歷史雙軌記憶：

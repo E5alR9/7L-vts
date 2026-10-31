@@ -217,6 +217,7 @@ from core.memory import (
     get_recent_100_memory_context, get_viewer_profile, save_viewer_profile, record_bot_message,
     get_cloud_knowledge, update_cloud_prompt_field, STREAMER_MIND_BOARD, DEFAULT_CHANNEL_ID,
     get_unified_memory_context, RECENT_BOT_MESSAGES, USER_PROFILE_FILE, is_known_viewer,
+    viewer_key, resolve_viewer_key, note_viewer_seen, viewer_seen_this_session,
 )
 
 
@@ -240,10 +241,12 @@ _AUDIENCE_DENIED_TOOLS = frozenset({
     "ask_desktop", "ask_gemini_desktop", "generate_ai_image", "draw_illustration",
     "music.transcribe_song", "music.stem_pack", "midi.edit", "midi.inspect", "execute_local_python_code",
 })
-# 這幾個連「最近有觀眾留言」都不行：主腦只有一個，觀眾留言的紙條剛送進去、老爸剛好開口時，
-# 這輪的權限會被記成老爸的（_BRAIN_INPUT_ORIGIN 只記最後一則），觀眾就借到老爸的權限（Fable 審查）
-_DAD_ONLY_STRICT_TOOLS = frozenset({"clear_all_memories", "update_cloud_knowledge"})
-AUDIENCE_TAINT_SEC = 15.0
+# 這一輪是誰的：主腦只有一個，以前權限只看「最後一則輸入」——觀眾留言的紙條剛送進去、老爸剛好開口，
+# 這輪就被記成老爸的，觀眾借到老爸的權限；子智能體又是做的時候才看，中間換人講話也會借到（Fable 審查，老爸 2026-10-31 要修）。
+# 現在記下每則人話（老爸／觀眾）的時間：主腦上一輪結束（減一點點餘裕）之後進來的輸入裡有觀眾的，這一輪就照觀眾的權限；
+# 主腦叫工具的那一刻就定下來，交給子智能體帶著走。
+_RECENT_HUMAN_INPUTS = collections.deque(maxlen=50)   # [(時間, "dad"／"audience")]
+TURN_INPUT_MARGIN_SEC = 2.0
 
 #  主腦最近一則輸入是誰觸發的：觀眾彈幕／哨兵轉述的紙條 → audience；老爸打字、說話、主持插話 → dad。
 #  主腦只有一個，觀眾說「收起鋼琴」被 CPU 擋下後，哨兵照樣把留言轉給主腦，主腦呼叫子智能體時
@@ -270,13 +273,21 @@ def _note_brain_origin(who: str, said: str = "", name: str = "") -> None:
         _BRAIN_INPUT_ORIGIN["human"] = False
         return
     _BRAIN_INPUT_ORIGIN.update(who=who, ts=time.time(), said=said or "", human=True, name=name or "")
-    if who == "audience":
-        _BRAIN_INPUT_ORIGIN["audience_ts"] = time.time()   # 最近一次觀眾留言（_DAD_ONLY_STRICT_TOOLS 看）
+    _RECENT_HUMAN_INPUTS.append((time.time(), who))
 
 
-def _vision_allowed() -> bool:
+def _turn_who(now: float = None) -> str:
+    """主腦這一輪用誰的權限：上一輪結束之後進來的人話裡有觀眾的就是觀眾（分不清就照觀眾，老爸再講一次就好）；
+    這輪沒有新的人話（系統通知觸發）就照最後一則。"""
+    since = (globals().get("LAST_BRAIN_ANY_TURN_TS") or 0.0) - TURN_INPUT_MARGIN_SEC
+    if any(w == "audience" for ts, w in list(_RECENT_HUMAN_INPUTS) if ts >= since):
+        return "audience"
+    return _BRAIN_INPUT_ORIGIN.get("who") or "dad"
+
+
+def _vision_allowed(who: str = "") -> bool:
     """看老爸螢幕只聽老爸的：觀眾叫她看螢幕、唸出來，等於把老爸桌面上的東西播給直播間（2026-10-31 Fable 審查）。"""
-    return _BRAIN_INPUT_ORIGIN.get("who") != "audience"
+    return (who or _turn_who()) != "audience"
 
 
 def _live_reply_target() -> str:
@@ -441,10 +452,6 @@ async def execute_tool_dispatch(fn_name: str, fn_args: dict, caller_target: str 
                                         or is_stage_control(fn_name)):
         log_print(f"🛑 [工具權限] 拒絕觀眾側呼叫 {fn_name}（{caller_user}）")
         return f" 權限不足：{fn_name} 僅限操作者使用"
-    if (fn_name or "").strip().lower() in _DAD_ONLY_STRICT_TOOLS and \
-            time.time() - (_BRAIN_INPUT_ORIGIN.get("audience_ts") or 0.0) < AUDIENCE_TAINT_SEC:
-        log_print(f"🛑 [工具權限] {fn_name} 剛有觀眾留言進來，分不清是誰要的，不執行")
-        return f" 權限不足：剛有觀眾留言，{fn_name} 請老爸直接在後台操作"
     extracted_text = ""
     fn_name = (fn_name or "").strip().lower()
     fn_args = {k.lower(): v for k, v in fn_args.items()} if isinstance(fn_args, dict) else {}
@@ -3410,7 +3417,7 @@ def _take_live_resume_handle(model: str, key_idx: int, now: Optional[float] = No
     return handle if ok else None
 
 
-async def _run_subagent_task(_task_ins, _intent, _respond):
+async def _run_subagent_task(_task_ins, _intent, _respond, who: str = ""):
     """子智能體任務全流程（CPU→副腦→回報）。_respond(文字, 排程, 還有下文) 把結果交回主腦：
     Live 主腦是送工具回應（_handle_invoke_subagent），REST 大腦是帶著結果再問她一次（_rest_answer_slip）。
     invoke_subagent 是非阻塞工具。實測主腦呼叫時幾乎都不開口（2026-10-24），所以：
@@ -3425,7 +3432,7 @@ async def _run_subagent_task(_task_ins, _intent, _respond):
     _if_said = "（妳剛才如果已經答應過，就輸出 [SILENCE]，不要再講一次。）"
 
     try:
-        if _task_ins and _SUBAGENT_VISION_TASK_RE.search(_task_ins) and not _vision_allowed():
+        if _task_ins and _SUBAGENT_VISION_TASK_RE.search(_task_ins) and not _vision_allowed(who):
             log_print(f"🛑 [子智能體] 觀眾要她看老爸的螢幕，不看：{_task_ins[:40]}")
             await _respond("[系統底層：看老爸的螢幕只聽老爸的，觀眾叫的不算，系統沒有去看。"
                            "俏皮帶過就好，不要描述或猜螢幕上有什麼。]", _speak)
@@ -3451,7 +3458,8 @@ async def _run_subagent_task(_task_ins, _intent, _respond):
                 await _respond("[系統底層：鏡子已經在照了（或剛照完），等鏡子的回報就好，不用再叫。]", _quiet)
             return
         if _task_ins:
-            _who = _BRAIN_INPUT_ORIGIN["who"]   # 這輪是觀眾觸發的，就照觀眾的權限
+            # 用主腦叫工具那一刻定下的權限（who）；沒給就照最後一則（以前一律在這裡才看，中間換人講話就借到權限）
+            _who = who or _BRAIN_INPUT_ORIGIN["who"]
             # 點播者照觸發這輪的人；系統通知觸發或不知道是誰就留空，紙條走中性文案
             _req = _brain_requester()
             # 主腦填了結構化舞台動作就照欄位直接執行，不再用正則猜她轉述的說法（2026-10-25）
@@ -3712,6 +3720,7 @@ def _note_inner_voice(text: str) -> None:
 async def _handle_invoke_subagent(session, ws_send_lock, _fn_name, _fn_call_id, _task_ins, _intent=None):
     """Live 主腦呼叫 invoke_subagent：每通獨立背景跑 _run_subagent_task，結果用工具回應交回去。"""
     _requester = _brain_requester()   # 結果回來時可能已經換人講話了，提醒要講給交辦的人聽
+    _turn_owner = _turn_who()          # 這次交辦用誰的權限：叫工具這一刻就定下來
 
     async def _respond(_text, _sched, _more=False):
         _fr = {"name": _fn_name, "response": {"result": _text}, "scheduling": _sched}
@@ -3736,7 +3745,7 @@ async def _handle_invoke_subagent(session, ws_send_lock, _fn_name, _fn_call_id, 
             _subagent_result_by_slip(_task_ins, _text, _sched, _se)
 
     try:
-        await _run_subagent_task(_task_ins, _intent, _respond)
+        await _run_subagent_task(_task_ins, _intent, _respond, who=_turn_owner)
     finally:
         _AWAITING_RESULTS.pop(_fn_call_id, None)
         # 同時交辦好幾件時：這件的結果交回去了，還在等的其他件重新算，讓她能講這件的結果（下一句又會被擋到下一件回來）
@@ -3958,7 +3967,8 @@ async def _rest_answer_slip(vts, input_queue, slip: str, origin: str) -> None:
                 await _rest_speak(vts, input_queue, r2.text, origin)
 
         await _run_subagent_task(args.get("task_instruction", ""),
-                                 {k: args.get(k, "") for k in ("action", "song", "song2", "url")}, _respond)
+                                 {k: args.get(k, "") for k in ("action", "song", "song2", "url")}, _respond,
+                                 who="audience" if origin == "audience" else "")   # REST 一張紙條一張回：誰的紙條就誰的權限
 
 
 async def rest_slip_worker(vts, input_queue):
@@ -5421,7 +5431,7 @@ _PLATFORM_LABEL = {"twitch": "Twitch", "youtube": "YouTube"}   # 其他（tiktok
 
 
 def add_to_streamer_mind_board(user_display: str, unique_id: str, content: str, source: str = "tiktok",
-                               handled: bool = False, note: str = ""):
+                               handled: bool = False, note: str = "", account_key: str = ""):
     """將接收到的彈幕/留言/事件寫入 7L 記憶腦袋，一排一排排列記錄，由主播自主排程讀取與發話。
     handled：呼叫端自己會處理（老爸的話），只記下來、不給看板哨兵再接一次。
     note：系統對這則的說明（接在這行後面給哨兵和主腦看，例如觀眾想停鋼琴、系統沒執行）。"""
@@ -5429,12 +5439,15 @@ def add_to_streamer_mind_board(user_display: str, unique_id: str, content: str, 
         # 觀眾原文中和：看板與記憶之後都會進 prompt，不能讓觀眾偽造【老爸】或 [系統標籤] 格式
         user_display = neutralize_viewer_text(user_display, 60)
         content = neutralize_viewer_text(content, 300)
+        # 這個名字現在是哪個帳號：之後大腦、看板用名字查觀眾檔時換成帳號（名字是中和過的，跟大腦看到的一樣）
+        note_viewer_seen(user_display, account_key or user_display)
     item = {
         "id": f"msg_{time.time()}_{random.randint(1000, 9999)}",
         "time": time.time(),
         "time_str": datetime.now(ZoneInfo('Asia/Taipei')).strftime('%H:%M:%S'),
         "user": user_display,
         "unique_id": unique_id,
+        "account_key": account_key,
         "content": content,
         "source": source,
         "status": "read" if handled else "unread"
@@ -5960,6 +5973,10 @@ def _save_viewer_updates(text: str) -> int:
 
 
 async def _save_one_viewer_update(name, call, rel, imp) -> None:
+    if not (viewer_seen_this_session(name) or is_known_viewer(name)):
+        # 這次開機沒看過這個名字、也不是熟客：大腦編出來的或冒用的，不建檔（建了也對不到帳號）
+        log_print(f"🛑 [認人] 這次沒看過「{name}」留言，不建觀眾檔")
+        return
     if await save_viewer_profile(name, call=call, relationship=rel, impression=imp):   # 都沒變就不寫、不記
         log_print(f"👥 [認人] 記住觀眾 {name}：稱={call} 關係={rel} 印象={imp}")
 
@@ -6026,7 +6043,7 @@ async def _streamer_mind_prompt(board_context: str, users_involved: list, has_da
     else:
         role_strict_block = "【直播間】老爸在打遊戲，觀眾在看直播。先分清楚誰在對誰說話。"
 
-    related = await _related_memories_block(board_context, viewers=[u for u in users_involved if is_known_viewer(u)])   # 回話前先查舊對話（2026-10-26）
+    related = await _related_memories_block(board_context, viewers=[resolve_viewer_key(u) for u in users_involved if is_known_viewer(u)])   # 回話前先查舊對話（2026-10-26）
     sys_instruction = f"""妳是 7L。
 時間：{get_current_time_string()}
 
@@ -6204,7 +6221,7 @@ async def streamer_mind_loop_worker(vts, input_queue):
                         _profiles = ""
                     _related = await _related_memories_block("\n".join(str(m.get("content", "")) for m in batch_to_process
                                                                       if m.get("source") != "video_watch"),
-                                                             viewers=[u for u in users_involved if is_known_viewer(u)])
+                                                             viewers=[resolve_viewer_key(u) for u in users_involved if is_known_viewer(u)])
                     slip_text = (f"[系統提示：背景潛意識哨兵偵測到直播間最新動態！目標：{log_target}，事件焦點：{log_focus}。剛才收到的觀眾留言：\n{board_context}\n"
                                  + (f"觀眾檔案：\n{_profiles}\n{VIEWER_UPDATE_HINT}\n" if _profiles else "")
                                  + (_related.strip("\n") + "\n" if _related else "")
@@ -7420,7 +7437,8 @@ async def execute_reward_action(reason: str = "", level: int = None):
 _AUDIENCE_JUDGE_SEM = asyncio.Semaphore(3)
 
 
-async def _audience_message_to_board(aud_c: str, id_display: str, v_unique_id: str, source: str) -> None:
+async def _audience_message_to_board(aud_c: str, id_display: str, v_unique_id: str, source: str,
+                                     account_key: str = "") -> None:
     """觀眾留言：先過 CPU 點歌判斷，再寫進看板。丟背景做：以前在派發迴圈裡等，
     觀眾刷一排「唱歌」時每則都要等 Groq，老爸的話、其他留言全排在後面（2026-10-31 Fable 審查）。"""
     # 進行 CPU 極速指令攔截 (觀眾專屬，不啟用 AI 備案避免消耗 API)
@@ -7434,7 +7452,7 @@ async def _audience_message_to_board(aud_c: str, id_display: str, v_unique_id: s
     # 點歌已經執行、紙條也遞給 Live 主腦了，這則就不用看板哨兵再轉一次
     # 觀眾想停鋼琴／停歌被擋：註明給哨兵看，不然哨兵叫她回頭請示老爸要不要收
     # （2026-10-31 Fable 看實機日誌：她停下來問「老爸，你說這鋼琴該不該收呀？」）
-    add_to_streamer_mind_board(id_display, v_unique_id, aud_c, source,
+    add_to_streamer_mind_board(id_display, v_unique_id, aud_c, source, account_key=account_key,
                                handled=bool(_hit) and _tool != "audience_denied" and is_live_brain_active(),
                                note=AUDIENCE_STAGE_DENIED_NOTE if _tool == "audience_denied" else "")
 
@@ -7579,7 +7597,9 @@ async def chat_processor_worker(vts, input_queue):
                         process_chat_message(vts, input_queue, aud_c, None, request_start_time=req_time, source="tiktok_dad")
                     )
                 else:
-                    spawn(_audience_message_to_board(aud_c, id_display, v_unique_id, source))
+                    # 觀眾檔照平台帳號認人（監聽器給的 platform_uid，觀眾改不到）；沒帳號才用名字
+                    spawn(_audience_message_to_board(aud_c, id_display, v_unique_id, source,
+                                                     account_key=viewer_key(source, platform_uid, id_display)))
 
             # -------------------------------------------------------------
             #  擁有者公開插話（owner_interject）：走觀眾軌道公開播出，不私聊、走觀眾工具牆

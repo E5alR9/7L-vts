@@ -26,7 +26,7 @@ def test_rag_memory_entry_rules(monkeypatch):
         == "[12:00:00] 7L對觀眾「小明」說: 明哥晚安"
     # 熟客的留言：帶觀眾名、speaker 只留名字；路人不存
     assert f("TikTok 觀眾「小明」", "7L", "7L 以後叫我明哥", "user", "tiktok", "12:41:00") \
-        == ("[12:41:00] 小明對7L說: 7L 以後叫我明哥", {"source": "user", "viewer": "小明"})
+        == ("[12:41:00] 小明對7L說: 7L 以後叫我明哥", {"source": "user", "viewer": "小明", "viewer_key": "小明"})
     assert f("TikTok 觀眾「小明」", "老爸/直播間", "送了玫瑰", "user", "tiktok_gift", "12:00:00")[1]["viewer"] == "小明"
     assert f("TikTok 觀眾「路人甲」", "7L", "7L 晚安", "user", "tiktok", "12:00:00") is None
     # 不存：只剩標籤、系統事件、心想
@@ -39,7 +39,7 @@ def test_append_to_unified_memory_sends_dad_her_and_regulars_to_the_vector_store
     _known(monkeypatch, "小明")
     stored = []
 
-    async def fake_add(text, source="dialogue", viewer=""):
+    async def fake_add(text, source="dialogue", viewer="", viewer_key=""):
         stored.append((text.split("] ", 1)[1], source, viewer))
 
     monkeypatch.setattr(rag_service, "add_rag_memory", fake_add)

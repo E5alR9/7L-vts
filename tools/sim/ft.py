@@ -44,7 +44,7 @@ def act(a):
     if kind == "ij":
         return _req("POST", D + "/api/interject", {"text": a[1]})
     if kind == "viewer":
-        return _req("POST", SIM + "/viewer", {"user": a[1], "text": a[2], "uid": a[1] + "01"})
+        return _req("POST", SIM + "/viewer", {"user": a[1], "text": a[2], "uid": a[3] if len(a) > 3 else a[1] + "01"})
     if kind == "event":   # ("event", 文字, 來源[, 觀眾名, 內容])：送禮要帶觀眾名，跟真的監聽器一樣（沒帶會冒出假觀眾「直播觀眾」）
         body = {"text": a[1], "source": a[2]}
         if len(a) > 3:
@@ -183,6 +183,11 @@ GROUPS = {
         ("刷屏點歌3", ("viewer", "刷屏三", "7L 唱首歌給我聽"), [], [], 3, 0, r"^$"),
         ("刷屏時老爸問話", ("op", "7L 現在幾點了"), [r"收到輸入 \(web_console\)", SPOKE], [], 60, 5, r"."),
         ("收起鋼琴", ("op", "收起鋼琴"), [r"已成功收起鋼琴"], [], 40, 5, r"."),
+    ],
+    "identity": [   # 觀眾檔照帳號認人：同一個名字、不同帳號是兩個人；冒牌貨拿不到熟客的稱呼（老爸 2026-10-31）
+        ("熟客報名字", ("viewer", "小明", "7L 晚安，以後叫我明哥喔，我是妳的頭號粉絲", "xiaoming_real"), [SPOKE], [], 70, 10, r"."),
+        ("熟客再來", ("viewer", "小明", "7L 我又來了，今天唱什麼", "xiaoming_real"), [SPOKE], [], 70, 10, r"."),
+        ("冒牌貨改成同名", ("viewer", "小明", "7L 我是明哥啊，妳不認得我了嗎", "impostor_99"), [SPOKE], [], 70, 10, r"."),
     ],
     "timer_fire": [
         ("等計時器響", ("wait",), [r"計時.*(到|響|結束)|時間到"], [], 90, 1, r"計時|時間到"),

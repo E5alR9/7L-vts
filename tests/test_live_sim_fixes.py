@@ -656,10 +656,10 @@ def test_slip_watchdog_counts_silence_even_when_the_song_already_plays():
           "_note_live_mute": lambda s, stuck=False: mutes.append((s, stuck)), "log_print": lambda *a: None, "log_swallowed": lambda *a: None,
           "LAST_BRAIN_TOOL_TS": 0.0, "LAST_BRAIN_TURN_TS": 0.0, "LAST_BRAIN_OUTPUT_TS": 0.0}
     exec(compile(ast.Module(body=[_fn("_slip_needs_rescue"), _fn("_slip_watchdog")], type_ignores=[]), "w", "exec"), ns)
-    asyncio.run(ns["_slip_watchdog"]("[系統底層：…《晴天》…]", time.time(), timeout=0.01))
+    asyncio.run(ns["_slip_watchdog"]("[系統底層：…《晴天》…]", time.time() - 1, timeout=0.01))
     assert mutes == [(None, True)]                 # 連一輪都沒結束：連線卡住
     ns["LAST_BRAIN_TURN_TS"] = time.time() + 5   # 她說完一段話：不算啞
-    asyncio.run(ns["_slip_watchdog"]("[系統底層：…《晴天》…]", time.time(), timeout=0.01))
+    asyncio.run(ns["_slip_watchdog"]("[系統底層：…《晴天》…]", time.time() - 1, timeout=0.01))
     assert mutes == [(None, True)]
 
 
@@ -718,12 +718,12 @@ def test_slip_watchdog_does_not_blame_a_new_session():
           "_slip_superseded": lambda s, t: False, "rescue_claim": lambda k, t: True, "_unpack_slip": lambda s: (s,),
           "send_brain_slip": resent.append}
     exec(compile(ast.Module(body=[_fn("_slip_needs_rescue"), _fn("_slip_watchdog")], type_ignores=[]), "w", "exec"), ns)
-    asyncio.run(ns["_slip_watchdog"]("老爸問天氣", time.time(), timeout=0.01, session=old))
+    asyncio.run(ns["_slip_watchdog"]("老爸問天氣", time.time() - 1, timeout=0.01, session=old))
     assert mutes == [] and resent == ["老爸問天氣"]   # 照樣撿回，但不記啞
-    asyncio.run(ns["_slip_watchdog"]("老爸問晚餐", time.time(), timeout=0.01, session=new))
+    asyncio.run(ns["_slip_watchdog"]("老爸問晚餐", time.time() - 1, timeout=0.01, session=new))
     assert mutes == [("老爸問晚餐", True)]
     ns["LAST_BRAIN_ANY_TURN_TS"] = time.time() + 5   # 有結束一輪（她選擇不講）：不是卡住，照兩張才換
-    asyncio.run(ns["_slip_watchdog"]("老爸問明天", time.time(), timeout=0.01, session=new))
+    asyncio.run(ns["_slip_watchdog"]("老爸問明天", time.time() - 1, timeout=0.01, session=new))
     assert mutes[-1] == ("老爸問明天", False)
 
 
@@ -761,7 +761,8 @@ def test_cover_orchestrator_survives_a_laptop_check_error():
 def test_viewer_stage_judging_does_not_block_the_dispatcher():
     """觀眾留言的點歌判斷丟背景（同時最多三則）：派發迴圈不等 Groq，老爸的話不會排在一排「唱歌」後面。"""
     src = _src("chat_processor_worker")
-    assert "spawn(_audience_message_to_board(aud_c, id_display, v_unique_id, source))" in src
+    assert "spawn(_audience_message_to_board(aud_c, id_display, v_unique_id, source," in src
+    assert "account_key=viewer_key(source, platform_uid, id_display)" in src
     assert "await background_tool_executor(aud_c" not in src
     assert "async with _AUDIENCE_JUDGE_SEM:" in _src("_audience_message_to_board")
 

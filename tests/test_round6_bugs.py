@@ -552,7 +552,7 @@ def test_subagent_result_survives_a_live_reconnect():
             silent.append(x)
     ns = {"types": NS(FunctionResponseScheduling=Sched, FunctionResponse=lambda **k: k), "log_print": logs.append,
           "send_brain_slip": slips.append, "LIVE_SILENT_CONTEXT_QUEUE": Q(), "log_swallowed": lambda *a: None,
-          "_AWAITING_RESULTS": {}, "LIVE_SAY_GATE": False, "_brain_requester": lambda: "老爸"}
+          "_AWAITING_RESULTS": {}, "LIVE_SAY_GATE": False, "_brain_requester": lambda: "老爸", "_turn_who": lambda: "dad"}
     for n in ("_subagent_result_by_slip", "_handle_invoke_subagent"):
         exec(compile(ast.Module(body=[_fn(n)], type_ignores=[]), n, "exec"), ns)
     old, new = object(), object()
@@ -563,7 +563,7 @@ def test_subagent_result_survives_a_live_reconnect():
         await task("1 美元約 159 日圓", Sched.WHEN_IDLE)               # 正式結果：改用紙條交回
         await task("記著就好", Sched.SILENT)                            # 不用她講：悄悄放進對話
 
-    async def fake_run(task_ins, intent, respond):
+    async def fake_run(task_ins, intent, respond, who=""):
         await run(respond)
     ns["_run_subagent_task"] = fake_run
     asyncio.run(ns["_handle_invoke_subagent"](old, asyncio.Lock(), "invoke_subagent", "c1", "查日圓匯率"))

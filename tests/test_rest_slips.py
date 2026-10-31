@@ -100,7 +100,7 @@ def _answer(first, calls, subagent_says):
             spoken.append((raw, origin))
         return raw
 
-    async def run_subagent(task, intent, respond):
+    async def run_subagent(task, intent, respond, who=""):
         for text, sched, more in subagent_says:
             await respond(text, sched, _more=more)
 

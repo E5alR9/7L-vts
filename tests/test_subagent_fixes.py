@@ -15,6 +15,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 from conftest import MAIN_SRC as MAIN, MAIN_TREE as TREE  # noqa: E402
 
 
+
 def _fn(name):
     return next(n for n in ast.walk(TREE) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == name)
 
@@ -104,7 +105,7 @@ def _run_handler(cpu, nv, total_timeout=45.0, task="幫我查日圓匯率", orig
 
     from core.hard_command import build_slip_text, structured_stage_command, compose_instead_of_play
     sess = _FakeSession()
-    ns = _load("_run_subagent_task", "_handle_invoke_subagent", _vision_allowed=lambda: True, _AWAITING_RESULTS={}, LIVE_SAY_GATE=False, types=types, asyncio=asyncio, session=sess, GLOBAL_LIVE_SESSION=sess,
+    ns = _load("_run_subagent_task", "_handle_invoke_subagent", "_turn_who", _vision_allowed=lambda *a: True, _RECENT_HUMAN_INPUTS=[], TURN_INPUT_MARGIN_SEC=2.0, _AWAITING_RESULTS={}, LIVE_SAY_GATE=False, types=types, asyncio=asyncio, session=sess, GLOBAL_LIVE_SESSION=sess,
                ws_send_lock=asyncio.Lock(), _desktop_lookup=desktop_lookup,
                background_tool_executor=background_tool_executor, nv_interpret_task=nv_interpret_task,
                build_slip_text=build_slip_text, _SUBAGENT_TOTAL_TIMEOUT=total_timeout,
@@ -233,7 +234,7 @@ def test_dispatcher_refuses_stage_control_from_the_audience():
     from core.hard_command import is_stage_control
     ns = _load("execute_tool_dispatch", is_stage_control=is_stage_control,
                _AUDIENCE_DENIED_TOOLS=_const_frozenset("_AUDIENCE_DENIED_TOOLS"),
-               _DAD_ONLY_STRICT_TOOLS=frozenset(), AUDIENCE_TAINT_SEC=15.0, _BRAIN_INPUT_ORIGIN={}, time=time)
+               _BRAIN_INPUT_ORIGIN={}, time=time)
     for name in ("pe.stop_virtual_piano", "stop_virtual_piano", "pause_virtual_piano", "stop_singing", "stop_cover"):
         assert "權限不足" in asyncio.run(ns["execute_tool_dispatch"](name, {}, caller_target="audience"))
 
@@ -326,7 +327,7 @@ def test_screen_task_is_handed_to_the_vision_brain():
 
     def run(recent):
         sess = _FakeSession()
-        ns = _load("_run_subagent_task", "_handle_invoke_subagent", _vision_allowed=lambda: True, _call_cancelled=lambda i: False, _brain_requester=lambda: "老爸", _AWAITING_RESULTS={}, LIVE_SAY_GATE=False, types=types, asyncio=asyncio, time=time, GLOBAL_LIVE_SESSION=sess,
+        ns = _load("_run_subagent_task", "_handle_invoke_subagent", "_turn_who", _vision_allowed=lambda *a: True, _RECENT_HUMAN_INPUTS=[], TURN_INPUT_MARGIN_SEC=2.0, _BRAIN_INPUT_ORIGIN={"who": "dad", "ts": 0.0}, _call_cancelled=lambda i: False, _brain_requester=lambda: "老爸", _AWAITING_RESULTS={}, LIVE_SAY_GATE=False, types=types, asyncio=asyncio, time=time, GLOBAL_LIVE_SESSION=sess,
                    background_tool_executor=never, nv_interpret_task=never, build_slip_text=build_slip_text,
                    _SUBAGENT_TOTAL_TIMEOUT=45.0, _SUBAGENT_VISION_TASK_RE=_re.compile(_const_pattern("_SUBAGENT_VISION_TASK_RE")),
                    _start_vision=lambda: not recent and (looked.append(True) or True),   # 剛看過／正在看就回 False
@@ -368,7 +369,7 @@ def test_brain_slips_have_one_exit_and_origin_is_noted_on_send():
     """紙條以前 14 處各自 put_nowait，「這張是誰觸發的」又在別處另外記（2026-10-25 健檢）。"""
     import collections
     q = collections.deque()
-    ns = _load("send_brain_slip", "_note_brain_origin", time=time, log_swallowed=lambda: None,
+    ns = _load("send_brain_slip", "_note_brain_origin", _RECENT_HUMAN_INPUTS=[], time=time, log_swallowed=lambda: None,
                LIVE_API_SYSTEM_PROMPT_QUEUE=type("Q", (), {"put_nowait": q.append})(),
                _BRAIN_INPUT_ORIGIN={"who": "dad", "ts": 0.0})
     assert ns["send_brain_slip"]("觀眾說收起鋼琴", origin="audience") is True
@@ -409,7 +410,7 @@ def test_brain_does_not_replay_old_requests_on_unrelated_words():
     主腦自己要彈／唱時，對照觸發這輪的那句人話；沒人點就不執行、請她直接回那句話。"""
     from core.hard_command import PLAY_TOOLS, stage_request_unasked
     from core.memory import UNIFIED_DIALOGUE_MEMORY
-    ns = _load("_note_brain_origin", "_her_words_before", "_brain_replaying_old_request", time=time,
+    ns = _load("_note_brain_origin", "_her_words_before", "_brain_replaying_old_request", _RECENT_HUMAN_INPUTS=[], time=time,
                log_swallowed=lambda: None, stage_request_unasked=stage_request_unasked,
                _BRAIN_INPUT_ORIGIN={"who": "dad", "ts": 0.0, "said": "", "human": False})
     note, replaying = ns["_note_brain_origin"], ns["_brain_replaying_old_request"]
@@ -456,7 +457,7 @@ def test_subagent_tells_her_not_to_replay_and_skips_the_reinterpreter():
 
 def test_subagent_acts_for_whoever_prompted_the_brain_by_name():
     """以前一律傳空字串：老爸用麥克風點歌，鋼琴隊列和她的應答都寫「點播的人」。"""
-    ns = _load("_note_brain_origin", "_brain_requester", time=time, _owner_name=lambda: "老爸",
+    ns = _load("_note_brain_origin", "_brain_requester", _RECENT_HUMAN_INPUTS=[], time=time, _owner_name=lambda: "老爸",
                _BRAIN_INPUT_ORIGIN={"who": "dad", "ts": 0.0, "said": "", "human": False, "name": ""})
     note, req = ns["_note_brain_origin"], ns["_brain_requester"]
     note("dad", "彈小星星")
@@ -493,7 +494,7 @@ def test_mirror_task_is_handed_to_the_mirror_once():
 
     def run(can_start):
         sess = _FakeSession()
-        ns = _load("_run_subagent_task", "_handle_invoke_subagent", _vision_allowed=lambda: True, _call_cancelled=lambda i: False, _brain_requester=lambda: "老爸", _AWAITING_RESULTS={}, LIVE_SAY_GATE=False, types=types, asyncio=asyncio, time=time, GLOBAL_LIVE_SESSION=sess,
+        ns = _load("_run_subagent_task", "_handle_invoke_subagent", "_turn_who", _vision_allowed=lambda *a: True, _RECENT_HUMAN_INPUTS=[], TURN_INPUT_MARGIN_SEC=2.0, _BRAIN_INPUT_ORIGIN={"who": "dad", "ts": 0.0}, _call_cancelled=lambda i: False, _brain_requester=lambda: "老爸", _AWAITING_RESULTS={}, LIVE_SAY_GATE=False, types=types, asyncio=asyncio, time=time, GLOBAL_LIVE_SESSION=sess,
                    background_tool_executor=never, nv_interpret_task=never,
                    _SUBAGENT_VISION_TASK_RE=__import__("re").compile(_const_pattern("_SUBAGENT_VISION_TASK_RE")),
                    _start_mirror=lambda: started.append(1) or can_start)

@@ -106,8 +106,9 @@ def test_two_tasks_at_once_each_result_can_be_said():
     ns, sess, spoken, _, _ = _say_ns()
     waiting = ns["_AWAITING_RESULTS"]
 
-    async def run_task(task, intent, respond):
+    async def run_task(task, intent, respond, who=""):
         await respond(f"[{task}的結果]", types.FunctionResponseScheduling.WHEN_IDLE)
+    ns["_turn_who"] = lambda: "dad"
 
     exec(compile(ast.Module(body=[_fn("_handle_invoke_subagent")], type_ignores=[]), "h", "exec"), ns)
     ns.update(_run_subagent_task=run_task, LIVE_SAY_GATE=False, _subagent_result_by_slip=lambda *a: None, _call_cancelled=lambda i: False, _brain_requester=lambda: "老爸")

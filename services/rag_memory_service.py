@@ -20,10 +20,10 @@ def init_rag(api_key: str):
     _initialized = True
     log_print("🧠 [RAG 記憶中樞] 已準備完畢 (本地 ChromaDB + 雲端 Firestore 同步)")
 
-async def add_rag_memory(content: str, source: str = "dialogue", viewer: str = ""):
+async def add_rag_memory(content: str, source: str = "dialogue", viewer: str = "", viewer_key: str = ""):
     """
     新增一筆 RAG 記憶，會自動計算向量，存入本地 ChromaDB 並同步至雲端 Firestore。
-    viewer：熟客的留言帶觀眾名，之後可以只查他說過的。
+    viewer：熟客的留言帶觀眾名；viewer_key：他的觀眾檔 key（平台:帳號），之後照這個只查他說過的。
     """
     if not content or not content.strip():
         return
@@ -38,6 +38,7 @@ async def add_rag_memory(content: str, source: str = "dialogue", viewer: str = "
     }
     if viewer:
         metadata["viewer"] = viewer
+        metadata["viewer_key"] = viewer_key or viewer
     
     # 1. Update Local ChromaDB Store
     # We use asyncio.to_thread because upsert_documents is synchronous
@@ -191,9 +192,21 @@ VIEWER_MIN_SCORE = 0.50     # 只在熟客自己的話裡找：本來就是他�
 VIEWER_LATEST = 2           # 找不到相關的，就給他最近說過的兩句
 
 
-def viewer_where(viewer: str) -> dict:
-    """向量庫裡「這位熟客說過的話」：他的留言（source=user）。觀眾檔片段（ingest_rag）也標了 viewer，不算。"""
-    return {"$and": [{"viewer": viewer}, {"source": "user"}]}
+def viewer_where(viewer_key: str) -> dict:
+    """向量庫裡「這位熟客說過的話」：他的留言（source=user），照觀眾檔 key（平台:帳號）找。
+    以前照名字找，改成熟客名字的冒牌貨也撈得到熟客的舊對話（2026-10-31）。觀眾檔片段（ingest_rag）不算。"""
+    return {"$and": [{"viewer_key": viewer_key}, {"source": "user"}]}
+
+
+async def retag_viewer(old_key: str, new_key: str) -> int:
+    """舊觀眾檔（用名字當 key）接到帳號時，他說過的話一起改標新的 key。回改了幾筆。"""
+    def _do():
+        return rag_store.update_where({"viewer_key": old_key}, {"viewer_key": new_key})
+    try:
+        return await asyncio.to_thread(_do)
+    except Exception as e:
+        log_print(f"⚠️ [RAG] 改標觀眾 {old_key} → {new_key} 失敗：{e}")
+        return 0
 
 
 def latest_viewer_lines(viewer: str, query: str = "", now=None, n=VIEWER_LATEST, skip_recent_sec=RELATED_SKIP_RECENT_SEC):

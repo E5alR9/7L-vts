@@ -45,7 +45,7 @@ MAIN_FUNCS = (
     "chat_processor_worker", "_audience_message_to_board", "process_chat_message", "add_to_streamer_mind_board", "is_piano_song_request",
     "background_tool_executor", "run_stage_commands", "_hard_cmd_seen_recently", "_dispatch_in_background",
     "send_brain_slip", "_send_stage_slip", "_supersede_board_requests", "_unpack_slip", "_take_slip", "_owner_text_slip", "_slip_is_dupe", "_record_slip",
-    "_note_brain_origin", "_vision_allowed", "_brain_requester", "_her_words_before", "_brain_replaying_old_request", "_offer_accept_cmds",
+    "_note_brain_origin", "_turn_who", "_vision_allowed", "_brain_requester", "_her_words_before", "_brain_replaying_old_request", "_offer_accept_cmds",
     "_stage_said_key", "_stage_mark", "_stage_already_handled",
     "is_live_brain_active", "live_brain_down_for", "use_rest_brain",
     "rest_slip_worker", "_rest_answer_slip", "_speak_brain_turn", "_rest_speak", "_run_subagent_task",
@@ -58,7 +58,7 @@ MAIN_FUNCS = (
 MAIN_CONSTS = (
     "AUDIENCE_STAGE_DECLINE", "AUDIENCE_STAGE_DENIED_NOTE", "UNASKED_STAGE_DECLINE", "_SUBAGENT_VISION_TASK_RE", "_SUBAGENT_MIRROR_TASK_RE",
     "_SUBAGENT_TOTAL_TIMEOUT", "_HARD_CMD_DEDUPE_SEC", "_PLATFORM_LABEL",
-    "_SLIP_DEDUPE_SEC", "LIVE_FALLBACK_AFTER_SEC", "LIVE_STABLE_SEC", "_DAD_ONLY_STRICT_TOOLS", "AUDIENCE_TAINT_SEC", "VISION_REPORT_QUIET_SEC", "VISION_FAIL_QUIET_SEC",
+    "_SLIP_DEDUPE_SEC", "LIVE_FALLBACK_AFTER_SEC", "LIVE_STABLE_SEC", "TURN_INPUT_MARGIN_SEC", "VISION_REPORT_QUIET_SEC", "VISION_FAIL_QUIET_SEC",
     "_BARE_PING_NAMES", "_PING_COOLDOWN_SEC", "_PING_QUIET_SEC",
     "_VIEWER_UPDATE_RE", "VIEWER_UPDATE_HINT",
     "_SING_PLAY_RE", "STAGE_JUDGE_WAIT_SEC", "_STAGE_JUDGED",
@@ -227,6 +227,10 @@ class DryRun:
             "live_timer_hub": pytypes.SimpleNamespace(detect_timer_intent=lambda t: None),
             "_save_model_position": lambda: d.saved_position.append(1),
             "_related_memories_block": related_block, "is_known_viewer": lambda n: n in d.known_viewers,
+            # 觀眾帳號 key：測試裡名字就是 key（真的對照表在 core.memory，測試不碰它的全域狀態）
+            "viewer_key": __import__("core.memory", fromlist=["viewer_key"]).viewer_key,
+            "resolve_viewer_key": lambda n: n, "note_viewer_seen": lambda d_, k: None, "viewer_seen_this_session": lambda n: True,
+            "_RECENT_HUMAN_INPUTS": collections.deque(maxlen=50), "LAST_BRAIN_ANY_TURN_TS": 0.0,
             "set_timer": anoop, "interrupt_current_speech": anoop, "execute_speech_visual_actions": anoop,
             "is_singing_active": lambda: False, "save_local_audio_clip": lambda *a: "",
             "live_vision_tool_task": lambda: d._record_vision("vision"),

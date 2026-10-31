@@ -122,6 +122,21 @@ def search(query: str, k: int = 4, where: Optional[Dict] = None) -> List[Dict]:
     return out
 
 
+def update_where(where: Dict, new_meta: Dict, limit: int = 5000) -> int:
+    """metadata 符合 where 的片段，把 new_meta 的欄位併進去（其他欄位不動）。回改了幾筆。"""
+    with _lock:
+        col = _get_collection()
+        if col.count() == 0:
+            return 0
+        res = col.get(where=where, limit=max(1, limit), include=["metadatas"])
+        ids = res.get("ids") or []
+        if not ids:
+            return 0
+        metas = [{**(m or {}), **new_meta} for m in (res.get("metadatas") or [{}] * len(ids))]
+        col.update(ids=ids, metadatas=metas)
+    return len(ids)
+
+
 def get_where(where: Dict, limit: int = 50) -> List[Dict]:
     """不比相似度，直接拿 metadata 符合的片段（例如某個熟客說過的全部）；沒有就空的。"""
     try:
