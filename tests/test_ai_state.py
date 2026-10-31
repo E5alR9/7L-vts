@@ -107,7 +107,7 @@ def test_after_talking_she_goes_back_to_what_is_on_stage():
     assert ns["_state_after_talking"]() == "PIANO"
     ns["is_singing_active"] = lambda: True
     assert ns["_state_after_talking"]() == "SINGING"
-    assert src.count("set_ai_state(_state_after_talking()") == 4
+    assert src.count("set_ai_state(_state_after_talking()") == 6   # 語音被取消、合成錯誤也回台上的狀態（2026-10-31 Fable 審查）
 
 
 def test_pipeline_routes_state_through_core(st):

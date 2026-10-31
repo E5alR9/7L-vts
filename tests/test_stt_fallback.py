@@ -22,7 +22,7 @@ class _Clock:
 def test_down_clock_starts_when_the_brain_drops_and_keeps_running_while_reconnects_fail():
     clock = _Clock(100.0)
     ns = _load("is_live_brain_active", "_set_live_active", "live_brain_down_for",
-               time=clock, LIVE_SESSION_ACTIVE=False, _LIVE_DOWN_SINCE=0.0)
+               time=clock, LIVE_SESSION_ACTIVE=False, _LIVE_DOWN_SINCE=0.0, _LIVE_UP_SINCE=0.0, LIVE_STABLE_SEC=10.0)
     ns["_set_live_active"](True)
     assert ns["live_brain_down_for"]() == 0.0
     clock.t = 200.0
@@ -33,6 +33,32 @@ def test_down_clock_starts_when_the_brain_drops_and_keeps_running_while_reconnec
     assert ns["live_brain_down_for"]() == 12.0
     ns["_set_live_active"](True)
     assert ns["live_brain_down_for"]() == 0.0
+
+
+def test_down_clock_keeps_running_while_the_brain_flaps():
+    """連上幾秒又斷（麥克風壞掉、連上就被踢）：斷線時間接著算，REST 大腦才接得到（2026-10-31 Fable 審查）。"""
+    clock = _Clock(100.0)
+    ns = _load("is_live_brain_active", "_set_live_active", "live_brain_down_for",
+               time=clock, LIVE_SESSION_ACTIVE=True, _LIVE_DOWN_SINCE=0.0, _LIVE_UP_SINCE=0.0, LIVE_STABLE_SEC=10.0)
+    ns["_set_live_active"](False)       # 穩定的連線斷了：從 100 起算
+    for t in (103.0, 109.0):
+        clock.t = t
+        ns["_set_live_active"](True)    # 連上
+        clock.t = t + 2.0
+        ns["_set_live_active"](False)   # 兩秒又斷
+    clock.t = 112.0
+    assert ns["live_brain_down_for"]() == 12.0
+
+
+def test_rest_brain_takes_over_while_the_live_brain_stays_mute():
+    """連線在但一直不出聲、換了兩次都一樣：REST 大腦先接；她一出聲就換回 Live。"""
+    import time
+    ns = _load("is_live_brain_active", "live_brain_down_for", "use_rest_brain", "_brain_output_seen",
+               time=time, LIVE_SESSION_ACTIVE=True, _LIVE_DOWN_SINCE=0.0, LIVE_FALLBACK_AFTER_SEC=8.0,
+               LAST_BRAIN_OUTPUT_TS=0.0, _LIVE_MUTE={"strikes": 0, "rotate": "", "rotations": 2, "rest_until": time.time() + 300})
+    assert ns["use_rest_brain"]()
+    ns["_brain_output_seen"]()
+    assert not ns["use_rest_brain"]() and ns["_LIVE_MUTE"]["rotations"] == 0
 
 
 class _Done(BaseException):
@@ -69,7 +95,7 @@ def _run_mic_worker(downs):
 
     rec = pytypes.SimpleNamespace(energy_threshold=300, adjust_for_ambient_noise=lambda s, duration: None)
     ns = _load("mic_worker", live_brain_down_for=down_for, LIVE_FALLBACK_AFTER_SEC=8.0, IS_MIC_ENABLED=True,
-               listen_once_fast=listen_once_fast, sr=pytypes.SimpleNamespace(Microphone=_Mic), os=os,
+               listen_once_fast=listen_once_fast, sr=pytypes.SimpleNamespace(Microphone=_Mic), os=os, time=_Clock(0.0),
                asyncio=pytypes.SimpleNamespace(sleep=_no_sleep, to_thread=_to_thread),
                log_print=lambda m, *a, **k: logs.append(m), current_mic_action_str="", MIC_ENERGY_THRESHOLD=500)
     try:

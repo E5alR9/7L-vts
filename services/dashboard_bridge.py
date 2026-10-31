@@ -35,7 +35,7 @@ CORE_ATTRS = (
     "LATEST_HD_SCREEN_BYTES", "latest_screen_cache", "STREAMER_MIND_BOARD",
     # 開關（讀寫）
     "IS_SLEEPING", "IS_MIC_ENABLED", "IS_AUTO_PIANO_ENABLED", "IS_AUTO_WANDER_ENABLED",
-    "IS_PROACTIVE_SPEAK_ENABLED", "IS_PERIPHERAL_VISION_ENABLED", "IS_FACE_TRACKING_ENABLED",
+    "IS_PROACTIVE_SPEAK_ENABLED", "IS_PERIPHERAL_VISION_ENABLED", "IS_FACE_TRACKING_ENABLED", "IS_GAZE_CURSOR_ENABLED",
     # 函式
     "set_ai_state", "get_api_stress_metrics", "set_vts_expression", "shutdown_7l", "apply_spatial_position",
     "control_microphone", "set_sleep_mode", "set_timer", "search_google",
@@ -354,6 +354,15 @@ class DashboardBridge:
                 "icon": "user"
             },
             {
+                "key": "IS_GAZE_CURSOR_ENABLED",
+                "name": "顯示視線位置",
+                "category": "vision",
+                "category_name": " 多模態感知",
+                "description": "在她現在看的螢幕位置顯示一個桃紅色箭頭游標（點不到、截圖和直播擷取都看不到）。",
+                "value": bool(c.IS_GAZE_CURSOR_ENABLED),
+                "icon": "eye"
+            },
+            {
                 "key": "IS_MIC_ENABLED",
                 "name": "麥克風語音監聽收音",
                 "category": "system",
@@ -409,6 +418,7 @@ class DashboardBridge:
             "IS_PROACTIVE_SPEAK_ENABLED": c.IS_PROACTIVE_SPEAK_ENABLED,
             "IS_PERIPHERAL_VISION_ENABLED": c.IS_PERIPHERAL_VISION_ENABLED,
             "IS_FACE_TRACKING_ENABLED": c.IS_FACE_TRACKING_ENABLED,
+            "IS_GAZE_CURSOR_ENABLED": c.IS_GAZE_CURSOR_ENABLED,
             "IS_MIC_ENABLED": c.IS_MIC_ENABLED,
             "IS_STREAM_CHAT_ENABLED": getattr(c.tk_listener, "IS_STREAMING", False),
             "IS_SLEEPING": c.IS_SLEEPING,
@@ -436,6 +446,9 @@ class DashboardBridge:
         elif key == "IS_FACE_TRACKING_ENABLED":
             c.IS_FACE_TRACKING_ENABLED = target_val
             log_print(f"🎛️ [系統開關] AI 視線與頭部追蹤已{'🟢 開啟' if target_val else '🔴 關閉'}")
+        elif key == "IS_GAZE_CURSOR_ENABLED":
+            c.IS_GAZE_CURSOR_ENABLED = target_val
+            log_print(f"🎛️ [系統開關] 顯示視線位置已{'🟢 開啟' if target_val else '🔴 關閉'}")
         elif key == "IS_MIC_ENABLED":
             c.IS_MIC_ENABLED = target_val
             log_print(f"🎛️ [系統開關] 麥克風收音已{'🟢 開啟' if target_val else '🔴 關閉'}")

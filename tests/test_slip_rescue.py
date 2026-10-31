@@ -46,7 +46,8 @@ def test_two_unanswered_slips_close_the_session_once():
         async def close(self):
             closed.append(1)
 
-    ns = {"time": time, "LIVE_MUTE_STRIKES": 2, "_LIVE_MUTE": {"strikes": 0, "rotate": ""},
+    ns = {"time": time, "LIVE_MUTE_STRIKES": 2, "_LIVE_MUTE": {"strikes": 0, "rotate": "", "rotations": 0, "rest_until": 0.0},
+          "LIVE_MUTE_ROTATIONS_FOR_REST": 2, "LIVE_MUTE_REST_SEC": 300.0,
           "LAST_BRAIN_OUTPUT_TS": 0.0, "GLOBAL_LIVE_SESSION": Session(),
           "log_print": logs.append, "spawn": lambda coro: (coro.close(), closed.append(1)),
           "_LIVE_SLIP_RETRY": deque()}
@@ -62,3 +63,7 @@ def test_two_unanswered_slips_close_the_session_once():
     assert f["_note_live_mute"]("紙條四") is False             # 已經在換了，不重複關
     assert closed == [1] and len(ns["_LIVE_SLIP_RETRY"]) == 1
     assert any("換一把金鑰" in l for l in logs)
+    ns["_LIVE_MUTE"].update(strikes=0, rotate="")
+    closed.clear()
+    assert f["_note_live_mute"]("紙條五", stuck=True) is True   # 連線卡住：一張就換
+    assert closed == [1] and "卡住" in ns["_LIVE_MUTE"]["rotate"]

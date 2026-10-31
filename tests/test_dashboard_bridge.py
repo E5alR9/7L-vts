@@ -72,7 +72,7 @@ def _fake_core(**kw):
                                       LATEST_YT_FRAME_BYTES=None),
         live_timer_hub=types.SimpleNamespace(get_sensor_summary=lambda: {}),
         IS_AUTO_PIANO_ENABLED=False, IS_AUTO_WANDER_ENABLED=True, IS_PROACTIVE_SPEAK_ENABLED=True,
-        IS_PERIPHERAL_VISION_ENABLED=True, IS_FACE_TRACKING_ENABLED=True, IS_MIC_ENABLED=True, IS_SLEEPING=False,
+        IS_PERIPHERAL_VISION_ENABLED=True, IS_FACE_TRACKING_ENABLED=True, IS_GAZE_CURSOR_ENABLED=False, IS_MIC_ENABLED=True, IS_SLEEPING=False,
         current_ai_status_str=" 正常運作中", current_mic_action_str="待命",
         is_user_listening=False, CURRENT_SYSTEM_AUDIO_VOL_PERCENT=0, CURRENT_MIC_VOL_PERCENT=0,
         LATEST_SYSTEM_AUDIO_TEXT="", LATEST_SYSTEM_AUDIO_TEXT_TIME=0.0, LATEST_SYSTEM_MUSIC_INFO="",

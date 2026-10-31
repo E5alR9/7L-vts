@@ -42,7 +42,7 @@ _TREE = ast.parse(MAIN_SRC)
 
 # 從主程式原樣載入的函式（這一串的真實行為）
 MAIN_FUNCS = (
-    "chat_processor_worker", "process_chat_message", "add_to_streamer_mind_board", "is_piano_song_request",
+    "chat_processor_worker", "_audience_message_to_board", "process_chat_message", "add_to_streamer_mind_board", "is_piano_song_request",
     "background_tool_executor", "run_stage_commands", "_hard_cmd_seen_recently", "_dispatch_in_background",
     "send_brain_slip", "_send_stage_slip", "_supersede_board_requests", "_unpack_slip", "_take_slip", "_owner_text_slip", "_slip_is_dupe", "_record_slip",
     "_note_brain_origin", "_brain_requester", "_her_words_before", "_brain_replaying_old_request", "_offer_accept_cmds",
@@ -58,7 +58,7 @@ MAIN_FUNCS = (
 MAIN_CONSTS = (
     "AUDIENCE_STAGE_DECLINE", "AUDIENCE_STAGE_DENIED_NOTE", "UNASKED_STAGE_DECLINE", "_SUBAGENT_VISION_TASK_RE", "_SUBAGENT_MIRROR_TASK_RE",
     "_SUBAGENT_TOTAL_TIMEOUT", "_HARD_CMD_DEDUPE_SEC", "_PLATFORM_LABEL",
-    "_SLIP_DEDUPE_SEC", "LIVE_FALLBACK_AFTER_SEC", "VISION_REPORT_QUIET_SEC", "VISION_FAIL_QUIET_SEC",
+    "_SLIP_DEDUPE_SEC", "LIVE_FALLBACK_AFTER_SEC", "LIVE_STABLE_SEC", "VISION_REPORT_QUIET_SEC", "VISION_FAIL_QUIET_SEC",
     "_BARE_PING_NAMES", "_PING_COOLDOWN_SEC", "_PING_QUIET_SEC",
     "_VIEWER_UPDATE_RE", "VIEWER_UPDATE_HINT",
     "_SING_PLAY_RE", "STAGE_JUDGE_WAIT_SEC", "_STAGE_JUDGED",
@@ -201,11 +201,12 @@ class DryRun:
             # 主程式的狀態
             "IS_SLEEPING": False, "CURRENT_SPEAKING_TARGET": "none", "current_dad_task": None,
             "CURRENT_PROCESSING_USER_INPUT": "", "last_interaction_time": 0.0, "LAST_TTS_END_TIME": 0.0,
-            "LIVE_SESSION_ACTIVE": self.live, "_LIVE_DOWN_SINCE": time.time() - (0 if self.live else 3600),
+            "LIVE_SESSION_ACTIVE": self.live, "_LIVE_DOWN_SINCE": time.time() - (0 if self.live else 3600), "_LIVE_UP_SINCE": 0.0,
+            "_LIVE_MUTE": {"strikes": 0, "rotate": "", "rotations": 0, "rest_until": 0.0},
             "_BRAIN_INPUT_ORIGIN": {"who": "dad", "ts": 0.0, "said": "", "human": False, "name": ""},
             "eventlog": eventlog, "usage": usage, "_LIVE_SLIP_RETRY": collections.deque(),
             "_VISION_STATE": {"report_ts": 0.0, "mirror_ts": 0.0}, "_PING_LAST_TS": {}, "_LAST_HUMAN_SLIP_TS": {},
-            "_DESKTOP_DOWN_UNTIL": float("inf"),   # 桌機代答關掉
+            "_DESKTOP_DOWN_UNTIL": float("inf"), "_AUDIENCE_JUDGE_SEM": asyncio.Semaphore(3),   # 桌機代答關掉
             "STREAMER_MIND_BOARD": [], "STREAMER_MIND_MODELS": ["m"], "REST_BRAIN_MODELS": ["m"],
             "REST_BRAIN_TOOLS": ["invoke_subagent"],
             "speech_queue": SpeechQueue(), "LIVE_API_SYSTEM_PROMPT_QUEUE": asyncio.Queue(), "LIVE_SILENT_CONTEXT_QUEUE": asyncio.Queue(),

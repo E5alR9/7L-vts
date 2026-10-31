@@ -629,14 +629,38 @@ def test_mirror_report_does_not_retrigger_the_mirror():
 def test_speech_queued_while_singing_goes_stale_instead_of_being_said_minutes_later():
     """唱歌中排隊的話以前沒有上限：「即興創作一首曲子馬上來」等到曲子彈完、鋼琴都收了才念（2026-10-31 Fable 看實機日誌）。"""
     src = _src("speech_queue_worker")
-    assert "time.time() - wait_t0 < SING_SPEECH_MAX_WAIT_SEC" in src
-    drop = src[src.index("if waited >= SING_SPEECH_MAX_WAIT_SEC:"):]
+    assert "_keep or time.time() - wait_t0 < SING_SPEECH_MAX_WAIT_SEC" in src
+    drop = src[src.index("if not _keep and waited >= SING_SPEECH_MAX_WAIT_SEC:"):]
     assert drop.index("add_brain_context(_stale_sing_speech_note(") < drop.index("continue")
     assert drop.index("continue") < drop.index('set_ai_state("TALKING"')
     ns = {"re": __import__("re")}
     exec(compile(ast.Module(body=[_fn("_stale_sing_speech_note")], type_ignores=[]), "x", "exec"), ns)
     note = ns["_stale_sing_speech_note"]("[EXPRESSION: 笑] 即興創作一首曲子馬上來", 21.4)
     assert "即興創作一首曲子馬上來" in note and "EXPRESSION" not in note and "21 秒" in note and "say" in note
+
+
+def test_timer_reminder_waits_out_the_song_instead_of_going_stale():
+    """唱歌中計時器響了，提醒被當過時的話丟掉（2026-10-31 實機）：計時提醒帶 keep，等到有空檔或唱完才念。"""
+    src = _src("speech_queue_worker")
+    assert '_keep = isinstance(item, dict) and item.get("keep")' in src
+    timer = open(os.path.join(ROOT, "workers", "timer_sensor.py"), encoding="utf-8").read()
+    assert timer.count('"keep": True') == 2
+
+
+def test_slip_watchdog_counts_silence_even_when_the_song_already_plays():
+    """點曲紙條撿回時歌已經在彈，看門狗直接收工、沒記她啞了，一分多鐘才換連線（2026-10-31 實機）。"""
+    import asyncio
+    mutes = []
+    ns = {"asyncio": asyncio, "stage": pytypes.SimpleNamespace(singing=lambda: False), "IS_SLEEPING": False,
+          "parse_slip_for_song": lambda p: ("play_virtual_piano", {"song_name": "晴天"}), "is_song_active": lambda s: True,
+          "_note_live_mute": lambda s, stuck=False: mutes.append((s, stuck)), "log_print": lambda *a: None, "log_swallowed": lambda *a: None,
+          "LAST_BRAIN_TOOL_TS": 0.0, "LAST_BRAIN_TURN_TS": 0.0, "LAST_BRAIN_OUTPUT_TS": 0.0}
+    exec(compile(ast.Module(body=[_fn("_slip_needs_rescue"), _fn("_slip_watchdog")], type_ignores=[]), "w", "exec"), ns)
+    asyncio.run(ns["_slip_watchdog"]("[系統底層：…《晴天》…]", time.time(), timeout=0.01))
+    assert mutes == [(None, True)]                 # 連一輪都沒結束：連線卡住
+    ns["LAST_BRAIN_TURN_TS"] = time.time() + 5   # 她說完一段話：不算啞
+    asyncio.run(ns["_slip_watchdog"]("[系統底層：…《晴天》…]", time.time(), timeout=0.01))
+    assert mutes == [(None, True)]
 
 
 def test_shock_scream_state_is_not_reset_by_the_previous_sentence():
@@ -661,3 +685,82 @@ def test_viewer_stage_stop_that_was_refused_is_annotated_for_the_sentry():
     lines = ctx.splitlines()
     assert "（系統：鋼琴、唱歌只聽老爸的" in lines[0] and "系統" not in lines[1] and users == ["阿呆", "小美"]
     assert 'note=AUDIENCE_STAGE_DENIED_NOTE if _tool == "audience_denied" else ""' in MAIN
+
+
+def test_broken_mic_sends_silence_instead_of_dropping_the_live_brain():
+    """麥克風開不起來或讀到一半壞掉：送靜音、30 秒後再開，不要整條 Live 斷線重連（2026-10-31 Fable 審查）。"""
+    worker = _src("continuous_live_worker")
+    assert "_open_mic()" in worker and "p.terminate()  # 麥克風開不起來也要釋放" not in worker
+    reader = worker[worker.index("def _read_mic_chunk():"):worker.index("ws_send_lock = asyncio.Lock()")]
+    assert "time.sleep(CHUNK / RATE)" in reader and "mic_state.update(stream=None" in reader
+    # 讀的執行緒卡住拿不到鎖：stream 跟 PyAudio 都不碰
+    assert "if got_mic_lock:\n                        p.terminate()" in worker
+
+
+def test_slip_taken_off_the_queue_is_put_back_when_the_send_is_cancelled():
+    """收的那端先斷、送紙條被取消：已經拿出佇列的紙條退回去，背景資料也放回去（2026-10-31 Fable 審查）。"""
+    worker = _src("continuous_live_worker")
+    i = worker.index("except asyncio.CancelledError:\n                                # 收的那端先斷線")
+    assert "if not _slip_sent:" in worker[i:i + 400] and "_LIVE_SLIP_RETRY.appendleft" in worker[i:i + 400]
+    assert "LIVE_SILENT_CONTEXT_QUEUE.put_nowait(_n)" in worker
+    assert "spawn(_send_instinct(INSTINCT_LIVE_SESSION, data))" in worker   # 本能腦不拖住主腦
+
+
+def test_slip_watchdog_does_not_blame_a_new_session():
+    """紙條送出後換過連線：舊連線沒回不記在新連線頭上（不然會關掉剛接上的好連線、冷卻好金鑰）。"""
+    import asyncio
+    mutes, resent = [], []
+    old, new = object(), object()
+    ns = {"asyncio": asyncio, "stage": pytypes.SimpleNamespace(singing=lambda: False), "IS_SLEEPING": False,
+          "parse_slip_for_song": lambda p: (None, {}), "is_song_active": lambda s: False,
+          "_note_live_mute": lambda s, stuck=False: mutes.append((s, stuck)) or False, "log_print": lambda *a: None, "log_swallowed": lambda *a: None,
+          "LAST_BRAIN_TOOL_TS": 0.0, "LAST_BRAIN_TURN_TS": 0.0, "LAST_BRAIN_OUTPUT_TS": 0.0, "GLOBAL_LIVE_SESSION": new,
+          "_slip_superseded": lambda s, t: False, "rescue_claim": lambda k, t: True, "_unpack_slip": lambda s: (s,),
+          "send_brain_slip": resent.append}
+    exec(compile(ast.Module(body=[_fn("_slip_needs_rescue"), _fn("_slip_watchdog")], type_ignores=[]), "w", "exec"), ns)
+    asyncio.run(ns["_slip_watchdog"]("老爸問天氣", time.time(), timeout=0.01, session=old))
+    assert mutes == [] and resent == ["老爸問天氣"]   # 照樣撿回，但不記啞
+    asyncio.run(ns["_slip_watchdog"]("老爸問晚餐", time.time(), timeout=0.01, session=new))
+    assert mutes == [("老爸問晚餐", True)]
+    ns["LAST_BRAIN_ANY_TURN_TS"] = time.time() + 5   # 有結束一輪（她選擇不講）：不是卡住，照兩張才換
+    asyncio.run(ns["_slip_watchdog"]("老爸問明天", time.time(), timeout=0.01, session=new))
+    assert mutes[-1] == ("老爸問明天", False)
+
+
+def test_memory_save_does_not_queue_threads_behind_a_slow_save(monkeypatch):
+    """正在存檔：執行緒池那條記一筆就走，存完再存一次（以前每 2 秒排一條等鎖，長時間直播把執行緒池佔滿）。"""
+    import core.memory as mem
+    calls = []
+    monkeypatch.setattr(mem, "_save_unified_memory_to_disk_locked", lambda loop, cloud: calls.append(1))
+    assert mem._SAVE_LOCK.acquire()
+    try:
+        mem._save_unified_memory_to_disk(None, True, False)   # 鎖被佔著：不等
+        assert calls == [] and mem._SAVE_AGAIN
+    finally:
+        mem._SAVE_LOCK.release()
+    mem._save_unified_memory_to_disk()
+    assert calls == [1] and not mem._SAVE_AGAIN
+
+
+def test_auto_doze_rechecks_before_closing_her_eyes():
+    """講「我想睡了」、等播完的這段時間有人來講話就不睡（2026-10-31 Fable 審查）。"""
+    src = _src("autonomous_wander_worker")
+    doze = src[src.index("_doze_t0 = time.time()"):]
+    assert doze.index('(_BRAIN_INPUT_ORIGIN.get("ts") or 0.0) >= _doze_t0') < doze.index("await set_sleep_mode(True)")
+
+
+def test_cover_orchestrator_survives_a_laptop_check_error():
+    import asyncio
+    import services.auto_cover_pipeline as acp
+
+    def boom():
+        raise OSError("筆電查不到")
+    assert asyncio.run(acp._remote_gpu_ok(pytypes.SimpleNamespace(available=boom))) is False
+
+
+def test_viewer_stage_judging_does_not_block_the_dispatcher():
+    """觀眾留言的點歌判斷丟背景（同時最多三則）：派發迴圈不等 Groq，老爸的話不會排在一排「唱歌」後面。"""
+    src = _src("chat_processor_worker")
+    assert "spawn(_audience_message_to_board(aud_c, id_display, v_unique_id, source))" in src
+    assert "await background_tool_executor(aud_c" not in src
+    assert "async with _AUDIENCE_JUDGE_SEM:" in _src("_audience_message_to_board")

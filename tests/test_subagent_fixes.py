@@ -108,7 +108,7 @@ def _run_handler(cpu, nv, total_timeout=45.0, task="幫我查日圓匯率", orig
                ws_send_lock=asyncio.Lock(), _desktop_lookup=desktop_lookup,
                background_tool_executor=background_tool_executor, nv_interpret_task=nv_interpret_task,
                build_slip_text=build_slip_text, _SUBAGENT_TOTAL_TIMEOUT=total_timeout,
-               _BRAIN_INPUT_ORIGIN={"who": origin, "ts": 0.0}, _brain_requester=lambda: requester,
+               _BRAIN_INPUT_ORIGIN={"who": origin, "ts": 0.0}, _call_cancelled=lambda i: False, _brain_requester=lambda: requester,
                structured_stage_command=structured_stage_command, compose_instead_of_play=compose_instead_of_play, run_stage_commands=run_stage_commands,
                AUDIENCE_STAGE_DECLINE=_const("AUDIENCE_STAGE_DECLINE"),
                UNASKED_STAGE_DECLINE=_const("UNASKED_STAGE_DECLINE"),
@@ -325,7 +325,7 @@ def test_screen_task_is_handed_to_the_vision_brain():
 
     def run(recent):
         sess = _FakeSession()
-        ns = _load("_run_subagent_task", "_handle_invoke_subagent", _brain_requester=lambda: "老爸", _AWAITING_RESULTS={}, LIVE_SAY_GATE=False, types=types, asyncio=asyncio, time=time, GLOBAL_LIVE_SESSION=sess,
+        ns = _load("_run_subagent_task", "_handle_invoke_subagent", _call_cancelled=lambda i: False, _brain_requester=lambda: "老爸", _AWAITING_RESULTS={}, LIVE_SAY_GATE=False, types=types, asyncio=asyncio, time=time, GLOBAL_LIVE_SESSION=sess,
                    background_tool_executor=never, nv_interpret_task=never, build_slip_text=build_slip_text,
                    _SUBAGENT_TOTAL_TIMEOUT=45.0, _SUBAGENT_VISION_TASK_RE=_re.compile(_const_pattern("_SUBAGENT_VISION_TASK_RE")),
                    _start_vision=lambda: not recent and (looked.append(True) or True),   # 剛看過／正在看就回 False
@@ -492,7 +492,7 @@ def test_mirror_task_is_handed_to_the_mirror_once():
 
     def run(can_start):
         sess = _FakeSession()
-        ns = _load("_run_subagent_task", "_handle_invoke_subagent", _brain_requester=lambda: "老爸", _AWAITING_RESULTS={}, LIVE_SAY_GATE=False, types=types, asyncio=asyncio, time=time, GLOBAL_LIVE_SESSION=sess,
+        ns = _load("_run_subagent_task", "_handle_invoke_subagent", _call_cancelled=lambda i: False, _brain_requester=lambda: "老爸", _AWAITING_RESULTS={}, LIVE_SAY_GATE=False, types=types, asyncio=asyncio, time=time, GLOBAL_LIVE_SESSION=sess,
                    background_tool_executor=never, nv_interpret_task=never,
                    _SUBAGENT_VISION_TASK_RE=__import__("re").compile(_const_pattern("_SUBAGENT_VISION_TASK_RE")),
                    _start_mirror=lambda: started.append(1) or can_start)

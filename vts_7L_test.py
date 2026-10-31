@@ -1014,6 +1014,7 @@ IS_AUTO_PIANO_ENABLED = False  #  是否允許 7L 在閒置時自主彈琴（預
 IS_PROACTIVE_SPEAK_ENABLED = True  #  視覺陪伴主動搭話開關（預設開啟）
 IS_PERIPHERAL_VISION_ENABLED = True  #  餘光視覺感知中樞開關（預設開啟）
 IS_FACE_TRACKING_ENABLED = True  #  AI 視線與頭部追蹤開關（預設開啟）
+IS_GAZE_CURSOR_ENABLED = False   # 在她看的位置顯示一個游標（workers/gaze_cursor.py，老爸 2026-10-31）
 LAST_WANDER_TIME = time.time()
 IS_SLEEPING = False
 IS_LIVE_MODE_ACTIVE = True
@@ -2315,14 +2316,14 @@ async def play_voice_complete(text, target: str = "dad", raw_actions_text: str =
             _release_playback()
             stage.IS_MP3_PLAYING = False
             LAST_TTS_END_TIME = time.time()
-            set_ai_state("IDLE", "語音被取消", only_from="TALKING")
+            set_ai_state(_state_after_talking(), "語音被取消", only_from="TALKING")
             raise
         except Exception as e:
             log_print(f"❌ [語音合成錯誤]: {e}")
             _release_playback()
             stage.IS_MP3_PLAYING = False
             LAST_TTS_END_TIME = time.time()
-            set_ai_state("IDLE", "語音合成錯誤", only_from="TALKING")
+            set_ai_state(_state_after_talking(), "語音合成錯誤", only_from="TALKING")
 
 async def play_instant_sound_clip(audio_path: str, subtitle: str = ""):
     """ 0 秒極速播放 7L 專屬觸電尖叫聲（即時對嘴 + 臉紅），後續對話無縫接軌"""
@@ -3026,6 +3027,9 @@ async def live_search_tool_task(query):
 LAST_BRAIN_TOOL_TS = 0.0
 # 主腦上次說完一段話（turn_complete）的時間戳（2026-10-11：看門狗只看工具有盲區，說話了也報警）
 LAST_BRAIN_TURN_TS = 0.0
+# Live 最後一次結束一輪（turn_complete）的時間，空的一輪也算：她決定不講話也會結束一輪；
+# 紙條送出後連一輪都沒結束＝連線卡住了（2026-10-31 實機三次：卡住的連線重送紙條也沒用，換新連線馬上好）
+LAST_BRAIN_ANY_TURN_TS = 0.0
 LAST_BRAIN_REPLY_DONE_TS = 0.0   # 主腦一輪的話處理完（_speak_brain_turn 收尾）
 # Live 服務端上次有任何回包的時間戳（2026-10-11：有回包＝session 活著，只是不緊不慢）
 LAST_LIVE_RX_TS = 0.0
@@ -3034,24 +3038,39 @@ LAST_LIVE_RX_TS = 0.0
 LAST_BRAIN_OUTPUT_TS = 0.0
 # 紙條送出 20 秒主腦一點產出都沒有＝記一次；連 LIVE_MUTE_STRIKES 次就當這把金鑰／模型啞了，冷卻、換下一把重連
 LIVE_MUTE_STRIKES = 2
-_LIVE_MUTE = {"strikes": 0, "rotate": ""}
+# 連續換了這麼多次連線她都還是不出聲：先讓 REST 大腦接紙條 LIVE_MUTE_REST_SEC 秒（她一出聲就換回 Live）。
+# 以前連線在、只是不生成時，REST 大腦永遠不接（它只看斷線幾秒，換線一兩秒就連上），
+# 每一兩分鐘換一把一直啞下去（2026-10-31 Fable 審查）
+LIVE_MUTE_ROTATIONS_FOR_REST = 2
+LIVE_MUTE_REST_SEC = 300.0
+_LIVE_MUTE = {"strikes": 0, "rotate": "", "rotations": 0, "rest_until": 0.0}
 
 
 def _brain_output_seen() -> None:
     global LAST_BRAIN_OUTPUT_TS
     LAST_BRAIN_OUTPUT_TS = time.time()
     _LIVE_MUTE["strikes"] = 0
+    _LIVE_MUTE["rotations"] = 0
+    _LIVE_MUTE["rest_until"] = 0.0
 
 
-def _note_live_mute(slip=None) -> bool:
+def _note_live_mute(slip=None, stuck: bool = False) -> bool:
     """一張紙條沒得到任何產出：記一次；連滿 LIVE_MUTE_STRIKES 次就關掉連線，讓 continuous_live_worker 冷卻這把換下一把，
-    這張紙條排到重送佇列最前面給新連線（Live 一直接不上的話 REST 大腦也會從那裡接）。回 True＝換了。"""
+    這張紙條排到重送佇列最前面給新連線（Live 一直接不上的話 REST 大腦也會從那裡接）。回 True＝換了。
+    stuck：送出後連一輪都沒結束（連線卡住）：不用等第二張，直接換。"""
     _LIVE_MUTE["strikes"] += 1
+    if stuck:
+        _LIVE_MUTE["strikes"] = max(_LIVE_MUTE["strikes"], LIVE_MUTE_STRIKES)
     session = globals().get("GLOBAL_LIVE_SESSION")
     if _LIVE_MUTE["strikes"] < LIVE_MUTE_STRIKES or session is None or _LIVE_MUTE["rotate"]:
         return False
-    _LIVE_MUTE["rotate"] = f"連續 {_LIVE_MUTE['strikes']} 張紙條都沒回應"
+    _LIVE_MUTE["rotate"] = "紙條送出後連一輪都沒結束（連線卡住）" if stuck else f"連續 {_LIVE_MUTE['strikes']} 張紙條都沒回應"
     log_print(f"🔇 [Live 主腦不回話] {_LIVE_MUTE['rotate']}（連線還在但不生成，多半是額度用完），換一把金鑰重連")
+    _LIVE_MUTE["rotations"] = _LIVE_MUTE.get("rotations", 0) + 1
+    if _LIVE_MUTE["rotations"] >= LIVE_MUTE_ROTATIONS_FOR_REST:
+        _LIVE_MUTE["rest_until"] = time.time() + LIVE_MUTE_REST_SEC
+        log_print(f"🛟 [Live 主腦不回話] 換了 {_LIVE_MUTE['rotations']} 次還是不出聲，"
+                  f"接下來 {LIVE_MUTE_REST_SEC / 60:.0f} 分鐘紙條先交給 REST 大腦")
     if slip:
         _LIVE_SLIP_RETRY.appendleft(slip)
     spawn(session.close())
@@ -3077,11 +3096,19 @@ def is_live_brain_active() -> bool:
         return False
 
 
+_LIVE_UP_SINCE = 0.0
+LIVE_STABLE_SEC = 10.0   # 連上不到這麼久就斷：不算真的回來過，斷線時間從上一次真的斷線接著算
+
+
 def _set_live_active(active: bool) -> None:
-    """主腦連上／斷線都走這裡：斷線那一刻記下時間。"""
-    global LIVE_SESSION_ACTIVE, _LIVE_DOWN_SINCE
-    if LIVE_SESSION_ACTIVE and not active:
-        _LIVE_DOWN_SINCE = time.time()
+    """主腦連上／斷線都走這裡：斷線那一刻記下時間。
+    連上幾秒又斷（一直重連）時不重算斷線時間：以前每次都從零算，斷斷續續一直不到 8 秒，REST 大腦永遠不接（2026-10-31 Fable 審查）。"""
+    global LIVE_SESSION_ACTIVE, _LIVE_DOWN_SINCE, _LIVE_UP_SINCE
+    now = time.time()
+    if LIVE_SESSION_ACTIVE and not active and now - _LIVE_UP_SINCE >= LIVE_STABLE_SEC:
+        _LIVE_DOWN_SINCE = now
+    if active and not LIVE_SESSION_ACTIVE:
+        _LIVE_UP_SINCE = now
     LIVE_SESSION_ACTIVE = active
 
 
@@ -3091,8 +3118,9 @@ def live_brain_down_for() -> float:
 
 
 def use_rest_brain() -> bool:
-    """該由 REST 大腦接手講話了嗎：Live 主腦斷線超過 LIVE_FALLBACK_AFTER_SEC（兩種模式都一樣，2026-10-26 起 VTuber 模式也開 Live 主腦）。"""
-    return live_brain_down_for() >= LIVE_FALLBACK_AFTER_SEC
+    """該由 REST 大腦接手講話了嗎：Live 主腦斷線超過 LIVE_FALLBACK_AFTER_SEC（兩種模式都一樣，2026-10-26 起 VTuber 模式也開 Live 主腦），
+    或連線在但一直不出聲、換了好幾次都一樣（_LIVE_MUTE["rest_until"]）。"""
+    return live_brain_down_for() >= LIVE_FALLBACK_AFTER_SEC or time.time() < _LIVE_MUTE.get("rest_until", 0.0)
 
 async def build_brain_system_prompt(owner: str, char_name: str, say_gate: bool = False) -> str:
     """主腦的系統提示詞（core/promptkit.brain_system）。Live 主腦和 REST 大腦共用；say_gate 只有 Live 主腦開。"""
@@ -3196,7 +3224,7 @@ def _slip_needs_rescue(now: float, sent_ts: float, tool_ts: float, turn_ts: floa
     return tool_ts < sent_ts and turn_ts < sent_ts
 
 
-async def _slip_watchdog(prompt: str, sent_ts: float, timeout: float = 20.0, slip=None):
+async def _slip_watchdog(prompt: str, sent_ts: float, timeout: float = 20.0, slip=None, session=None):
     """紙條看門狗（2026-10-10 起源：動作紙條只管送不管腦理不理）。
     2026-10-11 擴大＋精準化：
     - 所有紙條都盯（聊天紙條裸奔會靜默丟失——「收到請回答」連啞兩次）；
@@ -3212,6 +3240,10 @@ async def _slip_watchdog(prompt: str, sent_ts: float, timeout: float = 20.0, sli
         try:
             if stage.singing() or IS_SLEEPING:
                 return
+            # 這段時間她睡過（睡著聽不到、照規矩不講話）：沒回是應該的，不撿回、也不算她啞了
+            # （2026-10-31 實機：睡前那張收琴紙條、睡著時哨兵那張，叫醒後被算成兩次沒回，好好的連線被換掉）
+            if (_SLEEP_WAKE.get("woke_ts") or 0.0) >= sent_ts:
+                return
         except Exception:
             log_swallowed()
         tool, args = parse_slip_for_song(prompt)
@@ -3221,21 +3253,29 @@ async def _slip_watchdog(prompt: str, sent_ts: float, timeout: float = 20.0, sli
             import re as _re
             _m = _re.search(r'《([^》]+)》', prompt or "")
             song = _m.group(1).strip() if _m else ""
+        import time as _t
+        unanswered = _slip_needs_rescue(_t.time(), sent_ts,
+                                        globals().get("LAST_BRAIN_TOOL_TS", 0.0),
+                                        globals().get("LAST_BRAIN_TURN_TS", 0.0),
+                                        globals().get("LAST_BRAIN_OUTPUT_TS", 0.0), timeout)
+        stuck = unanswered and globals().get("LAST_BRAIN_ANY_TURN_TS", 0.0) < sent_ts
+        # 送出後換過連線（GoAway、斷線）：舊連線沒回不算新連線啞了，不然會把剛接上的好連線關掉、冷卻好的金鑰（2026-10-31 Fable 審查）
+        _same_session = session is None or session is globals().get("GLOBAL_LIVE_SESSION")
         if song and is_song_active(song):
+            # 歌在彈就不用撿回，但這段時間她一點產出都沒有還是記一次啞：以前直接收工，點曲紙條撿回時歌都已經在彈，
+            # 她啞掉一分多鐘才換連線（2026-10-31 實機：叫彈琴工具被回「已經排好」之後 Live 不再生成）
+            if unanswered and _same_session:
+                _note_live_mute(None, stuck=stuck)
             log_print(f"📎 [紙條備註] 《{song}》CPU 已在背景執行，主腦回不回話無所謂，看門狗收工。")
             return
-        import time as _t
-        if not _slip_needs_rescue(_t.time(), sent_ts,
-                                  globals().get("LAST_BRAIN_TOOL_TS", 0.0),
-                                  globals().get("LAST_BRAIN_TURN_TS", 0.0),
-                                  globals().get("LAST_BRAIN_OUTPUT_TS", 0.0), timeout):
+        if not unanswered:
             return  # 腦有動靜（調工具、說完一段），收工
         slip = slip or prompt
         if _slip_superseded(slip, sent_ts):
             log_print(f"📎 [紙條備註] 主腦 {timeout:.0f} 秒沒理會紙條（{(prompt or '')[:30]}…），但同一個人之後又講了新的，不撿回舊的。")
             return
         log_print(f"⚠️ [紙條無回應] 主腦 {timeout:.0f} 秒沒理會紙條（{(prompt or '')[:40]}…），撿回一次。")
-        if _note_live_mute(slip):
+        if _same_session and _note_live_mute(slip, stuck=stuck):
             return  # 換連線了，紙條已排給新連線
         import hashlib as _hl
         try:
@@ -3558,8 +3598,22 @@ async def _handle_say(session, ws_send_lock, fn_call_id, text: str, vts=None) ->
                                  "已說出口" if spoken else "沒有念（唱歌中或內容是空的）")
 
 
+_CANCELLED_CALL_IDS = collections.deque(maxlen=200)   # 伺服器取消掉的工具呼叫 id（tool_call_cancellation）
+
+
+def _note_cancelled_calls(ids) -> None:
+    _CANCELLED_CALL_IDS.extend(ids)
+
+
+def _call_cancelled(fn_call_id) -> bool:
+    return bool(fn_call_id) and fn_call_id in _CANCELLED_CALL_IDS
+
+
 async def _send_say_response(session, ws_send_lock, fn_call_id, result: str) -> None:
-    """say 的工具回應：SILENT（記著就好，不再開一輪）。"""
+    """say 的工具回應：SILENT（記著就好，不再開一輪）。伺服器已經取消的呼叫不回。"""
+    if _call_cancelled(fn_call_id):
+        log_print(f"🚫 [say] 這次呼叫伺服器已經取消，不回工具結果（{result[:20]}）")
+        return
     _fr = {"name": "say", "response": {"result": result}, "scheduling": types.FunctionResponseScheduling.SILENT}
     if fn_call_id:
         _fr["id"] = fn_call_id
@@ -3625,6 +3679,8 @@ async def _handle_invoke_subagent(session, ws_send_lock, _fn_name, _fn_call_id, 
         try:
             if session is not GLOBAL_LIVE_SESSION:
                 raise ConnectionError("叫子智能體的那條 Live 連線已經換掉了")
+            if _call_cancelled(_fn_call_id):   # 伺服器取消了這次呼叫：結果改用紙條給她
+                raise ConnectionError("這次子智能體呼叫伺服器已經取消")
             async with ws_send_lock:
                 await session.send_tool_response(function_responses=[types.FunctionResponse(**_fr)])
             if LIVE_SAY_GATE and not _more and _sched == types.FunctionResponseScheduling.WHEN_IDLE:
@@ -3954,11 +4010,25 @@ async def continuous_live_worker(vts):
                     log_swallowed()
                 
                 p = pyaudio.PyAudio()
-                try:
-                    stream = p.open(format=FORMAT, channels=CHANNELS, rate=RATE, input=True, frames_per_buffer=CHUNK)
-                except Exception:
-                    p.terminate()  # 麥克風開不起來也要釋放，否則每次重連漏一個 PyAudio
-                    raise
+                # 麥克風開不起來、讀到一半壞掉（USB 麥克風重置、被拔掉、這台沒有輸入裝置）：先送靜音，30 秒後再開。
+                # 以前直接拋出去整條 Live 斷線重連，每幾秒連一次又斷，紙條全卡著沒人回，
+                # 斷線時間又不到 8 秒、備用的 REST 大腦也不接（2026-10-31 Fable 審查）
+                mic_state = {"stream": None, "retry_at": 0.0, "warned": False}
+
+                def _open_mic():
+                    try:
+                        mic_state["stream"] = p.open(format=FORMAT, channels=CHANNELS, rate=RATE, input=True, frames_per_buffer=CHUNK)
+                        if mic_state["warned"]:
+                            log_print("🎙️ [麥克風] 又開得起來了，恢復收音")
+                        mic_state["warned"] = False
+                    except Exception as _me:
+                        mic_state["stream"] = None
+                        mic_state["retry_at"] = time.time() + 30.0
+                        if not mic_state["warned"]:
+                            log_print(f"⚠️ [麥克風] 開不起來（{_me}），先送靜音讓主腦照常運作，30 秒後再試")
+                        mic_state["warned"] = True
+
+                _open_mic()
 
                 # stream.read 跑在背景執行緒，收音任務被取消時執行緒不會跟著停；
                 # 關 stream 前必須等它讀完，PortAudio 跨執行緒邊讀邊關可能整個程式崩潰。
@@ -3969,7 +4039,22 @@ async def continuous_live_worker(vts):
                     with mic_read_lock:
                         if mic_closed.is_set():
                             raise OSError("live mic stream closed")
-                        return stream.read(CHUNK, exception_on_overflow=False)
+                        st = mic_state["stream"]
+                        if st is None and time.time() >= mic_state["retry_at"]:
+                            _open_mic()
+                            st = mic_state["stream"]
+                        if st is not None:
+                            try:
+                                return st.read(CHUNK, exception_on_overflow=False)
+                            except Exception as _re:
+                                log_print(f"⚠️ [麥克風] 讀取出錯（{_re}），先送靜音，30 秒後重開")
+                                try:
+                                    st.close()
+                                except Exception:
+                                    pass
+                                mic_state.update(stream=None, retry_at=time.time() + 30.0, warned=True)
+                        time.sleep(CHUNK / RATE)   # 照真的收音的節奏送靜音
+                        return b"\x00" * (CHUNK * 2)
 
                 ws_send_lock = asyncio.Lock()  # 新增併發鎖，避免音訊跟文字搶通道
                 
@@ -4026,19 +4111,19 @@ async def continuous_live_worker(vts):
                                 async with ws_send_lock:
                                     await session.send_realtime_input(audio=types.Blob(data=data, mime_type="audio/pcm;rate=16000"))
                             
-                            async def _send_instinct():
-                                async with _INSTINCT_SEND_LOCK:
-                                    await INSTINCT_LIVE_SESSION.send_realtime_input(audio=types.Blob(data=data, mime_type="audio/pcm;rate=16000"))
+                            async def _send_instinct(_isess, _data):
+                                try:
+                                    async with _INSTINCT_SEND_LOCK:
+                                        await _isess.send_realtime_input(audio=types.Blob(data=_data, mime_type="audio/pcm;rate=16000"))
+                                except Exception:
+                                    pass   # 本能腦失敗不管，它有自己的重連
 
-                            send_tasks = [_send_main()]
-                            if INSTINCT_LIVE_SESSION:
-                                send_tasks.append(_send_instinct())
-                                
-                            _sent = await asyncio.gather(*send_tasks, return_exceptions=True)
-                            if isinstance(_sent[0], Exception):
-                                # 送主腦失敗＝這條連線壞了：拋出去讓整組重連（以前跟本能腦一起被吞掉，半死連線
-                                # 送不出去、收的一端還在等，不會自己重連；本能腦失敗照舊不管，它有自己的重連）
-                                raise _sent[0]
+                            # 本能腦另外丟背景送，上一塊還沒送完就跳過這塊：以前跟主腦一起等，本能腦半死連線卡住時
+                            # 主腦二三十秒收不到老爸的聲音，還可能因此被 Google 踢掉（2026-10-31 Fable 審查）
+                            if INSTINCT_LIVE_SESSION and not _INSTINCT_SEND_LOCK.locked():
+                                spawn(_send_instinct(INSTINCT_LIVE_SESSION, data))
+                            # 送主腦失敗＝這條連線壞了：拋出去讓整組重連（半死連線送不出去、收的一端還在等，不會自己重連）
+                            await _send_main()
                             
                             if rms > 150:
                                 current_mic_action_str = "🎤 收音辨識中..."
@@ -4097,6 +4182,13 @@ async def continuous_live_worker(vts):
                                     goaway_pending = True
                                     if not turn_buffer.strip() and not chunk_buffer.strip():
                                         raise ConnectionResetError("goaway：伺服器預告換線，主動換線續接")
+                                _tcc = getattr(resp, 'tool_call_cancellation', None)
+                                if _tcc:
+                                    # 新訊息打斷了她剛叫的工具：伺服器把那幾個呼叫取消了，之後不要再回它們
+                                    # （以前沒接這個訊息，照樣回已取消的呼叫；2026-10-31 實機兩次她叫完工具被紙條打斷後整條連線不再生成）
+                                    _ids = [i for i in (getattr(_tcc, 'ids', None) or []) if i]
+                                    _note_cancelled_calls(_ids)
+                                    log_print(f"🚫 [Live 主腦] 伺服器取消了 {len(_ids)} 個工具呼叫（被新訊息打斷），之後不回這幾個")
                                 # Live API 的工具呼叫走 resp.tool_call（沒有 server_content，c 是 None）；舊碼只看 model_turn.parts，
                                 # 主腦每次呼叫 invoke_subagent 都被漏掉、工具回應永遠不回，整輪卡到下一則訊息才被「打斷」（2026-10-24 實機發現）
                                 _fcs = list(getattr(getattr(resp, 'tool_call', None), 'function_calls', None) or [])
@@ -4196,6 +4288,9 @@ async def continuous_live_worker(vts):
                                             chunk_buffer += text_chunk
                                             turn_buffer += text_chunk
                                             
+                                    if c.turn_complete:
+                                        global LAST_BRAIN_ANY_TURN_TS
+                                        LAST_BRAIN_ANY_TURN_TS = time.time()
                                     if c.turn_complete or getattr(c, 'generation_complete', False):
                                         _flush_user_speech()   # 她這輪沒開口（例如只回 [SILENCE]），老爸的話也要記
                                         if turn_buffer.strip():
@@ -4252,7 +4347,10 @@ async def continuous_live_worker(vts):
                 async def send_system_prompts_to_live():
                     try:
                         while True:
-                            slip = await _take_slip()
+                            if use_rest_brain():   # 她一直不出聲、紙條先給 REST 大腦：這裡不搶
+                                await asyncio.sleep(1.0)
+                                continue
+                            slip = await _take_slip(timeout=1.0)
                             if not slip:
                                 continue
                             prompt, origin, said, name = slip
@@ -4262,9 +4360,11 @@ async def continuous_live_worker(vts):
                                 if _wake:   # 剛睡醒後第一句人話：讓她知道自己剛醒（只加在送出去的那份，去重、流水帳照原本的）
                                     _send_text = f"{_wake}\n{prompt}"
                             log_print(f"📥 [黑板同步] 透過紙條傳送給 Live 大腦: {_send_text}")
+                            _slip_sent = False
                             try:
                                 async with ws_send_lock:
                                     await session.send_realtime_input(text=_send_text)
+                                    _slip_sent = True
                                     sent_ts = time.time()
                                     if not origin and prompt in _ORIGIN_KEEPING_SLIPS:
                                         pass   # 同一輪人話的延續：不改「這輪算誰的」（斷線重送也一樣，所以不拿掉）
@@ -4275,8 +4375,14 @@ async def continuous_live_worker(vts):
                                     #  所有紙條都掛看門狗（聊天紙條裸奔會靜默丟失）；
                                     #  自主閒聊除外（[SILENCE] 是合法答案，盯了只會狼來了）。
                                     if "【自主閒聊】" not in (prompt or "") and "【感知】" not in (prompt or ""):
-                                        spawn(_slip_watchdog(prompt, sent_ts,
+                                        spawn(_slip_watchdog(prompt, sent_ts, session=session,
                                                              slip=(prompt, origin, said, name) if origin else prompt))
+                            except asyncio.CancelledError:
+                                # 收的那端先斷線、這裡被取消：紙條已經從佇列拿出來了，沒送出去就退回去
+                                # （以前 CancelledError 不是 Exception，直接丟掉，斷線那一刻的話沒人回；2026-10-31 Fable 審查）
+                                if not _slip_sent:
+                                    _LIVE_SLIP_RETRY.appendleft((prompt, origin, said, name) if origin else prompt)
+                                raise
                             except Exception as inner_e:
                                 log_print(f"⚠️ [黑板同步] 發送失敗 ({inner_e})，訊息已退回佇列等待重連...")
                                 # 沒送成功的紙條排到最前面（沒送成功就沒記進流水帳，重連後不會被當重複丟掉）
@@ -4291,15 +4397,22 @@ async def continuous_live_worker(vts):
                     """背景資料悄悄放進主腦對話（不觸發回話）：兩秒內來的幾筆併成一則；送不進去就算了，下一筆還會來。"""
                     while True:
                         notes = [await LIVE_SILENT_CONTEXT_QUEUE.get()]
-                        await asyncio.sleep(2.0)
-                        while not LIVE_SILENT_CONTEXT_QUEUE.empty():
-                            notes.append(LIVE_SILENT_CONTEXT_QUEUE.get_nowait())
+                        _ctx_sent = False
                         try:
+                            await asyncio.sleep(2.0)
+                            while not LIVE_SILENT_CONTEXT_QUEUE.empty():
+                                notes.append(LIVE_SILENT_CONTEXT_QUEUE.get_nowait())
                             async with ws_send_lock:
                                 await session.send_client_content(
                                     turns=[types.Content(role="user", parts=[types.Part(text="\n".join(notes))])],
                                     turn_complete=False)
+                            _ctx_sent = True
                             log_print(f"🎬 [背景資料] 悄悄放進主腦對話（不用回話）：{notes[-1][:50]}")
+                        except asyncio.CancelledError:
+                            if not _ctx_sent:   # 斷線被取消：手上這批放回去給新連線（Fable 審查）
+                                for _n in notes:
+                                    LIVE_SILENT_CONTEXT_QUEUE.put_nowait(_n)
+                            raise
                         except Exception as e:
                             log_print(f"⚠️ [背景資料] 送不進主腦，略過：{e}")
 
@@ -4328,9 +4441,18 @@ async def continuous_live_worker(vts):
                 got_mic_lock = await asyncio.to_thread(mic_read_lock.acquire, True, 2.0)
                 try:
                     mic_closed.set()
-                    stream.stop_stream()
-                    stream.close()
-                    p.terminate()
+                    if not got_mic_lock:
+                        # 讀的那條執行緒卡在 stream.read 超過 2 秒（USB 麥克風重置、音訊服務重開）：這時候關 stream
+                        # 就是上面說的跨執行緒邊讀邊關，可能整個程式崩潰。寧可丟著這組不關（2026-10-31 Fable 審查）
+                        log_print("⚠️ [麥克風] 讀取卡住，這組麥克風先丟著不關，避免跨執行緒關閉讓程式崩潰")
+                    elif mic_state["stream"] is not None:
+                        try:
+                            mic_state["stream"].stop_stream()
+                            mic_state["stream"].close()
+                        except Exception:
+                            log_swallowed()
+                    if got_mic_lock:
+                        p.terminate()   # terminate 也會關 stream：卡住時一樣不碰
                 finally:
                     if got_mic_lock:
                         mic_read_lock.release()
@@ -4455,7 +4577,10 @@ async def mic_worker(recognizer, input_queue):
         #  7x24 全雙工真·不關麥監聽：7L 發話或 MP3 播放中時麥克風依然暢通，由專屬聲紋鎖精準防禦回音並支援隨時插話打斷！
         try:
             # 3 秒沒人開口就回來看一次 Live 回來了沒
+            _listen_t0 = time.time()
             listen_res = await asyncio.to_thread(lambda: listen_once_fast(recognizer, wait_sec=3.0))
+            if listen_res == ("", None) and time.time() - _listen_t0 < 0.5:
+                await asyncio.sleep(1.0)   # 麥克風開不起來時馬上回來：不要空轉一直重開（2026-10-31 Fable 審查）
             if isinstance(listen_res, tuple):
                 user_text, audio_b64 = listen_res
             else:
@@ -4753,6 +4878,8 @@ from workers.system_audio import system_audio_worker
 import workers.face_tracking as face_tracking  # 臉部追蹤（搬出主檔）
 face_tracking.bind(sys.modules[__name__])
 from workers.face_tracking import ai_face_tracking_loop
+import workers.gaze_cursor as gaze_cursor  # 視線游標
+gaze_cursor.bind(sys.modules[__name__])
 
 WATERMARK_REASSERT_SEC = 60.0  # 水印守護間隔：每分鐘重申一次常駐（冪等，開著再開一次無害）
 
@@ -4930,6 +5057,7 @@ async def autonomous_wander_worker():
                 
                 if (is_idle_night or is_idle_day) and is_quiet:
                     log_print("🌙 [7L 自主作息] 環境持續長時間安靜無聲，7L 決定自主閉眼小憩進入休眠...")
+                    _doze_t0 = time.time()
                     sleep_text = await _doze_one_liner("環境很安靜、老爸好像去休息了，妳睏了想小憩，撒嬌跟老爸說一聲")
                     speech_item = {
                         "text": sleep_text,
@@ -4943,6 +5071,11 @@ async def autonomous_wander_worker():
                     # 等這句播完再睡（不掐自己的話；30 秒還沒播完就照睡，保底）
                     await _wait_speech_done(timeout_sec=30.0)
                     await asyncio.sleep(0.5)
+                    # 講這句、等播完的這段時間有人來講話就不睡（以前不再看一次：老爸剛回來跟她講話，她回完馬上閉眼，
+                    # 下一句沒叫醒字就不理；2026-10-31 Fable 審查）
+                    if (_BRAIN_INPUT_ORIGIN.get("ts") or 0.0) >= _doze_t0:
+                        log_print("☀️ [7L 自主作息] 要睡的時候有人來講話，不睡了")
+                        continue
                     await set_sleep_mode(True)
                     continue
             
@@ -5061,10 +5194,14 @@ async def speech_queue_worker(vts, input_queue):
                 if is_vocal_upcoming(est_duration):
                     log_print(f"🎤 [語音佇列] 檢測到即將有歌聲，TTS 發言 (預估需 {est_duration:.1f} 秒) 已暫停並排入等候區...")
                     wait_t0 = time.time()
-                    while is_singing() and is_vocal_upcoming(est_duration) and time.time() - wait_t0 < SING_SPEECH_MAX_WAIT_SEC:
+                    # 計時提醒這種不會過時的（keep）就等到有空檔或唱完；以前一律 20 秒丟掉，
+                    # 唱歌中計時器響了提醒就沒念（2026-10-31 實機：「測試計時」到了，唱 Faded 中被當過時丟掉）
+                    _keep = isinstance(item, dict) and item.get("keep")
+                    while is_singing() and is_vocal_upcoming(est_duration) and (
+                            _keep or time.time() - wait_t0 < SING_SPEECH_MAX_WAIT_SEC):
                         await stage.wait_change(0.5)   # 唱完就馬上回頭看
                     waited = time.time() - wait_t0
-                    if waited >= SING_SPEECH_MAX_WAIT_SEC:
+                    if not _keep and waited >= SING_SPEECH_MAX_WAIT_SEC:
                         log_print(f"⌛ [語音佇列] 唱歌中等了 {waited:.0f} 秒都沒空檔，這句過時了，不念：{text[:40]}")
                         try:
                             await asyncio.to_thread(update_subtitle, "")
@@ -5987,7 +6124,15 @@ async def streamer_mind_loop_worker(vts, input_queue):
                 if not batch_to_process:
                     continue
                 board_context, users_involved, has_dad_message = _format_board_batch(batch_to_process)
-                
+
+            if IS_SLEEPING:
+                # 哨兵判斷的這幾秒她又被弄睡了：睡著聽不到，不遞紙條（2026-10-31 實機：觀眾叫醒→老爸又讓她睡→
+                # 紙條照送，她照「睡著不講話」沒回，叫醒後看門狗把這張算成她啞了，把好好的連線換掉）
+                for m in batch_to_process:
+                    m["status"] = "read"
+                log_print(f"🌙 [哨兵] 判斷完她已經睡著了，這批留言不轉給主腦（{len(batch_to_process)} 則）")
+                continue
+
             sentry_target = sentry_decision.get("target", "").strip()
             if "老爸" in sentry_target:
                 log_target = "老爸(因應觀眾留言吐槽/搭腔)"
@@ -7224,6 +7369,30 @@ async def execute_reward_action(reason: str = "", level: int = None):
         log_print(f"❌ [獎勵執行異常]: {e}")
         return {"status": "error", "message": str(e)}
 
+
+# 觀眾留言同時最多幾則在等點歌判斷（有唱／彈要問 Groq，最多等四秒）
+_AUDIENCE_JUDGE_SEM = asyncio.Semaphore(3)
+
+
+async def _audience_message_to_board(aud_c: str, id_display: str, v_unique_id: str, source: str) -> None:
+    """觀眾留言：先過 CPU 點歌判斷，再寫進看板。丟背景做：以前在派發迴圈裡等，
+    觀眾刷一排「唱歌」時每則都要等 Groq，老爸的話、其他留言全排在後面（2026-10-31 Fable 審查）。"""
+    # 進行 CPU 極速指令攔截 (觀眾專屬，不啟用 AI 備案避免消耗 API)
+    async with _AUDIENCE_JUDGE_SEM:
+        try:
+            _hit, _tool, _ = await background_tool_executor(aud_c, target="audience", requester_name=id_display)
+        except Exception:
+            log_swallowed()
+            _hit, _tool = False, ""
+    # 寫入 7L 滾動記憶腦袋，由 streamer_mind_loop_worker 自主排程讀取與發話；
+    # 點歌已經執行、紙條也遞給 Live 主腦了，這則就不用看板哨兵再轉一次
+    # 觀眾想停鋼琴／停歌被擋：註明給哨兵看，不然哨兵叫她回頭請示老爸要不要收
+    # （2026-10-31 Fable 看實機日誌：她停下來問「老爸，你說這鋼琴該不該收呀？」）
+    add_to_streamer_mind_board(id_display, v_unique_id, aud_c, source,
+                               handled=bool(_hit) and _tool != "audience_denied" and is_live_brain_active(),
+                               note=AUDIENCE_STAGE_DENIED_NOTE if _tool == "audience_denied" else "")
+
+
 async def chat_processor_worker(vts, input_queue):
     """對話派發器：老爸的話直送主腦；直播間留言（TikTok／Twitch／YouTube）進記憶腦袋的看板，由哨兵決定要不要回。"""
     global current_dad_task, CURRENT_PROCESSING_USER_INPUT
@@ -7362,19 +7531,7 @@ async def chat_processor_worker(vts, input_queue):
                         process_chat_message(vts, input_queue, aud_c, None, request_start_time=req_time, source="tiktok_dad")
                     )
                 else:
-                    # 進行 CPU 極速指令攔截 (觀眾專屬，不啟用 AI 備案避免消耗 API)
-                    try:
-                        _hit, _tool, _ = await background_tool_executor(aud_c, target="audience", requester_name=id_display)
-                    except Exception:
-                        log_swallowed()
-                        _hit, _tool = False, ""
-                    # 寫入 7L 滾動記憶腦袋，由 streamer_mind_loop_worker 自主排程讀取與發話；
-                    # 點歌已經執行、紙條也遞給 Live 主腦了，這則就不用看板哨兵再轉一次
-                    # 觀眾想停鋼琴／停歌被擋：註明給哨兵看，不然哨兵叫她回頭請示老爸要不要收
-                    # （2026-10-31 Fable 看實機日誌：她停下來問「老爸，你說這鋼琴該不該收呀？」）
-                    add_to_streamer_mind_board(id_display, v_unique_id, aud_c, source,
-                                               handled=bool(_hit) and _tool != "audience_denied" and is_live_brain_active(),
-                                               note=AUDIENCE_STAGE_DENIED_NOTE if _tool == "audience_denied" else "")
+                    spawn(_audience_message_to_board(aud_c, id_display, v_unique_id, source))
 
             # -------------------------------------------------------------
             #  擁有者公開插話（owner_interject）：走觀眾軌道公開播出，不私聊、走觀眾工具牆
@@ -7649,6 +7806,7 @@ async def main():
     except Exception as e:
         print(f"⚠️ VTS 啟動連線未完成 ({e})，已啟動背景自動重連守護（程式正常運作中，開啟 VTS 後將自動連線）。\n")
         spawn(vts_health_worker(vts))
+    spawn(gaze_cursor.gaze_cursor_worker())   # 視線游標：跟著「顯示視線位置」開關開關
 
     recognizer = sr.Recognizer()
     recognizer.pause_threshold = MIC_PAUSE_THRESHOLD   # 門檻都在 listen_once_fast 上面

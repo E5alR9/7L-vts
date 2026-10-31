@@ -909,6 +909,8 @@ def is_piano_active_and_alive() -> bool:
 
 def _mark_piano_offline(reason: str = ""):
     global is_piano_active, current_piano_song_title, GLOBAL_PIANO_REALTIME_STATE, current_piano_process, PIANO_NOTE_FOCUS_X, LAST_PIANO_HEARTBEAT_TIME
+    global _SPEED_FORCED_FOR_SYNC
+    _SPEED_FORCED_FOR_SYNC = False   # 彈唱中視窗掛了：下一個視窗回報的倍速照記（Fable 審查）
     was_active = is_piano_active or GLOBAL_PIANO_REALTIME_STATE.get("is_playing", False) or GLOBAL_PIANO_REALTIME_STATE.get("is_window_open", False)
     is_piano_active = False
     LAST_PIANO_HEARTBEAT_TIME = 0.0  # 舊視窗的心跳不算數，下一首從頭等新視窗的心跳

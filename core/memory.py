@@ -453,11 +453,26 @@ def _schedule_on_loop(coro, loop=None) -> None:
         coro.close()
 
 
-def _save_unified_memory_to_disk(loop=None, cloud: bool = True):
+_SAVE_AGAIN = False
+
+
+def _save_unified_memory_to_disk(loop=None, cloud: bool = True, wait: bool = True):
     """安全將最新對話記憶、心流思緒與全域記憶時間線序列化保存至本地磁碟並同步備份至雲端 Firestore。
-    loop：從執行緒池呼叫時傳入主 event loop，雲端同步才排得回去。"""
-    with _SAVE_LOCK:
-        _save_unified_memory_to_disk_locked(loop, cloud)
+    loop：從執行緒池呼叫時傳入主 event loop，雲端同步才排得回去。
+    wait=False（執行緒池那條）：正在存就記一筆「存完再存一次」就走。以前每 2 秒排一條執行緒等鎖，
+    記憶容量設無上限、長時間直播存一次超過 2 秒時，執行緒池被等鎖的佔滿，麥克風、截圖、字幕、TTS 都排不到（2026-10-31 Fable 審查）。"""
+    global _SAVE_AGAIN
+    if not _SAVE_LOCK.acquire(blocking=wait):
+        _SAVE_AGAIN = True
+        return
+    try:
+        while True:
+            _SAVE_AGAIN = False
+            _save_unified_memory_to_disk_locked(loop, cloud)
+            if not _SAVE_AGAIN:
+                break
+    finally:
+        _SAVE_LOCK.release()
 
 
 def _save_unified_memory_to_disk_locked(loop, cloud):
@@ -499,7 +514,7 @@ def _kick_save_now() -> None:
     except RuntimeError:
         _save_unified_memory_to_disk()
         return
-    loop.run_in_executor(None, _save_unified_memory_to_disk, loop)
+    loop.run_in_executor(None, _save_unified_memory_to_disk, loop, True, False)
 
 
 def _request_unified_save(now_t: float) -> None:

@@ -18,6 +18,9 @@ target_look_x = 0.0
 target_look_y = 0.0
 current_look_x = 0.0
 current_look_y = 0.0
+# 眼睛現在的角度（-1～1，臉部追蹤每一格寫）：視線游標拿來反推她看螢幕哪裡（workers/gaze_cursor.py）
+gaze_eye_x = 0.0
+gaze_eye_y = 0.0
 is_tracking_mouse = False
 force_blink_trigger = 0
 eye_roll_timer = 0.0

@@ -115,7 +115,8 @@ async def live_timer_sensor_worker(vts, input_queue):
                         await asyncio.to_thread(host.update_subtitle, clean_spoken)
                         record_bot_message(clean_spoken)
                         log_print(f"💬 7L (定時感測主動提醒): {clean_spoken}")
-                        await host.speech_queue.put({"text": clean_spoken, "target": "dad", "raw_text": raw_reply})
+                        # keep：唱歌中等到有空檔或唱完才念，不當過時的話丟掉
+                        await host.speech_queue.put({"text": clean_spoken, "target": "dad", "raw_text": raw_reply, "keep": True})
                         host.touch_interaction()
                         
                         append_to_unified_memory(speaker="7L", target=caller, content=clean_spoken, role="assistant", source="tts")
@@ -134,7 +135,7 @@ async def live_timer_sensor_worker(vts, input_queue):
                         else:
                             fallback_msg = f"時間到囉～剛才說好的「{task_msg}」要記得喔！"
                         await asyncio.to_thread(host.update_subtitle, fallback_msg)
-                        await host.speech_queue.put({"text": fallback_msg, "target": "dad"})
+                        await host.speech_queue.put({"text": fallback_msg, "target": "dad", "keep": True})
                         host.touch_interaction()
         except Exception as e:
             log_print(f"⚠️ [API Live 時間感測協程異常]: {e}")

@@ -40,7 +40,8 @@ def _say_ns(singing=False, vision_busy=False):
         return text
 
     sess = _Session()
-    ns = _load("_handle_say", "_send_say_response", "_note_inner_voice", re=re, time=time, asyncio=asyncio, types=types,
+    ns = _load("_handle_say", "_send_say_response", "_note_inner_voice", "_call_cancelled", "_note_cancelled_calls",
+               _CANCELLED_CALL_IDS=__import__("collections").deque(maxlen=200), re=re, time=time, asyncio=asyncio, types=types,
                _AWAITING_RESULTS={}, AWAIT_RESULT_MAX_SEC=75.0, LAST_SAY_TS=0.0, _RECENT_SAYS=[],
                _autonomy_note_say=lambda t, now: "", AUTONOMY_SAY_MIN_GAP=60.0,
                _SAY_LOCK=asyncio.Lock(), GLOBAL_LIVE_SESSION=sess, _speak_brain_turn=speak, input_queue=None,
@@ -60,6 +61,14 @@ def test_say_is_spoken_through_the_normal_path_and_answered_silently():
     r = sess.sent[0]
     assert r.name == "say" and r.id == "c1" and r.scheduling == types.FunctionResponseScheduling.SILENT   # 不再開一輪
     assert ns["LAST_BRAIN_TURN_TS"] > 0 and len(after) == 1        # 算她回話了；背後照樣再想一次
+
+
+def test_say_cancelled_by_the_server_is_not_answered():
+    """伺服器取消了這次 say（被新訊息打斷）：照念，但不回工具結果（2026-10-31 實機兩次回已取消的呼叫後連線不再生成）。"""
+    ns, sess, spoken, logs, _ = _say_ns()
+    ns["_note_cancelled_calls"](["c9"])
+    asyncio.run(ns["_handle_say"](sess, asyncio.Lock(), "c9", "好，鋼琴先暫停囉！"))
+    assert spoken and sess.sent == [] and any("已經取消" in str(l) for l in logs)
 
 
 def test_say_keeps_order_and_skips_empty_or_silence():
@@ -101,7 +110,7 @@ def test_two_tasks_at_once_each_result_can_be_said():
         await respond(f"[{task}的結果]", types.FunctionResponseScheduling.WHEN_IDLE)
 
     exec(compile(ast.Module(body=[_fn("_handle_invoke_subagent")], type_ignores=[]), "h", "exec"), ns)
-    ns.update(_run_subagent_task=run_task, LIVE_SAY_GATE=False, _subagent_result_by_slip=lambda *a: None, _brain_requester=lambda: "老爸")
+    ns.update(_run_subagent_task=run_task, LIVE_SAY_GATE=False, _subagent_result_by_slip=lambda *a: None, _call_cancelled=lambda i: False, _brain_requester=lambda: "老爸")
 
     async def go():
         lock = asyncio.Lock()

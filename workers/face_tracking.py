@@ -309,6 +309,7 @@ async def _ai_face_tracking_loop_impl(vts):
             curr_y += (target_angle_y - curr_y) * 0.10
             curr_z += (target_angle_z - curr_z) * 0.10
 
+            vc.gaze_eye_x, vc.gaze_eye_y = curr_eye_x, curr_eye_y   # 視線游標（workers/gaze_cursor.py）看這個
             param_values = [
                 {"id": "FaceAngleX", "value": curr_x, "weight": 1.0},
                 {"id": "FaceAngleY", "value": curr_y, "weight": 1.0},

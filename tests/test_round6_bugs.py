@@ -594,7 +594,8 @@ def test_unfinished_turn_is_salvaged_after_a_disconnect():
     recv = next(n for n in ast.walk(TREE) if isinstance(n, ast.AsyncFunctionDef) and n.name == "receive_from_live")
     # 開著 say 閘時說到一半的是腦內聲音、不是講出口的，不當「話說到一半」（2026-10-29）
     assert "_salvage_unfinished_turn(_said, \"\" if LIVE_SAY_GATE else turn_buffer)" in ast.get_source_segment(MAIN, recv)
-    assert "if isinstance(_sent[0], Exception):" in MAIN                # 送主腦失敗要觸發重連
+    assert "await _send_main()" in MAIN and "return_exceptions=True)" not in ast.get_source_segment(MAIN, next(
+        n for n in ast.walk(TREE) if isinstance(n, ast.AsyncFunctionDef) and n.name == "send_mic_audio"))   # 送主腦失敗要觸發重連
 
 
 def test_unanswered_slip_is_resent_soon_after_a_disconnect():

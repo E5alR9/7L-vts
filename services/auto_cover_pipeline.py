@@ -655,7 +655,7 @@ async def _sing_orchestrator():
                 _PREPARE_TASK = asyncio.create_task(_prepare_worker(item, _PIPELINE_GEN))
             # 2b. 筆電有開就同時準備第二首：下載跟上一首的分離錯開，顯卡誰空誰做由 gpu_split 排
             elif (SONG_REQUEST_QUEUE and not _running(_PREPARE_TASK2)
-                    and await asyncio.to_thread(remote_gpu.available)):
+                    and await _remote_gpu_ok(remote_gpu)):
                 item = SONG_REQUEST_QUEUE.popleft()
                 _PREPARE_TASK2 = asyncio.create_task(_prepare_worker(item, _PIPELINE_GEN))
             # 3. 全空且舞台空 → 收工（下次點歌再啟動，不留殭屍任務）
@@ -666,6 +666,15 @@ async def _sing_orchestrator():
             await asyncio.sleep(0.5)
     finally:
         _ORCH_TASK = None
+
+async def _remote_gpu_ok(remote_gpu) -> bool:
+    """筆電能不能幫忙；查不到就當不能（以前這裡拋出去，調度迴圈直接結束、備好的歌不會開唱；2026-10-31 Fable 審查）。"""
+    try:
+        return bool(await asyncio.to_thread(remote_gpu.available))
+    except Exception:
+        log_swallowed()
+        return False
+
 
 async def _run_with_heartbeat(awaitable_fn, label: str, song: str, interval: float = 30.0):
     """長任務心跳（2026-10-11：分離/RVC 幾分鐘零輸出，看起來像空轉）。
