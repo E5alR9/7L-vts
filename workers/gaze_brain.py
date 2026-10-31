@@ -141,6 +141,7 @@ async def gaze_brain_worker() -> None:
     import pyautogui
     import core.llm_engine as le
     import core.stage_state as stage
+    import core.usage as usage
     import services.screen_capture as screen_capture
     last_pick = None
     while True:
@@ -159,9 +160,10 @@ async def gaze_brain_worker() -> None:
             wins = await asyncio.to_thread(visible_windows, sw, sh)
             menu, items = build_menu(wins, (mx / sw, my / sh), hotspot, talking)
             jpg = await asyncio.to_thread(_jpeg, img)
-            text = await le.live_one_shot(
-                SYSTEM, f"{menu}\n回 {{\"pick\": 編號, \"part\": \"上中\", \"what\": \"那裡在顯示什麼\", \"why\": \"為什麼想看\"}}",
-                le.GEMINI_KEYS, image_jpeg=jpg, timeout=GAZE_BRAIN_TIMEOUT, max_keys=2)
+            with usage.as_role("視線副腦"):   # 後台模型用量表才分得出來（以前算在「Live 單次」）
+                text = await le.live_one_shot(
+                    SYSTEM, f"{menu}\n回 {{\"pick\": 編號, \"part\": \"上中\", \"what\": \"那裡在顯示什麼\", \"why\": \"為什麼想看\"}}",
+                    le.GEMINI_KEYS, image_jpeg=jpg, timeout=GAZE_BRAIN_TIMEOUT, max_keys=2)
             picked = parse_pick(text, items)
             if picked is None:
                 continue

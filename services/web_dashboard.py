@@ -3,6 +3,7 @@ import base64
 import ipaddress
 import json
 import os
+import re
 import socket
 import time
 from typing import Set, Dict, Any, Optional
@@ -418,7 +419,7 @@ DEFAULT_TOOLS_CATALOG = [
     {
         "name": "generate_ai_image",
         "category": "creative",
-        "category_name": "多模態創作",
+        "category_name": "畫圖與看片",
         "label": "AI 繪圖插畫生成",
         "description": "調用 Google Imagen 或繪圖模型生成 AI 插畫並展示在相框中。",
         "parameters": [
@@ -434,9 +435,9 @@ DEFAULT_TOOLS_CATALOG = [
     },
     {
         "name": "sing_song",
-        "category": "creative",
-        "category_name": "多模態創作",
-        "label": "AI 翻唱歌手歌聲合成",
+        "category": "music",
+        "category_name": "唱歌與作曲",
+        "label": "唱一首歌（AI 翻唱）",
         "description": "啟動 AI 歌聲生成引擎翻唱指定歌曲並播放音訊。",
         "parameters": [
             {
@@ -1063,6 +1064,33 @@ async def api_reset_prompts(request):
 _JSON_TYPE_UI = {"integer": "number", "number": "number", "boolean": "boolean"}
 _TOOL_ALIASES = {"auto_sing_song": "sing_song"}   # 宣告名 → 手寫目錄裡的同一個工具
 
+# 自動補上的工具放哪一類、叫什麼（以前全丟「更多工具」，分類按鈕沒有這類，只有選「全部」才看得到；
+# 名字從說明第一句硬切，list_piano_sheets 變成「【只有當老爸或觀眾明確要求『列出」——老爸 2026-10-31 後台整理）
+_AUTO_TOOL_UI = {
+    "list_piano_sheets": ("piano", "列出曲庫裡的歌"),
+    "play_midi_band": ("piano", "MIDI 樂團合奏"),
+    "stop_singing": ("music", "停止唱歌（鋼琴照彈）"),
+    "generate_song": ("music", "AI 作曲（寫一首新歌）"),
+    "transcribe_song": ("music", "把歌扒成鋼琴譜"),
+    "stem_pack": ("music", "扒帶包（分出人聲、伴奏）"),
+    "inspect": ("music", "讀譜（看 MIDI 內容）"),
+    "edit": ("music", "改譜（改 MIDI）"),
+    "request_watch": ("creative", "觀眾點播看整部影片"),
+    "search_knowledge": ("mind", "查 7L 的記憶庫"),
+}
+_TOOL_CATEGORY_NAMES = {"piano": "鋼琴演奏", "music": "唱歌與作曲", "live2d": "Live2D 空間", "system": "系統與語音",
+                        "mind": "記憶與大腦", "creative": "畫圖與看片", "more": "其他"}
+
+
+_STATIC_VER_RE = re.compile(r"(/static/[\w.-]+\.(?:js|css))(?:\?v=[\w.-]*)?")
+
+
+def _static_mtime(url_path: str) -> str:
+    try:
+        return str(int(os.path.getmtime(os.path.join(ROOT_DIR, "web", url_path.rsplit("/", 1)[-1]))))
+    except OSError:
+        return "0"
+
 
 def full_tools_catalog() -> list:
     """後台工具目錄＝手寫的（有預設值、選項）＋主腦能叫、手寫目錄卻沒列的（照工具宣告自動補）。
@@ -1088,9 +1116,10 @@ def full_tools_catalog() -> list:
                            "type": _JSON_TYPE_UI.get(v.get("type"), "string"),
                            "default": v.get("default", False if v.get("type") == "boolean" else ""),
                            "placeholder": p_desc, "required": k in req})
-        out.append({"name": name, "category": "more", "category_name": "更多工具",
-                    "label": desc.split("：")[0].split("（")[0][:16] or name, "description": desc,
-                    "parameters": params})
+        cat, label = _AUTO_TOOL_UI.get(tail, ("more", ""))
+        out.append({"name": name, "category": cat, "category_name": _TOOL_CATEGORY_NAMES[cat],
+                    "label": label or desc.lstrip("【").split("：")[0].split("（")[0].split("』")[0][:16] or name,
+                    "description": desc, "parameters": params})
         have.add(name.split(".")[-1])
     return out
 
@@ -1545,8 +1574,12 @@ async def start_web_dashboard(
     async def index(request):
         index_file = os.path.join(web_dir, "index.html")
         if os.path.exists(index_file):
-            # 首頁每次都要問一下有沒有更新：沒這行瀏覽器會自己快取舊首頁，連帶一直載入舊版 dashboard.js
-            return web.FileResponse(index_file, headers={"Cache-Control": "no-cache"})
+            # 首頁每次都要問一下有沒有更新：沒這行瀏覽器會自己快取舊首頁，連帶一直載入舊版 dashboard.js。
+            # dashboard.js／css 的 ?v= 照檔案修改時間自動換（以前要手動改版本號，忘了改就一直載舊的：2026-10-31 實機）
+            with open(index_file, encoding="utf-8") as f:
+                html = f.read()
+            html = _STATIC_VER_RE.sub(lambda m: f"{m.group(1)}?v={_static_mtime(m.group(1))}", html)
+            return web.Response(text=html, content_type="text/html", headers={"Cache-Control": "no-cache"})
         return web.Response(text="<h1>7L Web Dashboard Loading...</h1>", content_type="text/html")
 
     app.router.add_get("/", index)

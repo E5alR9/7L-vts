@@ -300,118 +300,59 @@ class DashboardBridge:
         res = await c.execute_tool_dispatch(tool_name, args, caller_target="dad", caller_user=owner)
         return _TAG_RE.sub("", str(res or "")).strip() or f"已執行 {tool_name}"
 
+    # 後台「系統開關」頁照這個順序、分組顯示（老爸 2026-10-31：後台整理一下；名字、說明寫白話，說清楚現在真的做什麼）
+    _SWITCH_GROUPS = {
+        "voice": "聲音與直播",
+        "vision": "看螢幕與視線",
+        "idle": "閒著的時候",
+        "piano": "鋼琴",
+        "system": "睡覺與模式",
+    }
+
     def get_switches(self):
         c = self.core
-        return [
-            {
-                "key": "IS_AUTO_PIANO_ENABLED",
-                "name": "閒置自主彈琴",
-                "category": "piano",
-                "category_name": " 音樂與演奏",
-                "description": "當 7L 閒置且環境無聲音超過 60 秒時，每隔 5 分鐘是否自主坐到鋼琴前隨機挑選曲目演奏。",
-                "value": bool(c.IS_AUTO_PIANO_ENABLED),
-                "icon": "piano"
-            },
-            {
-                "key": "IS_PIANO_AUTO_RADIO_MODE",
-                "name": "鋼琴隨機電台連播",
-                "category": "piano",
-                "category_name": " 音樂與演奏",
-                "description": "當前鋼琴曲目彈完後，若隊列已無點歌，是否自動從曲庫中無限接續隨機抽歌連播。",
-                "value": bool(getattr(c.pe, "IS_PIANO_AUTO_RADIO_MODE", False)),
-                "icon": "radio"
-            },
-            {
-                "key": "IS_AUTO_WANDER_ENABLED",
-                "name": "閒置自主漫遊走位",
-                "category": "wander",
-                "category_name": " 自主行為與漫遊",
-                "description": "7L 處於閒置狀態超過 60 秒時，每隔 60 秒在螢幕舞台上隨機走位、變換站位與姿態。",
-                "value": bool(c.IS_AUTO_WANDER_ENABLED),
-                "icon": "walk"
-            },
-            {
-                "key": "IS_PROACTIVE_SPEAK_ENABLED",
-                "name": "視覺陪伴主動搭話",
-                "category": "wander",
-                "category_name": " 自主行為與漫遊",
-                "description": "房間安靜約 3 分鐘（彈琴中 10 分鐘）時，看畫面與最近聊過的話自己找話題閒聊 1~2 句，聊完冷卻 7 分鐘。關閉時轉為純被動（有問才答）。",
-                "value": bool(c.IS_PROACTIVE_SPEAK_ENABLED),
-                "icon": "chat"
-            },
-            {
-                "key": "IS_PERIPHERAL_VISION_ENABLED",
-                "name": "餘光視覺感知中樞",
-                "category": "vision",
-                "category_name": " 多模態感知",
-                "description": "背景是否定時截取並分析老爸的螢幕動態與視窗畫面，維持連續時序視覺記憶緩存。",
-                "value": bool(c.IS_PERIPHERAL_VISION_ENABLED),
-                "icon": "eye"
-            },
-            {
-                "key": "IS_FACE_TRACKING_ENABLED",
-                "name": "AI 視線與頭部追蹤",
-                "category": "vision",
-                "category_name": " 多模態感知",
-                "description": "啟用 Live2D 模型的自然視線跟隨、呼吸律動與自然眨眼同步。",
-                "value": bool(c.IS_FACE_TRACKING_ENABLED),
-                "icon": "user"
-            },
-            {
-                "key": "IS_GAZE_CURSOR_ENABLED",
-                "name": "顯示視線位置",
-                "category": "vision",
-                "category_name": " 多模態感知",
-                "description": "在她現在看的螢幕位置顯示一個桃紅色箭頭游標（點不到、截圖和直播擷取都看不到）。",
-                "value": bool(c.IS_GAZE_CURSOR_ENABLED),
-                "icon": "eye"
-            },
-            {
-                "key": "IS_MIC_ENABLED",
-                "name": "麥克風語音監聽收音",
-                "category": "system",
-                "category_name": " 系統核心與收音",
-                "description": "即時監聽並轉寫實體麥克風收到的語音。關閉時 7L 不再收音，僅接受文字發話。",
-                "value": bool(c.IS_MIC_ENABLED),
-                "icon": "mic"
-            },
-            {
-                "key": "IS_STREAM_CHAT_ENABLED",
-                "name": "直播彈幕即時互動",
-                "category": "system",
-                "category_name": " 系統核心與收音",
-                "description": "是否開啟直播間（如 TikTok）即時彈幕串流接入與觀眾留言排隊互動。",
-                "value": bool(getattr(c.tk_listener, "IS_STREAMING", False)),
-                "icon": "broadcast"
-            },
-            {
-                "key": "IS_SLEEPING",
-                "name": "深層休眠模式 (0 API)",
-                "category": "system",
-                "category_name": " 系統核心與收音",
-                "description": "雙眼閉合安睡，完全停止視覺截圖、背景思考與計時器，達成 0 API 消耗。",
-                "value": bool(c.IS_SLEEPING),
-                "icon": "moon"
-            },
-            {
-                "key": "IS_YT_WATCHER_ENABLED",
-                "name": " YouTube 即時伴看 (Multimodal Live)",
-                "category": "vision",
-                "category_name": " 視覺與多模態感知",
-                "description": "自動檢測螢幕上的 YouTube 影片，以 1 FPS 視窗裁剪與系統音訊內錄持續跟進理解。",
-                "value": bool(c.yt_comp.IS_YT_WATCHER_ENABLED),
-                "icon": "video"
-            },
-            {
-                "key": "MODE_TOGGLE",
-                "name": "伴侶模式 (需重啟)",
-                "category": "system",
-                "category_name": " 系統核心與收音",
-                "description": "開啟時為伴侶模式 (同時陪你與聊天室)，關閉為實況主模式 (只理聊天室)。切換後請點擊上方「重啟大腦」生效。",
-                "value": self.run_mode == "companion",
-                "icon": "user"
-            }
+        items = [
+            ("IS_MIC_ENABLED", "voice", "mic", "麥克風（聽老爸說話）",
+             "聽麥克風、把老爸說的話轉成文字。關掉後她聽不到，只能在對話框打字跟她說。",
+             c.IS_MIC_ENABLED),
+            ("IS_STREAM_CHAT_ENABLED", "voice", "broadcast", "理直播聊天室",
+             "直播連上時會自動打開，觀眾的留言會排隊讓她回。關掉就先不理聊天室；直播斷線時這裡也會自己變回關。",
+             getattr(c.tk_listener, "IS_STREAMING", False)),
+            ("IS_PERIPHERAL_VISION_ENABLED", "vision", "eye", "看老爸的螢幕（餘光視覺）",
+             "每隔一陣子看一次螢幕，知道老爸在做什麼、畫面有什麼變化，聊天時拿來當話題。"
+             "她「想看哪裡」也靠這個：Live 看螢幕挑她想看的東西（視線副腦）。關掉時她看哪裡只照簡單規則。",
+             c.IS_PERIPHERAL_VISION_ENABLED),
+            ("IS_FACE_TRACKING_ENABLED", "vision", "user", "眼睛和頭會動",
+             "眼睛看螢幕上的東西（滑鼠、正在用的視窗、剛有變化的地方、鏡頭），頭跟著轉，還有呼吸和眨眼。關掉後臉不會自己動。",
+             c.IS_FACE_TRACKING_ENABLED),
+            ("IS_GAZE_CURSOR_ENABLED", "vision", "eye", "顯示她在看哪裡",
+             "在她現在看的位置放一個桃紅色箭頭（點不到；截圖、直播畫面都看不到），用來確認她的視線。",
+             c.IS_GAZE_CURSOR_ENABLED),
+            ("IS_YT_WATCHER_ENABLED", "vision", "video", "陪看 YouTube",
+             "螢幕上有 YouTube 在播時，每秒看一張影片畫面、同時聽影片聲音，跟老爸一起看、一起聊。",
+             c.yt_comp.IS_YT_WATCHER_ENABLED),
+            ("IS_PROACTIVE_SPEAK_ENABLED", "idle", "chat", "自己找話聊",
+             "安靜大約 3 分鐘（彈琴時 10 分鐘），她會看畫面和剛聊過的事自己開話題講 1～2 句，講完休息 7 分鐘。關掉就只有人問才回。",
+             c.IS_PROACTIVE_SPEAK_ENABLED),
+            ("IS_AUTO_WANDER_ENABLED", "idle", "walk", "閒著時走來走去",
+             "沒事超過 60 秒，每 60 秒在畫面上換個位置、換個姿勢。",
+             c.IS_AUTO_WANDER_ENABLED),
+            ("IS_AUTO_PIANO_ENABLED", "piano", "piano", "閒著時自己彈琴",
+             "沒事、房間也沒聲音超過 60 秒，每 5 分鐘自己坐到鋼琴前挑一首彈。",
+             c.IS_AUTO_PIANO_ENABLED),
+            ("IS_PIANO_AUTO_RADIO_MODE", "piano", "radio", "彈完自動接下一首",
+             "一首彈完、又沒有人點歌時，自動從曲庫隨機挑下一首一直彈下去。",
+             getattr(c.pe, "IS_PIANO_AUTO_RADIO_MODE", False)),
+            ("IS_SLEEPING", "system", "moon", "睡覺（不花 API）",
+             "閉上眼睛睡覺：不看螢幕、不在背景想事情、計時器也暫停，完全不呼叫 AI。叫她起床或關掉這個就醒來。",
+             c.IS_SLEEPING),
+            ("MODE_TOGGLE", "system", "user", "陪伴模式（要重開才完整生效）",
+             "開著：同時陪老爸和直播聊天室。關掉：實況主模式，只理聊天室。切換後按上面的「重開」。",
+             self.run_mode == "companion"),
         ]
+        return [{"key": key, "name": name, "category": cat, "category_name": self._SWITCH_GROUPS[cat],
+                 "description": desc, "value": bool(val), "icon": icon}
+                for key, cat, icon, name, desc, val in items]
 
     async def set_switch(self, key: str, value=None, sync_cloud=True):
         c = self.core

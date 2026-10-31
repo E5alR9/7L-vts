@@ -7,6 +7,9 @@
  * 4. 單一 WebSocket 通道渲染，徹底杜絕連發兩次
  */
 
+const MEMORY_PAGE_SIZE = 100;   // 記憶頁一次畫幾筆
+const LOG_MAX_LINES = 1500;     // 運行日誌最多留幾行
+
 // 輕量高效率 DOM 賦值 Helper (僅在值改變時觸發瀏覽器重繪)
 function safeSetText(el, text) {
   if (el && el.textContent !== text) {
@@ -301,6 +304,23 @@ class SevenLMonitorApp {
     // 日誌分頁
     this.terminalLogs = document.getElementById('terminalLogs');
     this.btnClearLogs = document.getElementById('btnClearLogs');
+    // 「清空畫面」以前沒綁事件，按了沒反應
+    if (this.btnClearLogs) {
+      this.btnClearLogs.addEventListener('click', () => {
+        if (this.terminalLogs) this.terminalLogs.innerHTML = '';
+      });
+    }
+    const ttsToggle = document.getElementById('toggleTtsLogs');
+    if (ttsToggle && this.terminalLogs) {
+      let showTts = false;
+      try { showTts = localStorage.getItem('7l_show_tts_logs') === '1'; } catch (e) { /* 私密視窗等讀不到就用預設 */ }
+      ttsToggle.checked = showTts;
+      this.terminalLogs.classList.toggle('hide-tts', !showTts);
+      ttsToggle.addEventListener('change', () => {
+        this.terminalLogs.classList.toggle('hide-tts', !ttsToggle.checked);
+        try { localStorage.setItem('7l_show_tts_logs', ttsToggle.checked ? '1' : '0'); } catch (e) { /* 存不了就算了 */ }
+      });
+    }
 
     // 提示詞庫分頁
     this.promptSyncDot = document.getElementById('promptSyncDot');
@@ -766,6 +786,7 @@ class SevenLMonitorApp {
           this.memoryRoleChips.forEach(c => c.classList.remove('active'));
           chip.classList.add('active');
           this.memoryFilterRole = chip.dataset.role || 'all';
+          this.memoryShowLimit = MEMORY_PAGE_SIZE;
           this.renderMemoryList();
         });
       });
@@ -774,6 +795,7 @@ class SevenLMonitorApp {
     if (this.memorySearchInput) {
       this.memorySearchInput.addEventListener('input', (e) => {
         this.memorySearchKeyword = e.target.value.trim();
+        this.memoryShowLimit = MEMORY_PAGE_SIZE;
         if (this.btnClearMemorySearch) {
           this.btnClearMemorySearch.style.display = this.memorySearchKeyword ? 'block' : 'none';
         }
@@ -1688,9 +1710,14 @@ class SevenLMonitorApp {
 
     // 3. 7L 思維黑板
     if (data.mind_board && Array.isArray(data.mind_board) && data.mind_board.length > 0 && this.monMindBoard) {
-      const latest = data.mind_board[data.mind_board.length - 1];
-      const thoughtText = typeof latest === 'object' ? (latest.content || latest.text || JSON.stringify(latest)) : String(latest);
-      safeSetText(this.monMindBoard, thoughtText);
+      // 以前只顯示最後一筆的內容（例如只剩「收起鋼琴」），看不出是誰說的、她回了沒：改成最近 5 筆（2026-10-31）
+      const lines = data.mind_board.slice(-5).reverse().map(it => {
+        if (typeof it !== 'object' || !it) return String(it);
+        const who = it.user || (it.source === 'tiktok' ? '觀眾' : '老爸');
+        const st = it.status === 'unread' ? '（還沒回）' : '';
+        return `${it.time_str || ''} ${who}：${it.content || it.text || ''}${st}`.trim();
+      });
+      safeSetText(this.monMindBoard, lines.join('\n'));
     }
   }
 
@@ -2322,12 +2349,17 @@ class SevenLMonitorApp {
 
   appendLog(msg, level = 'line-info') {
     if (!this.terminalLogs) return;
+    const box = this.terminalLogs;
+    const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;   // 老爸往上捲著看時不要硬拉回底部
     const line = document.createElement('div');
-    line.className = `term-line ${level}`;
+    // 語音合成每句十幾行細節：預設藏起來，日誌頁上方可以打開（老爸 2026-10-31 後台整理）
+    line.className = `term-line ${level}${String(msg).includes('[GPT-SoVITS]') ? ' line-tts' : ''}`;
     const timeStr = new Date().toLocaleTimeString('zh-TW', { hour12: false });
     line.textContent = `[${timeStr}] ${msg}`;
-    this.terminalLogs.appendChild(line);
-    this.terminalLogs.scrollTop = this.terminalLogs.scrollHeight;
+    box.appendChild(line);
+    // 以前沒上限：開一整天會累積幾萬行，頁面越來越卡
+    while (box.childElementCount > LOG_MAX_LINES) box.firstElementChild.remove();
+    if (atBottom) box.scrollTop = box.scrollHeight;
   }
 
   // ==========================================================================
@@ -2677,6 +2709,12 @@ class SevenLMonitorApp {
         if (this.toolsActiveCount) {
           safeSetText(this.toolsActiveCount, `${this.toolsCatalog.length} 個工具就緒`);
         }
+        // 沒有工具的分類按鈕藏起來（「其他」只在有新工具還沒分類時才出現）
+        const cats = new Set(this.toolsCatalog.map(t => t.category));
+        (this.toolCategoryChips || []).forEach(chip => {
+          const c = chip.dataset.category;
+          if (c && c !== 'all') chip.style.display = cats.has(c) ? '' : 'none';
+        });
         this.renderToolDropdown('all');
       }
     } catch (e) {
@@ -3194,8 +3232,13 @@ class SevenLMonitorApp {
       return matchRole && matchQuery;
     });
 
+    // 一次只畫最新的一頁（老爸 2026-10-31 後台整理：564 筆一次全畫、每有新記憶又全部重畫，頁面很卡）
+    const limit = this.memoryShowLimit || MEMORY_PAGE_SIZE;
     if (this.memoryListMeta) {
-      safeSetText(this.memoryListMeta, `顯示 ${filtered.length} / ${totalCount} 筆記憶 (時序最新排最後)`);
+      const shown = Math.min(limit, filtered.length);
+      safeSetText(this.memoryListMeta, filtered.length === totalCount
+        ? `顯示最新 ${shown} 筆，共 ${totalCount} 筆（最新的在最上面）`
+        : `顯示最新 ${shown} 筆，符合 ${filtered.length} 筆，共 ${totalCount} 筆（最新的在最上面）`);
     }
 
     if (filtered.length === 0) {
@@ -3205,7 +3248,7 @@ class SevenLMonitorApp {
 
     const frag = document.createDocumentFragment();
     // 預設將最新記憶排在上方供快速審閱與刪除
-    const displayList = [...filtered].reverse();
+    const displayList = [...filtered].reverse().slice(0, limit);
 
     displayList.forEach(item => {
       const idx = item.index !== undefined ? item.index : this.memoryItems.indexOf(item);
@@ -3260,6 +3303,18 @@ class SevenLMonitorApp {
 
       frag.appendChild(card);
     });
+
+    if (filtered.length > limit) {
+      const more = document.createElement('button');
+      more.type = 'button';
+      more.className = 'glass-btn btn-sm memory-load-more';
+      more.textContent = `再顯示更早的 ${Math.min(MEMORY_PAGE_SIZE, filtered.length - limit)} 筆（還有 ${filtered.length - limit} 筆）`;
+      more.addEventListener('click', () => {
+        this.memoryShowLimit = limit + MEMORY_PAGE_SIZE;
+        this.renderMemoryList();
+      });
+      frag.appendChild(more);
+    }
 
     this.memoryCardList.innerHTML = '';
     this.memoryCardList.appendChild(frag);
@@ -3478,6 +3533,8 @@ class SevenLMonitorApp {
     if (this.switchesActiveCount) {
       safeSetText(this.switchesActiveCount, String(activeCount));
     }
+    const totalLabel = document.getElementById('switchesTotalLabel');
+    if (totalLabel) safeSetText(totalLabel, `/ ${switches.length} 項開著`);
 
     // 依 category 分組
     const groups = {};
@@ -3499,7 +3556,7 @@ class SevenLMonitorApp {
         <div class="switches-group">
           <div class="switches-group-header">
             <span class="switches-group-title">${this.escapeHtml(group.name)}</span>
-            <span class="switches-group-count">${groupActive} / ${group.items.length} 已啟用</span>
+            <span class="switches-group-count">${groupActive} / ${group.items.length} 開著</span>
           </div>
           <div class="switches-cards-grid">
       `;
@@ -3517,8 +3574,7 @@ class SevenLMonitorApp {
             <div class="switch-card-top">
               <div class="switch-info-main">
                 <div class="switch-card-name-row">
-                  <h3 class="switch-card-title">${this.escapeHtml(sw.name)}</h3>
-                  <span class="switch-card-key font-mono">${this.escapeHtml(sw.key)}</span>
+                  <h3 class="switch-card-title" title="${this.escapeHtml(sw.key)}">${this.escapeHtml(sw.name)}</h3>
                 </div>
                 <p class="switch-card-desc">${this.escapeHtml(sw.description)}</p>
               </div>
@@ -3538,7 +3594,7 @@ class SevenLMonitorApp {
             </div>
             <div class="switch-card-footer">
               <span class="${badgeClass}" id="badge-sw-${sw.key}">${badgeText}</span>
-              <span class="switch-action-hint" data-key="${sw.key}">點擊開關切換</span>
+              <span class="switch-action-hint" data-key="${sw.key}">點這裡切換</span>
             </div>
           </div>
         `;

@@ -4687,3 +4687,13 @@ body.frosted-theme::before {
     max-height: 45vh;
   }
 }
+
+/* 記憶頁「再顯示更早的」按鈕（2026-10-31） */
+.memory-load-more { display: block; width: 100%; margin: 12px 0 4px; padding: 10px; }
+
+/* 運行日誌：語音合成細節預設藏起來（2026-10-31） */
+.frosted-terminal.hide-tts .line-tts { display: none; }
+.log-head-actions { display: flex; align-items: center; gap: 12px; }
+.log-tts-toggle { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary, #aaa); cursor: pointer; user-select: none; }
+
+.mind-box { white-space: pre-wrap; }

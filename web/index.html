@@ -536,11 +536,11 @@
           <div class="panel-head">
             <div class="head-title">
               <span class="panel-pill font-mono">MIND</span>
-              <h3>心流思維看板</h3>
+              <h3>最近收到的話</h3>
             </div>
           </div>
           <div class="frosted-desc-box mind-box" id="monMindBoard">
-            7L 正在靜候老爸發言或直播間互動...
+            還沒有人跟她說話
           </div>
         </div>
 
@@ -569,15 +569,14 @@
         <div class="panel-head">
           <div class="head-title">
             <span class="panel-pill font-mono">LOGS</span>
-            <h3>系統終端即時日誌</h3>
+            <h3>運行日誌</h3>
           </div>
-          <button class="glass-mini-btn" id="btnClearLogs">清空畫面</button>
+          <div class="log-head-actions">
+            <label class="log-tts-toggle"><input type="checkbox" id="toggleTtsLogs"> 顯示語音合成細節</label>
+            <button class="glass-mini-btn" id="btnClearLogs">清空畫面</button>
+          </div>
         </div>
-        <div class="frosted-terminal" id="terminalLogs">
-          <div class="term-line line-info">[系統] 7L 智慧一體化核心已成功啟動</div>
-          <div class="term-line line-success">[TikTok] 雙帳號巡檢已就緒 (@e5alr9qub2 / @e_7l_9)</div>
-          <div class="term-line line-info">[視覺] 眼角餘光即時感知守護中</div>
-        </div>
+        <div class="frosted-terminal hide-tts" id="terminalLogs"></div>
       </div>
     </section>
 
@@ -784,7 +783,9 @@
               <button type="button" class="category-chip" data-category="live2d">🎭 Live2D 空間</button>
               <button type="button" class="category-chip" data-category="system">⚙️ 系統與語音</button>
               <button type="button" class="category-chip" data-category="mind">🧠 記憶大腦</button>
-              <button type="button" class="category-chip" data-category="creative">🎨 多模態創作</button>
+              <button type="button" class="category-chip" data-category="music">🎤 唱歌與作曲</button>
+              <button type="button" class="category-chip" data-category="creative">🎨 畫圖與看片</button>
+              <button type="button" class="category-chip" data-category="more">📦 其他</button>
             </div>
 
             <!-- 工具選擇下拉/清單 -->
@@ -959,14 +960,14 @@
             <div class="switches-title-box">
               <span class="switches-icon">🎛️</span>
               <div>
-                <h2 class="switches-title">7L 系統開關與自主行為中樞</h2>
-                <p class="switches-subtitle">即時控制 7L 的背景協程、視覺感知、音樂連播與自主搭話行為，點擊 Toggle 滑動開關立即生效</p>
+                <h2 class="switches-title">系統開關</h2>
+                <p class="switches-subtitle">控制 7L 會自己做哪些事。點右邊的開關馬上生效（除了註明要重開的）。</p>
               </div>
             </div>
             <div class="switches-stats-box">
               <div class="switches-stat-pill">
                 <span class="stat-num text-cyan font-mono" id="switchesActiveCount">0</span>
-                <span class="stat-lbl">/ 9 項開關已啟用</span>
+                <span class="stat-lbl" id="switchesTotalLabel">/ 0 項開著</span>
               </div>
               <button class="glass-btn btn-sm" id="btnRefreshSwitches" title="從後端重新讀取所有開關最新狀態">
                 <span>🔄 重新整理</span>
