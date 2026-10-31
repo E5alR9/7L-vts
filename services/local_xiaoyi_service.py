@@ -470,11 +470,37 @@ def init_gpt_sovits():
         finally:
             os.chdir(prev_cwd)
 
-def synthesize_xiaoyi_bytes(text: str) -> bytes:
+def apply_voice_prosody(audio, sr: int, pitch: float = 0.0, gain_db: float = 0.0):
+    """念好的聲音再調音高、音量（語速在合成時用 speed_factor 調，音質最好）。
+    pitch：升降幾個半音（Praat 的 PSOLA 改音高，盡量保留音色，比一般變調自然）；
+    gain_db：大小聲，放大時用柔性限幅防爆音（嘴型照聲音大小動，大聲嘴也張大）。調不了就原樣回。"""
+    out = audio.astype(np.float64)
+    if abs(pitch) >= 0.05:
+        try:
+            import parselmouth
+            from parselmouth.praat import call
+            snd = parselmouth.Sound(out, sampling_frequency=sr)
+            manip = call(snd, "To Manipulation", 0.01, 75, 600)
+            tier = call(manip, "Extract pitch tier")
+            call(tier, "Multiply frequencies", snd.xmin, snd.xmax, 2 ** (pitch / 12.0))
+            call([tier, manip], "Replace pitch tier")
+            out = call(manip, "Get resynthesis (overlap-add)").values[0]
+        except Exception as e:
+            print(f"⚠️ [語氣] 調音高失敗，用原音：{e}")
+    if abs(gain_db) >= 0.1:
+        out = out * (10 ** (gain_db / 20.0))
+        if gain_db > 0:
+            out = np.tanh(out * 1.2) / np.tanh(1.2)   # 柔性限幅：大聲但不削波
+    return out.astype(np.float32)
+
+
+def synthesize_xiaoyi_bytes(text: str, speed: float = 1.0, pitch: float = 0.0, gain_db: float = 0.0) -> bytes:
     """
     同步推論函數，回傳音訊 bytes（lameenc 在就 MP3，否則 WAV——別信舊註解說的 WAV）。
+    speed：語速倍率（乘在原本的 1.05／1.0 上）；pitch：升降半音；gain_db：大小聲（見 apply_voice_prosody）。
     """
     global _tts_pipeline
+    _speed_mult = max(0.7, min(1.4, float(speed or 1.0)))
     with _thread_lock:
         if _tts_pipeline is None:
             init_gpt_sovits()
@@ -531,7 +557,7 @@ def synthesize_xiaoyi_bytes(text: str) -> bytes:
                 "temperature": temp,
                 "text_split_method": XIAOYI_SPLIT_METHOD,
                 "batch_size": 2, # 適度放大 batch_size 加速顯卡推理
-                "speed_factor": speed,
+                "speed_factor": round(speed * _speed_mult, 3),
                 "repetition_penalty": 1.35,
             }
             
@@ -575,7 +601,11 @@ def synthesize_xiaoyi_bytes(text: str) -> bytes:
             else:
                 pause = np.zeros(int(sr * 0.08), dtype=pieces[0].dtype)   # 段與段之間留一點換氣
                 audio = np.concatenate([x for i, p in enumerate(pieces) for x in ((pause, p) if i else (p,))])
-            
+            if abs(pitch) >= 0.05 or abs(gain_db) >= 0.1:
+                if audio.dtype == np.int16:
+                    audio = audio.astype(np.float32) / 32768.0
+                audio = apply_voice_prosody(audio, sr, pitch=max(-4.0, min(4.0, pitch)), gain_db=max(-12.0, min(8.0, gain_db)))
+
             # 轉為 16-bit PCM numpy 陣列
             if audio.dtype != np.int16:
                 if audio.dtype == np.float32 or audio.dtype == np.float64:
@@ -632,7 +662,7 @@ _STUCK_SEC = 60.0
 _STUCK_WARNED = {"on": False}
 
 
-async def get_xiaoyi_audio_bytes(text: str) -> bytes:
+async def get_xiaoyi_audio_bytes(text: str, speed: float = 1.0, pitch: float = 0.0, gain_db: float = 0.0) -> bytes:
     """
     非同步調用封裝，防止阻塞主線程
     """
@@ -653,7 +683,7 @@ async def get_xiaoyi_audio_bytes(text: str) -> bytes:
 
     def run():
         try:
-            return synthesize_xiaoyi_bytes(text)
+            return synthesize_xiaoyi_bytes(text, speed=speed, pitch=pitch, gain_db=gain_db)
         finally:
             _INFLIGHT.pop(id(token), None)   # 執行緒真的結束才算（外面放棄等待不算）
     return await asyncio.to_thread(run)

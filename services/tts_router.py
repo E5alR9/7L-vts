@@ -282,8 +282,14 @@ def _clean_text(text: str, lang: str) -> str:
     return text
 
 
-async def _synth_edge(text: str) -> bytes:
-    """微軟 Edge-TTS 雲端合成（台灣腔女聲 / 日文聲線），回傳 MP3 bytes"""
+def _edge_prosody(speed: float = 1.0, pitch: float = 0.0, gain_db: float = 0.0) -> dict:
+    """語氣換成 Edge-TTS 的參數：語速百分比、音高 Hz（一個半音約 15Hz）、音量百分比。"""
+    return {"rate": f"{round((speed - 1.0) * 100):+d}%", "pitch": f"{round(pitch * 15):+d}Hz",
+            "volume": f"{round((10 ** (gain_db / 20.0) - 1.0) * 100):+d}%"}
+
+
+async def _synth_edge(text: str, speed: float = 1.0, pitch: float = 0.0, gain_db: float = 0.0) -> bytes:
+    """微軟 Edge-TTS 雲端合成（台灣腔女聲 / 日文聲線），回傳 MP3 bytes；語氣照 _edge_prosody 換成它的參數"""
     import edge_tts
     lang = detect_language(text)
     if lang == "zh" and has_kana(text):
@@ -294,7 +300,7 @@ async def _synth_edge(text: str) -> bytes:
     text = _clean_text(text, lang)
     if not text:
         return b""
-    comm = edge_tts.Communicate(text, voice=voice, rate="+0%")
+    comm = edge_tts.Communicate(text, voice=voice, **_edge_prosody(speed, pitch, gain_db))
     buf = io.BytesIO()
     async for chunk in comm.stream():
         if chunk["type"] == "audio":
@@ -302,13 +308,13 @@ async def _synth_edge(text: str) -> bytes:
     return buf.getvalue()
 
 
-async def _synth_xiaoyi(text: str) -> bytes:
-    """原 GPT-SoVITS 曉伊（需本機有 GPT-SoVITS 安裝，否則拋錯讓鏈降級）"""
+async def _synth_xiaoyi(text: str, speed: float = 1.0, pitch: float = 0.0, gain_db: float = 0.0) -> bytes:
+    """原 GPT-SoVITS 曉伊（需本機有 GPT-SoVITS 安裝，否則拋錯讓鏈降級）；語氣見 local_xiaoyi_service"""
     from core.paths import GPT_SOVITS_DIR as svc_path
     if not os.path.isdir(svc_path):
         raise RuntimeError(f"GPT-SoVITS 不存在: {svc_path}")
     from services import local_xiaoyi_service
-    return await local_xiaoyi_service.get_xiaoyi_audio_bytes(text)
+    return await local_xiaoyi_service.get_xiaoyi_audio_bytes(text, speed=speed, pitch=pitch, gain_db=gain_db)
 
 
 _ENGINES = {
@@ -520,9 +526,17 @@ def _tts_cache_prune() -> None:
         pass
 
 
-async def get_tts_audio_bytes(text: str) -> bytes:
+def _prosody_cache_text(text: str, speed: float, pitch: float, gain_db: float) -> str:
+    """快取用的字：原本的語氣跟以前同一把 key（舊快取照用），調過語氣的另外存。"""
+    if abs(speed - 1.0) < 0.005 and abs(pitch) < 0.05 and abs(gain_db) < 0.1:
+        return text
+    return f"{text}§{speed:.3f}|{pitch:.2f}|{gain_db:.1f}"
+
+
+async def get_tts_audio_bytes(text: str, speed: float = 1.0, pitch: float = 0.0, gain_db: float = 0.0) -> bytes:
     """
     依引擎鏈合成語音。全部失敗回傳 b""（呼叫端會記錄警告，不會中斷直播）。
+    speed／pitch／gain_db：這段的語氣（core/prosody 決定；語速倍率、升降半音、大小聲）。
     單引擎 90 秒無回應視為卡死（GPU 推理 hang 不會拋錯），超時直接換下一個，
     絕不讓一顆引擎拖住整條語音管線（2026-10-11：xiaoyi 卡死導致全場靜默）。
     """
@@ -548,7 +562,8 @@ async def get_tts_audio_bytes(text: str) -> bytes:
         if fn is None:
             continue
         try:
-            hit = tts_cache_get(text, engine)
+            cache_text = _prosody_cache_text(text, speed, pitch, gain_db)
+            hit = tts_cache_get(cache_text, engine)
             if hit:
                 if _active_engine != engine:
                     _log(f"[TTS Router] 切換引擎 -> {engine}")
@@ -559,7 +574,8 @@ async def get_tts_audio_bytes(text: str) -> bytes:
             # 舊碼直接換下一個引擎，但預設鏈只有 xiaoyi 一個，結果整句靜音（2026-10-24 實機：26.8s 靜音被擋、7L 沒出聲）
             # 實測（「老爸。30秒到囉。快快，記得喝水喔…」）單次失敗率可到 1/3～5/8，所以最多抽 3 次
             for _attempt in range(QUALITY_RETRIES + 1):
-                data = await asyncio.wait_for(fn(text), timeout=ENGINE_TIMEOUT_SEC)
+                _kw = {} if cache_text == text else {"speed": speed, "pitch": pitch, "gain_db": gain_db}   # 原本的語氣照舊呼叫
+                data = await asyncio.wait_for(fn(text, **_kw), timeout=ENGINE_TIMEOUT_SEC)
                 # 品質檢查要跑 ffmpeg 解碼加逐點算音量，以前直接在主迴圈跑：每段都卡住嘴型、表情和聊天室（2026-10-30 健檢）
                 quality_err = await asyncio.to_thread(_quality_problem, text, data)
                 if not quality_err:
@@ -573,7 +589,7 @@ async def get_tts_audio_bytes(text: str) -> bytes:
                     _log(f"[TTS Router] 切換引擎 -> {engine}")
                     _active_engine = engine
                 _engine_errors.pop(engine, None)
-                tts_cache_put(text, engine, data)
+                tts_cache_put(cache_text, engine, data)
                 return data
             raise RuntimeError("回傳音訊為空")
         except Exception as e:

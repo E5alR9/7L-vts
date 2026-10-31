@@ -183,7 +183,7 @@ from core.utils import (
 from core.identity import is_owner_account, claims_owner_identity
 from core.paths import DATA_DIR   # 執行時資料夾 data/：記憶、聲紋、音訊快取都在這（唯一出處）
 import core.stage_state as stage
-from core import usage, promptkit
+from core import usage, promptkit, prosody   # prosody：說話的語速、音高、大小聲（2026-10-31）
 from core import eventlog
 from core.speech_queue import SpeechQueue
 from core.barge_in import BargeInDetector
@@ -2147,13 +2147,20 @@ async def play_voice_complete(text, target: str = "dad", raw_actions_text: str =
             import services.tts_router as _tts_router
             chunks = []
             if clean_for_tts_text.strip() and re.search(r'[\u4e00-\u9fa5a-zA-Z0-9\u3040-\u309F\u30A0-\u30FF\uAC00-\uD7AF]', clean_for_tts_text):
-                for _seg in _tts_router.split_for_streaming(clean_for_tts_text):
-                    chunks.append({
-                        "text": _seg,
-                        "voice": "local_xiaoyi",
-                        "rate": "+0%",
-                        "pitch": "+0Hz"
-                    })
+                # 每段的語氣（語速、音高、大小聲）照她的表情標籤、句尾標點、[小聲] 這類短標籤定（core/prosody；老爸 2026-10-31）。
+                # 語氣不同的地方一定斷開；算不出來就照以前整段原本的語氣
+                try:
+                    _planned = prosody.build_chunks(
+                        source_text,
+                        lambda s: TextCleanEngine.clean_for_tts(TextCleanEngine.clean_speech_text(s), apply_phonetics=True),
+                        TextCleanEngine.clean_speech_text, _tts_router.split_for_streaming)
+                except Exception:
+                    log_swallowed()
+                    _planned = []
+                if not _planned:
+                    _planned = [(_seg, dict(prosody.NEUTRAL)) for _seg in _tts_router.split_for_streaming(clean_for_tts_text)]
+                for _seg, _pros in _planned:
+                    chunks.append({"text": _seg, "voice": "local_xiaoyi", "prosody": _pros})
                 
             if not chunks:
                 return
@@ -2183,7 +2190,8 @@ async def play_voice_complete(text, target: str = "dad", raw_actions_text: str =
                     for idx, c_dict in enumerate(chunks):
                         try:
                             t0 = time.time()
-                            local_wav = await tts_router.get_tts_audio_bytes(c_dict["text"])
+                            _pros = c_dict.get("prosody") or {}
+                            local_wav = await tts_router.get_tts_audio_bytes(c_dict["text"], **_pros)
                             if local_wav and len(local_wav) > 100:
                                 cost = time.time() - t0
                                 _eng = tts_router.get_active_engine() or "未定"
@@ -2194,7 +2202,8 @@ async def play_voice_complete(text, target: str = "dad", raw_actions_text: str =
                                     pf.write(bytes(local_wav))
                                     pf.flush()
                                 temp_files_to_clean.append(part_file)
-                                log_print(f"🟢 【串流分段 TTS({_eng}|{_lang_str}) ⚡ 第 {idx+1}/{len(chunks)} 句秒出】: '{c_dict['text']}' (耗時:{cost:.2f}s)")
+                                log_print(f"🟢 【串流分段 TTS({_eng}|{_lang_str}) ⚡ 第 {idx+1}/{len(chunks)} 句秒出】: '{c_dict['text']}' (耗時:{cost:.2f}s)"
+                                          + ("" if prosody.is_neutral(_pros) else f"｜語氣：{prosody.describe(_pros)}"))
                                 await audio_stream_queue.put({"file": part_file, "text": c_dict["text"], "idx": idx, "total": len(chunks)})
                             else:
                                 log_print(f"⚠️ 【TTS 回傳為空】'{c_dict['text']}'")
@@ -2975,6 +2984,7 @@ def _brain_text_for_memory(text: str) -> str:
     t = TextCleanEngine.extract_thought((text or "").strip())[1]
     t = re.sub(r'\[(?:INTERRUPT_SELF|CUT_IN|INTERRUPT|SELF_INTERRUPT|插話|中斷|打斷自己)\]', '', t, flags=re.IGNORECASE).strip()
     t = re.sub(r'\[(?:SPEED|PITCH|VOLUME|RATE)\b[^\]]*\]', '', t, flags=re.IGNORECASE)  # 也吃模型漏寫冒號的 [SPEED+8%]
+    t = prosody.TAG_RE.sub('', t)   # [小聲] [大聲] 這類語氣標籤也只給 TTS 用
     return re.sub(r' {2,}', ' ', t).strip() or (text or "").strip()
 
 

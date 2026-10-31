@@ -217,10 +217,12 @@ def test_memory_drops_prosody_tags():
     """主腦說的話存進記憶前拿掉語速／音高標籤（一句話常夾十幾個），表情標籤和內容留著。Live 和 REST 共用。"""
     import re
     from core.prompts import TextCleanEngine
-    ns = {"re": re, "TextCleanEngine": TextCleanEngine}
+    from core import prosody
+    ns = {"re": re, "TextCleanEngine": TextCleanEngine, "prosody": prosody}
     exec(compile(ast.Module(body=[_fn("_brain_text_for_memory")], type_ignores=[]), "m", "exec"), ns)
     out = ns["_brain_text_for_memory"]("[EXPRESSION: 花花] [SPEED:+8%][PITCH:+2Hz] 好呀 [SPEED+8%]～[INTERRUPT_SELF]")
     assert out == "[EXPRESSION: 花花] 好呀 ～"
+    assert ns["_brain_text_for_memory"]("[小聲] 我跟你說") == "我跟你說"   # 語氣短標籤也不存（2026-10-31）
     assert "_speak_brain_turn(" in _src("receive_from_live")
     assert "_brain_text_for_memory(text)" in _src("_speak_brain_turn")
 
