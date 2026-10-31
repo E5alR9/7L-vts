@@ -5,6 +5,11 @@
 看不到老爸的螢幕：主程式啟動前把所有截圖入口換成「不截圖」（老爸 2026-10-26 指示，測試絕不能看螢幕）。
 live_up.sh 開好後會再經 /exec 確認一次，沒擋住就立刻關掉 7L。
 
+不碰她真正的資料（2026-10-31 Fable 審查：以前測試直接寫正式的 data/ 和雲端，測試的「睡著、麥克風關」存進開關，
+她下次真的開機就睡著；測試觀眾小明被記成頭號粉絲；鋼琴音量被改成 80；測試作的曲子進了曲庫）：
+每次開都把 data/、midi_sheets/ 複製一份到暫存資料夾（SIM_DATA_DIR，預設 %TEMP%\7l_sim_data）給這次用，
+預設不連雲端（SIM_NO_CLOUD=0 才連）。正式的 7L 在跑的話不開（主程式的單一實例守護會把它殺掉）。
+
 POST /viewer  {"user": "阿呆", "text": "7L 晚安", "uid": "adai01", "platform": "tiktok|youtube"}
 POST /event   {"text": "【TikTok 直播動態】：...", "source": "tiktok_gift|tiktok_ambient"}
 POST /exec    {"code": "result = m.IS_SLEEPING"}  在主迴圈裡跑一段 async 程式（m＝主程式模組），回 result
@@ -121,7 +126,7 @@ import dotenv as _dotenv
 # 只在測試時用的覆寫（不寫進 .env）：SIM_MODE=vtuber 用 VTuber 模式開；SIM_NO_CLOUD=1 不連 Firestore（不碰雲端備份）。
 # 主程式一開頭會用 override=True 重讀 .env，所以包住 load_dotenv：每次讀完都再套一次。
 _SIM_OVERRIDES = {k: v for k, v in (("MODE", os.environ.get("SIM_MODE", "")),
-                                    ("FIREBASE_ENABLED", "0" if os.environ.get("SIM_NO_CLOUD") == "1" else "")) if v}
+                                    ("FIREBASE_ENABLED", "0" if os.environ.get("SIM_NO_CLOUD", "1") == "1" else "")) if v}
 _orig_load_dotenv = _dotenv.load_dotenv
 
 
@@ -136,6 +141,50 @@ from core.env_config import ENV_PATH as _ENV_PATH   # 專案資料夾的 .env，
 _dotenv.load_dotenv(_ENV_PATH, override=True)   # 跟主程式一樣先讀 .env，金鑰模組才不會空著初始化
 if _SIM_OVERRIDES:
     print(f"🧪 [測試包裝] 覆寫 {_SIM_OVERRIDES}", flush=True)
+
+# ── 正式的 7L 在跑就不開：主程式的單一實例守護會殺掉命令列有 vts_7L_test.py 的程序 ──
+try:
+    import psutil as _psutil
+    _real = [p.info["pid"] for p in _psutil.process_iter(["pid", "name", "cmdline"])
+             if p.info["pid"] != os.getpid() and "python" in (p.info["name"] or "").lower()
+             and any("vts_7L_test.py" in str(a) for a in (p.info.get("cmdline") or []))]
+except Exception:
+    _real = []
+if _real:
+    print(f"❌ [測試包裝] 正式的 7L 正在跑（pid {_real}），測試版不開，免得把它關掉", flush=True)
+    sys.exit(1)
+
+# ── 這次測試用的資料副本：主程式 import 記憶、向量庫、鋼琴模組之前先把路徑指過去 ──
+import shutil as _shutil
+import tempfile as _tempfile
+
+SIM_DATA = os.environ.get("SIM_DATA_DIR") or os.path.join(_tempfile.gettempdir(), "7l_sim_data")
+_SKIP = {"recent_audio", "tts_cache", "watch", "stem_pack", "score_in", "gpu_worker", ".stversions", ".stfolder"}
+
+
+def _ignore(folder, names):
+    return [n for n in names if n in _SKIP or n.startswith("backup_") or n.endswith((".tmp", ".bak"))]
+
+
+_shutil.rmtree(SIM_DATA, ignore_errors=True)
+_shutil.copytree(os.path.join(ROOT, "data"), os.path.join(SIM_DATA, "data"), ignore=_ignore)
+_shutil.copytree(os.path.join(ROOT, "midi_sheets"), os.path.join(SIM_DATA, "midi_sheets"), ignore=_ignore)
+import core.paths as _paths
+_paths.DATA_DIR = os.path.join(SIM_DATA, "data")
+os.environ["SEVENL_DATA_DIR"] = _paths.DATA_DIR   # 鋼琴視窗是另一個程序：靠環境變數知道設定檔在副本裡
+import core.db as _db
+_db.OFFLINE_QUEUE_FILE = os.path.join(_paths.DATA_DIR, "firestore_offline_queue.json")
+import services.rag_store as _rag_store
+_rag_store.PERSIST_DIR = os.path.join(_paths.DATA_DIR, "rag", "chroma")
+import services.piano_engine as _pe
+_pe.DATA_DIR = _paths.DATA_DIR
+_pe.PIANO_SETTINGS_FILE = os.path.join(_paths.DATA_DIR, "piano_settings.json")
+_pe.PIANO_PERSIST_FILE = os.path.join(_paths.DATA_DIR, "piano_persisted_state.json")
+_pe.MIDI_SHEETS_DIR = os.path.join(SIM_DATA, "midi_sheets")
+_pe.MIDI_CATALOG_FILE = os.path.join(_pe.MIDI_SHEETS_DIR, "midi_catalog.json")
+import core.memory as _mem
+assert _mem.UNIFIED_MEMORY_FILE.startswith(SIM_DATA), _mem.UNIFIED_MEMORY_FILE
+print(f"🧪 [測試包裝] 資料用副本：{SIM_DATA}（正式的 data/、midi_sheets/ 不動）；雲端：{'不連' if _SIM_OVERRIDES.get('FIREBASE_ENABLED') == '0' else '有連'}", flush=True)
 
 # 老爸不讓測試看他的螢幕（2026-10-26）：所有截圖入口在主程式啟動前換成「不截圖」。
 # 主程式、後台都從 services.screen_capture 拿畫面（用到才 import，所以換模組屬性就生效）；YT 伴看用 PIL.ImageGrab。
@@ -155,5 +204,5 @@ def _no_grab(*a, **k):
 _sc.grab_screen = _no_screen
 _sc.gdi_capture_screen = _no_screen
 _ig.grab = _no_grab
-sys.argv = [os.path.join(ROOT, "vts_7L_test.py")]
+sys.argv = [os.path.abspath(__file__)]   # 重開（shutdown_7l(restart=True)、/api/restart）照 sys.argv 再開：要開回測試包裝
 runpy.run_path(os.path.join(ROOT, "vts_7L_test.py"), run_name="__main__")

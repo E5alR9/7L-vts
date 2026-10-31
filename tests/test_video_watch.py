@@ -66,6 +66,7 @@ def test_watch_note_is_not_shown_as_a_viewer_comment():
     fn = next(n for n in ast.walk(ast.parse(main)) if isinstance(n, ast.AsyncFunctionDef) and n.name == "execute_tool_dispatch")
     from core.hard_command import is_stage_control
     ns = {"_AUDIENCE_DENIED_TOOLS": frozenset(), "is_stage_control": is_stage_control, "log_print": lambda *a: None,
+          "_DAD_ONLY_STRICT_TOOLS": frozenset(), "AUDIENCE_TAINT_SEC": 15.0, "_BRAIN_INPUT_ORIGIN": {}, "time": __import__("time"),
           "video_watch": types.SimpleNamespace(request_watch=request_watch)}
     exec(compile(ast.Module(body=[fn], type_ignores=[]), "x", "exec"), ns)
     for target, user in (("dad", ""), ("audience", ""), ("audience", "小明")):

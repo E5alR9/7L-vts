@@ -610,8 +610,10 @@ def parse_speed_str(speed_str: str) -> float:
         return 1.0
 
 def get_piano_settings_path():
-    p1 = os.path.join("data", "piano_settings.json")
-    if os.path.exists("data"):
+    # 測試包裝（tools/sim/sim_run.py）會設 SEVENL_DATA_DIR：測試開的鋼琴不寫正式的 data/（2026-10-31）
+    data_dir = os.environ.get("SEVENL_DATA_DIR") or "data"
+    p1 = os.path.join(data_dir, "piano_settings.json")
+    if os.path.exists(data_dir):
         return p1
     return "piano_settings.json"
 
@@ -2681,7 +2683,7 @@ if __name__ == "__main__":
     args, _ = parser.parse_known_args()
 
     saved_vol, saved_spd = 100, 1.0
-    piano_set_path = os.path.join("data", "piano_settings.json") if os.path.exists(os.path.join("data", "piano_settings.json")) else "piano_settings.json"
+    piano_set_path = get_piano_settings_path() if os.path.exists(get_piano_settings_path()) else "piano_settings.json"
     if os.path.exists(piano_set_path):
         try:
             with open(piano_set_path, "r", encoding="utf-8") as sf:

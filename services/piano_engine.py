@@ -618,9 +618,23 @@ def load_persisted_piano_settings():
     return vol, spd
 
 def save_persisted_piano_settings(vol, spd):
+    """讀進來併上音量、倍速再存（先寫 .tmp 再換上去）：鋼琴視窗也在這個檔存自己的位置大小（geometry），
+    以前整份蓋掉，視窗位置就丟了（Fable 審查）。"""
     try:
-        with open(PIANO_SETTINGS_FILE, "w", encoding="utf-8") as f:
-            json.dump({"volume": int(vol), "speed": float(spd)}, f, ensure_ascii=False, indent=2)
+        cur = {}
+        if os.path.exists(PIANO_SETTINGS_FILE):
+            try:
+                with open(PIANO_SETTINGS_FILE, "r", encoding="utf-8") as f:
+                    cur = json.load(f)
+            except Exception:
+                cur = {}
+        if not isinstance(cur, dict):
+            cur = {}
+        cur.update(volume=int(vol), speed=float(spd))
+        tmp = PIANO_SETTINGS_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(cur, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, PIANO_SETTINGS_FILE)
     except Exception:
         log_swallowed()
 

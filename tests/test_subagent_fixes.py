@@ -104,7 +104,7 @@ def _run_handler(cpu, nv, total_timeout=45.0, task="幫我查日圓匯率", orig
 
     from core.hard_command import build_slip_text, structured_stage_command, compose_instead_of_play
     sess = _FakeSession()
-    ns = _load("_run_subagent_task", "_handle_invoke_subagent", _AWAITING_RESULTS={}, LIVE_SAY_GATE=False, types=types, asyncio=asyncio, session=sess, GLOBAL_LIVE_SESSION=sess,
+    ns = _load("_run_subagent_task", "_handle_invoke_subagent", _vision_allowed=lambda: True, _AWAITING_RESULTS={}, LIVE_SAY_GATE=False, types=types, asyncio=asyncio, session=sess, GLOBAL_LIVE_SESSION=sess,
                ws_send_lock=asyncio.Lock(), _desktop_lookup=desktop_lookup,
                background_tool_executor=background_tool_executor, nv_interpret_task=nv_interpret_task,
                build_slip_text=build_slip_text, _SUBAGENT_TOTAL_TIMEOUT=total_timeout,
@@ -232,7 +232,8 @@ def test_audience_turn_cannot_stop_the_stage_through_the_subagent():
 def test_dispatcher_refuses_stage_control_from_the_audience():
     from core.hard_command import is_stage_control
     ns = _load("execute_tool_dispatch", is_stage_control=is_stage_control,
-               _AUDIENCE_DENIED_TOOLS=_const_frozenset("_AUDIENCE_DENIED_TOOLS"))
+               _AUDIENCE_DENIED_TOOLS=_const_frozenset("_AUDIENCE_DENIED_TOOLS"),
+               _DAD_ONLY_STRICT_TOOLS=frozenset(), AUDIENCE_TAINT_SEC=15.0, _BRAIN_INPUT_ORIGIN={}, time=time)
     for name in ("pe.stop_virtual_piano", "stop_virtual_piano", "pause_virtual_piano", "stop_singing", "stop_cover"):
         assert "權限不足" in asyncio.run(ns["execute_tool_dispatch"](name, {}, caller_target="audience"))
 
@@ -325,7 +326,7 @@ def test_screen_task_is_handed_to_the_vision_brain():
 
     def run(recent):
         sess = _FakeSession()
-        ns = _load("_run_subagent_task", "_handle_invoke_subagent", _call_cancelled=lambda i: False, _brain_requester=lambda: "老爸", _AWAITING_RESULTS={}, LIVE_SAY_GATE=False, types=types, asyncio=asyncio, time=time, GLOBAL_LIVE_SESSION=sess,
+        ns = _load("_run_subagent_task", "_handle_invoke_subagent", _vision_allowed=lambda: True, _call_cancelled=lambda i: False, _brain_requester=lambda: "老爸", _AWAITING_RESULTS={}, LIVE_SAY_GATE=False, types=types, asyncio=asyncio, time=time, GLOBAL_LIVE_SESSION=sess,
                    background_tool_executor=never, nv_interpret_task=never, build_slip_text=build_slip_text,
                    _SUBAGENT_TOTAL_TIMEOUT=45.0, _SUBAGENT_VISION_TASK_RE=_re.compile(_const_pattern("_SUBAGENT_VISION_TASK_RE")),
                    _start_vision=lambda: not recent and (looked.append(True) or True),   # 剛看過／正在看就回 False
@@ -492,7 +493,7 @@ def test_mirror_task_is_handed_to_the_mirror_once():
 
     def run(can_start):
         sess = _FakeSession()
-        ns = _load("_run_subagent_task", "_handle_invoke_subagent", _call_cancelled=lambda i: False, _brain_requester=lambda: "老爸", _AWAITING_RESULTS={}, LIVE_SAY_GATE=False, types=types, asyncio=asyncio, time=time, GLOBAL_LIVE_SESSION=sess,
+        ns = _load("_run_subagent_task", "_handle_invoke_subagent", _vision_allowed=lambda: True, _call_cancelled=lambda i: False, _brain_requester=lambda: "老爸", _AWAITING_RESULTS={}, LIVE_SAY_GATE=False, types=types, asyncio=asyncio, time=time, GLOBAL_LIVE_SESSION=sess,
                    background_tool_executor=never, nv_interpret_task=never,
                    _SUBAGENT_VISION_TASK_RE=__import__("re").compile(_const_pattern("_SUBAGENT_VISION_TASK_RE")),
                    _start_mirror=lambda: started.append(1) or can_start)

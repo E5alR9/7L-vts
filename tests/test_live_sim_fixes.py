@@ -617,7 +617,7 @@ def test_mirror_report_does_not_retrigger_the_mirror():
     ns = {"re": re, "time": time, "log_print": lambda *a: None, "_VISION_STATE": {"report_ts": 0.0, "mirror_ts": 0.0},
           "VISION_REPORT_QUIET_SEC": 15.0, "VISION_FAIL_QUIET_SEC": 90.0, "strip_blob_noise": lambda t: t, "sanitize_search_query": lambda q: q,
           "spawn": lambda c: started.append(c), "live_mirror_tool_task": lambda: "mirror",
-          "live_vision_tool_task": lambda: "vision", "live_search_tool_task": lambda q: "search"}
+          "live_vision_tool_task": lambda: "vision", "live_search_tool_task": lambda q: "search", "_vision_allowed": lambda: True}
     for n in ("_vision_report_recent", "_start_vision", "_start_mirror", "_start_marker_tools"):
         exec(compile(ast.Module(body=[_fn(n)], type_ignores=[]), n, "exec"), ns)
     assert ns["_start_marker_tools"]("我照照看～[TOOL:MIRROR]") == "我照照看～" and started == ["mirror"]
@@ -764,3 +764,15 @@ def test_viewer_stage_judging_does_not_block_the_dispatcher():
     assert "spawn(_audience_message_to_board(aud_c, id_display, v_unique_id, source))" in src
     assert "await background_tool_executor(aud_c" not in src
     assert "async with _AUDIENCE_JUDGE_SEM:" in _src("_audience_message_to_board")
+
+
+def test_human_slips_carry_the_local_time_at_most_once_a_minute():
+    """老爸問幾點她答 UTC（2026-10-31 實機）：人話紙條前附現在時間，一分鐘最多一次。"""
+    ns = {"time": time}
+    exec(compile(ast.Module(body=[_fn("_slip_clock_note")], type_ignores=[]), "c", "exec"), ns)
+    ns.update(SLIP_CLOCK_EVERY_SEC=60.0, _SLIP_CLOCK={"ts": 0.0})
+    now = time.mktime((2026, 10, 31, 13, 36, 0, 0, 0, -1))
+    assert ns["_slip_clock_note"](now) == "（現在時間 10/31 13:36，被問到再說）"
+    assert ns["_slip_clock_note"](now + 30) == ""
+    assert ns["_slip_clock_note"](now + 61).startswith("（現在時間 10/31 13:37")
+    assert "_clock = _slip_clock_note(time.time())" in _src("continuous_live_worker")

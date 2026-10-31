@@ -234,7 +234,16 @@ from core.memory import (
 _AUDIENCE_DENIED_TOOLS = frozenset({
     "clear_all_memories", "update_cloud_knowledge", "set_sleep_mode",
     "open_browser", "control_microphone",
+    # 2026-10-31 Fable 審查：觀眾能間接控制鋼琴（音量調 0、倍速、音色）、在老爸桌面打字（桌面版 Gemini）、
+    # 在老爸桌面開圖（畫圖）、叫顯卡跑三四十分鐘（轉譜、分軌）、改 MIDI 檔
+    "set_piano_volume", "set_piano_speed", "set_piano_instrument",
+    "ask_desktop", "ask_gemini_desktop", "generate_ai_image", "draw_illustration",
+    "music.transcribe_song", "music.stem_pack", "midi.edit", "midi.inspect", "execute_local_python_code",
 })
+# 這幾個連「最近有觀眾留言」都不行：主腦只有一個，觀眾留言的紙條剛送進去、老爸剛好開口時，
+# 這輪的權限會被記成老爸的（_BRAIN_INPUT_ORIGIN 只記最後一則），觀眾就借到老爸的權限（Fable 審查）
+_DAD_ONLY_STRICT_TOOLS = frozenset({"clear_all_memories", "update_cloud_knowledge"})
+AUDIENCE_TAINT_SEC = 15.0
 
 #  主腦最近一則輸入是誰觸發的：觀眾彈幕／哨兵轉述的紙條 → audience；老爸打字、說話、主持插話 → dad。
 #  主腦只有一個，觀眾說「收起鋼琴」被 CPU 擋下後，哨兵照樣把留言轉給主腦，主腦呼叫子智能體時
@@ -261,6 +270,13 @@ def _note_brain_origin(who: str, said: str = "", name: str = "") -> None:
         _BRAIN_INPUT_ORIGIN["human"] = False
         return
     _BRAIN_INPUT_ORIGIN.update(who=who, ts=time.time(), said=said or "", human=True, name=name or "")
+    if who == "audience":
+        _BRAIN_INPUT_ORIGIN["audience_ts"] = time.time()   # 最近一次觀眾留言（_DAD_ONLY_STRICT_TOOLS 看）
+
+
+def _vision_allowed() -> bool:
+    """看老爸螢幕只聽老爸的：觀眾叫她看螢幕、唸出來，等於把老爸桌面上的東西播給直播間（2026-10-31 Fable 審查）。"""
+    return _BRAIN_INPUT_ORIGIN.get("who") != "audience"
 
 
 def _live_reply_target() -> str:
@@ -425,6 +441,10 @@ async def execute_tool_dispatch(fn_name: str, fn_args: dict, caller_target: str 
                                         or is_stage_control(fn_name)):
         log_print(f"🛑 [工具權限] 拒絕觀眾側呼叫 {fn_name}（{caller_user}）")
         return f" 權限不足：{fn_name} 僅限操作者使用"
+    if (fn_name or "").strip().lower() in _DAD_ONLY_STRICT_TOOLS and \
+            time.time() - (_BRAIN_INPUT_ORIGIN.get("audience_ts") or 0.0) < AUDIENCE_TAINT_SEC:
+        log_print(f"🛑 [工具權限] {fn_name} 剛有觀眾留言進來，分不清是誰要的，不執行")
+        return f" 權限不足：剛有觀眾留言，{fn_name} 請老爸直接在後台操作"
     extracted_text = ""
     fn_name = (fn_name or "").strip().lower()
     fn_args = {k.lower(): v for k, v in fn_args.items()} if isinstance(fn_args, dict) else {}
@@ -837,7 +857,9 @@ from mic_live_plugin import voiceprint_verifier  # noqa: F401
 # ────────────────────────────────────────────────────────
 #  讀 .env、印出各家金鑰數量；金鑰池怎麼分工、模型叫什麼名字都定義在 core/llm_engine。
 
-load_dotenv(_ENV_PATH, override=True)
+# 不覆寫：開頭已經讀過 .env，settings.boot() 也照後台的模式開關改過 MODE／OPERATOR_*；
+# 以前這裡 override=True 又把它們蓋回 .env 的值，後台切成 VTuber 重開後記憶檔是 VTuber 的、行為卻是伴侶模式（Fable 審查）
+load_dotenv(_ENV_PATH, override=False)
 os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"  # 關閉 Hugging Face 符號連結警告
 
 print("=== 🔍 .env 金鑰讀取測試 ===")
@@ -1299,6 +1321,20 @@ def _take_wake_note(now: float) -> str:
     if not note or now - (_SLEEP_WAKE.get("woke_ts") or 0.0) > WAKE_NOTE_SEC:
         return ""
     return note
+
+
+# 人話紙條前面附現在時間（最多每分鐘一次）。Live 主腦以前只有每 15 分鐘的餘光紙條看得到時間，
+# 老爸問「現在幾點」她答「早上五點三十六分」（下午 1:36，她拿的是 UTC；2026-10-31 實機）
+SLIP_CLOCK_EVERY_SEC = 60.0
+_SLIP_CLOCK = {"ts": 0.0}
+
+
+def _slip_clock_note(now: float) -> str:
+    if now - _SLIP_CLOCK["ts"] < SLIP_CLOCK_EVERY_SEC:
+        return ""
+    _SLIP_CLOCK["ts"] = now
+    lt = time.localtime(now)
+    return f"（現在時間 {lt.tm_mon}/{lt.tm_mday} {lt.tm_hour:02d}:{lt.tm_min:02d}，被問到再說）"
 
 
 async def set_sleep_mode(enable: bool):
@@ -2909,7 +2945,9 @@ def _start_marker_tools(text: str) -> str:
             log_print("⚠️ [攔截暗號] 搜尋關鍵字全是雜訊，跳過不搜。")
     if "[TOOL:VISION]" in text:
         text = text.replace("[TOOL:VISION]", "").strip()
-        if _start_vision():
+        if not _vision_allowed():
+            log_print("🛑 [視覺] 這輪是觀眾觸發的，不看老爸的螢幕")
+        elif _start_vision():
             log_print("⚡ [攔截暗號] 啟動平行代理人：視覺大腦！")
         else:
             log_print("👁️ [視覺] 正在看、剛看完或剛看失敗，這次的 [TOOL:VISION] 不重看（防看完又看的迴圈）")
@@ -3387,6 +3425,11 @@ async def _run_subagent_task(_task_ins, _intent, _respond):
     _if_said = "（妳剛才如果已經答應過，就輸出 [SILENCE]，不要再講一次。）"
 
     try:
+        if _task_ins and _SUBAGENT_VISION_TASK_RE.search(_task_ins) and not _vision_allowed():
+            log_print(f"🛑 [子智能體] 觀眾要她看老爸的螢幕，不看：{_task_ins[:40]}")
+            await _respond("[系統底層：看老爸的螢幕只聽老爸的，觀眾叫的不算，系統沒有去看。"
+                           "俏皮帶過就好，不要描述或猜螢幕上有什麼。]", _speak)
+            return
         if _task_ins and _SUBAGENT_VISION_TASK_RE.search(_task_ins):
             # 子智能體看不到畫面：照舊流程會回「沒結果，請妳自己回答」，她就自己編畫面內容
             # （2026-10-25 實機：視覺結果還沒回來，她先說「螢幕上滿滿的都是舊照片」）。
@@ -4359,6 +4402,9 @@ async def continuous_live_worker(vts):
                                 _wake = _take_wake_note(time.time())
                                 if _wake:   # 剛睡醒後第一句人話：讓她知道自己剛醒（只加在送出去的那份，去重、流水帳照原本的）
                                     _send_text = f"{_wake}\n{prompt}"
+                                _clock = _slip_clock_note(time.time())
+                                if _clock:
+                                    _send_text = f"{_clock}{_send_text}"
                             log_print(f"📥 [黑板同步] 透過紙條傳送給 Live 大腦: {_send_text}")
                             _slip_sent = False
                             try:
@@ -7415,7 +7461,9 @@ async def chat_processor_worker(vts, input_queue):
                 log_swallowed()
 
             #  收到新輸入時，若包含立即關機指令，0.001 秒內立即安全退出！
-            if check_immediate_shutdown(user_input):
+            # 只認老爸本人的輸入：以前在分流前對所有輸入檢查，觀眾聊天打「7L關機」「阿七重開機」就把她關掉
+            # （留言包成「【TikTok 直播觀眾 X 留言】：…」照樣命中；2026-10-31 Fable 審查）
+            if is_operator(source, bool(user_audio_b64)) and check_immediate_shutdown(user_input):
                 input_queue.task_done()
                 return
 

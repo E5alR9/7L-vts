@@ -18,6 +18,10 @@ from core.utils import log_print, get_silence_ticks, get_uptime_ticks, format_ti
 
 _TAG_RE = re.compile(r"\[[A-Z_]+(?:[:：][^\]]*)?\]")   # 回給後台顯示前拿掉 [EXPRESSION: …] 這類標籤
 
+# 當下的狀態，不是設定：不存進雲端開關、開機也不還原（2026-10-31 Fable 審查：
+# 測試按了睡覺，叫醒的路徑又不會再存，她下次真的開機就睡著；直播連線是監聽器自己管的狀態）
+TRANSIENT_SWITCHES = frozenset({"IS_SLEEPING", "IS_STREAM_CHAT_ENABLED"})
+
 # 本檔經 core 讀寫的主程式名稱（新增 c.<名稱> 用法時一併登記）
 CORE_ATTRS = (
     # 模組
@@ -411,6 +415,8 @@ class DashboardBridge:
 
     async def set_switch(self, key: str, value=None, sync_cloud=True):
         c = self.core
+        if key in TRANSIENT_SWITCHES:
+            sync_cloud = False   # 睡著、直播連線是當下的狀態，不是設定：不存、開機也不還原
         current_map = {
             "IS_AUTO_PIANO_ENABLED": c.IS_AUTO_PIANO_ENABLED,
             "IS_PIANO_AUTO_RADIO_MODE": getattr(c.pe, "IS_PIANO_AUTO_RADIO_MODE", False),
@@ -491,7 +497,7 @@ class DashboardBridge:
             if switches:
                 log_print("☁️ [雲端還原] 正在載入全域系統開關...")
                 for k, v in switches.items():
-                    if k != "MODE_TOGGLE":
+                    if k != "MODE_TOGGLE" and k not in TRANSIENT_SWITCHES:
                         await self.set_switch(k, v, sync_cloud=False)
                 log_print("✅ [雲端還原] 全域系統開關載入完成")
         except Exception as e:

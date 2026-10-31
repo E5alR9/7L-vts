@@ -26,6 +26,9 @@ def cn_number(s: str):
     return total + cur
 
 
+MAX_ACTIVE_TIMERS = 20   # 同時最多幾個計時器（觀眾一直叫她設提醒會洗版）
+
+
 class LiveTimerSensorHub:
     """⏱️ 7L API Live 持續時間感測哨兵中樞 (Live Timer & Countdown Sensor)
     - 只記帳（新增／取消／列出計時器），本身不計時也不發言
@@ -36,7 +39,12 @@ class LiveTimerSensorHub:
         self._counter: int = 0
 
     def add_timer(self, seconds: int, message: str = "", source: str = "代碼指令/標籤", caller_user: str = "") -> Dict[str, Any]:
-        """新增一個定時感測任務 (單位: 秒數 / Ticks)"""
+        """新增一個定時感測任務 (單位: 秒數 / Ticks)。同時最多 MAX_ACTIVE_TIMERS 個，滿了就不收（回空 dict）：
+        觀眾一直叫她設提醒會被洗版（2026-10-31 Fable 審查）。"""
+        active = [t for t in self.timers.values() if t.get("status") == "sensing"]
+        if len(active) >= MAX_ACTIVE_TIMERS:
+            log_print(f"⏱️ [API Live 定時感測] 已經有 {len(active)} 個計時器在跑，這個不收：{message[:30]}")
+            return {}
         self._counter += 1
         task_id = f"timer_{int(time.time())}_{self._counter}"
         now = time.time()

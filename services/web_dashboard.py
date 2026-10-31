@@ -1030,11 +1030,14 @@ async def api_get_prompts(request):
 async def api_save_prompts(request):
     """儲存並即時同步 7L 雲端提示詞庫至 Firestore 與本地"""
     try:
-        from core.memory import save_cloud_knowledge
+        from core.memory import save_cloud_knowledge, get_cloud_knowledge
         body = await request.json()
         if not isinstance(body, dict):
             return web.json_response({"ok": False, "error": "資料格式錯誤"}, status=400)
-        
+        # 併進現有的再存：網頁送來的沒有 system_switches 這類欄位，以前整份蓋掉，存一次提示詞所有開關都回預設（Fable 審查）
+        merged = dict(await get_cloud_knowledge())
+        merged.update(body)
+        body = merged
         await save_cloud_knowledge(body)
         broadcast_event("prompts_updated", {"timestamp": time.time(), "last_updated": body.get("last_updated")})
         return web.json_response({"ok": True, "message": "雲端提示詞已成功同步至 Firestore 永久大腦！", "last_updated": body.get("last_updated")})
@@ -1046,7 +1049,11 @@ async def api_reset_prompts(request):
     try:
         from core.memory import DEFAULT_CLOUD_KNOWLEDGE, save_cloud_knowledge
         import copy
+        from core.memory import get_cloud_knowledge
         default_kn = copy.deepcopy(DEFAULT_CLOUD_KNOWLEDGE)
+        _switches = (await get_cloud_knowledge()).get("system_switches")
+        if _switches:   # 恢復預設提示詞，開關照舊
+            default_kn["system_switches"] = _switches
         await save_cloud_knowledge(default_kn)
         broadcast_event("prompts_updated", {"timestamp": time.time(), "last_updated": default_kn.get("last_updated")})
         return web.json_response({"ok": True, "data": default_kn, "message": "已成功恢復為系統預設提示詞庫並同步至雲端！"})
@@ -1387,6 +1394,46 @@ async def _lan_only(request, handler):
     return await handler(request)
 
 
+def is_trusted_hostname(host: str) -> bool:
+    """網址裡的主機名稱是不是自己人：localhost、本機／家裡網路／Tailscale 的 IP、這台的電腦名、Tailscale 的 *.ts.net，
+    或沒有點的短名稱（區網／Tailscale MagicDNS）。外面網站的網域都不算。"""
+    h = (host or "").strip().strip("[]").rstrip(".").lower()
+    if not h:
+        return False
+    if h == "localhost" or h.endswith(".localhost") or h.endswith(".ts.net") or "." not in h:
+        return True
+    if is_lan_peer(h):
+        return True
+    try:
+        return h == socket.gethostname().lower()
+    except OSError:
+        return False
+
+
+@web.middleware
+async def _same_site_only(request, handler):
+    """擋「別的網站」借老爸的瀏覽器打後台：瀏覽器帶的 Origin、網址的 Host 都要是自己人。
+    以前只看連線位址：老爸在這台開任何網頁，那個網頁就能 POST /api/shutdown、改提示詞、執行工具，
+    WebSocket 也能連上來讀對話（CSRF／DNS rebinding；2026-10-31 Fable 審查）。curl、ft.py 這類不帶 Origin 的照收。"""
+    host = (request.host or "").rsplit(":", 1)[0] if not (request.host or "").startswith("[") else (request.host or "").split("]")[0]
+    origin = request.headers.get("Origin")
+    bad = ""
+    if not is_trusted_hostname(host):
+        bad = f"Host {request.host}"
+    elif origin is not None:
+        try:
+            from urllib.parse import urlparse
+            o_host = urlparse(origin).hostname or ""
+        except Exception:
+            o_host = ""
+        if origin == "null" or not is_trusted_hostname(o_host):
+            bad = f"Origin {origin}"
+    if bad:
+        log_print(f"🛡️ [7L Web 後台] 擋掉別的網站發來的請求（{bad}）：{request.method} {request.path}")
+        raise web.HTTPForbidden(text="7L 後台不接受別的網站發來的請求")
+    return await handler(request)
+
+
 def _lan_urls(port: int) -> list:
     """這台在家裡網路／Tailscale 上的網址（給其他裝置開）。"""
     ips = set()
@@ -1451,7 +1498,7 @@ async def start_web_dashboard(
     if hasattr(yt_comp, 'reject_pending_video'):
         REJECT_YT_COMPANION_CALLBACK = yt_comp.reject_pending_video
 
-    app = web.Application(middlewares=[_lan_only])
+    app = web.Application(middlewares=[_lan_only, _same_site_only])
     
     # 靜態資源目錄 (web/)
     web_dir = os.path.join(ROOT_DIR, "web")
