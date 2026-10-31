@@ -37,7 +37,23 @@ def _lines_since(pos):
     return out
 
 
+_SIM_CHECKED = False
+
+
+def ensure_sim():
+    """確定 7860 那個 7L 是測試包裝開的（只有測試包裝有 7870 控制埠）；不是就什麼都不送、直接停。
+    2026-10-31：老爸開著正式的 7L，測試包裝拒絕啟動，測試照跑，打字、主持插話、走位、計時器全送進正式的 7L。"""
+    global _SIM_CHECKED
+    if _SIM_CHECKED:
+        return
+    code, body = _req("POST", SIM + "/exec", {"code": "result = 'sim'"}, timeout=10)
+    if code != 200 or "sim" not in body:
+        raise SystemExit("❌ 找不到測試包裝（7870 控制埠沒回）：正在跑的可能是正式的 7L，測試一個指令都不送")
+    _SIM_CHECKED = True
+
+
 def act(a):
+    ensure_sim()   # 每個動作送出前都要確定對象是測試版（第一次檢查過就記住）
     kind = a[0]
     if kind == "op":
         return _req("POST", D + "/api/send_message", {"text": a[1]})
@@ -202,6 +218,7 @@ GROUPS = {
 }
 
 if __name__ == "__main__":
+    ensure_sim()
     res = []
     for g in sys.argv[2].split(","):
         print(f"\n════════ {g} ════════")

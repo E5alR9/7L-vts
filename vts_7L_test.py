@@ -1048,6 +1048,7 @@ IS_PROACTIVE_SPEAK_ENABLED = True  #  視覺陪伴主動搭話開關（預設開
 IS_PERIPHERAL_VISION_ENABLED = True  #  餘光視覺感知中樞開關（預設開啟）
 IS_FACE_TRACKING_ENABLED = True  #  AI 視線與頭部追蹤開關（預設開啟）
 IS_GAZE_CURSOR_ENABLED = False   # 在她看的位置顯示一個游標（workers/gaze_cursor.py，老爸 2026-10-31）
+IS_DREAM_ENABLED = True   # 做夢整理：閒著時用 Groq 把對話整理成日記、知識去重（core/dream.py，老爸 2026-10-31）
 LAST_WANDER_TIME = time.time()
 IS_SLEEPING = False
 IS_LIVE_MODE_ACTIVE = True
@@ -3207,8 +3208,14 @@ def use_rest_brain() -> bool:
 async def build_brain_system_prompt(owner: str, char_name: str, say_gate: bool = False) -> str:
     """主腦的系統提示詞（core/promptkit.brain_system）。Live 主腦和 REST 大腦共用；say_gate 只有 Live 主腦開。"""
     from core.identity import get_mode
-    return promptkit.brain_system(owner, char_name, await get_cloud_knowledge(), vc.EXPRESSION_MENU_TEXT, mode=get_mode(),
-                                  say_gate=say_gate)
+    system = promptkit.brain_system(owner, char_name, await get_cloud_knowledge(), vc.EXPRESSION_MENU_TEXT, mode=get_mode(),
+                                    say_gate=say_gate)
+    try:
+        diary = dream.diary_block()   # 做夢整理寫的最近幾天日記：時間線擠掉的事她還記得
+    except Exception:
+        log_swallowed()
+        diary = ""
+    return f"{system}\n\n{diary}" if diary else system
 
 
 # Live 主腦的 say 閘（2026-10-29 老爸：以前她輸出就直接念，像沒有腦內聲音的人，沒辦法先想、反覆調度再決定說）。
@@ -5012,6 +5019,17 @@ import workers.gaze_cursor as gaze_cursor  # 視線游標
 gaze_cursor.bind(sys.modules[__name__])
 import workers.gaze_brain as gaze_brain    # 視線副腦：Live 看螢幕決定她想看什麼
 gaze_brain.bind(sys.modules[__name__])
+import core.dream as dream    # 做夢整理：閒著時把對話整理成日記
+dream.bind(sys.modules[__name__])
+_BOOT_TS = time.time()
+
+
+def _idle_seconds() -> float:
+    """沒人講話、她也沒在講話多久了（做夢整理看這個）；她正在講話、唱歌、彈琴就是 0。"""
+    if stage.ai_state() != "IDLE":
+        return 0.0
+    last = max(_BRAIN_INPUT_ORIGIN.get("ts") or 0.0, LAST_SAY_TS, LAST_BRAIN_TURN_TS)
+    return time.time() - last if last else time.time() - _BOOT_TS
 
 WATERMARK_REASSERT_SEC = 60.0  # 水印守護間隔：每分鐘重申一次常駐（冪等，開著再開一次無害）
 
@@ -7979,6 +7997,7 @@ async def main():
         spawn(vts_health_worker(vts))
     spawn(gaze_cursor.gaze_cursor_worker())   # 視線游標：跟著「顯示視線位置」開關開關
     spawn(gaze_brain.gaze_brain_worker())     # 視線副腦：餘光視覺開著時用 Live 看螢幕挑她想看的
+    spawn(dream.dream_worker(_idle_seconds))  # 做夢整理：閒著時把對話整理成日記
 
     recognizer = sr.Recognizer()
     recognizer.pause_threshold = MIC_PAUSE_THRESHOLD   # 門檻都在 listen_once_fast 上面

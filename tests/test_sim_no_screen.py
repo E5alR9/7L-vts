@@ -35,3 +35,13 @@ def test_no_other_screenshot_paths():
             if pat.search(line) and not line.lstrip().startswith("#"):
                 bad.append(f"{rel}:{i}: {line.strip()[:80]}")
     assert bad == []
+
+
+def test_tests_never_talk_to_the_real_7l():
+    """2026-10-31：老爸開著正式的 7L，測試包裝拒絕啟動，測試照跑：打字、主持插話、走位、計時器全送進正式的 7L。
+    現在送任何動作前先確定 7870 控制埠（只有測試包裝有）在；啟動被拒整串停。"""
+    src = open(os.path.join(ROOT, "tools", "sim", "ft.py"), encoding="utf-8").read()
+    act = src[src.index("def act("):src.index("def step(")]
+    assert "ensure_sim()" in act and src.index("ensure_sim()", src.index('if __name__ == "__main__":')) > 0
+    up = open(os.path.join(ROOT, "tools", "sim", "live_up.sh"), encoding="utf-8").read()
+    assert 'grep -aq "測試版不開"' in up and "exit 1" in up

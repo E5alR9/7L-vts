@@ -40,6 +40,7 @@ CORE_ATTRS = (
     # 開關（讀寫）
     "IS_SLEEPING", "IS_MIC_ENABLED", "IS_AUTO_PIANO_ENABLED", "IS_AUTO_WANDER_ENABLED",
     "IS_PROACTIVE_SPEAK_ENABLED", "IS_PERIPHERAL_VISION_ENABLED", "IS_FACE_TRACKING_ENABLED", "IS_GAZE_CURSOR_ENABLED",
+    "IS_DREAM_ENABLED",
     # 函式
     "set_ai_state", "get_api_stress_metrics", "set_vts_expression", "shutdown_7l", "apply_spatial_position",
     "control_microphone", "set_sleep_mode", "set_timer", "search_google",
@@ -337,6 +338,10 @@ class DashboardBridge:
             ("IS_AUTO_WANDER_ENABLED", "idle", "walk", "閒著時走來走去",
              "沒事超過 60 秒，每 60 秒在畫面上換個位置、換個姿勢。",
              c.IS_AUTO_WANDER_ENABLED),
+            ("IS_DREAM_ENABLED", "idle", "moon", "做夢整理記憶",
+             "閒下來 10 分鐘（或新對話多到快被擠掉）時，在背景把對話整理成當天的日記、存進記憶庫，"
+             "學到的事和網路梗去掉重複的。最近 3 天的日記她會記得。用 Groq，不花 Gemini；睡著時不做。",
+             getattr(c, "IS_DREAM_ENABLED", True)),
             ("IS_AUTO_PIANO_ENABLED", "piano", "piano", "閒著時自己彈琴",
              "沒事、房間也沒聲音超過 60 秒，每 5 分鐘自己坐到鋼琴前挑一首彈。",
              c.IS_AUTO_PIANO_ENABLED),
@@ -366,6 +371,7 @@ class DashboardBridge:
             "IS_PERIPHERAL_VISION_ENABLED": c.IS_PERIPHERAL_VISION_ENABLED,
             "IS_FACE_TRACKING_ENABLED": c.IS_FACE_TRACKING_ENABLED,
             "IS_GAZE_CURSOR_ENABLED": c.IS_GAZE_CURSOR_ENABLED,
+            "IS_DREAM_ENABLED": getattr(c, "IS_DREAM_ENABLED", True),
             "IS_MIC_ENABLED": c.IS_MIC_ENABLED,
             "IS_STREAM_CHAT_ENABLED": getattr(c.tk_listener, "IS_STREAMING", False),
             "IS_SLEEPING": c.IS_SLEEPING,
@@ -396,6 +402,9 @@ class DashboardBridge:
         elif key == "IS_GAZE_CURSOR_ENABLED":
             c.IS_GAZE_CURSOR_ENABLED = target_val
             log_print(f"🎛️ [系統開關] 顯示視線位置已{'🟢 開啟' if target_val else '🔴 關閉'}")
+        elif key == "IS_DREAM_ENABLED":
+            c.IS_DREAM_ENABLED = target_val
+            log_print(f"🎛️ [系統開關] 做夢整理記憶已{'🟢 開啟' if target_val else '🔴 關閉'}")
         elif key == "IS_MIC_ENABLED":
             c.IS_MIC_ENABLED = target_val
             log_print(f"🎛️ [系統開關] 麥克風收音已{'🟢 開啟' if target_val else '🔴 關閉'}")

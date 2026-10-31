@@ -13,6 +13,8 @@ PYTHONIOENCODING=utf-8 PYTHONUNBUFFERED=1 nohup python -u "$SIM/sim_run.py" > "$
 for i in $(seq 1 240); do
   if grep -aq "Roformer 預載" "$L" 2>/dev/null && grep -aq "已成功連線至 Live API" "$L"; then echo "7L READY（約 ${i} 秒）"; break; fi
   if grep -aq "Traceback" "$L" 2>/dev/null; then echo "CRASH"; tail -c 3000 "$L"; exit 1; fi
+  # 正式的 7L 開著，測試包裝拒絕啟動：整串停下來（2026-10-31：以前照樣往下跑，測試指令送進正式的 7L）
+  if grep -aq "測試版不開" "$L" 2>/dev/null; then echo "❌ 正式的 7L 正在跑，測試版沒開"; exit 1; fi
   sleep 1
 done
 sleep 3
