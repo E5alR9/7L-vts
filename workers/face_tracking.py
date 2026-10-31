@@ -14,6 +14,7 @@ import pyautogui
 import core.stage_state as stage
 import services.piano_engine as pe
 import services.vts_client as vc
+from core.gaze import GazeDirector, look_angles
 from core.utils import log_print, log_swallowed
 
 HOST_ATTRS = (
@@ -31,6 +32,27 @@ def bind(main_module) -> None:
 
 
 AI_FACE_TRACKING_RUNNING = False
+
+
+def _foreground_rect(sw: int, sh: int):
+    """前景視窗的範圍（比例座標）；是她自己的 VTS、最小化、太小、拿不到就回 None。"""
+    try:
+        import ctypes
+        import ctypes.wintypes as wt
+        user32 = ctypes.windll.user32
+        hwnd = user32.GetForegroundWindow()
+        if not hwnd or user32.IsIconic(hwnd):
+            return None
+        buf = ctypes.create_unicode_buffer(256)
+        user32.GetWindowTextW(hwnd, buf, 256)
+        if "vtube studio" in (buf.value or "").lower():
+            return None
+        r = wt.RECT()
+        if not user32.GetWindowRect(hwnd, ctypes.byref(r)) or r.right - r.left < 150 or r.bottom - r.top < 100:
+            return None
+        return (max(0.0, r.left / sw), max(0.0, r.top / sh), min(1.0, r.right / sw), min(1.0, r.bottom / sh))
+    except Exception:
+        return None
 
 
 async def ai_face_tracking_loop(vts):
@@ -51,12 +73,18 @@ async def _ai_face_tracking_loop_impl(vts):
     blink_start_time = 0.0
     is_blinking = False
     smooth_sleep_eye = 1.0  #  休眠閉眼平滑過渡因子 (1.0 清醒睜眼 -> 0.0 閉眼安睡)
-    
+
     curr_x, curr_y, curr_z = 0.0, 0.0, 0.0
     curr_eye_x, curr_eye_y = 0.0, 0.0
     smooth_piano_focus_x = 0.0
-    auto_mouse_track_timer = 0.0  
-    
+    # 待命、說話時看哪裡：盯住一個地方一會兒再跳到下一個，從滑鼠、前景視窗、畫面變化、鏡頭裡挑（core/gaze；老爸 2026-10-31：
+    # 以前眼睛照正弦波飄、平均每 10 秒才看一次滑鼠，看起來像亂晃，不像真的看見桌面）
+    gaze = GazeDirector()
+    last_mouse = None
+    last_win_poll = 0.0
+    seen_hotspot_ts = 0.0
+    micro_x = micro_y = micro_until = 0.0
+
     while True:
         try:
             if not host.IS_FACE_TRACKING_ENABLED:
@@ -69,35 +97,32 @@ async def _ai_face_tracking_loop_impl(vts):
             except Exception:
                 log_swallowed()
 
-            if stage.ai_state() == "IDLE" and not is_playing and not vc.is_tracking_mouse:
-                if auto_mouse_track_timer > 0:
-                    auto_mouse_track_timer -= 0.05
-                    if auto_mouse_track_timer <= 0:
-                        vc.target_look_x = 0.0
-                        vc.target_look_y = 0.0
-                else:
-                    if random.random() < 0.005:  
-                        auto_mouse_track_timer = random.uniform(2.0, 4.0)  
+            sw, sh = pyautogui.size()
+            px, py = pyautogui.position()
+            #  以 7L 的 VTS 視窗中心為基準（每 3 秒查一次），看的點都換算成相對她的角度
+            vc._vts_win_cx, vc._vts_win_cy = await vc.update_vts_window_center(sw, sh)
+            moved = 0.0 if last_mouse is None else math.hypot(px - last_mouse[0], py - last_mouse[1])
+            last_mouse = (px, py)
+            gaze.note_mouse((px / sw, py / sh), now, moved)
+            if now - last_win_poll > 0.3:
+                last_win_poll = now
+                gaze.note_window(_foreground_rect(sw, sh), now)
+            hs = vc.screen_hotspot
+            if hs and hs[2] > seen_hotspot_ts:
+                seen_hotspot_ts = hs[2]
+                gaze.note_hotspot((hs[0], hs[1]), hs[2])
+
+            state = stage.ai_state()
+            gaze_mode = (not vc.is_tracking_mouse and not host.IS_SLEEPING and not pe.is_piano_active_and_alive()
+                         and state in ("IDLE", "TALKING"))
+            is_currently_tracking = vc.is_tracking_mouse
+            if vc.is_tracking_mouse:   # [LOOK: MOUSE]：一直盯著滑鼠
+                vc.target_look_x, vc.target_look_y = look_angles((px / sw, py / sh), vc._vts_win_cx, vc._vts_win_cy)
+            elif gaze_mode:
+                vc.target_look_x, vc.target_look_y = look_angles(
+                    gaze.update(now, talking=is_playing or state == "TALKING"), vc._vts_win_cx, vc._vts_win_cy)
             else:
-                if auto_mouse_track_timer > 0:
-                    auto_mouse_track_timer = 0.0
-                    if not vc.is_tracking_mouse:
-                        vc.target_look_x = 0.0
-                        vc.target_look_y = 0.0
-
-            is_currently_tracking = vc.is_tracking_mouse or auto_mouse_track_timer > 0
-
-            if is_currently_tracking:
-                sw, sh = pyautogui.size()
-                px, py = pyautogui.position()
-                
-                #  以 7L 的 VTS 視窗中心為基準，修正視線相對於螢幕中心的偏差
-                vc._vts_win_cx, vc._vts_win_cy = await vc.update_vts_window_center(sw, sh)
-                
-                # 以 7L 的視窗中心為參考點，計算滑鼠相對位置（往左為負，往右為正）
-                nx = (px / sw) - vc._vts_win_cx  # 以 VTS 視窗 X 為 0 點
-                ny = (py / sh) - vc._vts_win_cy
-                vc.target_look_x, vc.target_look_y = nx * 28.0, ny * -20.0
+                vc.target_look_x, vc.target_look_y = 0.0, 0.0
 
             vc.current_look_x += (vc.target_look_x - vc.current_look_x) * 0.08
             vc.current_look_y += (vc.target_look_y - vc.current_look_y) * 0.08
@@ -165,10 +190,19 @@ async def _ai_face_tracking_loop_impl(vts):
                 target_eye_y = 0.55
                 curr_eye_x += (target_eye_x - curr_eye_x) * 0.15
                 curr_eye_y += (target_eye_y - curr_eye_y) * 0.15
+            elif gaze_mode:
+                # 待命/說話時：眼睛快速跳到要看的點（頭比較慢才跟上）。盯著的時候不晃，偶爾偏一點點（微跳視）。
+                # 以前用兩條正弦波做微顫，合起來是一個小橢圓，視線游標繞著焦點轉圈（2026-10-31 老爸實機看到）
+                if now >= micro_until:
+                    micro_x, micro_y = random.uniform(-0.006, 0.006), random.uniform(-0.005, 0.005)
+                    micro_until = now + random.uniform(0.6, 1.6)
+                target_eye_x = max(-0.85, min(0.85, vc.target_look_x / 20.0 + micro_x))
+                target_eye_y = max(-0.85, min(0.85, vc.target_look_y / 15.0 + micro_y))
+                curr_eye_x += (target_eye_x - curr_eye_x) * 0.35
+                curr_eye_y += (target_eye_y - curr_eye_y) * 0.35
             else:
-                # 待命/說話時：更自然靈動的左右眼神飄移（幅度加大，像真正說話時的眼神流動）
-                target_eye_x = math.sin(t * 0.9) * 0.55 + (vc.current_look_x / 28.0) * 0.55
-                target_eye_y = math.cos(t * 0.65) * 0.28 + (vc.current_look_y / 20.0) * 0.4
+                target_eye_x = math.sin(t * 0.9) * 0.3
+                target_eye_y = math.cos(t * 0.65) * 0.15
                 curr_eye_x += (target_eye_x - curr_eye_x) * 0.13
                 curr_eye_y += (target_eye_y - curr_eye_y) * 0.13
 
@@ -186,7 +220,7 @@ async def _ai_face_tracking_loop_impl(vts):
                         raw_target = stage.CURRENT_MOUTH_ENVELOPE[frame_idx]
                     else:
                         raw_target = 0.0
-                    
+
                     #  快開慢合 (Fast Attack 0.65, Gentle Release 0.35) 物理濾波，徹底告別卡頓與僵硬
                     if raw_target > stage.CURRENT_SMOOTH_MOUTH:
                         stage.CURRENT_SMOOTH_MOUTH += (raw_target - stage.CURRENT_SMOOTH_MOUTH) * 0.65
@@ -210,8 +244,8 @@ async def _ai_face_tracking_loop_impl(vts):
                 target_angle_z = smooth_piano_focus_x * 0.30 + math.sin(t * 1.0) * 2.0
             elif is_playing:
                 #  MP3 播放中：頭部溫和自然微幅呼吸點頭
-                target_angle_x = math.sin(t * 1.0) * 1.5 + vc.current_look_x * 0.25
-                target_angle_y = math.cos(t * 0.8) * 0.8 + vc.current_look_y * 0.25
+                target_angle_x = math.sin(t * 1.0) * 1.5 + vc.current_look_x * 0.45
+                target_angle_y = math.cos(t * 0.8) * 0.8 + vc.current_look_y * 0.35
                 target_angle_z = math.sin(t * 0.7) * 1.0
             elif is_currently_tracking:
                 target_angle_x = vc.current_look_x
@@ -225,9 +259,9 @@ async def _ai_face_tracking_loop_impl(vts):
                     target_angle_y = -8.5 + sleep_breath * 0.8
                     target_angle_z = 1.5 + math.sin(t * 0.3) * 0.8
                 elif stage.ai_state() == "IDLE":
-                    # 待命時：更自然有幅度的漫遊擺頭，像真人靜待時的自然晃動
-                    target_angle_x = math.sin(t * 0.42) * 4.0 + vc.current_look_x * 0.45
-                    target_angle_y = math.cos(t * 0.32) * 1.5 + vc.current_look_y * 0.35
+                    # 待命時：頭跟著看的方向轉一半，只留一點自然擺動（以前大幅正弦擺頭，看起來像亂晃）
+                    target_angle_x = math.sin(t * 0.42) * 1.2 + vc.current_look_x * 0.5
+                    target_angle_y = math.cos(t * 0.32) * 0.6 + vc.current_look_y * 0.4
                     target_angle_z = math.sin(t * 0.3) * 1.5
                 elif stage.ai_state() == "THINKING":
                     target_angle_x = -2.0 + vc.current_look_x * 0.2
@@ -235,7 +269,7 @@ async def _ai_face_tracking_loop_impl(vts):
                     target_angle_z = 4.5
                 elif stage.ai_state() == "TALKING":
                     # 說話時：加入自然語感搖頭韻律（像說話時帶的肢體動作），幅度不誇張但明顯活潑
-                    target_angle_x = math.sin(t * 1.1) * 3.5 + vc.current_look_x * 0.55
+                    target_angle_x = math.sin(t * 1.1) * 2.5 + vc.current_look_x * 0.55
                     target_angle_y = math.cos(t * 0.75) * 1.2 + vc.current_look_y * 0.35
                     target_angle_z = math.sin(t * 0.85) * 1.8
 
@@ -253,7 +287,7 @@ async def _ai_face_tracking_loop_impl(vts):
 
             is_in_shock = (vc.shock_timer > now)
             is_frowning = (vc.frown_timer > now)
-            
+
             #  徹底防呆：時效結束時立即歸零重置，絕不殘留！
             if not is_in_shock and vc.shock_timer > 0:
                 vc.shock_timer = 0.0

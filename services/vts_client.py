@@ -18,6 +18,8 @@ target_look_x = 0.0
 target_look_y = 0.0
 current_look_x = 0.0
 current_look_y = 0.0
+# 餘光比對截圖找到的「畫面剛有變化的地方」：(x 比例, y 比例, 時間)；視線會瞄過去（core/gaze）
+screen_hotspot = None
 # 眼睛現在的角度（-1～1，臉部追蹤每一格寫）：視線游標拿來反推她看螢幕哪裡（workers/gaze_cursor.py）
 gaze_eye_x = 0.0
 gaze_eye_y = 0.0
@@ -1267,6 +1269,7 @@ async def update_vts_window_center(sw: float, sh: float):
                 # 只認 "VTube Studio"：舊的 'vts' 會先撞到「vts_7L_test.py - Visual Studio Code」或終端機
                 if 'vtube studio' in win_t:
                     found_win = (w.left + w.width / 2, w.top + w.height / 2)
+                    update_vts_window_center._rect = (w.left / sw, w.top / sh, (w.left + w.width) / sw, (w.top + w.height) / sh)
                     break
     except Exception:
         pass

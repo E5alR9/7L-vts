@@ -2475,6 +2475,27 @@ def get_realistic_cursor_icon():
 PREV_SCREEN_THUMB = None
 
 
+def _note_screen_hotspot(diff) -> None:
+    """兩張縮圖的差 → 變化最大那一塊記到 vc.screen_hotspot，她的視線會瞄過去（core/gaze；老爸 2026-10-31）。
+    她自己的 VTS 視窗一直在動（嘴、表情），遮掉，不然她會一直看自己。"""
+    try:
+        import numpy as np
+        from core.gaze import hotspot_from_diff
+        g = np.asarray(diff.convert("L"), dtype=np.float32)
+        mask = None
+        rect = getattr(vc.update_vts_window_center, "_rect", None)
+        if rect:
+            h, w = g.shape
+            mask = np.zeros_like(g, dtype=bool)
+            l, t, r, b = rect
+            mask[max(0, int(t * h)):min(h, int(np.ceil(b * h))), max(0, int(l * w)):min(w, int(np.ceil(r * w)))] = True
+        pt = hotspot_from_diff(g, mask)
+        if pt is not None:
+            vc.screen_hotspot = (pt[0], pt[1], time.time())
+    except Exception:
+        log_swallowed()
+
+
 def _update_screen_change(screenshot):
     """全螢幕縮成 64x36 跟上一張比，更新畫面變化等級（耗時約 1.5ms）。"""
     global PREV_SCREEN_THUMB, CURRENT_VISION_CHANGE_LEVEL, CURRENT_VISION_CHANGE_SCORE
@@ -2485,6 +2506,7 @@ def _update_screen_change(screenshot):
             diff = ImageChops.difference(curr_thumb, PREV_SCREEN_THUMB)
             stat = ImageStat.Stat(diff)
             raw_diff = sum(stat.mean) / (3.0 * 255.0) * 100.0  # 0.0 ~ 100.0%
+            _note_screen_hotspot(diff)
             if raw_diff < 0.01:
                 CURRENT_VISION_CHANGE_LEVEL = "none"
                 CURRENT_VISION_CHANGE_SCORE = 0

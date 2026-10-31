@@ -53,6 +53,8 @@ _STATE = {"center": (0.5, 0.5), "screen": (1920, 1080), "stop": None, "thread": 
 def _overlay_thread(stop: threading.Event) -> None:
     import ctypes
     import tkinter as tk
+    user32 = ctypes.windll.user32
+    prev_fg = user32.GetForegroundWindow()   # 建立視窗會搶走焦點：記下來，弄好再還回去
     root = tk.Tk()
     root.overrideredirect(True)
     root.attributes("-topmost", True)
@@ -64,12 +66,14 @@ def _overlay_thread(stop: threading.Event) -> None:
     root.geometry("28x30+0+0")
     root.update_idletasks()
     try:
-        user32 = ctypes.windll.user32
         hwnd = user32.GetParent(root.winfo_id()) or root.winfo_id()
         GWL_EXSTYLE, WS_EX_LAYERED, WS_EX_TRANSPARENT, WS_EX_TOOLWINDOW = -20, 0x80000, 0x20, 0x80
+        WS_EX_NOACTIVATE = 0x08000000   # 永遠不拿焦點（2026-10-31 實機：一打開游標，前景視窗就變成它，老爸打字會被打斷）
         style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
-        user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style | WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW)
+        user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style | WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE)
         user32.SetWindowDisplayAffinity(hwnd, 0x11)   # WDA_EXCLUDEFROMCAPTURE：截圖、直播擷取都看不到
+        if prev_fg and user32.GetForegroundWindow() != prev_fg:
+            user32.SetForegroundWindow(prev_fg)
     except Exception:
         log_swallowed()
 

@@ -39,4 +39,4 @@ def test_face_tracking_publishes_the_eye_angles_and_the_switch_is_wired():
     assert "spawn(gaze_cursor.gaze_cursor_worker())" in MAIN_SRC and "\nIS_GAZE_CURSOR_ENABLED = False" in MAIN_SRC
     # 游標視窗點不到、不被截圖
     src = open(gc.__file__, encoding="utf-8").read()
-    assert "WS_EX_TRANSPARENT" in src and "SetWindowDisplayAffinity(hwnd, 0x11)" in src
+    assert "WS_EX_TRANSPARENT" in src and "SetWindowDisplayAffinity(hwnd, 0x11)" in src and "WS_EX_NOACTIVATE" in src
