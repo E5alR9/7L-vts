@@ -1768,6 +1768,21 @@ async def resolve_piano_intent_by_ai(
     except Exception:
         log_swallowed()
 
+    # Groq 沒判斷成、給的本來就是曲名、本地又對得到：直接彈，不用等 Gemini
+    # （2026-11-01 故障演練：Groq 掛掉時「彈小星星」等 Gemini 12 秒（3.8 想太久、3.6 回 503）才照曲名找）
+    # 點的就是正在彈的那首（可能要重播、換版本）才交給 AI 判斷
+    # 只認曲名一模一樣（去掉括號標籤、空白、大小寫）：is_midi_match_valid 是寬鬆的防呆，拿來挑檔會讓
+    # 「小星星」挑到核心名是空的東方曲、「換一首」「月光奏鳴曲」也對得到檔（2026-11-01 Fable 用真曲庫驗出）
+    q_key = _title_key(clean_q)
+    same_as_playing = bool(cur_fname) and q_key in _title_keys(cur_fname)
+    if is_direct_song_name and len(q_key) >= 2 and not same_as_playing:
+        local = [f for f in available_files if q_key in _title_keys(f)]
+        # 對到好幾首不同的歌（「周杰倫」）就是不夠明確，交給 AI；同一首的不同版本算明確
+        if local and len({_title_key(f) for f in local}) == 1:
+            log_print(f"🎹 [鋼琴意圖] Groq 沒判斷成，曲名《{clean_q}》本地對得到 {len(local)} 個檔，直接用（不等 Gemini）")
+            return {**default_res, "is_song_request": True, "action_type": "song_request", "song_title": clean_q,
+                    "matched_files": local[:5], "_from_ai": False, "_provider": "local"}
+
     active_keys = get_piano_gemini_keys()
     if active_keys:
         # 👑 倒序高智商模型梯隊：3.8 ➔ 3.7 ➔ 3.6 ➔ 3.5 ➔ 3.1-pro ➔ 3-flash ➔ 3.5-flash-lite
@@ -1829,6 +1844,29 @@ def extract_core_title(raw_name: str) -> str:
     t = re.sub(r'[\'\"_\-.,!?~～/\\+]+', ' ', t).strip()
     t = re.sub(r'\s{2,}', ' ', t).strip()
     return t
+
+_TITLE_NOISE = re.compile(r"piano|midi|instrumental|鋼琴|钢琴", re.IGNORECASE)
+_CJK = re.compile(r"[぀-ヿ一-鿿]")
+
+
+def _title_key(name: str) -> str:
+    """曲名比對鍵：核心曲名去空白、小寫；括號標籤和修飾詞去掉後沒剩東西就是空字串（什麼都不配）。"""
+    return _TITLE_NOISE.sub("", re.sub(r"\s+", "", extract_core_title(name or ""))).lower()
+
+
+def _title_keys(filename: str) -> set:
+    """一個檔可能叫的曲名：整個、照破折號切的每段（「周杰倫- 稻香」「Coldplay - Viva La Vida」），
+    中日文那段再照空白切（「周杰倫 愛在西元前 piano midi」）；英文不照空白切，免得「stop」配到「Don't Stop Me Now」。"""
+    stem = os.path.splitext(os.path.basename(filename or ""))[0]
+    stem = re.sub(r"[\(\[（【\{][^\)\]）】\}]*[\)\]）】\}]", " ", stem)
+    keys = {_title_key(stem)}
+    for seg in re.split(r"\s*(?:-|–|－|—+|｜|\|)\s*", stem):
+        keys.add(_title_key(seg))
+        if _CJK.search(seg):
+            keys.update(_title_key(tok) for tok in seg.split() if _CJK.search(tok))
+    keys.discard("")
+    return keys
+
 
 def is_midi_match_valid(query_title: str, matched_filename: str) -> bool:
     """雙重防呆校驗：驗證匹配出的 MIDI 檔名是否確實為目標曲目，嚴格杜絕因備註標籤偶然同字（如『未完成』）導致的弱相關誤配"""

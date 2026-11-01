@@ -20,17 +20,19 @@ def init_rag(api_key: str):
     _initialized = True
     log_print("🧠 [RAG 記憶中樞] 已準備完畢 (本地 ChromaDB + 雲端 Firestore 同步)")
 
-async def add_rag_memory(content: str, source: str = "dialogue", viewer: str = "", viewer_key: str = ""):
+async def add_rag_memory(content: str, source: str = "dialogue", viewer: str = "", viewer_key: str = "",
+                         doc_id: str = ""):
     """
     新增一筆 RAG 記憶，會自動計算向量，存入本地 ChromaDB 並同步至雲端 Firestore。
     viewer：熟客的留言帶觀眾名；viewer_key：他的觀眾檔 key（平台:帳號），之後照這個只查他說過的。
+    doc_id：給了就用這個 id，同一個 id 再寫會蓋掉舊的（日記一天一筆，不會每整理一次多一份）。
     """
     if not content or not content.strip():
         return
         
     timestamp = datetime.now().isoformat()
     # Generate unique ID
-    mem_id = f"mem_{int(time.time() * 1000)}_{uuid.uuid4().hex[:6]}"
+    mem_id = doc_id or f"mem_{int(time.time() * 1000)}_{uuid.uuid4().hex[:6]}"
     
     metadata = {
         "source": source,

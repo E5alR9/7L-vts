@@ -12,6 +12,7 @@ import sys
 import re
 import asyncio
 import functools
+import threading
 import subprocess
 import shutil
 import time
@@ -52,7 +53,7 @@ def download_youtube_audio(song_query: str, output_wav: str) -> bool:
     - 保留 100% 真人歌手的換氣、轉音、顫音與細膩情感
     """
     log_print(f"🔍 [YT-DLP 智慧搜歌中] 正在向 YouTube 搜尋《{song_query}》原版高音質音軌...")
-    if os.path.exists(output_wav) and os.path.getsize(output_wav) > 100000:
+    if _audio_ok(output_wav):
         log_print(f"💾 [快取命中] 已存在高品質音訊: {output_wav}")
         return True
 
@@ -127,12 +128,29 @@ def separate_stems_gpu(input_wav: str, song_name: str, tag: str = "") -> tuple[s
     tag：快取命名空間前綴（自創曲傳 "orig_"，與翻唱快取零碰撞；預設空字串行為不變）
     """
     safe_name = tag + get_safe_filename(song_name)
+    # 同一首同時只分一次：兩種寫法的點歌（「晴天」「周杰倫的晴天」）AI 對到同一個快取檔名時，
+    # 以前第二路吃快取；要重分時兩路會同時寫同一組分軌（2026-11-01 Fable）
+    with _SEP_LOCKS_GUARD:
+        lock = _SEP_LOCKS.setdefault(safe_name, threading.Lock())
+    with lock:
+        return _separate_stems_locked(input_wav, song_name, safe_name)
+
+
+_SEP_LOCKS = {}
+_SEP_LOCKS_GUARD = threading.Lock()
+
+
+def _separate_stems_locked(input_wav: str, song_name: str, safe_name: str) -> tuple[str, str]:
     vocals_out = os.path.join(CACHE_DIR, f"{safe_name}_vocals.wav")
     inst_out = os.path.join(CACHE_DIR, f"{safe_name}_instrumental.wav")
+    redo = _redo_flag(safe_name)
 
-    if os.path.exists(vocals_out) and os.path.exists(inst_out):
+    need_redo = _stems_need_redo(safe_name)
+    if _audio_ok(vocals_out) and _audio_ok(inst_out) and not need_redo:
         log_print(f"💾 [快取命中] 已存在人聲與伴奏分軌檔案！")
         return vocals_out, inst_out
+    if need_redo:
+        log_print(f"🔁 [人聲分離] 《{song_name}》上次是備援方法分的（伴奏還留著人聲）或分軌壞了，這次重分")
 
     log_print("⚡ [AI 人聲分離] Tier-1 Roformer GPU 分離（分鐘級，有進度＋心跳，不空轉）...")
 
@@ -151,6 +169,7 @@ def separate_stems_gpu(input_wav: str, song_name: str, tag: str = "") -> tuple[s
         from services import gpu_split
         if gpu_split.separate(input_wav, vocals_out, inst_out,
                               song_name=song_name, progress_cb=_sep_progress):
+            _clear_redo(redo)
             return vocals_out, inst_out
         log_print("🔄 [Roformer 未成功，降級 Demucs]...")
     except Exception as e:
@@ -177,6 +196,7 @@ def separate_stems_gpu(input_wav: str, song_name: str, tag: str = "") -> tuple[s
             if os.path.exists(d_voc) and os.path.exists(d_inst):
                 shutil.copy2(d_voc, vocals_out)
                 shutil.copy2(d_inst, inst_out)
+                _clear_redo(redo)
                 log_print(f"✨ [AI 人聲分離成功] 伴奏與原唱已精準獨立拆解！")
                 return vocals_out, inst_out
     except Exception as e:
@@ -196,7 +216,57 @@ def separate_stems_gpu(input_wav: str, song_name: str, tag: str = "") -> tuple[s
     ]
     subprocess.run(cmd_inst, capture_output=True)
     subprocess.run(cmd_voc, capture_output=True)
+    # 先湊合唱，記下來下次點這首再用好的方法重分（2026-11-01：快取裡 8 首一直是備援分的，伴奏留著原唱人聲）
+    try:
+        with open(redo, "w", encoding="utf-8") as f:
+            f.write(time.strftime("%Y-%m-%d %H:%M:%S"))
+    except Exception:
+        log_swallowed()
     return vocals_out, inst_out
+
+
+_REDO_SUFFIX = "_stems_redo.flag"
+
+
+def _redo_flag(safe_name: str) -> str:
+    return os.path.join(CACHE_DIR, safe_name + _REDO_SUFFIX)
+
+
+def _clear_redo(path: str) -> None:
+    try:
+        if os.path.exists(path):
+            os.remove(path)
+    except Exception:
+        log_swallowed()
+
+
+def _audio_ok(path: str) -> bool:
+    """檔在、夠大、讀得出音訊格式（2026-11-01：快取裡有個人聲檔整個是零，被當成命中，那首永遠唱不出來）。"""
+    if not (os.path.exists(path) and os.path.getsize(path) > 100000):
+        return False
+    try:
+        import soundfile as sf
+        return sf.info(path).frames > 0
+    except Exception:
+        return False
+
+
+_REDO_RETRY_SEC = 6 * 3600   # 備援分完 6 小時內先湊合用，不重試（顯卡掉卡時每點一次都要等 Roformer＋Demucs 逾時 3 分鐘）
+
+
+def _stems_need_redo(safe_name: str) -> bool:
+    """分軌要重做：分好的人聲或伴奏壞了；或上次是備援分的、已過重試間隔、原曲還在（原曲沒了重抓可能抓到別的錄音）。"""
+    for suf in ("_vocals.wav", "_instrumental.wav"):
+        p = os.path.join(CACHE_DIR, safe_name + suf)
+        if os.path.exists(p) and not _audio_ok(p):
+            return True
+    flag = _redo_flag(safe_name)
+    if not os.path.exists(flag) or not _audio_ok(os.path.join(CACHE_DIR, f"{safe_name}_raw.wav")):
+        return False
+    try:
+        return time.time() - os.path.getmtime(flag) >= _REDO_RETRY_SEC
+    except OSError:
+        return False
 
 def pitch_shift_vocal_to_female(vocal_in: str, vocal_out: str, semitones: float = 0.0, auto_pitch: bool = True) -> bool:
     """
@@ -936,7 +1006,10 @@ async def prepare_cover_song(song_name: str, source_mp3: str = "", origin: str =
 
         # 1. 檢查 7L 純人聲快取 (若已有 7L 歌聲則秒開唱)
         play_vocal = None
-        if os.path.exists(cached_vocal) and os.path.getsize(cached_vocal) > 100000:
+        redo_stems = _stems_need_redo(safe_name)
+        if redo_stems:
+            log_print(f"🔁 [翻唱快取] 《{song_name}》的分軌是備援分的或壞了，重分一次再唱")
+        elif _audio_ok(cached_vocal):
             # 🛡️ 雙重安全驗證：確保為真實 RVC 產出之單聲道 48kHz (舊版未置換的原唱為雙聲道 44.1kHz)
             vocal_raw = os.path.join(CACHE_DIR, f"{safe_name}_vocals.wav")
             is_fake = False
@@ -959,7 +1032,7 @@ async def prepare_cover_song(song_name: str, source_mp3: str = "", origin: str =
                 play_vocal = cached_vocal
 
         # 2. 若人聲與伴奏已拆解但尚未轉換 7L 聲線，直接極速啟用 RVC (省去下載與分離的數十秒)
-        if not play_vocal:
+        if not play_vocal and not redo_stems:
             vocal_raw = os.path.join(CACHE_DIR, f"{safe_name}_vocals.wav")
             if os.path.exists(vocal_raw) and os.path.exists(cached_inst) and os.path.getsize(vocal_raw) > 100000:
                 log_print(f"⚡ [人聲伴奏已分離] 直接啟動 7L 曉伊 RVC 少女歌聲置換 (整首統一音域判決): 《{song_name}》...")

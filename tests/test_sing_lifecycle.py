@@ -24,9 +24,10 @@ def test_cache_hit_broadcasts_incoming(monkeypatch, tmp_path):
     safe = acp.get_safe_filename(song)
     voc = os.path.join(acp.CACHE_DIR, f"{safe}_7l_vocal.wav")
     ins = os.path.join(acp.CACHE_DIR, f"{safe}_instrumental.wav")
-    for p in (voc, ins):
-        with open(p, "wb") as f:
-            f.write(b"\x00\x01" * 100000)
+    import numpy as np
+    import soundfile as sf
+    for p in (voc, ins):   # 要是讀得出來的音檔：壞掉的分軌不算快取命中（2026-11-01）
+        sf.write(p, np.full((44100 * 2, 2), 0.01, dtype="float32"), 44100)
     events, bcast = _recorder()
     monkeypatch.setattr(web_dash, "broadcast_event", bcast)
     try:

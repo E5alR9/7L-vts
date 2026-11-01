@@ -40,10 +40,13 @@ ENGINE_ORDER = [e.strip().lower() for e in (os.getenv("TTS_ENGINE") or "xiaoyi")
 _FALLBACK = [e.strip().lower() for e in (os.getenv("TTS_FALLBACK") or "edge").split(",") if e.strip()]
 
 # 依序嘗試的完整引擎鏈（去重、保序）
+# 只准這兩個：GPT-SoVITS（曉伊）主力、edge 備用（老爸 2026-11-01：備用不要用 Google TTS，GPT-SoVITS 跟 edge 兩個就好）。
+# 設定檔寫了別的名字（gemini、google…）一律不理
+ALLOWED_ENGINES = ("xiaoyi", "edge")
 _seen = set()
 ENGINE_CHAIN = []
 for _e in ENGINE_ORDER + _FALLBACK:
-    if _e not in _seen:
+    if _e in ALLOWED_ENGINES and _e not in _seen:
         _seen.add(_e)
         ENGINE_CHAIN.append(_e)
 if not ENGINE_CHAIN:
