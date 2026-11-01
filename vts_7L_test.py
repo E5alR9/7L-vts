@@ -199,7 +199,8 @@ from core.hard_command import (
 from core.subagent_router import resolve_subagent_chain
 from core.live_timer_sensor import live_timer_hub
 import services.piano_engine as pe
-from services.web_search import TAVILY_KEYS, search_google, summarize_search_to_speech
+from services.web_search import TAVILY_KEYS, search_google, summarize_search_to_speech, prefetch as _search_prefetch
+intent_router.ON_SEARCH = _search_prefetch   # 判定老爸要查資料時先開搜（猜到要查就先查，2026-11-01）
 from services.audio_analysis import (extract_audio_mouth_envelope, load_sound_with_envelope,
                                      normalize_text_for_echo, check_is_echo_by_waveform)
 from services.stage_actions import (parse_action_timeline, execute_action_timeline,
@@ -3987,6 +3988,8 @@ async def _nudge_if_unsaid(result_text: str, sent_ts: float, requester: str = ""
                     _v[1] = 0
                 break
             await asyncio.sleep(0.5)
+        if content and await _speak_thought_now(result_text, sent_ts, reply_to):
+            return   # 腦內已經講到這份結果：直接念她那段，不用再提醒兩輪（2026-11-01 模擬版：結果 4.6 秒就想好，提醒兩次到 32 秒才念）
         said_other = LAST_SAY_TS >= sent_ts
         log_print(f"👂 [沒開口] 結果交給她 {time.time() - sent_ts:.0f} 秒還沒講到"
                   f"{'（講了別的）' if said_other else ''}，提醒第 {attempt + 1} 次：{(result_text or '')[:50]}")
@@ -4016,6 +4019,11 @@ async def _say_thought_if_still_unsaid(result_text: str, sent_ts: float, reply_t
         return True
     if _result_mentioned(result_text, [t for ts, t in list(_RECENT_SAYS) if ts >= sent_ts]):
         return True
+    return await _speak_thought_now(result_text, sent_ts, reply_to)
+
+
+async def _speak_thought_now(result_text: str, sent_ts: float, reply_to: str) -> bool:
+    """她腦內（沒 say）講到這份結果的那段，有就直接念出來（是她自己的話）回 True；沒有回 False。"""
     thought = next((t for ts, t in reversed(list(_RECENT_THOUGHTS))
                     if ts >= sent_ts and _result_mentioned(result_text, [t])), "")
     spoken = TextCleanEngine.clean_speech_text(thought) if thought else ""
@@ -6992,6 +7000,18 @@ async def nv_interpret_task(task_ins: str, target: str = "dad", requester_name: 
         if not chain:
             return "miss", ""
         system_instruction_text = promptkit.subagent_system()
+        # —— 先查好的：老爸那句一判定是要查資料就先搜了，任務講的是同一件事就直接用（省工具判定＋搜尋約 3 秒）——
+        from services.web_search import take_prefetch
+        _pre = take_prefetch(task_ins) if target != "audience" else None
+        if _pre is not None:
+            try:
+                _res = await asyncio.wait_for(asyncio.wrap_future(_pre), timeout=8.0)
+                if _res and "搜尋無結果" not in _res:
+                    log_print("🏃 [先查] 任務跟剛才先搜的是同一件事，直接用")
+                    _sum = await summarize_search_to_speech(task_ins, _res, user_role_name=requester_name)
+                    return "report", _subagent_report_text(requester_name, _sum)
+            except Exception as _pe:
+                log_print(f"⚠️ [先查] 先搜的沒拿到（{type(_pe).__name__}），照常走工具判定")
         # —— 第一棒：工具判定（按鏈順序）——
         fn_name, fn_args = None, {}
         for _brain in chain:

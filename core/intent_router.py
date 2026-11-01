@@ -43,9 +43,19 @@ def hint_text(intent: str, owner: str = "老爸") -> str:
     return f"（程式判斷：{owner}這句像是要妳{LABELS[intent]}，要做就交辦 invoke_subagent，不要只嘴上答應{extra}。）"
 
 
+# 判定是要查資料時順便叫這個（主程式開機時接上 services.web_search.prefetch）：紙條還在送主腦，搜尋先開跑。
+# core 不往上 import services，所以用登記的（跟 memory.register_rag 一樣）
+ON_SEARCH = None
+
+
 async def slip_hint(text: str, owner: str = "老爸", handled_by_cpu: bool = False) -> str:
     """給老爸打字紙條加的提示；不用加回空字串。handled_by_cpu：程式已經直接處理（記住、點歌），不用再提醒。"""
     if handled_by_cpu:
         return ""
     intent = await classify(text)
+    if intent == "search" and ON_SEARCH is not None:
+        try:
+            ON_SEARCH(text)
+        except Exception:
+            pass
     return hint_text(intent, owner) if intent else ""

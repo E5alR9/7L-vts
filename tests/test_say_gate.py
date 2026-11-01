@@ -213,7 +213,7 @@ def _nudge_ns(says=(), singing=False, talking_for=0.0, tries=1):
     import collections
     slips = []
     t_end = time.time() + talking_for
-    ns = _load("_nudge_if_unsaid", "_mention_keys", "_result_mentioned", "_say_thought_if_still_unsaid",
+    ns = _load("_nudge_if_unsaid", "_mention_keys", "_result_mentioned", "_say_thought_if_still_unsaid", "_speak_thought_now",
                asyncio=asyncio, re=re, time=time, _RECENT_THOUGHTS=collections.deque(),
                TextCleanEngine=__import__("core.prompts", fromlist=["TextCleanEngine"]).TextCleanEngine,
                _owner_name=lambda: "老爸", append_to_unified_memory=lambda **k: None,
@@ -377,10 +377,12 @@ def test_reminders_are_numbered_and_her_own_thought_is_spoken_if_she_never_says_
     ns, slips = _nudge_ns(tries=2)
     ns["_RECENT_THOUGHTS"].append((time.time() + 1, "[EXPRESSION: 眨眼] 報告老爸，台北今天多雲時晴，21 到 27 度，下午可能下雨喔"))
     asyncio.run(ns["_nudge_if_unsaid"](_WEATHER, time.time(), "老爸"))
-    assert len(slips) == 2 and slips[0] != slips[1] and "第 2 次提醒" in slips[1]
+    # 腦內已經講到結果：該提醒的時候直接念她那段，不用再提醒兩輪（2026-11-01 模擬版：提醒兩次到 32 秒才念）
+    assert slips == []
     item = ns["speech_queue"].get_nowait()
     assert "台北今天多雲" in item["text"] and "EXPRESSION" not in item["text"] and item["private"] is True
-    ns, slips = _nudge_ns(tries=2)                                # 腦內也沒講到結果：不代念
+    ns, slips = _nudge_ns(tries=2)                                # 腦內也沒講到結果：提醒兩次、編號不同，不代念
     ns["_RECENT_THOUGHTS"].append((time.time() + 1, "嗯讓我想想"))
     asyncio.run(ns["_nudge_if_unsaid"](_WEATHER, time.time(), "老爸"))
+    assert len(slips) == 2 and slips[0] != slips[1] and "第 2 次提醒" in slips[1]
     assert ns["speech_queue"].empty()

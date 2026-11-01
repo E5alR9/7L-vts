@@ -169,6 +169,62 @@ def search_google(query: str, depth: str = "basic") -> str:
         log_print(f"\n❌ [搜尋 Tool 異常]: {e}")
         return f"搜尋時發生錯誤: {e}"
 
+# ── 猜到要查就先查（speculative tool calling，2026-11-01）──
+# 語意分流判定老爸這句是要查資料，紙條還在送主腦時就先用老爸的原句搜；她交辦的子智能體任務跟這句講同一件事，
+# 就直接拿這份結果，不用再等工具判定（約 1.8 秒）和搜尋（約 1.5 秒）。只留最近一份，放太久、講的不是同件事就不用。
+PREFETCH_MAX_AGE = 30.0
+PREFETCH_WAIT_SEC = 8.0
+_PREFETCH = {"text": "", "ts": 0.0, "future": None}
+_PREFETCH_POOL = None
+_FILLER = re.compile(r"^(7L|七L)[，,、\s]*|幫(我|老爸|忙)|查(一下|查看|查|詢)?|看(一下|看)|上網|搜尋|一下|請|麻煩|告訴我|跟我說|給我")
+_OTHER_JOB = re.compile(r"提醒|計時|鬧鐘|分鐘後|秒後|小時後|記住|記下|唱|彈")   # 還夾著別件事：不先查、也不拿
+
+
+def _prefetch_query(text: str, now=None) -> str:
+    """老爸原句 → 搜尋字串：拿掉「幫我查一下」這些；「今年、去年、最近」換成真的年月——子智能體的工具判定會這樣寫，
+    先查不經過它，原句「今年金馬獎」搜到的是去年的（2026-11-01 模擬版：答成去年得獎的《大濛》）。"""
+    from datetime import datetime
+    now = now or datetime.now()
+    q = _FILLER.sub("", (text or "").strip()).strip(" ，,。？?！!") or (text or "").strip()
+    q = q.replace("今年", f"{now.year}年").replace("去年", f"{now.year - 1}年")
+    if re.search(r"最近|最新|近期|新上映|這週|本週|這個月", q) and str(now.year) not in q:
+        q += f" {now.year}年{now.month}月"
+    return q
+
+
+def _chars(text: str) -> set:
+    return set(re.findall(r"[一-鿿]|[A-Za-z0-9]+", _prefetch_query(text))) - set("的了嗎呢吧啊我你妳他她是在有")
+
+
+def prefetch(text: str) -> None:
+    """語意分流判定要查資料時呼叫：背景開始搜。夾著別件事的句子不先查（原句拿去搜會查歪）。"""
+    global _PREFETCH_POOL
+    if not text or _OTHER_JOB.search(text):
+        return
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+    if _PREFETCH_POOL is None:
+        _PREFETCH_POOL = ThreadPoolExecutor(max_workers=1, thread_name_prefix="search_prefetch")
+    q = _prefetch_query(text)
+    _PREFETCH.update(text=text, ts=time.time(), future=_PREFETCH_POOL.submit(search_google, q))
+    log_print(f"🏃 [先查] 老爸像要查資料，先搜：「{q}」")
+
+
+def take_prefetch(task: str, now: float = None):
+    """子智能體拿到任務時問：有剛先搜好（或正在搜）的、講的是同一件事，就回那個 future（呼叫端 await），不然回 None。
+    同一件事＝任務的實字八成以上出現在老爸那句裡（「幫老爸查明天台中會不會下雨」對「明天台中會不會下雨」）。"""
+    import time
+    fut = _PREFETCH.get("future")
+    now = time.time() if now is None else now
+    if fut is None or now - _PREFETCH["ts"] > PREFETCH_MAX_AGE or _OTHER_JOB.search(task or ""):
+        return None
+    tc, pc = _chars(task), _chars(_PREFETCH["text"])
+    if not tc or len(tc & pc) / len(tc) < 0.8:
+        return None
+    _PREFETCH.update(text="", ts=0.0, future=None)   # 用一次就清掉
+    return fut
+
+
 # 摘要提示詞：數字帶單位和方向、舊資料講日期、沒答案不猜（2026-11-01 模擬版：她把「1 台幣換 4.85 日圓」講成「日幣對台幣 4.8」）。
 # 12 題真的搜尋結果、各摘 3 次、Groq 當裁判對照原始資料：舊提示詞 temp 0.75 沒講錯 26/36 → 這版 temp 0.3 34/36
 #（只改提示詞不降溫 31/36；錯的多是換算方向反了、把別天的事講成這週、資料裡沒有的歸因）。
