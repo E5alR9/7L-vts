@@ -184,6 +184,7 @@ from core.identity import is_owner_account, claims_owner_identity
 from core.paths import DATA_DIR   # 執行時資料夾 data/：記憶、聲紋、音訊快取都在這（唯一出處）
 import core.stage_state as stage
 from core import usage, promptkit, prosody   # prosody：說話的語速、音高、大小聲（2026-10-31）
+from core import volume as volume_ctl   # 後台的說話／唱歌音量滑桿（2026-11-01）
 from core import eventlog
 from core.speech_queue import SpeechQueue
 from core.barge_in import BargeInDetector
@@ -2302,6 +2303,12 @@ async def play_voice_complete(text, target: str = "dad", raw_actions_text: str =
                     try:
                         if snd_obj is None:
                             snd_obj = pygame.mixer.Sound(part_file)
+                        # 後台說話音量（0～200）：超過 100 把聲音放大（2026-11-01）。放大在背景做，不卡主迴圈；
+                        # 音量設在這一段聲音上，不設在聲道上：排隊接播時才不會把前一段正在播的也一起改掉
+                        _speech_vol, _speech_gain = volume_ctl.split(1.0, "speech")
+                        if _speech_gain > 1.001:
+                            snd_obj = await asyncio.to_thread(volume_ctl.boost, snd_obj, _speech_gain)
+                        snd_obj.set_volume(_speech_vol)
                         ch = pygame.mixer.find_channel(True)
                         if ch is None:
                             ch = pygame.mixer.Channel(0)
@@ -2316,6 +2323,7 @@ async def play_voice_complete(text, target: str = "dad", raw_actions_text: str =
                                     break
                                 await asyncio.sleep(0.02)
                         else:
+                            ch.set_volume(1.0)   # find_channel 可能拿到唱歌用過的聲道，音量還停在 0.67（以前從沒設過）
                             ch.play(snd_obj)
                             await asyncio.sleep(0.02)
                             while ch.get_busy() or ch.get_queue() is not None:
@@ -2326,7 +2334,7 @@ async def play_voice_complete(text, target: str = "dad", raw_actions_text: str =
                     except Exception:
                         # fallback: 舊版 music 模式
                         pygame.mixer.music.load(part_file)
-                        pygame.mixer.music.set_volume(1.0)
+                        pygame.mixer.music.set_volume(volume_ctl.split(1.0, "speech")[0])
                         pygame.mixer.music.play()
                         _used_music_fallback = True
                         await asyncio.sleep(0.05)
@@ -2413,16 +2421,20 @@ async def play_instant_sound_clip(audio_path: str, subtitle: str = ""):
         stage.start_playback(envelope=envelope)
         
         #  採用專屬 SFX 獨立通道 (Channel 5)，音量拉滿，絕不與 TTS 語音串流 (pygame.mixer.music) 衝突打架！
+        # 尖叫也是她的聲音：跟著後台說話音量（2026-11-01 Fable：說話調到 0 時電擊照樣全音量尖叫）
         channel = pygame.mixer.Channel(5)
-        channel.set_volume(1.0)
+        _scream_vol, _scream_gain = volume_ctl.split(1.0, "speech")
+        channel.set_volume(_scream_vol)
         if snd:
+            if _scream_gain > 1.001:
+                snd = await asyncio.to_thread(volume_ctl.boost, snd, _scream_gain)
             channel.play(snd)
             await asyncio.sleep(0.06)
             while channel.get_busy():
                 await asyncio.sleep(0.03)
         else:
             pygame.mixer.music.load(audio_path)
-            pygame.mixer.music.set_volume(1.0)
+            pygame.mixer.music.set_volume(_scream_vol)
             pygame.mixer.music.play()
             await asyncio.sleep(0.12)
             while pygame.mixer.music.get_busy():

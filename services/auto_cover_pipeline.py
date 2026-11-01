@@ -1172,9 +1172,17 @@ async def play_cover_audio(vocal_path: str, song_name: str, inst_path: str = Non
             log_print(f"⚠️ [口型波形提取警告]: {env_err}")
 
         # 🎛️ 專業立體聲即時動態混音平衡：人聲清晰飽滿 (0.67)，伴奏音樂襯托 (0.55)
-        ch_vocal.set_volume(0.67)
+        # 再乘上後台的唱歌音量（0～200，2026-11-01）：聲道最多 1.0，超過的把聲音放大
+        from core import volume as volume_ctl
+        inst_base = _MIXED_INST_VOLUME if start_at else 0.55
+        snd_vocal, vocal_vol, vocal_gain = await asyncio.to_thread(volume_ctl.prepare, snd_vocal, 0.67, "sing")
+        ch_vocal.set_volume(vocal_vol)
+        live = {6: (0.67, vocal_gain, snd_vocal)}
         if snd_inst:
-            ch_inst.set_volume(_MIXED_INST_VOLUME if start_at else 0.55)
+            snd_inst, inst_vol, inst_gain = await asyncio.to_thread(volume_ctl.prepare, snd_inst, inst_base, "sing")
+            ch_inst.set_volume(inst_vol)
+            live[7] = (inst_base, inst_gain, snd_inst)
+        volume_ctl.sing_started(live)
 
         if start_at:
             # 彈唱同步：等到共同起點才放（asyncio.sleep 在 Windows 只準到 15ms 左右，最後一小段空轉）
@@ -1230,6 +1238,11 @@ async def play_cover_audio(vocal_path: str, song_name: str, inst_path: str = Non
         try:
             pygame.mixer.Channel(6).stop()
             pygame.mixer.Channel(7).stop()
+        except Exception:
+            pass
+        try:
+            from core import volume as volume_ctl
+            volume_ctl.sing_ended(snd_vocal)
         except Exception:
             pass
             

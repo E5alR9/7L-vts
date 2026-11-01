@@ -94,6 +94,69 @@ class SevenLMonitorApp {
     setInterval(() => this.loadModelUsage(), 15000);
     this.loadExpressions();
     setInterval(() => this.loadExpressions(), 10000);   // 她自己換表情時，按鈕的開關狀態也跟上
+    this.bindVolumeSliders();
+    this.loadVolumes();
+    setInterval(() => this.loadVolumes(), 10000);   // 用講的調鋼琴音量時，滑桿也跟上
+  }
+
+  // 音量滑桿（說話／唱歌／鋼琴，0～200）：拉的時候數字跟著跑，放開才送（每拉一下都寫檔、記日誌太吵）；
+  // 別處改了也跟上，但正在拉的那條不動（老爸 2026-11-01）
+  bindVolumeSliders() {
+    this._volumeDragging = {};
+    document.querySelectorAll('#volumeSliders input[type="range"]').forEach((input) => {
+      const kind = input.dataset.kind;
+      const stop = () => { this._volumeDragging[kind] = false; };
+      input.addEventListener('pointerdown', () => { this._volumeDragging[kind] = true; });
+      input.addEventListener('pointerup', stop);
+      input.addEventListener('pointercancel', stop);   // 觸控捲動、切走視窗：沒有 pointerup，不清掉這條就再也不跟上
+      input.addEventListener('blur', stop);
+      input.addEventListener('input', () => this.showVolume(kind, input.value, true));
+      input.addEventListener('change', () => {
+        stop();
+        this.sendVolume(kind, input.value);
+      });
+    });
+  }
+
+  showVolume(kind, value, fromUser = false) {
+    const input = document.querySelector(`#volumeSliders input[data-kind="${kind}"]`);
+    if (!input) return;
+    if (!fromUser && this._volumeDragging && this._volumeDragging[kind]) return;   // 正在拉：不被輪詢拉回去
+    const v = Math.max(0, Math.min(200, Math.round(Number(value))));
+    if (Number.isNaN(v)) return;
+    if (!fromUser) input.value = v;
+    const box = input.closest('.volume-slider');
+    box.querySelector('.volume-value').textContent = v;
+    box.classList.toggle('is-loud', v > 100);
+  }
+
+  async sendVolume(kind, value) {
+    try {
+      const res = await fetch('/api/volume', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind, value: Number(value) })
+      });
+      const data = await res.json();
+      if (!data.ok) this.showToast(`音量沒調成：${data.error || res.status}`);
+    } catch (e) {
+      this.showToast('音量沒調成：連不到 7L');
+    }
+  }
+
+  applyVolumes(vols) {
+    if (!vols) return;
+    ['speech', 'sing', 'piano'].forEach((k) => {
+      if (vols[k] !== undefined) this.showVolume(k, vols[k]);
+    });
+  }
+
+  async loadVolumes() {
+    try {
+      const res = await fetch('/api/volume');
+      const data = await res.json();
+      if (data.ok) this.applyVolumes(data.volume);
+    } catch (e) { /* 7L 還沒開好：下次再讀 */ }
   }
 
   // Live2D 表情盤（/api/expressions）：按鈕照模型實際有的表情長，開著的亮起來；道具和一下就過的動作分開放
@@ -1188,6 +1251,8 @@ class SevenLMonitorApp {
       this.updateSleepUI(data.is_sleeping);
     } else if (type === 'mic_changed') {
       this.updateMicUI(data.is_mic_enabled);
+    } else if (type === 'volume_changed') {
+      this.applyVolumes(data);
     } else if (type === 'switch_update') {
       if (data) {
         if (data.switches && Array.isArray(data.switches)) {

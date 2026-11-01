@@ -246,6 +246,24 @@
         <button class="action-chip chip-mic-off" id="btnChipMicOff" data-action="mic_off" title="關閉麥克風收音 (靜音模式)">
           <span>關麥</span>
         </button>
+        <!-- 音量滑桿：0～200，100 是原本的大小（老爸 2026-11-01） -->
+        <div class="volume-sliders" id="volumeSliders">
+          <label class="volume-slider" title="7L 說話的音量（0～200，100 是原本的大小）">
+            <span class="volume-label">說話</span>
+            <input type="range" min="0" max="200" step="1" value="100" data-kind="speech">
+            <span class="volume-value">100</span>
+          </label>
+          <label class="volume-slider" title="7L 唱歌（人聲＋伴奏）的音量（0～200）；唱到一半拉大，超過的部分下一首才會更大">
+            <span class="volume-label">唱歌</span>
+            <input type="range" min="0" max="200" step="1" value="100" data-kind="sing">
+            <span class="volume-value">100</span>
+          </label>
+          <label class="volume-slider" title="88 鍵鋼琴的音量（0～200）">
+            <span class="volume-label">鋼琴</span>
+            <input type="range" min="0" max="200" step="1" value="100" data-kind="piano">
+            <span class="volume-value">100</span>
+          </label>
+        </div>
       </div>
 
       <!-- 黑色磨砂浮動輸入欄 (Floating Input Bar) -->

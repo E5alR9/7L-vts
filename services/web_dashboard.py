@@ -935,6 +935,42 @@ async def api_toggle_expression(request):
         return web.json_response({"ok": False, "error": str(e)}, status=500)
 
 
+def _volumes() -> dict:
+    from core import volume as volume_ctl
+    import services.piano_engine as pe
+    return {"speech": volume_ctl.get("speech"), "sing": volume_ctl.get("sing"),
+            "piano": int(pe.GLOBAL_PIANO_VOLUME)}
+
+
+async def api_get_volume(request):
+    """說話、唱歌、鋼琴三條音量滑桿現在的值（0～200）。"""
+    return web.json_response({"ok": True, "volume": _volumes()})
+
+
+async def api_set_volume(request):
+    """拉滑桿：{"kind": "speech|sing|piano", "value": 0～200}（老爸 2026-11-01）。"""
+    try:
+        body = await request.json()
+        kind = str(body.get("kind", ""))
+        value = max(0, min(200, int(round(float(body.get("value"))))))
+    except Exception:
+        return web.json_response({"ok": False, "error": "要給 kind 和 0～200 的 value"}, status=400)
+    try:
+        if kind == "piano":
+            import services.piano_engine as pe
+            await pe.set_piano_volume(value)
+        elif kind in ("speech", "sing"):
+            from core import volume as volume_ctl
+            volume_ctl.set_volume(kind, value)
+        else:
+            return web.json_response({"ok": False, "error": f"沒有這種音量：{kind}"}, status=400)
+        vols = _volumes()
+        broadcast_event("volume_changed", vols)
+        return web.json_response({"ok": True, "volume": vols})
+    except Exception as e:
+        return web.json_response({"ok": False, "error": str(e)}, status=500)
+
+
 async def api_set_sleep(request):
     """切換 7L 睡眠模式 (0 API 消耗)"""
     try:
@@ -1553,6 +1589,8 @@ async def start_web_dashboard(
     app.router.add_get("/api/chat_sources", api_chat_sources)
     app.router.add_post("/api/toggle_mic", api_toggle_mic)
     app.router.add_post("/api/set_sleep", api_set_sleep)
+    app.router.add_get("/api/volume", api_get_volume)
+    app.router.add_post("/api/volume", api_set_volume)
     app.router.add_post("/api/trigger_expression", api_trigger_expression)
     app.router.add_get("/api/expressions", api_get_expressions)
     app.router.add_post("/api/expression_toggle", api_toggle_expression)
