@@ -3485,7 +3485,8 @@ async def _run_subagent_task(_task_ins, _intent, _respond, who: str = ""):
     _speak = types.FunctionResponseScheduling.WHEN_IDLE
     _quiet = types.FunctionResponseScheduling.SILENT
     _no_result = ("請妳自己直接回答剛才的問題；需要即時資料的（匯率、天氣、新聞之類）"
-                  "就老實說這次沒查到，不要自己編數字。]")
+                  "就老實說這次沒查到，不要自己編數字。要妳去做的事（計時器、記東西、表情之類）這次沒做成："
+                  "妳剛才如果說了「好了」「設好了」之類的話，要老實更正，跟對方說這次沒弄成。]")
     _if_said = "（妳剛才如果已經答應過，就輸出 [SILENCE]，不要再講一次。）"
 
     try:
@@ -3564,7 +3565,7 @@ async def _run_subagent_task(_task_ins, _intent, _respond, who: str = ""):
                 _result_text, _sched = build_slip_text(_tname, _targs, _req, via="") + _if_said, _speak
             else:
                 await _respond("[系統底層：子智能體開始處理了，要幾秒到半分鐘。請妳先用一句短話答應對方"
-                               "（例如「好，我去查！」），不要猜結果；結果回來會再告訴妳。]" + _if_said,
+                               "（例如「好，我去查！」「好，我來設！」），不要猜結果，也不要說已經好了；結果回來會再告訴妳。]" + _if_said,
                                _speak, _more=True)
                 _k2, _t2 = "miss", ""
                 if (_intent or {}).get("action") == "ask_desktop":
@@ -3659,6 +3660,27 @@ def _salvage_unfinished_turn(dad_said: str, partial: str) -> None:
 
 
 _SAY_LOCK = asyncio.Lock()
+_LAST_RESULT_BACK_TS = 0.0   # 最近一次有子智能體結果交回給她的時間
+# 交辦結果還沒回來就說「做好了」（2026-11-01 實測：她說「三分鐘計時器準備好囉」，其實子智能體失敗、計時器沒設）。
+# 抓不完所有說法，提示詞那條規則才是主要防線；這裡擋最常見的幾種（Fable 列的誤判、漏判都在測試裡）
+_CLAIMS_DONE = re.compile(
+    r"(設定?|設置|弄|做|查|記|存|開|關|調|排|改|換|訂|準備|搞)(好|完|到|妥|上)(了|囉|啦|嘍|喔|嚕|$|[，。！!～~])|"
+    r"(設定|設置)?完成|搞定(了|囉|啦|$|[，。！!～~])|記住了|記下來了|記起來了|"
+    r"(計時器|鬧鐘|提醒).{0,4}(啟動|開始跑|在跑|跑起來)|幫你(設|記|存)了|"
+    r"已經(幫你|替你|為你|幫老爸|幫妳)?(設|弄|做|查|記|存|開|關|調|排|改|換|訂|定)(?!.{0,2}開始)")
+# 同一個小句裡有這些：是「之後會…」「…嗎？」，不是說已經辦好（「查到了再跟你說」「你準備好了嗎」）
+_CLAIMS_DONE_NOT = re.compile(r"再|會|就跟|就告訴|叫你|跟你說|告訴你|跟你講|嗎|？|\?|等我|如果|之後|以後|"
+                              r"我來|交給我|讓我|已經開始")
+
+
+def _claims_done(text: str) -> bool:
+    """答應的話是不是說成「已經辦好了」（標籤不算）。"""
+    t = re.sub(r"\[[^\]]*\]", "", text or "")
+    for clause in re.split(r"[，。！!；;\n]", t):
+        m = _CLAIMS_DONE.search(clause.strip())
+        if m and not _CLAIMS_DONE_NOT.search(clause):
+            return True
+    return False
 
 
 async def _handle_say(session, ws_send_lock, fn_call_id, text: str, vts=None) -> None:
@@ -3678,6 +3700,14 @@ async def _handle_say(session, ws_send_lock, fn_call_id, text: str, vts=None) ->
             log_print(f"🤐 [先別講] 交辦的結果還沒回來就要講第二句，不念：{raw[:80]}")
             await _send_say_response(session, ws_send_lock, fn_call_id,
                                      "沒有念：交辦的結果還沒回來，不要先講結果、也不要猜；等結果回來再 say。")
+            return
+        if _newest is not None and _LAST_RESULT_BACK_TS < _newest[0] and _claims_done(raw):
+            # 交辦後還沒有任何結果回來，答應那句就說成「已經好了」：不念、不算答應過，讓她改說「好，我來設」
+            #（失敗時才不會說謊）。中間有別件的結果回來，她說「查到了」是在講回來的那件，照念
+            log_print(f"🤐 [還沒辦好] 結果還沒回來就說做好了，不念：{raw[:80]}")
+            await _send_say_response(session, ws_send_lock, fn_call_id,
+                                     "沒有念：事情還沒辦完，不能說已經好了。改用 say 說要去做的話（例如「好，我來設！」），"
+                                     "辦好了系統會再告訴妳。")
             return
         for _v in _AWAITING_RESULTS.values():
             _v[1] += 1
@@ -3782,10 +3812,18 @@ def _note_inner_voice(text: str) -> None:
 
 async def _handle_invoke_subagent(session, ws_send_lock, _fn_name, _fn_call_id, _task_ins, _intent=None):
     """Live 主腦呼叫 invoke_subagent：每通獨立背景跑 _run_subagent_task，結果用工具回應交回去。"""
+    global _LAST_RESULT_BACK_TS
     _requester = _brain_requester()   # 結果回來時可能已經換人講話了，提醒要講給交辦的人聽
     _turn_owner = _turn_who()          # 這次交辦用誰的權限：叫工具這一刻就定下來
 
     async def _respond(_text, _sched, _more=False):
+        _wait = _AWAITING_RESULTS.get(_fn_call_id)
+        if (LIVE_SAY_GATE and not _more and _sched == types.FunctionResponseScheduling.SILENT
+                and _wait is not None and _wait[1] == 0):
+            # 辦好了（不用她講的那種），可是交辦後她一句都還沒說出口（答應那句說成「已經好了」被擋、或根本沒答應）：
+            # 以前照樣悄悄交回，事情辦了、老爸卻什麼都沒聽到（Fable 2026-11-01）。改成請她說一聲
+            _text = f"{_text}（妳交辦後還沒開口跟對方說過話，現在用 say 簡短說一聲辦好了。）"
+            _sched = types.FunctionResponseScheduling.WHEN_IDLE
         _fr = {"name": _fn_name, "response": {"result": _text}, "scheduling": _sched}
         if _more:
             _fr["will_continue"] = True
@@ -3811,6 +3849,7 @@ async def _handle_invoke_subagent(session, ws_send_lock, _fn_name, _fn_call_id, 
         await _run_subagent_task(_task_ins, _intent, _respond, who=_turn_owner)
     finally:
         _AWAITING_RESULTS.pop(_fn_call_id, None)
+        _LAST_RESULT_BACK_TS = time.time()   # 有結果交回了：她接著說「查到了」是在講這件，不是搶先說還在辦的那件
         # 同時交辦好幾件時：這件的結果交回去了，還在等的其他件重新算，讓她能講這件的結果（下一句又會被擋到下一件回來）
         for _v in _AWAITING_RESULTS.values():
             _v[1] = 0
@@ -6835,7 +6874,8 @@ async def nv_interpret_task(task_ins: str, target: str = "dad", requester_name: 
     第一棒「工具判定」（temp 0 + tools）：是硬指令就派發；
     第二棒「深度思考」（temp 0.8、無 tools）：第一棒沒叫工具時，讓副腦真正當大腦想一次。
     用腦順序看 core/subagent_router.SUBAGENT_BRAIN（預設 auto）：
-      auto   = 兩棒都是 Gemini 先、NV 備援（NV 推理模型深度思考要 60 秒，即時對話等不起）
+      auto   = 工具判定只用 Gemini；深度思考 Gemini 跟 NV 一起想、誰先想好用誰
+               （老爸 2026-11-01：輝達不要用來計時，負責高智商任務）
       nv     = 全走 NV（舊行為，不碰 Gemini 一滴）
       gemini = 全走 Gemini（不碰 NV 一滴，NV 額度全留）
     乾淨無調用就信任它、不問下一棒；報錯才換下一棒。單腦模式報錯即收工（沿用舊語義）。
@@ -6848,7 +6888,8 @@ async def nv_interpret_task(task_ins: str, target: str = "dad", requester_name: 
     if not task_ins or not task_ins.strip():
         return "miss", ""
     try:
-        chain = resolve_subagent_chain()
+        chain = resolve_subagent_chain(stage="tool")
+        think_chain = resolve_subagent_chain(stage="think")
         if not chain:
             return "miss", ""
         system_instruction_text = promptkit.subagent_system()
@@ -6862,8 +6903,9 @@ async def nv_interpret_task(task_ins: str, target: str = "dad", requester_name: 
                     fn_name, fn_args = await _nv_tool_pass(task_ins, target, requester_name, system_instruction_text)
             except Exception as _be:
                 log_print(f"⚠️ [子智能體工具判定異常({_brain})，換下一棒]: {_be}")
-                if len(chain) == 1:
-                    return "miss", ""  # 單腦模式：報錯即收工（沿用舊語義）
+                if len(chain) == 1 and len(think_chain) == 1:
+                    return "miss", ""  # 單腦模式（nv／gemini）：報錯即收工（沿用舊語義）
+                # auto：工具判定只有 Gemini，它出錯就直接交給兩顆一起深思，不要整件丟掉（Fable 2026-11-01）
                 continue
             if fn_name:
                 break
@@ -6901,18 +6943,28 @@ async def nv_interpret_task(task_ins: str, target: str = "dad", requester_name: 
                 _dispatch_in_background(fn_name, fn_args, caller_target=target, caller_user=requester_name)
             # ⚠️ 同 CPU 路徑：唱歌/彈琴紙條必須寫明演唱者是 7L 本人，避免主腦說成「老爸唱的」
             return "tool", build_slip_text(fn_name, fn_args, requester_name, via="")
-        # —— 第二棒：深度思考（第一棒乾淨無調用才到這裡），照用腦順序走 API ——
-        for _brain in chain:
+        # —— 第二棒：深度思考（第一棒乾淨無調用才到這裡）：清單上的腦一起想，誰先想好用誰 ——
+        # （NV 免費端點常排隊 15～30 秒或回 5xx，排在後面當備援會先把時間耗光；一起想就不拖，2026-11-01）
+        async def _think(_brain):
             try:
                 if _brain == "gemini":
-                    _k, _t = await _gemini_think_pass(task_ins, target, requester_name, system_instruction_text)
-                else:
-                    _k, _t = await _nv_think_pass(task_ins, target, requester_name, system_instruction_text)
+                    return _brain, await _gemini_think_pass(task_ins, target, requester_name, system_instruction_text)
+                return _brain, await _nv_think_pass(task_ins, target, requester_name, system_instruction_text)
             except Exception as _be2:
-                log_print(f"⚠️ [子智能體深思異常({_brain})，換下一位]: {_be2}")
-                continue
-            if _k in ("tool", "advice"):
-                return _k, _t
+                log_print(f"⚠️ [子智能體深思異常({_brain})]: {_be2}")
+                return _brain, ("miss", "")
+
+        _jobs = [asyncio.create_task(_think(b)) for b in think_chain]
+        try:
+            for _done in asyncio.as_completed(_jobs):
+                _brain, (_k, _t) = await _done
+                if _k in ("tool", "advice"):
+                    if len(_jobs) > 1:
+                        log_print(f"🧠 [子智能體深思] {('Gemini' if _brain == 'gemini' else 'NV')} 先想好，用它的")
+                    return _k, _t
+        finally:
+            for _j in _jobs:
+                _j.cancel()
         return "miss", ""
     except Exception as e:
         log_print(f"⚠️ [子智能體解讀失敗]: {repr(e)}")

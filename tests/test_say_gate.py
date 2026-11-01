@@ -22,6 +22,12 @@ def _load(*names, **ns):
     return ns
 
 
+def _const(name, ns):
+    """把主程式的模組常數（例如編好的正則）跑進 ns。"""
+    node = next(n for n in TREE.body if isinstance(n, ast.Assign) and any(getattr(t, "id", "") == name for t in n.targets))
+    exec(compile(ast.Module(body=[node], type_ignores=[]), name, "exec"), ns)
+
+
 class _Session:
     def __init__(self):
         self.sent = []
@@ -40,9 +46,9 @@ def _say_ns(singing=False, vision_busy=False):
         return text
 
     sess = _Session()
-    ns = _load("_handle_say", "_send_say_response", "_note_inner_voice", "_call_cancelled", "_note_cancelled_calls",
+    ns = _load("_handle_say", "_send_say_response", "_note_inner_voice", "_call_cancelled", "_note_cancelled_calls", "_claims_done",
                _CANCELLED_CALL_IDS=__import__("collections").deque(maxlen=200), re=re, time=time, asyncio=asyncio, types=types,
-               _AWAITING_RESULTS={}, AWAIT_RESULT_MAX_SEC=75.0, LAST_SAY_TS=0.0, _RECENT_SAYS=[],
+               _AWAITING_RESULTS={}, AWAIT_RESULT_MAX_SEC=75.0, LAST_SAY_TS=0.0, _RECENT_SAYS=[], _LAST_RESULT_BACK_TS=0.0,
                _autonomy_note_say=lambda t, now: "", AUTONOMY_SAY_MIN_GAP=60.0,
                _SAY_LOCK=asyncio.Lock(), GLOBAL_LIVE_SESSION=sess, _speak_brain_turn=speak, input_queue=None,
                _start_marker_tools=lambda t: t.replace("[TOOL:VISION]", "").strip(),
@@ -52,6 +58,8 @@ def _say_ns(singing=False, vision_busy=False):
                log_print=logs.append, log_swallowed=lambda *a: None, spawn=lambda c: (after.append(c), c.close()),
                _afterthought=lambda t: asyncio.sleep(0), _group_post=lambda *a: None, LAST_BRAIN_TURN_TS=0.0, LAST_BRAIN_REPLY_DONE_TS=0.0,
                eventlog=SimpleNamespace(get=lambda: SimpleNamespace(record=lambda *a, **k: logs.append(("ev", a)))))
+    _const("_CLAIMS_DONE", ns)
+    _const("_CLAIMS_DONE_NOT", ns)
     return ns, sess, spoken, logs, after
 
 
@@ -100,6 +108,50 @@ def test_only_the_ack_is_said_while_a_result_is_pending():
     ns["_AWAITING_RESULTS"]["stale"] = [time.time() - 200, 5]                        # 漏撤銷的不會永遠擋住
     asyncio.run(ns["_handle_say"](sess, asyncio.Lock(), "d", "老爸晚安"))
     assert spoken[-1][0] == "老爸晚安" and "stale" not in ns["_AWAITING_RESULTS"]
+
+
+def test_ack_cannot_claim_the_job_is_already_done():
+    """2026-11-01 實測：交辦計時器後她馬上說「三分鐘計時器準備好囉」，子智能體其實失敗、計時器沒設。
+    結果回來前說成「已經好了」的不念、不算答應過，讓她改說要去做；結果回來後照常能說設好了。"""
+    ns, sess, spoken, logs, _ = _say_ns()
+    ns["_AWAITING_RESULTS"]["call-1"] = [time.time(), 0]
+
+    async def go():
+        lock = asyncio.Lock()
+        await ns["_handle_say"](sess, lock, "a", "[EXPRESSION: 眨眼] 沒問題，三分鐘計時器準備好囉！")   # 擋
+        await ns["_handle_say"](sess, lock, "b", "好，我來幫你設！")                                     # 改說要去做：念
+        ns["_AWAITING_RESULTS"].pop("call-1")
+        await ns["_handle_say"](sess, lock, "c", "設好了！三分鐘後提醒你關火")                            # 結果回來了：念
+    asyncio.run(go())
+    assert [s[0] for s in spoken] == ["好，我來幫你設！", "設好了！三分鐘後提醒你關火"]
+    assert "不能說已經好了" in sess.sent[0].response["result"] and any("還沒辦好" in str(x) for x in logs)
+
+
+def test_claims_done_patterns():
+    ns = _load("_claims_done", re=re)
+    _const("_CLAIMS_DONE", ns)
+    _const("_CLAIMS_DONE_NOT", ns)
+    f = ns["_claims_done"]
+    done_says = ("計時器準備好囉！", "設好了～", "幫你記住了", "搞定！", "已經幫你設定三分鐘", "查到了，明天會下雨", "表情換好啦",
+                 # Fable 2026-11-01 列的漏判
+                 "幫你設了三分鐘", "三分鐘計時器啟動！", "計時器開始跑囉", "設定完成", "搞好了", "OK 設置好", "弄妥了",
+                 "計時器已經在跑了", "計時器設上了", "幫你記起來了", "記起來了喔")
+    for done in done_says:
+        assert f(done), done
+    ack_says = ("好，我來設！", "我查一下喔", "沒問題，馬上幫你弄", "等我一下下", "[EXPRESSION: 準備好了] 好喔我去記",
+                "好，馬上幫你設定三分鐘，提醒你關火！",
+                # Fable 2026-11-01 列的誤判：都是「之後會」或問句
+                "我查到了再跟你說", "弄好了叫你", "交給我搞定！", "我來搞定", "已經開始查了", "已經開始弄囉", "你準備好了嗎？",
+                "等我查完了跟你講", "我做完了會說", "馬上去查，查到了告訴你")
+    for ack in ack_says:
+        assert not f(ack), ack
+
+
+def test_result_is_spoken_when_she_never_got_to_acknowledge():
+    """答應那句被擋（或根本沒答應），事情辦好了是「不用她講」的結果：要改成請她說一聲，
+    不然計時器設了、老爸什麼都沒聽到（Fable 2026-11-01）。"""
+    src = ast.get_source_segment(MAIN, _fn("_handle_invoke_subagent"))
+    assert "_wait[1] == 0" in src and "現在用 say 簡短說一聲辦好了" in src and "WHEN_IDLE" in src
 
 
 def test_two_tasks_at_once_each_result_can_be_said():

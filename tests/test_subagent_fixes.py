@@ -215,7 +215,7 @@ def test_audience_turn_cannot_stop_the_stage_through_the_subagent():
     async def tool_pass(*a, **k):
         return "pe.stop_virtual_piano", {}
     from core.utils import spawn
-    ns = _load("nv_interpret_task", "_dispatch_in_background", spawn=spawn, asyncio=asyncio, resolve_subagent_chain=lambda: ["gemini"],
+    ns = _load("nv_interpret_task", "_dispatch_in_background", spawn=spawn, asyncio=asyncio, resolve_subagent_chain=lambda stage="tool": ["gemini"],
                promptkit=SimpleNamespace(subagent_system=lambda: ""), execute_tool_dispatch=dispatch, is_stage_control=is_stage_control,
                build_slip_text=build_slip_text, _gemini_tool_pass=tool_pass,
                AUDIENCE_STAGE_DECLINE=_const("AUDIENCE_STAGE_DECLINE"))
@@ -260,28 +260,51 @@ def test_relay_text_keeps_facts():
         assert "數字" in s and "不要自己補" in s
 
 
-def _interpret(chain, calls, tool=(None, None), gemini_think=("advice", "[答案]"), nv_think=("advice", "[NV 答案]")):
+def _interpret(chain, calls, tool=(None, None), gemini_think=("advice", "[答案]"), nv_think=("advice", "[NV 答案]"),
+               delays=None, think_chain=None):
+    delays = delays or {}
+
     def mk(name, result):
         async def f(*a, **k):
             calls.append(name)
+            await asyncio.sleep(delays.get(name, 0))
             if isinstance(result, Exception):
                 raise result
             return result
         return f
 
-    ns = _load("nv_interpret_task", asyncio=asyncio, resolve_subagent_chain=lambda: chain, promptkit=SimpleNamespace(subagent_system=lambda: ""),
+    chains = {"tool": chain, "think": think_chain or chain}
+    ns = _load("nv_interpret_task", asyncio=asyncio, log_print=lambda *a: None,
+               resolve_subagent_chain=lambda stage="tool": chains[stage], promptkit=SimpleNamespace(subagent_system=lambda: ""),
                _gemini_tool_pass=mk("gemini_tool", tool), _nv_tool_pass=mk("nv_tool", tool),
                _gemini_think_pass=mk("gemini_think", gemini_think), _nv_think_pass=mk("nv_think", nv_think))
     return asyncio.run(ns["nv_interpret_task"]("想一個老媽生日的驚喜點子"))
 
 
-def test_auto_thinks_with_gemini_first_and_nv_only_as_backup():
+def test_auto_tools_with_gemini_only_and_thinks_with_both_at_once():
+    """老爸 2026-11-01：輝達不要用來計時，負責高智商任務——工具判定只問 Gemini；深度思考兩顆一起想、誰先好用誰。"""
     calls = []
-    assert _interpret(["gemini", "nv"], calls) == ("advice", "[答案]")
-    assert calls == ["gemini_tool", "gemini_think"]     # 2026-10-29 起不再自動先問桌面版（主腦自己選 ask_desktop）
+    got = _interpret(["gemini"], calls, think_chain=["gemini", "nv"], delays={"nv_think": 0.05})
+    assert got == ("advice", "[答案]") and "nv_tool" not in calls and {"gemini_think", "nv_think"} <= set(calls)
     calls = []
-    assert _interpret(["gemini", "nv"], calls, gemini_think=RuntimeError("503")) == ("advice", "[NV 答案]")
-    assert calls == ["gemini_tool", "gemini_think", "nv_think"]
+    got = _interpret(["gemini"], calls, think_chain=["gemini", "nv"], delays={"gemini_think": 0.05})
+    assert got == ("advice", "[NV 答案]")                                             # 輝達先想好：用輝達的
+    calls = []
+    got = _interpret(["gemini"], calls, think_chain=["gemini", "nv"], gemini_think=RuntimeError("503"))
+    assert got == ("advice", "[NV 答案]")                                             # 一顆壞了，另一顆照樣有答案
+    calls = []
+    got = _interpret(["gemini"], calls, think_chain=["gemini", "nv"], gemini_think=("miss", ""), nv_think=RuntimeError("500"))
+    assert got == ("miss", "")
+
+
+def test_tool_pass_error_in_auto_goes_to_joint_thinking_not_nv_tools():
+    """auto 的工具判定只有 Gemini：它出錯不丟給輝達計時，但也不整件丟掉，交給兩顆一起深思（Fable 2026-11-01）。"""
+    calls = []
+    got = _interpret(["gemini"], calls, tool=RuntimeError("503"), think_chain=["gemini", "nv"], delays={"nv_think": 0.05})
+    assert got == ("advice", "[答案]") and "nv_tool" not in calls and calls[0] == "gemini_tool"
+    calls = []
+    got = _interpret(["gemini"], calls, tool=RuntimeError("503"), think_chain=["gemini"])   # gemini 單腦模式：照舊收工
+    assert got == ("miss", "") and calls == ["gemini_tool"]
 
 
 def test_search_result_is_a_report_to_be_spoken():
@@ -292,7 +315,7 @@ def test_search_result_is_a_report_to_be_spoken():
         return "現在 1 美元約換 159.4 日圓"
 
     rule = _const("_SUBAGENT_RELAY_RULE")
-    ns = _load("nv_interpret_task", "_subagent_report_text", asyncio=asyncio, resolve_subagent_chain=lambda: ["gemini"],
+    ns = _load("nv_interpret_task", "_subagent_report_text", asyncio=asyncio, resolve_subagent_chain=lambda stage="tool": ["gemini"],
                promptkit=SimpleNamespace(subagent_system=lambda: ""), execute_tool_dispatch=dispatch, summarize_search_to_speech=summarize,
                _SUBAGENT_RELAY_RULE=rule)
 
