@@ -728,7 +728,7 @@ async def get_lightweight_gemini_vision(image_base64: str, temporal_frames: list
                 "2. 當前畫面（最後一張）老爸的視窗焦點在哪裡、正在做什麼？\n"
                 "3. 若畫面上出現 VTube Studio 視窗、Live2D 角色或 OBS 字幕，代表 7L 妳自己的虛擬化身，請忽略它。\n"
                 "請用 1~3 句簡短扼要的中文描述動態變化與當前狀態，請根據真實畫面回答："
-            )
+            ) + gaze_cursor.capture_note()   # 截圖裡的桃紅箭頭是她自己的視線（2026-11-01）
         else:
             prompt = (
                 "妳是 7L 的視覺神經。請精準、客觀、簡短描述妳看到的電腦螢幕畫面內容：\n"
@@ -736,7 +736,7 @@ async def get_lightweight_gemini_vision(image_base64: str, temporal_frames: list
                 "2. 畫面上有什麼具體的視窗標題、應用程式名稱、文字內容或重要資訊？\n"
                 "3. 若畫面上出現 VTube Studio 視窗、Live2D 角色或 OBS 字幕，代表 7L 妳自己的虛擬化身，請忽略它，專注描述老爸正在操作的實際內容。\n"
                 "請直接用 1~2 句簡短扼要的中文描述畫面的真實內容："
-            )
+            ) + gaze_cursor.capture_note()
 
         # 組合：提示詞 + 歷史幀 + 當前幀
         all_parts = [types.Part.from_text(text=prompt)] + frame_parts
@@ -801,6 +801,7 @@ async def describe_images(prompt: str, images) -> str:
     """PROVIDER: GEMINI（看畫面、照鏡子；見 docs/AI_SOURCES.md）。描述圖片，回一段文字；看不了回空字串。
     以前走 450 行的 fetch_ai_response（多通道競速、Groq 前鋒、串流嘴巴、工具第二輪），
     老爸 REST 路拿掉後只剩看圖兩個呼叫點，改用跟 REST 大腦同一個 rest_chat（2026-10-26）。"""
+    prompt = (prompt or "") + gaze_cursor.capture_note()   # 截圖裡的桃紅箭頭是她自己的視線（2026-11-01）
     r = await rest_chat("", prompt, models=GEMINI_MODELS, extra_parts=_image_parts(images), max_tokens=800,
                         attempts=4, timeout=20.0, total_timeout=VISION_TOOL_TIMEOUT_SEC)
     return r.text if r else ""
@@ -2690,7 +2691,7 @@ async def check_screen_change_via_live_api(img_bytes: bytes, current_context: st
         return False
     decision = await live_one_shot(
         promptkit.SCREEN_SENTRY_SYSTEM,
-        promptkit.screen_sentry_user(current_context),
+        promptkit.screen_sentry_user(current_context) + gaze_cursor.capture_note(),
         KEYS_VISION if KEYS_VISION else GEMINI_KEYS, image_jpeg=img_bytes, timeout=3.8,
         accept=lambda t: any(m in t.upper() for m in ("LOOK_SERIOUS", "NO_CHANGE", "[SILENCE]")))
     return "LOOK_SERIOUS" in decision.upper()

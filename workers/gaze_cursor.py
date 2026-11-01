@@ -5,8 +5,9 @@
 看滑鼠時眼睛角度是從滑鼠位置換算的（以 VTS 視窗中心為 0 點），這裡照同一套換算反推回螢幕上的點，
 畫一個桃紅色的箭頭游標；看滑鼠時它會疊在真的滑鼠上，彈琴時往下看琴鍵、想事情時往左上飄。
 
-游標是一個置頂、點不到（滑鼠穿透）的小視窗，不會擋到操作；也設成不被截圖：
-她自己的餘光截圖、OBS 擷取都看不到它，觀眾也看不到。
+游標是一個置頂、點不到（滑鼠穿透）的小視窗，不會擋到操作。開著就拍得到：OBS 擷取、觀眾都看得到
+（老爸 2026-11-01「讓視線滑鼠有開就是能被拍到」；以前設成不被截圖）。Windows 沒辦法只讓 OBS 拍到、
+她自己的截圖拍不到，所以她看螢幕的提示詞都附上 capture_note()，告訴她那個箭頭是自己的視線。
 主程式的狀態經 host.<名稱> 即時讀（host＝主程式模組，主程式 import 本檔後 bind()）。
 """
 import asyncio
@@ -49,6 +50,15 @@ _KEY = "#010203"   # 透明色
 
 _STATE = {"center": (0.5, 0.5), "screen": (1920, 1080), "stop": None, "thread": None}
 
+CAPTURE_NOTE = ("（畫面上白邊的桃紅色箭頭是 7L 自己的視線標記，表示她正在看哪裡：不是老爸的滑鼠，"
+                "也不是畫面上的新東西；不要描述它，它移動也不算畫面有變化。）")
+
+
+def capture_note() -> str:
+    """游標開著（截圖裡會有那個箭頭）就回說明句，沒開回空字串。看螢幕的提示詞接在後面用。"""
+    t = _STATE["thread"]
+    return CAPTURE_NOTE if t is not None and t.is_alive() else ""
+
 
 def _overlay_thread(stop: threading.Event) -> None:
     import ctypes
@@ -71,7 +81,6 @@ def _overlay_thread(stop: threading.Event) -> None:
         WS_EX_NOACTIVATE = 0x08000000   # 永遠不拿焦點（2026-10-31 實機：一打開游標，前景視窗就變成它，老爸打字會被打斷）
         style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
         user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style | WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE)
-        user32.SetWindowDisplayAffinity(hwnd, 0x11)   # WDA_EXCLUDEFROMCAPTURE：截圖、直播擷取都看不到
         if prev_fg and user32.GetForegroundWindow() != prev_fg:
             user32.SetForegroundWindow(prev_fg)
     except Exception:

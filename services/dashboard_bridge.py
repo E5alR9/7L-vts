@@ -327,7 +327,7 @@ class DashboardBridge:
              "眼睛看螢幕上的東西（滑鼠、正在用的視窗、剛有變化的地方、鏡頭），頭跟著轉，還有呼吸和眨眼。關掉後臉不會自己動。",
              c.IS_FACE_TRACKING_ENABLED),
             ("IS_GAZE_CURSOR_ENABLED", "vision", "eye", "顯示她在看哪裡",
-             "在她現在看的位置放一個桃紅色箭頭（點不到；截圖、直播畫面都看不到），用來確認她的視線。",
+             "在她現在看的位置放一個桃紅色箭頭（點不到；直播畫面拍得到，觀眾也看得到她在看哪），用來確認她的視線。",
              c.IS_GAZE_CURSOR_ENABLED),
             ("IS_YT_WATCHER_ENABLED", "vision", "video", "陪看 YouTube",
              "螢幕上有 YouTube 在播時，每秒看一張影片畫面、同時聽影片聲音，跟老爸一起看、一起聊。",

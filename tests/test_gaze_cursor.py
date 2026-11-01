@@ -37,6 +37,21 @@ def test_face_tracking_publishes_the_eye_angles_and_the_switch_is_wired():
     assert bridge.count('"IS_GAZE_CURSOR_ENABLED"') >= 3 and "c.IS_GAZE_CURSOR_ENABLED = target_val" in bridge
     from conftest import MAIN_SRC
     assert "spawn(gaze_cursor.gaze_cursor_worker())" in MAIN_SRC and "\nIS_GAZE_CURSOR_ENABLED = False" in MAIN_SRC
-    # 游標視窗點不到、不被截圖
+    # 游標視窗點不到、不搶焦點；開著就拍得到（老爸 2026-11-01「讓視線滑鼠有開就是能被拍到」）
     src = open(gc.__file__, encoding="utf-8").read()
-    assert "WS_EX_TRANSPARENT" in src and "SetWindowDisplayAffinity(hwnd, 0x11)" in src and "WS_EX_NOACTIVATE" in src
+    assert "WS_EX_TRANSPARENT" in src and "WS_EX_NOACTIVATE" in src
+    assert "SetWindowDisplayAffinity" not in src
+
+
+def test_her_own_screen_prompts_know_the_arrow_is_her_gaze(monkeypatch):
+    """拍得到之後她自己的截圖裡也有那個箭頭：開著時看螢幕的提示詞都要說那是她自己的視線，沒開就不加。"""
+    assert gc.capture_note() == ""
+    monkeypatch.setitem(gc._STATE, "thread", type("T", (), {"is_alive": lambda self: True})())
+    note = gc.capture_note()
+    assert "桃紅色箭頭" in note and "不是老爸的滑鼠" in note and "不算畫面有變化" in note
+    from conftest import MAIN_SRC
+    assert MAIN_SRC.count("gaze_cursor.capture_note()") == 4   # 畫面哨兵、餘光（兩種）、看畫面／照鏡子
+    brain = open(os.path.join(ROOT, "workers", "gaze_brain.py"), encoding="utf-8").read()
+    assert "SYSTEM + gaze_cursor.capture_note()" in brain
+    bridge = open(os.path.join(ROOT, "services", "dashboard_bridge.py"), encoding="utf-8").read()
+    assert "直播畫面拍得到" in bridge

@@ -18,6 +18,7 @@ import re
 import time
 
 import services.vts_client as vc
+import workers.gaze_cursor as gaze_cursor
 from core.utils import log_print, log_swallowed
 
 HOST_ATTRS = (
@@ -167,7 +168,7 @@ async def gaze_brain_worker() -> None:
             # key 每次隨機排（挑 key 是穩定排序，以前永遠打全池第一把空著的，負載全壓在同一把；Fable 審查），一次只試一把
             with usage.as_role("視線副腦"):   # 後台模型用量表才分得出來（以前算在「Live 單次」）
                 text = await le.live_one_shot(
-                    SYSTEM, f"{menu}\n回 {{\"pick\": 編號, \"part\": \"上中\", \"what\": \"那裡在顯示什麼\", \"why\": \"為什麼想看\"}}",
+                    SYSTEM + gaze_cursor.capture_note(), f"{menu}\n回 {{\"pick\": 編號, \"part\": \"上中\", \"what\": \"那裡在顯示什麼\", \"why\": \"為什麼想看\"}}",
                     random.sample(le.GEMINI_KEYS, len(le.GEMINI_KEYS)), image_jpeg=jpg,
                     timeout=GAZE_BRAIN_TIMEOUT, max_keys=1)
             picked = parse_pick(text, items)
