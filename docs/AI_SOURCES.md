@@ -68,6 +68,7 @@
 
 | 服務 | 用途 | 程式 |
 |---|---|---|
+| Open-Meteo（免金鑰） | 問天氣先拿預報數字（今天起三天，約 0.8 秒）；台灣地名用內建座標表 | `services/weather.py` |
 | Tavily → DuckDuckGo | 網路搜尋（basic 深度，約 1.5 秒）、找線上琴譜（Tavily 額度爆了自動改 DuckDuckGo） | `services/web_search.py`、`services/onlinesequencer_engine.py` |
 | edge-tts（微軟） | 說話備援聲音（曉伊掛了才用；套件要 7.3.1 以上） | `services/tts_router._synth_edge` |
 | Google 免費語音辨識 | **只在 Live 主腦斷線時**聽麥克風（非官方端點，隨時可能失效） | `listen_once_fast` |

@@ -69,6 +69,10 @@ def _memory_files_in_tmp(tmp_path_factory):
     import services.rag_memory_service as rag_service
     import services.desktop_helper as desktop_helper
     import services.piano_engine as piano_engine
+    import services.weather as weather
+
+    def _no_weather(url):
+        raise OSError("測試不連 Open-Meteo")
 
     def _no_desktop(*a, **k):
         raise RuntimeError("找不到桌面版（測試一律不碰老爸的桌面版 Gemini）")
@@ -89,6 +93,7 @@ def _memory_files_in_tmp(tmp_path_factory):
         mp.setattr(desktop_helper, "get_answer", _no_desktop)   # 查資料備援、深度思考會叫它
         mp.setattr(desktop_helper, "prewarm", lambda: False)
         mp.setattr(piano_engine, "subprocess", _SubprocessNoWindow())   # 測試絕不開真的鋼琴視窗
+        mp.setattr(weather, "_get", _no_weather)                           # 測試不連 Open-Meteo（要的自己換假的）
         yield tmp
 
 

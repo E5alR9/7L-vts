@@ -124,6 +124,14 @@ def search_google(query: str, depth: str = "basic") -> str:
                摘要出來的答案一樣好，basic 還只扣一半額度；fast／ultra-fast 更常查不到，不用）
     """
     log_print(f"\n🔍 [Tool 調用] 7L 正在使用 Google / 網路搜尋: 「{query}」")
+    # 問天氣先拿預報數字（Open-Meteo，約 0.8 秒、帶日期）；以前網路搜尋拿到 4 月的舊新聞（2026-11-01）。查不到才往下搜
+    try:
+        from services.weather import forecast_text
+        w = forecast_text(query)
+        if w:
+            return w
+    except Exception:
+        log_swallowed()
     try:
         is_news_query = any(k in query for k in ["新聞", "時事", "今天", "昨天", "最新", "發生什麼", "快訊", "熱搜", "熱門", "突發", "大事"])
         topic_mode = "news" if is_news_query else "general"
