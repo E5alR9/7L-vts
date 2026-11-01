@@ -127,8 +127,39 @@ def cooldown_left(key: str, model: str = "") -> float:
     return max(0.0, until - time.time())
 
 
+# 整個模型卡住（不回、逾時）：跟金鑰無關，換哪把 key 都一樣。2026-11-01 實測 gemini-3.8-flash 的 REST 連「說嗨」都 40 秒沒回，
+# 深度思考把它排第一，每次先白等 13 秒才換 3.6-flash（1.4～2.7 秒）。逾時一次就整個模型先跳過一陣子。
+MODEL_TIMEOUT_COOLDOWN_SEC = 1800.0
+_MODEL_DOWN: Dict[str, float] = {}
+
+
+def report_model_timeout(model: str, seconds: float = MODEL_TIMEOUT_COOLDOWN_SEC) -> None:
+    if not model:
+        return
+    _MODEL_DOWN[model] = time.time() + seconds
+    log_print(f"🔒 [模型冷卻] {model} 逾時沒回，{int(seconds / 60)} 分鐘內先跳過、換下一個模型")
+
+
+def model_down(model: str) -> bool:
+    until = _MODEL_DOWN.get(model or "")
+    if until is None:
+        return False
+    if until > time.time():
+        return True
+    _MODEL_DOWN.pop(model, None)
+    return False
+
+
+def usable_models(models) -> List[str]:
+    """拿掉整個卡住的模型；全卡住就照原順序（不餓死）。"""
+    models = [m for m in (models or []) if m]
+    return [m for m in models if not model_down(m)] or models
+
+
 def model_cooling(model: str, keys) -> bool:
-    """這些 key 在這個模型上全都冷卻中：整個模型先跳過，換下一個（鋼琴挑模型用）。"""
+    """這些 key 在這個模型上全都冷卻中、或整個模型卡住：整個模型先跳過，換下一個（鋼琴挑模型用）。"""
+    if model_down(model):
+        return True
     keys = list(keys)
     return bool(keys) and all(key_cooling(k, model) for k in keys)
 

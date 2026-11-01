@@ -6717,8 +6717,9 @@ def _subagent_advice_text(requester_name: str, reply: str) -> str:
 def _subagent_gemini_pairs(models, attempts):
     """子智能體 Gemini 梯隊：空閒優先（同負載隨機打散），(key, model) 輪著試，最多 attempts 組。"""
     import random as _r
+    from core.llm_engine import usable_models   # 整個卡住的模型（逾時沒回）先跳過
     keys = [k for k in GEMINI_KEYS if k]
-    models = [m for m in (models or []) if m]
+    models = usable_models(models)
     if not keys or not models or attempts <= 0:
         return
     order = keys[:]
@@ -6863,6 +6864,9 @@ async def _gemini_tool_pass(task_ins, target, requester_name, system_instruction
         except Exception as e:
             last_err = e
             report_gemini_key_error(gkey, e, gmodel)
+            if isinstance(e, asyncio.TimeoutError):
+                from core.llm_engine import report_model_timeout
+                report_model_timeout(gmodel)   # 整個模型卡住：換 key 也一樣，先跳過（2026-11-01 3.8-flash 連「說嗨」都不回）
             log_print(f"⚠️ [Gemini 工具判定失敗 ({gmodel})]: {str(e)[:80]}")
             continue
     raise last_err if last_err is not None else RuntimeError("Gemini 工具判定梯隊全滅")
@@ -6931,6 +6935,9 @@ async def _gemini_think_pass(task_ins, target, requester_name, system_instructio
         except Exception as e:
             last_err = e
             report_gemini_key_error(gkey, e, gmodel)
+            if isinstance(e, asyncio.TimeoutError):
+                from core.llm_engine import report_model_timeout
+                report_model_timeout(gmodel)   # 整個模型卡住：換 key 也一樣，先跳過（2026-11-01 3.8-flash 連「說嗨」都不回）
             log_print(f"⚠️ [Gemini 深思失敗 ({gmodel})]: {str(e)[:80]}")
             continue
     raise last_err if last_err is not None else RuntimeError("Gemini 深思梯隊全滅")
