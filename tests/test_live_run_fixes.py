@@ -124,6 +124,8 @@ def _run_executor(text, target):
 
     ns = {"asyncio": asyncio, "time": time, "log_print": lambda *a, **k: None, "log_swallowed": lambda: None,
           "parse_hard_command": parse_hard_command, "build_slip_text": build_slip_text,
+          "extract_remember": __import__("core.hard_command", fromlist=["extract_remember"]).extract_remember,
+          "_LAST_REMEMBER": {"ts": 0.0, "content": ""}, "REMEMBER_DEDUPE_SEC": 30.0,
           "PIANO_CONTROL_TOOLS": PIANO_CONTROL_TOOLS, "STAGE_CONTROL_TOOLS": STAGE_CONTROL_TOOLS,
           "split_original_request": split_original_request, "is_stage_control": is_stage_control,
           "execute_tool_dispatch": execute_tool_dispatch, "_song_ack_missing_original": _song_ack, "spawn": __import__("core.utils", fromlist=["spawn"]).spawn,

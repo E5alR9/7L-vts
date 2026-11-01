@@ -501,6 +501,37 @@ def offer_accept_command(said: str, her_last: str):
     return []
 
 
+# 「幫我記住…」：老爸明確叫她記的事直接存進知識庫（2026-11-01 實測：她嘴上說「記住了」卻沒交辦，什麼都沒存）。
+# 寧可漏判（漏了交還主腦，她還是可以自己交辦），不可誤存：只認句首的記住／記下來，問句、「記得…嗎」不算
+_REMEMBER_RE = re.compile(r"^(?:7L|7寶|小7|七L)?[\s，,、]*(?:請|妳|你)?(?:幫我|要|給我)?(?:好好)?"
+                          r"(?:記住|記下來|記一下|記好|記起來)(?:喔|哦|唷)?[\s，,、：:]*(?P<c>.+)$")
+_REMEMBER_NOT = re.compile(r"[?？]|嗎|了沒|沒有記|不要記|別記|忘記")
+# 內容像提醒（要她到時候叫人），或沒有上下文就看不懂（這首、剛剛、現在）：不當事實存，交還主腦（Fable 2026-11-01）
+_REMEMBER_NOT_FACT = re.compile(r"提醒|叫我|鬧鐘|計時|分鐘後|小時後|等等|等一下|待會|明天早上|幾點|點叫|"
+                                r"這首|那首|這個|那個|這裡|這邊|剛剛|剛才|現在|位置")
+_LEAD_JUNK = re.compile(r"^[\s，,、。.！!？?；;：:~～…]+")
+_TRAIL_REMEMBER = re.compile(r"[，,、\s]*(?:記住|記好|記得)(?:喔|哦|唷|囉|了)?$")
+
+
+def extract_remember(text: Optional[str]) -> Optional[str]:
+    """老爸叫她記住的內容；不是這種句子回 None。"""
+    t = (text or "").strip()
+    if not t or len(t) > 120 or _REMEMBER_NOT.search(t):
+        return None
+    m = _REMEMBER_RE.match(t)
+    if not m:
+        return None
+    c = _LEAD_JUNK.sub("", m.group("c").strip())
+    c = _TRAIL_JUNK.sub("", c)
+    c = _TRAIL_MODAL.sub("", c)
+    c = _TRAIL_JUNK.sub("", _TRAIL_REMEMBER.sub("", c)).strip("，,、：: ")
+    if c.startswith(("說", "喔", "哦")):
+        c = _LEAD_JUNK.sub("", c[1:])
+    if len(c) < 3 or not _has_content_char(c) or _REMEMBER_NOT_FACT.search(c):
+        return None
+    return c
+
+
 def parse_hard_command(text: Optional[str]) -> Tuple[Optional[str], Dict]:
     """CPU 硬指令入口：把純文字拆成 (工具名, 參數)。
 
@@ -671,6 +702,11 @@ def build_slip_text(fn_name: str, fn_args: Dict, requester_name: str,
         return (f"[系統底層：收到表情請求，{done}。"
                 f"【做表情的是妳 7L 本人】請妳口頭答應一聲即可，"
                 f"絕對不要重複下達表情指令（重複會把剛開的表情關掉）。]")
+    if fn_name == "update_cloud_knowledge":
+        # 不把類別名（facts、memes…）寫進去：她可能照念出來（Fable 2026-11-01）
+        content = str(args.get("content", "")).strip()[:80]
+        return (f"[系統底層：已經把「{content}」存進妳的知識庫了，以後妳都記得。"
+                f"請妳口頭答應一聲（可以說記住了），不用再交辦一次。]")
     # 不寫原始工具名和參數字典（主腦可能照念出 pe.play_virtual_piano {'song_name': …}），改寫中文
     label = _TOOL_LABELS.get(fn_name, "處理交代的事")
     detail = "、".join(str(v).strip() for v in args.values()

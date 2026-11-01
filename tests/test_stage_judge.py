@@ -35,6 +35,8 @@ def _ns(judge_reply="", cpu=(None, {})):
           "log_print": lambda *a, **k: None, "log_swallowed": lambda: None, "groq_chat": groq_chat,
           "usage": __import__("core.usage", fromlist=["usage"]), "structured_stage_command": structured_stage_command,
           "parse_hard_command": lambda t: cpu, "run_stage_commands": run_stage_commands,
+          "extract_remember": __import__("core.hard_command", fromlist=["extract_remember"]).extract_remember,
+          "_LAST_REMEMBER": {"ts": 0.0, "content": ""}, "REMEMBER_DEDUPE_SEC": 30.0,
           "_offer_accept_cmds": lambda *a: [], "_STAGE_JUDGED": {}, "STAGE_JUDGE_WAIT_SEC": 0.3,
           "_STAGE_JUDGE_SYSTEM": "判斷", "_SING_PLAY_RE": re.compile(_const_pattern("_SING_PLAY_RE")),
           "_STAGE_JUDGE_ACTIONS": next(ast.literal_eval(n.value) for n in TREE.body if isinstance(n, ast.Assign)

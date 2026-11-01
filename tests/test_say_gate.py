@@ -218,7 +218,8 @@ def _nudge_ns(says=(), singing=False, talking_for=0.0, tries=1):
                is_singing_active=lambda: singing, log_print=lambda *a: None, send_brain_slip=slips.append,
                _MENTION_STOP={"老爸", "今天"}, _RECENT_SAYS=collections.deque(), _AWAITING_RESULTS={},
                stage=SimpleNamespace(ai_state=lambda: "TALKING" if time.time() < t_end else "IDLE"),
-               speech_queue=asyncio.Queue(), _SAY_LOCK=asyncio.Lock())
+               speech_queue=asyncio.Queue(), _SAY_LOCK=asyncio.Lock(), _OWED_RESULTS=[],
+               LIVE_SILENT_CONTEXT_QUEUE=asyncio.Queue(), log_swallowed=lambda *a: None, is_live_brain_active=lambda: True)
     for t in says:
         ns["_RECENT_SAYS"].append((time.time() + 1, t))
         ns["LAST_SAY_TS"] = time.time() - 3   # 講完一陣子了（算在交辦之後：sent_ts 給更早的）

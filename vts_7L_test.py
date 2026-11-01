@@ -189,7 +189,7 @@ from core import eventlog
 from core.speech_queue import SpeechQueue
 from core.barge_in import BargeInDetector
 from core.hard_command import (
-    asks_to_remember_model_position, parse_hard_command, build_slip_text, display_requester,
+    asks_to_remember_model_position, parse_hard_command, build_slip_text, display_requester, extract_remember,
     parse_slip_for_song, strip_blob_noise, sanitize_search_query, rescue_claim,
     split_original_request, PIANO_CONTROL_TOOLS, is_stage_control, structured_stage_command, compose_instead_of_play,
     PLAY_TOOLS, stage_request_unasked, offer_accept_command, STAGE_ACTIONS,
@@ -377,6 +377,9 @@ def send_brain_slip(text: str, origin: str = "", said: str = "", name: str = "")
     真的送出那一刻才記，排隊中的紙條不會搶先改掉身分。
     said：觸發的那句人話（不含紙條包裝），主腦自己要彈唱時對照用；name：觀眾留言是誰講的。"""
     try:
+        if origin == "dad" and said and _OWED_RESULTS and "（另外，妳還欠" not in text:
+            # 欠著的結果附在老爸下一句話上，請她順便講（電擊、獎勵這類事件紙條沒有 said，不附；重送的紙條已經附過的不再附）
+            text = text + _owed_note(time.time())
         LIVE_API_SYSTEM_PROMPT_QUEUE.put_nowait((text, origin, said, name) if origin else text)
         if origin and said:
             _LAST_HUMAN_SLIP_TS[(origin, name or "")] = time.time()
@@ -384,6 +387,28 @@ def send_brain_slip(text: str, origin: str = "", said: str = "", name: str = "")
     except Exception:
         log_swallowed()
         return False
+
+
+# 提醒到最後還是沒講出口的交辦結果：[(時間, 要講給誰, 結果)]。老爸下一句打字時附在紙條上請她順便講
+#（2026-11-01 實測：查天氣的結果回來時老爸接著叫她設計時器，提醒兩次她都在講計時器，天氣就再也沒講）
+_OWED_RESULTS = []
+OWED_RESULT_SEC = 300.0   # 欠超過這麼久就不提了（話題早就過了）
+
+
+def _owed_note(now: float) -> str:
+    """把欠著、這段時間她也還沒自己講到的結果寫成一句附註，並清掉清單；沒有就回空字串。"""
+    keep = []
+    for ts, who, text in _OWED_RESULTS:
+        if now - ts >= OWED_RESULT_SEC:
+            continue
+        if _result_mentioned(text, [t for st, t in list(_RECENT_SAYS) if st >= ts]):
+            continue
+        keep.append((who, text))
+    _OWED_RESULTS.clear()
+    if not keep:
+        return ""
+    return ("（另外，妳還欠" + "；".join(f"{who}剛才交辦的結果沒講出口：{text[:200]}" for who, text in keep)
+            + "——回這句的時候順便用 say 簡短講。）")
 
 
 # 每個人最近一次說話遞紙條的時間：(origin, name) → ts。看門狗重送舊紙條前對照，他之後又講了就不重送
@@ -3486,7 +3511,8 @@ async def _run_subagent_task(_task_ins, _intent, _respond, who: str = ""):
     _quiet = types.FunctionResponseScheduling.SILENT
     _no_result = ("請妳自己直接回答剛才的問題；需要即時資料的（匯率、天氣、新聞之類）"
                   "就老實說這次沒查到，不要自己編數字。要妳去做的事（計時器、記東西、表情之類）這次沒做成："
-                  "妳剛才如果說了「好了」「設好了」之類的話，要老實更正，跟對方說這次沒弄成。]")
+                  "妳剛才如果說了「好了」「設好了」之類的話，要老實更正，跟對方說這次沒弄成。"
+                  "想再試一次就直接再叫 invoke_subagent，不要只嘴上說「我再幫你設一次」卻沒叫。]")
     _if_said = "（妳剛才如果已經答應過，就輸出 [SILENCE]，不要再講一次。）"
 
     try:
@@ -3910,28 +3936,40 @@ async def _nudge_if_unsaid(result_text: str, sent_ts: float, requester: str = ""
         # 標第幾次：兩次提醒剛好隔 10 秒、全文一樣，第二次被紙條去重吃掉（2026-10-31 實機）
         send_brain_slip(f"[系統提示（第 {attempt + 1} 次提醒）：剛才交辦的結果妳還沒講出口（只在腦內想不算，要呼叫 say 才念得出來），"
                         f"現在用 say 簡短講給{who}聽：] {(result_text or '')[:500]}")
-    if content:
-        await _say_thought_if_still_unsaid(result_text, sent_ts, reply_to)
+    if content and not await _say_thought_if_still_unsaid(result_text, sent_ts, reply_to) and reply_to == "dad":
+        # 提醒完、腦內也沒講到：記成欠著，老爸下一句話時再請她順便講（語音的話悄悄放進對話當背景）。
+        # 只記老爸交辦的：觀眾的結果附在老爸的私話上，觀眾也聽不到（Fable）
+        _OWED_RESULTS.append((time.time(), who, result_text or ""))
+        del _OWED_RESULTS[:-3]
+        log_print(f"📌 [欠著的結果] 提醒完還是沒講，等老爸下一句話時再請她順便講：{(result_text or '')[:50]}")
+        if is_live_brain_active():   # Live 不在（REST 接手）時不放：斷線期間堆著，接回來早就過時了
+            try:
+                LIVE_SILENT_CONTEXT_QUEUE.put_nowait(f"（背景：妳還欠{who}剛才交辦的結果沒講出口：{(result_text or '')[:300]}"
+                                                     f"——下次跟{who}講話時順便簡短講。）")
+            except Exception:
+                log_swallowed()
 
 
-async def _say_thought_if_still_unsaid(result_text: str, sent_ts: float, reply_to: str) -> None:
+async def _say_thought_if_still_unsaid(result_text: str, sent_ts: float, reply_to: str) -> bool:
     """提醒到最後她還是只在腦內講結果（2026-10-31 實機：查天氣，三次腦內都講了台北幾度，就是沒 say，老爸什麼都沒聽到）：
-    再等一下，還是沒講就直接念她腦內講到這份結果的那段（是她自己的話，不是系統代講）。"""
+    再等一下，還是沒講就直接念她腦內講到這份結果的那段（是她自己的話，不是系統代講）。
+    回 True＝這份結果算交代了（講過、代念了、或唱歌睡覺中不用管）；False＝還是沒講。"""
     await asyncio.sleep(SAY_NUDGE_SEC)
     if is_singing_active() or IS_SLEEPING:
-        return
+        return True
     if _result_mentioned(result_text, [t for ts, t in list(_RECENT_SAYS) if ts >= sent_ts]):
-        return
+        return True
     thought = next((t for ts, t in reversed(list(_RECENT_THOUGHTS))
                     if ts >= sent_ts and _result_mentioned(result_text, [t])), "")
     spoken = TextCleanEngine.clean_speech_text(thought) if thought else ""
     if not spoken:
-        return
+        return False
     log_print(f"🗣️ [代念腦內] 提醒過了她還是只在腦內講結果，直接念她腦內那段：{spoken[:80]}")
     await speech_queue.put({"text": spoken, "target": reply_to, "raw_text": thought, "private": reply_to == "dad"})
     _RECENT_SAYS.append((time.time(), spoken))
     append_to_unified_memory(speaker="7L", target=_owner_name() if reply_to == "dad" else "直播間",
                              content=spoken, role="assistant", source="live_api")
+    return True
 
 
 async def _speak_brain_turn(vts, input_queue, text: str, who: str, reply_to: str, source: str,
@@ -4343,6 +4381,8 @@ async def continuous_live_worker(vts):
                         spawn(_accept_offer_by_voice(user_spoken, owner))   # 她剛問要不要唱、老爸說「要」（2026-10-27）
                         if _SING_PLAY_RE.search(user_spoken):   # 有唱／彈：不等她決定，直接判斷（老爸 2026-10-29）
                             _stage_mark(user_spoken, "pending")   # 當場記：同一批的工具呼叫會等這個判斷
+                            spawn(background_tool_executor(user_spoken, target="dad", requester_name=owner, voice=True))
+                        elif extract_remember(user_spoken):   # 用講的「幫我記住…」也直接存（Fable 2026-11-01：以前只有打字的會存）
                             spawn(background_tool_executor(user_spoken, target="dad", requester_name=owner, voice=True))
                         spawn(_related_context_for_speech(user_spoken))   # 查舊對話，有就當背景資料給主腦（2026-10-26）
                         try:
@@ -7177,6 +7217,10 @@ async def _judge_stage_request(text: str) -> list:
     return structured_stage_command(action=d["action"], song=str(d.get("song") or ""), song2=str(d.get("song2") or ""))
 
 
+_LAST_REMEMBER = {"ts": 0.0, "content": ""}   # 最近一次照老爸的話存進知識庫的
+REMEMBER_DEDUPE_SEC = 30.0   # 這麼久內她又交辦「記住：…」，當成同一件（說法常不一樣，不然會存兩條）
+
+
 async def background_tool_executor(user_text: str, target: str = "dad", requester_name: str = "", from_brain: bool = False,
                                    voice: bool = False):
     """
@@ -7190,6 +7234,21 @@ async def background_tool_executor(user_text: str, target: str = "dad", requeste
     """
     try:
         log_print(f"🤖 [CPU 拆解] 掃描指令: {user_text}")
+        # 0. 老爸明確叫她記住的事：直接存進知識庫，紙條告訴她存好了（打字、語音都算；觀眾、她自己交辦的不走這裡）
+        #    （2026-11-01 實測：「幫我記住我最喜歡喝無糖綠茶」她只說「記住了」，沒交辦，什麼都沒存）
+        #    她自己交辦「記住：…」也走這裡（不經 Gemini 改寫）；30 秒內程式剛照老爸的話存過，就不再存一次（Fable）。
+        #    有唱／彈的句子交給點歌判斷，不在這裡存（「幫我記住，然後唱晴天」）
+        if target == "dad" and not _SING_PLAY_RE.search(user_text or ""):
+            _mem = extract_remember(user_text)
+            if _mem:
+                _now = time.time()
+                if from_brain and _now - _LAST_REMEMBER["ts"] < REMEMBER_DEDUPE_SEC:
+                    log_print(f"⏭️ [記住] 剛剛已照老爸的話存過「{_LAST_REMEMBER['content'][:30]}」，不再存一次")
+                    return True, "update_cloud_knowledge", {"category": "facts", "content": _LAST_REMEMBER["content"]}
+                _LAST_REMEMBER.update(ts=_now, content=_mem)
+                return await run_stage_commands([("update_cloud_knowledge", {"category": "facts", "content": _mem})],
+                                                target=target, requester_name=requester_name, from_brain=from_brain,
+                                                said=user_text)
         # 1. CPU 代碼硬體判斷 (極速、零成本、零幻覺)——三道閘門見 core/hard_command.py
         #    2026-10-09：舊版只認關鍵字「唱」，把「你可以唱歌了？」抽成歌名「歌了？」、
         #    「? 又我唱了????」抽成「了????」，兩次都真的開跑 YT-DLP。改走 parse_hard_command。

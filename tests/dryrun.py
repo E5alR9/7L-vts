@@ -44,7 +44,7 @@ _TREE = ast.parse(MAIN_SRC)
 MAIN_FUNCS = (
     "chat_processor_worker", "_audience_message_to_board", "process_chat_message", "add_to_streamer_mind_board", "is_piano_song_request",
     "background_tool_executor", "run_stage_commands", "_hard_cmd_seen_recently", "_dispatch_in_background",
-    "send_brain_slip", "_send_stage_slip", "_supersede_board_requests", "_unpack_slip", "_take_slip", "_owner_text_slip", "_slip_is_dupe", "_record_slip",
+    "send_brain_slip", "_owed_note", "_send_stage_slip", "_supersede_board_requests", "_unpack_slip", "_take_slip", "_owner_text_slip", "_slip_is_dupe", "_record_slip",
     "_note_brain_origin", "_turn_who", "_vision_allowed", "_brain_requester", "_her_words_before", "_brain_replaying_old_request", "_offer_accept_cmds",
     "_stage_said_key", "_stage_mark", "_stage_already_handled",
     "is_live_brain_active", "live_brain_down_for", "use_rest_brain",
@@ -57,7 +57,7 @@ MAIN_FUNCS = (
 # 從主程式原樣載入的常數
 MAIN_CONSTS = (
     "AUDIENCE_STAGE_DECLINE", "AUDIENCE_STAGE_DENIED_NOTE", "UNASKED_STAGE_DECLINE", "_SUBAGENT_VISION_TASK_RE", "_SUBAGENT_MIRROR_TASK_RE",
-    "_SUBAGENT_TOTAL_TIMEOUT", "_HARD_CMD_DEDUPE_SEC", "_PLATFORM_LABEL",
+    "_SUBAGENT_TOTAL_TIMEOUT", "_HARD_CMD_DEDUPE_SEC", "_PLATFORM_LABEL", "_OWED_RESULTS", "OWED_RESULT_SEC", "_LAST_REMEMBER", "REMEMBER_DEDUPE_SEC",
     "_SLIP_DEDUPE_SEC", "LIVE_FALLBACK_AFTER_SEC", "LIVE_STABLE_SEC", "TURN_INPUT_MARGIN_SEC", "VISION_REPORT_QUIET_SEC", "VISION_FAIL_QUIET_SEC",
     "_BARE_PING_NAMES", "_PING_COOLDOWN_SEC", "_PING_QUIET_SEC",
     "_VIEWER_UPDATE_RE", "VIEWER_UPDATE_HINT",
@@ -196,7 +196,7 @@ class DryRun:
             **{n: getattr(hc, n) for n in ("parse_hard_command", "build_slip_text", "structured_stage_command", "compose_instead_of_play",
                                             "stage_request_unasked", "offer_accept_command", "is_stage_control", "PLAY_TOOLS",
                                             "PIANO_CONTROL_TOOLS", "split_original_request", "display_requester",
-                                            "asks_to_remember_model_position", "strip_blob_noise",
+                                            "asks_to_remember_model_position", "strip_blob_noise", "extract_remember",
                                             "sanitize_search_query")},
             # 主程式的狀態
             "IS_SLEEPING": False, "CURRENT_SPEAKING_TARGET": "none", "current_dad_task": None,
