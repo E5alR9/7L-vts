@@ -15,6 +15,14 @@ from dryrun import DryRun
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 from conftest import MAIN_SRC as MAIN  # noqa: E402
 Q_CAT = "7L 我之前有問過妳貓跟狗哪個比較可愛，妳還記得我問過嗎？"
+import pytest  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _no_real_store(monkeypatch):
+    """算「常講的話」不去讀真的向量庫。"""
+    monkeypatch.setattr(rag.rag_store, "all_texts", lambda limit=20000: [])
+    monkeypatch.setitem(rag._COMMON, "ts", 0.0)
 
 
 def _hit(text, score, age_sec):
@@ -211,3 +219,21 @@ def test_her_own_old_lines_are_capped_strong_only_and_labelled():
     block = rag.format_related(got)
     assert "（妳自己說過的）" in block and "不要照抄" in block
     assert "不要照抄" not in rag.format_related([p for p in got if not p["mine"]])
+
+
+def test_common_lines_are_not_memories(monkeypatch):
+    """庫裡出現 3 次以上的話（「收起鋼琴」「幫我查一下明天台北天氣」）是指令、招呼，不附（2026-11-01 附過的四成是這種）。"""
+    store = ["[10:00:00] E5對7L說: 幫我查一下明天台北天氣"] * 3 + ["[10:00:00] E5對7L說: 7L，幫我查一下明天台北天氣"]         + ["[11:00:00] E5對7L說: 我明天要去台北出差三天"]
+    common = rag.common_keys(store)
+    assert len(common) == 1                                                  # 「7L，」拿掉後一樣，算同一句
+    hits = [_hit("幫我查一下明天台北天氣", 0.80, 86400), _hit("我明天要去台北出差三天", 0.72, 86400)]
+    q = "明天台北會下雨嗎"
+    assert len(rag.pick_related(hits, q)) == 2
+    assert _bodies(rag.pick_related(hits, q, common=common)) == ["我明天要去台北出差三天"]
+
+    async def search(q, top_k=3, where=None):
+        return hits
+    monkeypatch.setattr(rag, "search_rag_memory", search)
+    monkeypatch.setattr(rag.rag_store, "all_texts", lambda limit=20000: store)
+    block = asyncio.run(rag.related_memories_block(q))
+    assert "出差" in block and "查一下明天台北天氣" not in block

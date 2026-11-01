@@ -244,6 +244,18 @@ async def fold_summary(texts: List[str], max_chars: int = 1200) -> str:
     return summary
 
 
+def all_texts(limit: int = 20000) -> List[str]:
+    """庫裡全部片段的文字（算哪些話常講用）；讀不到回空的。"""
+    try:
+        with _lock:
+            col = _get_collection()
+            if col.count() == 0:
+                return []
+            return [d for d in (col.get(limit=max(1, limit), include=["documents"]).get("documents") or []) if d]
+    except Exception:
+        return []
+
+
 def stats() -> dict:
     try:
         with _lock:

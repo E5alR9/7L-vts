@@ -135,6 +135,33 @@ def search_text(query: str) -> str:
     return t or query
 
 
+# 常講的話不算記憶（參考 Generative Agents 的記憶重要度，用「庫裡出現幾次」當便宜的重要度，像 IDF）：
+# 2026-11-01 翻事件記錄：附過的 1085 行舊記憶裡，約四成是庫裡有 3 份以上的話——「收起鋼琴」存了 99 份、「停止唱歌」64、
+# 「幫我查一下明天台北天氣」21、「妳今天好可愛」16——都是重複的指令、招呼，附上只是雜訊。庫裡 1312 種話有 1142 種只出現一次。
+COMMON_MIN_COPIES = 3
+COMMON_REFRESH_SEC = 600
+_COMMON = {"keys": frozenset(), "ts": 0.0}
+
+
+def common_keys(texts) -> frozenset:
+    """純函數：哪些話（_norm 後前 80 字）在這堆片段裡出現 COMMON_MIN_COPIES 次以上。"""
+    cnt = {}
+    for t in texts or ():
+        k = _norm(t)[:80]
+        if k:
+            cnt[k] = cnt.get(k, 0) + 1
+    return frozenset(k for k, n in cnt.items() if n >= COMMON_MIN_COPIES)
+
+
+def _common_now(now=None) -> frozenset:
+    """庫裡常講的話（每 COMMON_REFRESH_SEC 秒重算一次，2000 多筆約幾十毫秒）。"""
+    now = time.time() if now is None else now
+    if now - _COMMON["ts"] >= COMMON_REFRESH_SEC:
+        _COMMON["keys"] = common_keys(rag_store.all_texts())
+        _COMMON["ts"] = now
+    return _COMMON["keys"]
+
+
 def _parse_ts(iso):
     try:
         return datetime.fromisoformat(str(iso)).timestamp()
@@ -149,7 +176,7 @@ OWN_LINES_MAX = 1
 
 def pick_related(hits, query: str, now=None, k=RELATED_MAX, min_score=RELATED_MIN_SCORE,
                  strong_score=RELATED_STRONG_SCORE, skip_recent_sec=RELATED_SKIP_RECENT_SEC,
-                 min_query_content=MIN_CONTENT, need_overlap=True):
+                 min_query_content=MIN_CONTENT, need_overlap=True, common=frozenset()):
     """純函數：檢索結果 → 值得附給主腦的幾筆（規則見檔頭）。最後照時間排（好讀）。
     只查某個熟客說過的（hits 已經是他的）時，放寬：一個實字就查、不用共同實字（本來就是他的話）。
     她自己說過的最多 OWN_LINES_MAX 句、要 ≥ strong_score，標 mine。"""
@@ -171,8 +198,8 @@ def pick_related(hits, query: str, now=None, k=RELATED_MAX, min_score=RELATED_MI
         if ts and now - ts < skip_recent_sec:
             continue
         key = _norm(text)[:80]
-        if not key or key in seen or key == qn[:80] or score >= 0.95:
-            continue   # 空的、重複的、跟這句一模一樣的
+        if not key or key in seen or key == qn[:80] or score >= 0.95 or key in common:
+            continue   # 空的、重複的、跟這句一模一樣的、常講的話（指令、招呼）
         hg = content_chars(text)
         if len(hg) < MIN_CONTENT or (need_overlap and score < strong_score and not (qg & hg)):
             continue   # 記憶本身沒內容（「他自己彈的」）、或只是表面像
@@ -220,7 +247,8 @@ async def retag_viewer(old_key: str, new_key: str) -> int:
         return 0
 
 
-def latest_viewer_lines(viewer: str, query: str = "", now=None, n=VIEWER_LATEST, skip_recent_sec=RELATED_SKIP_RECENT_SEC):
+def latest_viewer_lines(viewer: str, query: str = "", now=None, n=VIEWER_LATEST, skip_recent_sec=RELATED_SKIP_RECENT_SEC,
+                        common=frozenset()):
     """熟客最近說過的幾句（一小時內的、跟這句一樣的、招呼這種沒內容的、重複的都不算），新的在前。"""
     now = time.time() if now is None else now
     qn = _norm(query)[:80]
@@ -234,7 +262,7 @@ def latest_viewer_lines(viewer: str, query: str = "", now=None, n=VIEWER_LATEST,
     out, seen = [], set()
     for r in rows:
         key = _norm(r["text"])[:80]
-        if not key or key in seen or key == qn or len(content_chars(r["text"])) < MIN_CONTENT:
+        if not key or key in seen or key == qn or key in common or len(content_chars(r["text"])) < MIN_CONTENT:
             continue
         seen.add(key)
         out.append(r)
@@ -251,17 +279,18 @@ async def related_memories_block(query: str, k: int = RELATED_MAX, timeout: floa
 
     async def _collect():
         got = []
+        common = await asyncio.to_thread(_common_now)
         if query and len(content_chars(query)) >= MIN_CONTENT:
             hits = await search_rag_memory(search_text(query), top_k=max(k * 3, 8))
-            got += pick_related(hits, query, k=k)
+            got += pick_related(hits, query, k=k, common=common)
         for v in list(viewers or [])[:2]:
             mine = []
             if query and content_chars(query):
                 vh = await search_rag_memory(search_text(query), top_k=6, where=viewer_where(v))
                 mine = pick_related(vh, query, k=VIEWER_LATEST, min_score=VIEWER_MIN_SCORE,
-                                    min_query_content=1, need_overlap=False)
+                                    min_query_content=1, need_overlap=False, common=common)
             if not mine:
-                mine = await asyncio.to_thread(latest_viewer_lines, v, query)
+                mine = await asyncio.to_thread(latest_viewer_lines, v, query, common=common)
             got += mine
         return got
 

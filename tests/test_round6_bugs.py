@@ -99,7 +99,7 @@ def test_related_memories_has_one_overall_timeout(monkeypatch):
         return []
 
     monkeypatch.setattr(rag, "search_rag_memory", slowish)
-    monkeypatch.setattr(rag, "latest_viewer_lines", lambda v, q="": [])
+    monkeypatch.setattr(rag, "latest_viewer_lines", lambda v, q="", **k: [])
     # 三次查詢各 0.04 秒，總時限 0.06 秒：整段超時、回空字串
     assert asyncio.run(rag.related_memories_block("我之前講過的貓咪小故事", viewers=["小明"], timeout=0.06)) == ""
 
