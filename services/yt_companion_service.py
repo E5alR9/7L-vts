@@ -4,7 +4,8 @@
 --------------------------------------------------------------------------
 🎯 核心設計：
 1. 【只當眼與耳，不發出聲音】：
-   - 持續接收 1 FPS 視窗裁切畫面 + 16kHz WASAPI 數位原聲音訊。
+   - 一直聽 16kHz WASAPI 數位原聲音訊；畫面每秒截一張存著，每次記錄時把這段的 3 張跟問題放同一則訊息、高解析度送
+     （2026-11-01：以前畫面每秒串流過去，Live 幾乎看不清楚）。
    - 完全靜音（不佔用喇叭、不發出 TTS 音訊），純粹充當 7L 的視覺與聽覺受體。
 2. 【播到哪，記憶沉澱到哪】：
    - 每 15~20 秒或偵測到精彩轉折時，自動將剛才看到的畫面動作、字幕與對白
@@ -176,16 +177,39 @@ class AudioLoopbackStreamer:
 
 EYE_EAR_SYSTEM_INSTRUCTION = """
 你是 7L 的「眼與耳感官神經中樞 (Visual & Auditory Sensory Nerve)」。
-你正在充當 7L 的眼睛與耳朵，透過即時畫面串流與系統原聲音訊，觀看主人電腦上的 YouTube 影片。
+你正在充當 7L 的眼睛與耳朵，一直聽著系統原聲音訊，每次記錄時會收到剛剛十幾秒的幾張影片畫面，觀看主人電腦上的 YouTube 影片。
 
 【核心規則】：
 1. 【絕對靜音】：你不是對話助手，不要對主人說話，保持安靜。
 2. 【記憶沉澱記錄員】：你的職責是將影片內容提煉為「劇情與情境筆記」，存入 7L 的記憶庫。
-3. 【記錄格式】：每當收到記錄信號或劇情發生關鍵轉折，用繁體中文記錄 1~2 句話：
+3. 【記錄格式】：每當收到記錄的問題（附著剛剛的幾張畫面），用繁體中文記錄 1~2 句話；沒被問的時候不要出聲：
    - 畫面動作、字幕與文字重點
    - 角色說了什麼關鍵台詞、笑點或情節進展
    - 保持生動、具體、客觀（例如：「灰檸檬在電車難題選了撞 4 公斤，說比較不會痛...」）。
 """
+
+NOTE_FRAME_AGES = (12.0, 6.0, 0.0)   # 記錄時送哪幾張畫面：大約幾秒前（舊到新）
+NOTE_PROMPT = ("上面是剛剛十幾秒的影片畫面（由舊到新，每張約隔 6 秒），加上妳一直在聽的聲音。"
+               "請用繁體中文，用一句話記錄這段畫面中發生的動作或人物台詞：")
+
+
+NOTE_FRAME_MAX_AGE = 20.0   # 比這舊的畫面不送（截圖一直失敗時，不能拿一分鐘前的畫面說是剛剛的）
+
+
+def pick_note_frames(frames, now: float, ages=NOTE_FRAME_AGES, max_age: float = NOTE_FRAME_MAX_AGE) -> list:
+    """每秒存下的畫面 [(時間, jpeg)] → 記錄要送的幾張（每個目標時間挑最接近的，不重複，舊到新）。
+    畫面不再串流給 Live（2026-11-01 實測：串流的單張畫面幾乎看不清楚，紅點測試 6 次 6 次答不出來），
+    改成記錄時跟問題放同一則訊息、高解析度送。"""
+    frames = [f for f in frames if now - f[0] <= max_age]
+    picked = []
+    for age in ages:
+        if not frames:
+            break
+        ts, jpg = min(frames, key=lambda f: abs((now - f[0]) - age))
+        if all(p[0] != ts for p in picked):
+            picked.append((ts, jpg))
+    return [jpg for ts, jpg in sorted(picked, key=lambda p: p[0])]
+
 
 def add_perception_memory(text: str):
     """將一段感官記憶加入時序隊列，並同步推送至 Web 後台視覺串流"""
@@ -246,6 +270,10 @@ async def _yt_companion_session_loop(target_hwnd, initial_rect, initial_title):
         ),
         # 影音一起送的 Live 連線沒開壓縮只撐約 2 分鐘就被伺服器關掉（2026-10-30 健檢）
         context_window_compression=types.ContextWindowCompressionConfig(sliding_window=types.SlidingWindow()),
+        # 記錄時的畫面跟問題放同一則訊息、高解析度送（老爸 2026-11-01：用 Live 看圖的都改高解析度同一則訊息）
+        media_resolution=types.MediaResolution.MEDIA_RESOLUTION_HIGH,
+        # 影片裡有人講話不准打斷她寫筆記：以前影片聲音一觸發，寫到一半的筆記就被清掉（Fable 2026-11-01）
+        realtime_input_config=types.RealtimeInputConfig(activity_handling=types.ActivityHandling.NO_INTERRUPTION),
     )
 
     try:
@@ -260,6 +288,16 @@ async def _yt_companion_session_loop(target_hwnd, initial_rect, initial_title):
             # 啟動時沉澱第一筆認知
             add_perception_memory(f"開始陪伴老爸觀看 YouTube 影片《{initial_title[:30]}》")
 
+            note_frames = deque(maxlen=20)   # 最近 20 秒每秒一張 (時間, jpeg)
+            note_turn = {"sent": 0.0, "turn_start": 0.0}   # 筆記題什麼時候送出、這一輪回答什麼時候開始
+
+            def _grab(bbox):
+                shot = ImageGrab.grab(bbox=bbox)
+                shot.thumbnail((1280, 720))
+                buf = io.BytesIO()
+                shot.save(buf, format="JPEG", quality=75)
+                return buf.getvalue()
+
             # 任務 1: 畫面採集 (1 FPS)
             async def _video_worker():
                 global LATEST_YT_FRAME_BYTES
@@ -267,16 +305,12 @@ async def _yt_companion_session_loop(target_hwnd, initial_rect, initial_title):
                 while session_running and IS_YT_WATCHER_ENABLED:
                     try:
                         bbox = (current_rect[0], current_rect[1], current_rect[2], current_rect[3]) if current_rect else None
-                        shot = ImageGrab.grab(bbox=bbox)
-                        shot.thumbnail((1024, 576))
-                        buf = io.BytesIO()
-                        shot.save(buf, format="JPEG", quality=70)
-                        jpeg_bytes = buf.getvalue()
+                        jpeg_bytes = await asyncio.to_thread(_grab, bbox)   # 截圖、縮圖、壓縮在背景做，不卡主迴圈
                         LATEST_YT_FRAME_BYTES = jpeg_bytes
-
-                        await session.send_realtime_input(
-                            video=types.Blob(data=jpeg_bytes, mime_type="image/jpeg")
-                        )
+                        # 只存起來，記錄時才跟問題一起送（不再串流：串流的畫面 Live 幾乎看不清楚）。
+                        # YouTube 剛剛還在前景才存：切走後那幾秒截到的是蓋在上面的別的視窗（Fable）
+                        if time.time() - last_seen_time < 1.5:
+                            note_frames.append((time.time(), jpeg_bytes))
                     except Exception:
                         log_swallowed()
                     await asyncio.sleep(1.0)
@@ -313,9 +347,16 @@ async def _yt_companion_session_loop(target_hwnd, initial_rect, initial_title):
                 await asyncio.sleep(6.0) # 給連線初期幾秒積累
                 while session_running and IS_YT_WATCHER_ENABLED:
                     try:
-                        # 促使模型將最近這段的視聽內容做一個 1~2 句的感官沉澱筆記
-                        await session.send_realtime_input(text="請用繁體中文，用一句話記錄剛剛畫面中發生的動作或人物台詞：")
-                        await session.send_realtime_input(activity_end=types.ActivityEnd())
+                        # 促使模型將最近這段的視聽內容做一個 1~2 句的感官沉澱筆記：這段的幾張畫面跟問題同一則訊息送
+                        now = time.time()
+                        shots = pick_note_frames(list(note_frames), now)
+                        # 沒有新鮮畫面不問（問了它會照提示詞編一個畫面）；上一題還沒答完也先不問（新題會把它打斷）
+                        if shots and now - note_turn["sent"] > 15.0:
+                            parts = [types.Part.from_bytes(data=j, mime_type="image/jpeg") for j in shots]
+                            note_turn["sent"] = now
+                            await session.send_client_content(
+                                turns=types.Content(role="user", parts=parts + [types.Part(text=NOTE_PROMPT)]),
+                                turn_complete=True)
                     except Exception:
                         log_swallowed()
                     await asyncio.sleep(18.0) # 每 18 秒沉澱一次記憶
@@ -334,18 +375,24 @@ async def _yt_companion_session_loop(target_hwnd, initial_rect, initial_title):
                             # 🔇 關鍵：完全不播放 part.inline_data，保持安靜！
                             if hasattr(content, "output_transcription") and content.output_transcription:
                                 if hasattr(content.output_transcription, "text") and content.output_transcription.text:
+                                    if not full_turn_text:
+                                        note_turn["turn_start"] = time.time()
                                     full_turn_text.append(content.output_transcription.text)
 
                             if getattr(content, "interrupted", False):
                                 full_turn_text.clear()
 
                             if getattr(content, "turn_complete", False):
-                                if full_turn_text:
+                                # 只收回答筆記題的那一輪（有附畫面）；影片聲音自己觸發的回話沒看到畫面，不當筆記（Fable）
+                                is_note = note_turn["sent"] and note_turn["turn_start"] >= note_turn["sent"]
+                                if full_turn_text and is_note:
                                     complete_text = "".join(full_turn_text).strip()
                                     # 濾除非筆記的客套話
                                     if complete_text and len(complete_text) > 3:
                                         add_perception_memory(complete_text)
-                                    full_turn_text.clear()
+                                if is_note:
+                                    note_turn["sent"] = 0.0   # 這題答完了：下一次可以再問
+                                full_turn_text.clear()
 
             # 併發啟動
             v_task = asyncio.create_task(_video_worker())
