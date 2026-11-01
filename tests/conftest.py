@@ -56,6 +56,8 @@ def _memory_files_in_tmp(tmp_path_factory):
             mp.setattr(mem, name, os.path.join(tmp, os.path.basename(getattr(mem, name))))
         mp.setattr(db, "db", None)
         mp.setattr(rag_service, "add_rag_memory", _no_rag)
+        mp.setattr(rag_service.rag_store, "all_texts", lambda limit=20000: [])   # 算常講的話不讀真的庫（2026-11-01）
+        mp.setattr(rag_service.rag_store, "stats", lambda: {"count": 0})
         mp.setattr(desktop_helper, "get_answer", _no_desktop)   # 查資料備援、深度思考會叫它
         mp.setattr(desktop_helper, "prewarm", lambda: False)
         yield tmp

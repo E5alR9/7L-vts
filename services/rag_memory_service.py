@@ -2,6 +2,7 @@ import os
 import re
 import time
 import asyncio
+import threading
 from datetime import datetime
 import uuid
 
@@ -140,7 +141,8 @@ def search_text(query: str) -> str:
 # 「幫我查一下明天台北天氣」21、「妳今天好可愛」16——都是重複的指令、招呼，附上只是雜訊。庫裡 1312 種話有 1142 種只出現一次。
 COMMON_MIN_COPIES = 3
 COMMON_REFRESH_SEC = 600
-_COMMON = {"keys": frozenset(), "ts": 0.0}
+_COMMON = {"keys": frozenset(), "ts": 0.0, "count": -1}
+_COMMON_BUSY = threading.Lock()   # 一次只讓一條執行緒重算（超時被取消的那條還在算時，後面的回話直接用舊的）
 
 
 def common_keys(texts) -> frozenset:
@@ -154,11 +156,16 @@ def common_keys(texts) -> frozenset:
 
 
 def _common_now(now=None) -> frozenset:
-    """庫裡常講的話（每 COMMON_REFRESH_SEC 秒重算一次，2000 多筆約幾十毫秒）。"""
+    """庫裡常講的話：每 COMMON_REFRESH_SEC 秒、或庫的筆數變了一成以上（清空、整批灌回）就重算（2000 多筆約 30 毫秒）。"""
     now = time.time() if now is None else now
-    if now - _COMMON["ts"] >= COMMON_REFRESH_SEC:
-        _COMMON["keys"] = common_keys(rag_store.all_texts())
-        _COMMON["ts"] = now
+    count = rag_store.stats().get("count", -1)
+    stale = now - _COMMON["ts"] >= COMMON_REFRESH_SEC or abs(count - _COMMON["count"]) > max(20, _COMMON["count"] // 10)
+    if stale and _COMMON_BUSY.acquire(blocking=False):
+        try:
+            _COMMON["keys"] = common_keys(rag_store.all_texts())
+            _COMMON["ts"], _COMMON["count"] = now, count
+        finally:
+            _COMMON_BUSY.release()
     return _COMMON["keys"]
 
 

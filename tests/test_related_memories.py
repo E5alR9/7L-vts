@@ -22,7 +22,10 @@ import pytest  # noqa: E402
 def _no_real_store(monkeypatch):
     """算「常講的話」不去讀真的向量庫。"""
     monkeypatch.setattr(rag.rag_store, "all_texts", lambda limit=20000: [])
+    monkeypatch.setattr(rag.rag_store, "stats", lambda: {"count": 0})
     monkeypatch.setitem(rag._COMMON, "ts", 0.0)
+    monkeypatch.setitem(rag._COMMON, "keys", frozenset())
+    monkeypatch.setitem(rag._COMMON, "count", -1)
 
 
 def _hit(text, score, age_sec):
@@ -237,3 +240,16 @@ def test_common_lines_are_not_memories(monkeypatch):
     monkeypatch.setattr(rag.rag_store, "all_texts", lambda limit=20000: store)
     block = asyncio.run(rag.related_memories_block(q))
     assert "出差" in block and "查一下明天台北天氣" not in block
+
+
+def test_common_cache_refreshes_when_store_is_reset_or_refilled(monkeypatch):
+    store = ["[10:00:00] E5對7L說: 收起鋼琴"] * 30
+    monkeypatch.setattr(rag.rag_store, "all_texts", lambda limit=20000: list(store))
+    monkeypatch.setattr(rag.rag_store, "stats", lambda: {"count": len(store)})
+    assert len(rag._common_now(now=1000.0)) == 1
+    store.clear()                                                     # 清記憶：筆數變了，不用等 10 分鐘
+    assert rag._common_now(now=1001.0) == frozenset()
+    with rag._COMMON_BUSY:                                            # 別條執行緒正在算：直接用舊的，不排隊
+        store.extend(["[10:00:00] E5對7L說: 停止唱歌"] * 30)
+        assert rag._common_now(now=1002.0) == frozenset()
+    assert len(rag._common_now(now=1003.0)) == 1
