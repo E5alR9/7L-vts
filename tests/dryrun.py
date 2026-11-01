@@ -38,13 +38,17 @@ from core.prompts import TextCleanEngine, neutralize_viewer_text
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MAIN_SRC = open(os.path.join(ROOT, "vts_7L_test.py"), encoding="utf-8").read()
+
+
+async def _no_hint():
+    return ""
 _TREE = ast.parse(MAIN_SRC)
 
 # 從主程式原樣載入的函式（這一串的真實行為）
 MAIN_FUNCS = (
     "chat_processor_worker", "_audience_message_to_board", "process_chat_message", "add_to_streamer_mind_board", "is_piano_song_request",
     "background_tool_executor", "run_stage_commands", "_hard_cmd_seen_recently", "_dispatch_in_background",
-    "send_brain_slip", "_owed_note", "_send_stage_slip", "_supersede_board_requests", "_unpack_slip", "_take_slip", "_owner_text_slip", "_slip_is_dupe", "_record_slip",
+    "send_brain_slip", "_owed_note", "_intent_hint", "_send_stage_slip", "_supersede_board_requests", "_unpack_slip", "_take_slip", "_owner_text_slip", "_slip_is_dupe", "_record_slip",
     "_note_brain_origin", "_turn_who", "_vision_allowed", "_brain_requester", "_her_words_before", "_brain_replaying_old_request", "_offer_accept_cmds",
     "_stage_said_key", "_stage_mark", "_stage_already_handled",
     "is_live_brain_active", "live_brain_down_for", "use_rest_brain",
@@ -193,6 +197,8 @@ class DryRun:
             "parse_input_item": ins.parse_input_item, "classify": ins.classify, "is_operator": ins.is_operator,
             "sleep_wake_decision": ins.sleep_wake_decision, "VIEWER_SOURCES": ins.VIEWER_SOURCES,
             "WAKE_WORDS": ins.WAKE_WORDS,
+            # 語意分流要問 Groq：模擬跑不打 API，一律不加提示（分流本身在 tests/test_intent_router.py 測）
+            "intent_router": pytypes.SimpleNamespace(slip_hint=lambda *a, **k: _no_hint()),
             **{n: getattr(hc, n) for n in ("parse_hard_command", "build_slip_text", "structured_stage_command", "compose_instead_of_play",
                                             "stage_request_unasked", "offer_accept_command", "is_stage_control", "PLAY_TOOLS",
                                             "PIANO_CONTROL_TOOLS", "split_original_request", "display_requester",

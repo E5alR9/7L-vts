@@ -185,6 +185,7 @@ from core.paths import DATA_DIR   # 執行時資料夾 data/：記憶、聲紋�
 import core.stage_state as stage
 from core import usage, promptkit, prosody   # prosody：說話的語速、音高、大小聲（2026-10-31）
 from core import promise_check   # 承諾追蹤：答應了沒做就提醒（2026-11-01）
+from core import intent_router   # 語意指令分流：老爸打的字像要她做事，紙條提醒她交辦（2026-11-01）
 from core import volume as volume_ctl   # 後台的說話／唱歌音量滑桿（2026-11-01）
 from core import eventlog
 from core.speech_queue import SpeechQueue
@@ -7251,6 +7252,20 @@ async def _judge_stage_request(text: str) -> list:
     return structured_stage_command(action=d["action"], song=str(d.get("song") or ""), song2=str(d.get("song2") or ""))
 
 
+async def _intent_hint(user_input: str, owner: str) -> str:
+    """老爸打的字像要她做事（設提醒、記東西、查資料）→ 紙條後面加一句提醒她交辦（core/intent_router）。
+    程式已經直接處理的（幫我記住、點歌／彈琴）不加。"""
+    try:
+        handled = bool(extract_remember(user_input)) or bool(_SING_PLAY_RE.search(user_input or ""))
+        hint = await intent_router.slip_hint(user_input, owner, handled_by_cpu=handled)
+        if hint:
+            log_print(f"🧭 [語意分流] {hint[:60]}")
+        return hint
+    except Exception:
+        log_swallowed()
+        return ""
+
+
 _LAST_REMEMBER = {"ts": 0.0, "content": ""}   # 最近一次照老爸的話存進知識庫的
 REMEMBER_DEDUPE_SEC = 30.0   # 這麼久內她又交辦「記住：…」，當成同一件（說法常不一樣，不然會存兩條）
 
@@ -7489,8 +7504,8 @@ async def process_chat_message(vts, input_queue, user_input: str, user_audio_b64
             # 以前純閒聊先照關鍵字丟給桌面版 Gemini 代答（每句多等 20 多秒、看螢幕也被丟過去）；
             # 2026-10-29 老爸：交給主腦，要查東西時她自己選桌面版（ask_desktop）還是 API 子代理
             try:
-                send_brain_slip(_owner_text_slip(owner, user_input) + await _related_memories_block(user_input),
-                                origin="dad", said=user_input)
+                send_brain_slip(_owner_text_slip(owner, user_input) + await _related_memories_block(user_input)
+                                + await _intent_hint(user_input, owner), origin="dad", said=user_input)
             except Exception: log_swallowed()
             return
         if check_immediate_shutdown(user_input):
@@ -7538,6 +7553,8 @@ async def process_chat_message(vts, input_queue, user_input: str, user_audio_b64
         if interrupted_context:
             slip += f"（他前一句「{interrupted_context}」還沒講完就接了這句，兩句一起理解）"
         slip += await _related_memories_block(user_input)   # 回話前先查舊對話（2026-10-26）
+        if not user_audio_b64:
+            slip += await _intent_hint(user_input, owner)
         send_brain_slip(slip, origin="dad", said=user_input)
     except asyncio.CancelledError:
         pass
