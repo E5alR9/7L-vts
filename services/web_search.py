@@ -115,7 +115,7 @@ def _desktop_search(query: str) -> str:
     return "\n".join(f"- {ln}" for ln in lines[:6])
 
 
-def search_google(query: str, depth: str = "basic") -> str:
+def search_google(query: str, depth: str = "basic", allow_desktop: bool = True) -> str:
     """使用 Google / 網路搜尋引擎查詢最新的即時資訊、天氣、時事新聞或未知知識。
     
     Args:
@@ -151,7 +151,7 @@ def search_google(query: str, depth: str = "basic") -> str:
                 err = res.get("error") if isinstance(res, dict) else res
                 log_print(f"⚠️ [網路搜尋] Tavily 失敗，改問桌面版 Gemini：{str(err)[:120]}")
 
-        desk = _desktop_search(query)
+        desk = _desktop_search(query) if allow_desktop else ""
         if desk:
             return desk
 
@@ -176,50 +176,73 @@ PREFETCH_MAX_AGE = 30.0
 PREFETCH_WAIT_SEC = 8.0
 _PREFETCH = {"text": "", "ts": 0.0, "future": None}
 _PREFETCH_POOL = None
-_FILLER = re.compile(r"^(7L|七L)[，,、\s]*|幫(我|老爸|忙)|查(一下|查看|查|詢)?|看(一下|看)|上網|搜尋|一下|請|麻煩|告訴我|跟我說|給我")
+# 句首的客套、叫她查的字（只拿句首的：「申請」「檢查」「好看」裡的字不能砍，Fable 審查）
+_LEAD = ("7L", "七L", "，", ",", "、", " ", "幫我", "幫老爸", "幫忙", "請", "麻煩", "上網查", "上網", "搜尋", "搜", "查查看", "查一下",
+         "查查", "查詢", "查", "看一下", "看看", "一下", "告訴我", "跟我說", "給我")
 _OTHER_JOB = re.compile(r"提醒|計時|鬧鐘|分鐘後|秒後|小時後|記住|記下|唱|彈")   # 還夾著別件事：不先查、也不拿
+_WHEN = re.compile(r"今天|明天|後天|大後天|昨天|前天|今晚|明晚|週末|這週|下週|上週|本週|這個月|下個月|今年|去年|明年|現在")
+_PAST = re.compile(r"上次|之前|以前|記得|說過|講過|問過")   # 問過去的事：要查的是記憶（search_knowledge），不是網路
 
 
 def _prefetch_query(text: str, now=None) -> str:
-    """老爸原句 → 搜尋字串：拿掉「幫我查一下」這些；「今年、去年、最近」換成真的年月——子智能體的工具判定會這樣寫，
+    """老爸原句 → 搜尋字串：拿掉句首「幫我查一下」這些；「今年、去年、最近」換成真的年月——子智能體的工具判定會這樣寫，
     先查不經過它，原句「今年金馬獎」搜到的是去年的（2026-11-01 模擬版：答成去年得獎的《大濛》）。"""
     from datetime import datetime
     now = now or datetime.now()
-    q = _FILLER.sub("", (text or "").strip()).strip(" ，,。？?！!") or (text or "").strip()
+    q = (text or "").strip()
+    changed = True
+    while changed:
+        changed = False
+        for w in _LEAD:
+            if q.startswith(w):
+                q, changed = q[len(w):], True
+    q = q.strip(" ，,。？?！!") or (text or "").strip()
     q = q.replace("今年", f"{now.year}年").replace("去年", f"{now.year - 1}年")
     if re.search(r"最近|最新|近期|新上映|這週|本週|這個月", q) and str(now.year) not in q:
         q += f" {now.year}年{now.month}月"
     return q
 
 
-def _chars(text: str) -> set:
-    return set(re.findall(r"[一-鿿]|[A-Za-z0-9]+", _prefetch_query(text))) - set("的了嗎呢吧啊我你妳他她是在有")
+def _same_question(a: str, b: str) -> bool:
+    """兩句是不是問同一件事：數字、英文要一模一樣；中文的相鄰兩字（「台中」「台北」）兩邊重疊要七成五以上。
+    以前只看單字有沒有出現：「明天台北會不會下雨」對「明天台中會不會下雨」算一樣，拿台中的預報當台北講（Fable 審查）。"""
+    qa, qb = _prefetch_query(a), _prefetch_query(b)
+    if set(re.findall(r"[A-Za-z0-9]+", qa.lower())) != set(re.findall(r"[A-Za-z0-9]+", qb.lower())):
+        return False
+    if set(_WHEN.findall(qa)) != set(_WHEN.findall(qb)):   # 明天／後天只差一個字，重疊照樣很高
+        return False
+
+    def grams(q):
+        out = set()
+        for run in re.findall(r"[\u4e00-\u9fff]+", q):
+            out.update(run[i:i + 2] for i in range(len(run) - 1))
+        return out
+    ga, gb = grams(qa), grams(qb)
+    return bool(ga and gb) and len(ga & gb) / len(ga | gb) >= 0.75
 
 
 def prefetch(text: str) -> None:
-    """語意分流判定要查資料時呼叫：背景開始搜。夾著別件事的句子不先查（原句拿去搜會查歪）。"""
+    """語意分流判定要查資料時呼叫：背景開始搜（不叫桌面版：它很慢、會搶走主腦自己要用的桌面版）。
+    夾著別件事、問過去的事的句子不先查。"""
     global _PREFETCH_POOL
-    if not text or _OTHER_JOB.search(text):
+    if not text or _OTHER_JOB.search(text) or _PAST.search(text):
         return
     import time
     from concurrent.futures import ThreadPoolExecutor
     if _PREFETCH_POOL is None:
-        _PREFETCH_POOL = ThreadPoolExecutor(max_workers=1, thread_name_prefix="search_prefetch")
+        _PREFETCH_POOL = ThreadPoolExecutor(max_workers=2, thread_name_prefix="search_prefetch")
     q = _prefetch_query(text)
-    _PREFETCH.update(text=text, ts=time.time(), future=_PREFETCH_POOL.submit(search_google, q))
+    _PREFETCH.update(text=text, ts=time.time(), future=_PREFETCH_POOL.submit(search_google, q, allow_desktop=False))
     log_print(f"🏃 [先查] 老爸像要查資料，先搜：「{q}」")
 
 
 def take_prefetch(task: str, now: float = None):
-    """子智能體拿到任務時問：有剛先搜好（或正在搜）的、講的是同一件事，就回那個 future（呼叫端 await），不然回 None。
-    同一件事＝任務的實字八成以上出現在老爸那句裡（「幫老爸查明天台中會不會下雨」對「明天台中會不會下雨」）。"""
+    """子智能體拿到任務時問：有剛先搜好（或正在搜）的、問的是同一件事，就回那個 future（呼叫端 await），不然回 None。"""
     import time
     fut = _PREFETCH.get("future")
     now = time.time() if now is None else now
-    if fut is None or now - _PREFETCH["ts"] > PREFETCH_MAX_AGE or _OTHER_JOB.search(task or ""):
-        return None
-    tc, pc = _chars(task), _chars(_PREFETCH["text"])
-    if not tc or len(tc & pc) / len(tc) < 0.8:
+    if (fut is None or now - _PREFETCH["ts"] > PREFETCH_MAX_AGE or _OTHER_JOB.search(task or "")
+            or _PAST.search(task or "") or not _same_question(task, _PREFETCH["text"])):
         return None
     _PREFETCH.update(text="", ts=0.0, future=None)   # 用一次就清掉
     return fut

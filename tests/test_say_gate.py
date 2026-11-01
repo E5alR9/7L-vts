@@ -227,6 +227,7 @@ def _nudge_ns(says=(), singing=False, talking_for=0.0, tries=1):
     for t in says:
         ns["_RECENT_SAYS"].append((time.time() + 1, t))
         ns["LAST_SAY_TS"] = time.time() - 3   # 講完一陣子了（算在交辦之後：sent_ts 給更早的）
+    _const("_NOT_REPLYING_RE", ns)
     return ns, slips
 
 
@@ -385,4 +386,22 @@ def test_reminders_are_numbered_and_her_own_thought_is_spoken_if_she_never_says_
     ns["_RECENT_THOUGHTS"].append((time.time() + 1, "嗯讓我想想"))
     asyncio.run(ns["_nudge_if_unsaid"](_WEATHER, time.time(), "老爸"))
     assert len(slips) == 2 and slips[0] != slips[1] and "第 2 次提醒" in slips[1]
+    assert ns["speech_queue"].empty()
+
+
+def test_early_thought_speaking_has_guards():
+    """腦內代念（Fable 審查）：等太久還在講話時不念、刻意先不講的不念、只湊到轉述規則字眼的不念。"""
+    rule = "（用妳自己的口吻講，但數字、日期、名稱要照資料講對；資料裡沒有的不要自己補。）"
+    good = "[EXPRESSION: 眨眼] 報告老爸，台北今天多雲時晴，21 到 27 度，下午可能下雨喔"
+    ns, slips = _nudge_ns(tries=1, talking_for=30)                 # 一直在講：等到期限先遞提醒，不搶先代念
+    ns["_RECENT_THOUGHTS"].append((time.time() + 1, good))
+    asyncio.run(ns["_nudge_if_unsaid"](_WEATHER, time.time(), "老爸"))
+    assert len(slips) == 1                                          # （提醒完還是沒講，最後才照舊代念）
+    ns, slips = _nudge_ns(tries=1)
+    ns["_RECENT_THOUGHTS"].append((time.time() + 1, "台北今天多雲時晴 21 到 27 度，老爸在跟觀眾講話，我先不插話"))
+    asyncio.run(ns["_nudge_if_unsaid"](_WEATHER, time.time(), "老爸"))
+    assert ns["speech_queue"].empty()
+    ns, slips = _nudge_ns(tries=1)
+    ns["_RECENT_THOUGHTS"].append((time.time() + 1, "資料回來了，等一下用我自己的口吻講，數字日期名稱要照資料講對"))
+    asyncio.run(ns["_nudge_if_unsaid"](_WEATHER + rule, time.time(), "老爸"))
     assert ns["speech_queue"].empty()

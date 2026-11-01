@@ -3979,16 +3979,18 @@ async def _nudge_if_unsaid(result_text: str, sent_ts: float, requester: str = ""
             if (says or LAST_SAY_TS >= sent_ts) if not content else _result_mentioned(result_text, says):
                 return
             now = time.time()
-            if (stage.ai_state() != "TALKING" and speech_queue.empty() and not _AWAITING_RESULTS
-                    and not _SAY_LOCK.locked() and now - (_BRAIN_INPUT_ORIGIN.get("ts") or 0.0) >= SAY_NUDGE_QUIET_SEC
-                    and now - LAST_SAY_TS >= 2.0):
+            quiet = (stage.ai_state() != "TALKING" and speech_queue.empty() and not _AWAITING_RESULTS
+                     and not _SAY_LOCK.locked() and now - (_BRAIN_INPUT_ORIGIN.get("ts") or 0.0) >= SAY_NUDGE_QUIET_SEC
+                     and now - LAST_SAY_TS >= 2.0)
+            if quiet:
                 break
             if now > deadline:
                 for _v in _AWAITING_RESULTS.values():   # 還有別件在等：不然她照提醒 say 也會被「先別講」擋掉
                     _v[1] = 0
                 break
             await asyncio.sleep(0.5)
-        if content and await _speak_thought_now(result_text, sent_ts, reply_to):
+        # 只在場面安靜時代念（等太久才走到這裡的，她可能正在講、say 正在飛：照舊只遞提醒，Fable 審查）
+        if content and quiet and await _speak_thought_now(result_text, sent_ts, reply_to):
             return   # 腦內已經講到這份結果：直接念她那段，不用再提醒兩輪（2026-11-01 模擬版：結果 4.6 秒就想好，提醒兩次到 32 秒才念）
         said_other = LAST_SAY_TS >= sent_ts
         log_print(f"👂 [沒開口] 結果交給她 {time.time() - sent_ts:.0f} 秒還沒講到"
@@ -4023,9 +4025,14 @@ async def _say_thought_if_still_unsaid(result_text: str, sent_ts: float, reply_t
 
 
 async def _speak_thought_now(result_text: str, sent_ts: float, reply_to: str) -> bool:
-    """她腦內（沒 say）講到這份結果的那段，有就直接念出來（是她自己的話）回 True；沒有回 False。"""
+    """她腦內（沒 say）講到這份結果的那段，有就直接念出來（是她自己的話）回 True；沒有回 False。
+    已經講過（另一件結果剛代念了同一段）算交代了；她刻意先不講（「先不插話」）的不念；
+    比對只看結果本身，不看後面「用妳自己的口吻講…」那段規則（她想「資料回來了，用自己的口吻講」會湊到，Fable 審查）。"""
+    core = re.sub(r"（用妳自己的口吻講[^）]*）", "", result_text or "")
+    if _result_mentioned(core, [t for ts, t in list(_RECENT_SAYS) if ts >= sent_ts]):
+        return True
     thought = next((t for ts, t in reversed(list(_RECENT_THOUGHTS))
-                    if ts >= sent_ts and _result_mentioned(result_text, [t])), "")
+                    if ts >= sent_ts and _result_mentioned(core, [t]) and not _NOT_REPLYING_RE.search(t)), "")
     spoken = TextCleanEngine.clean_speech_text(thought) if thought else ""
     if not spoken:
         return False
