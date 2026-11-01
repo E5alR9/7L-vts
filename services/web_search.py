@@ -115,12 +115,13 @@ def _desktop_search(query: str) -> str:
     return "\n".join(f"- {ln}" for ln in lines[:6])
 
 
-def search_google(query: str, depth: str = "advanced") -> str:
+def search_google(query: str, depth: str = "basic") -> str:
     """使用 Google / 網路搜尋引擎查詢最新的即時資訊、天氣、時事新聞或未知知識。
     
     Args:
         query: 要搜尋的關鍵字或問題描述
-        depth: Tavily 搜尋深度（basic 省額度）
+        depth: Tavily 搜尋深度。預設 basic（2026-11-01 實測沒快取的新問題：basic 中位數約 1.5 秒、advanced 約 3.4 秒，
+               摘要出來的答案一樣好，basic 還只扣一半額度；fast／ultra-fast 更常查不到，不用）
     """
     log_print(f"\n🔍 [Tool 調用] 7L 正在使用 Google / 網路搜尋: 「{query}」")
     try:

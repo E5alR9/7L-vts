@@ -68,7 +68,7 @@
 
 | 服務 | 用途 | 程式 |
 |---|---|---|
-| Tavily → DuckDuckGo | 網路搜尋、找線上琴譜（Tavily 額度爆了自動改 DuckDuckGo） | `services/web_search.py`、`services/onlinesequencer_engine.py` |
+| Tavily → DuckDuckGo | 網路搜尋（basic 深度，約 1.5 秒）、找線上琴譜（Tavily 額度爆了自動改 DuckDuckGo） | `services/web_search.py`、`services/onlinesequencer_engine.py` |
 | edge-tts（微軟） | 說話備援聲音（曉伊掛了才用；套件要 7.3.1 以上） | `services/tts_router._synth_edge` |
 | Google 免費語音辨識 | **只在 Live 主腦斷線時**聽麥克風（非官方端點，隨時可能失效） | `listen_once_fast` |
 | Firestore | 記憶、觀眾檔、知識庫、事件紀錄的雲端備份（本機 JSON 是正本；`FIREBASE_ENABLED=0` 關掉） | `core/memory.py`、`core/db.py`、`core/eventlog.py` |
