@@ -507,11 +507,22 @@ async def update_cloud_prompt_field(field_name: str, content: str, action: str =
             log_print(f"🧠 [7L 雲端認知演進] 7L 自主學會新梗：『{clean_val}』")
     elif clean_field in ["facts", "learned_facts", "知識", "事實"]:
         facts = kn.get("learned_facts", [])
-        if clean_val not in facts:
+        if clean_val in facts:
+            return
+        # 先看跟舊的有沒有重複或矛盾：更新那條、重複不存、不相干才新增（core/fact_merge，2026-11-01）
+        from core import fact_merge
+        op, idx, merged = await fact_merge.reconcile(clean_val, facts)
+        if op == "skip":
+            log_print(f"🧠 [知識庫] 「{clean_val}」跟已經記的一樣，不再存一條")
+            return
+        if op == "update" and idx is not None:
+            log_print(f"🧠 [知識庫] 更新舊的一條：『{facts[idx]}』→『{merged}』")
+            facts[idx] = merged
+        else:
             facts.append(clean_val)
             del facts[:-100]
-            kn["learned_facts"] = facts
             log_print(f"🧠 [7L 雲端認知演進] 7L 自主學會新事實：『{clean_val}』")
+        kn["learned_facts"] = facts
     elif clean_field in ["rules", "custom_rules", "規範", "原則"]:
         rules = kn.get("custom_rules", [])
         if clean_val not in rules:

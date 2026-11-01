@@ -529,7 +529,8 @@ def extract_remember(text: Optional[str]) -> Optional[str]:
         c = _LEAD_JUNK.sub("", c[1:])
     if len(c) < 3 or not _has_content_char(c) or _REMEMBER_NOT_FACT.search(c):
         return None
-    return c
+    # 老爸講的「我」存成「老爸」：知識庫整段放進她的提示詞，存「我最喜歡喝無糖綠茶」她會以為是自己喜歡（2026-11-01）
+    return re.sub(r"我(?!們)", "老爸", c)
 
 
 def parse_hard_command(text: Optional[str]) -> Tuple[Optional[str], Dict]:

@@ -10,12 +10,12 @@ from dryrun import DryRun
 
 
 def test_extract_remember_only_takes_clear_requests():
-    assert extract_remember("7L 幫我記住，我最喜歡喝無糖綠茶") == "我最喜歡喝無糖綠茶"
+    assert extract_remember("7L 幫我記住，我最喜歡喝無糖綠茶") == "老爸最喜歡喝無糖綠茶"   # 「我」存成老爸
     assert extract_remember("記住：老爸不吃香菜") == "老爸不吃香菜"
-    assert extract_remember("妳要記住喔，我生日是 1 月 9 號") == "我生日是 1 月 9 號"
+    assert extract_remember("妳要記住喔，我生日是 1 月 9 號") == "老爸生日是 1 月 9 號"
     assert extract_remember("幫我記一下明天要繳電費喔") == "明天要繳電費"
-    assert extract_remember("記住！我喜歡貓") == "我喜歡貓"                          # 開頭標點去掉
-    assert extract_remember("記住我喜歡貓，記住喔") == "我喜歡貓"                    # 尾巴的「記住喔」去掉
+    assert extract_remember("記住！我喜歡貓") == "老爸喜歡貓"                          # 開頭標點去掉
+    assert extract_remember("記住我喜歡貓，記住喔") == "老爸喜歡貓"                    # 尾巴的「記住喔」去掉
     for no in ("妳記得我昨天說什麼嗎？", "記住了嗎", "你要記住喔", "我老是記不住", "他叫我記住這個",
                "不要記這個", "記得帶傘", "幫我記住", "記住？", "",
                # Fable 2026-11-01：提醒、沒上下文看不懂的，不當事實存（交還主腦）
@@ -35,7 +35,7 @@ def test_dad_remember_request_is_saved_but_viewers_are_not():
             return d
     d = asyncio.run(go("dad"))
     saved = [t for t in d.tools if t[0] == "update_cloud_knowledge"]
-    assert saved and saved[0][1] == {"category": "facts", "content": "我最喜歡喝無糖綠茶"} and saved[0][2] == "dad"
+    assert saved and saved[0][1] == {"category": "facts", "content": "老爸最喜歡喝無糖綠茶"} and saved[0][2] == "dad"
     assert d.problems == []
     d = asyncio.run(go("viewer"))
     assert not [t for t in d.tools if t[0] == "update_cloud_knowledge"]          # 觀眾說的不算
