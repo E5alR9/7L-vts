@@ -80,7 +80,7 @@ def subagent_system(now=None) -> str:
     now = now or datetime.now()
     return (load_prompt("7L_subagent.md").rstrip() +
             f"\n- 今天是 {now.year} 年 {now.month} 月 {now.day} 日（星期{_WEEKDAYS[now.weekday()]}），現在 {now:%H:%M}。"
-            "「今天、明天、最近」照這個日期算；搜尋字串不要自己加別的年份或日期。")
+            f"「今天、明天、最近、今年」照這個日期算：要查最近或今年的事，搜尋字串寫上 {now.year} 年，不要寫別的年份。")
 
 
 # 看板哨兵：只決定她現在該不該開口（[SILENCE] 或 [SPEAK: …]）

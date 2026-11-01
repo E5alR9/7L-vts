@@ -61,6 +61,20 @@ INTERACTIONS_TOOLS = [
         }
     },
     {
+        # 2026-11-01 模擬版：老爸說「取消剛剛那個計時器」，沒有這個工具，她只能嘴上說取消了，時間到照響
+        "type": "function",
+        "name": "cancel_timer",
+        "description": "取消還沒響的提醒或計時器：「取消剛剛那個計時器」「不用提醒我喝水了」「計時器全部取消」。不給條件就取消最近設的那一個",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "keyword": {"type": "string", "description": "要取消的提醒內容裡的字，例如「喝水」「收衣服」；沒指定哪一個就留空"},
+                "all": {"type": "boolean", "description": "要全部取消才填 true"}
+            },
+            "required": []
+        }
+    },
+    {
         "type": "function",
         "name": "generate_ai_image",
         "description": "繪製 AI 圖片",

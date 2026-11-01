@@ -69,6 +69,30 @@ class LiveTimerSensorHub:
         log_print(f"⏱️ [API Live 定時感測啟動] 註冊任務 #{self._counter}: {seconds} Ticks ({format_ticks_to_human(seconds)}) ➔ 「{clean_msg}」")
         return timer_item
 
+    def cancel(self, keyword: str = "", everything: bool = False, caller_user: str = "") -> List[Dict[str, Any]]:
+        """取消還在跑的計時器，回取消掉的那幾個（沒有就空的）。everything：全部；keyword：提醒內容有這些字的；
+        都沒給：最近設的那一個。caller_user：不是全部取消時先在他自己設的（或沒記是誰設的）裡面找，找不到才看全部——
+        老爸說「取消剛剛那個」，不能取消到觀眾剛設的（Fable 審查）。
+        2026-11-01 模擬版：老爸說「取消剛剛那個計時器」，她說取消了，其實沒有這個工具，五分鐘後照響。"""
+        active = [t for t in self.timers.values() if t.get("status") == "sensing"]
+        kw = re.sub(r"\s+", "", keyword or "")
+
+        def _pick(pool):
+            if kw:
+                return [t for t in pool if kw in re.sub(r"\s+", "", t.get("message", ""))]
+            return sorted(pool, key=lambda t: t["created_at"])[-1:]
+
+        if everything:
+            picked = active
+        else:
+            mine = [t for t in active if not t.get("caller_user") or t.get("caller_user") == caller_user] if caller_user else []
+            picked = _pick(mine) or _pick(active)
+        for t in picked:
+            t["status"] = "cancelled"
+            self.timers.pop(t["task_id"], None)
+            log_print(f"⏱️ [API Live 定時感測] 已取消「{t['message']}」（還剩 {format_ticks_to_human(max(0, int(t['target_time'] - time.time())))}）")
+        return picked
+
     def get_active_timers(self) -> List[Dict[str, Any]]:
         """獲取所有進行中感測任務的即時狀態清單"""
         now = time.time()
@@ -127,6 +151,9 @@ class LiveTimerSensorHub:
         """
         clean_text = text.strip()
         if not clean_text:
+            return None
+        # 「取消那個五分鐘後叫我喝水的計時器」「不用五分鐘後提醒我了」是要取消，不是再設一個（Fable 審查 2026-11-01）
+        if re.search(r"取消|不用|不要|別再|免了", clean_text):
             return None
 
         # 模式 1: 明確時間 + 後 + 叫我/提醒我

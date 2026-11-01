@@ -1271,6 +1271,11 @@ class SevenLMonitorApp {
         const txt = data.status_text || '定時感測已啟動';
         this.showToast(`⏱️ API Live 定時感測啟動：${txt}`);
       }
+    } else if (type === 'timer_cancelled') {
+      if (data) {
+        this.updateLiveTimerUI(data);
+        this.showToast(`⏱️ 已取消計時器${data.has_active_timer ? `，還在跑：${data.status_text}` : ''}`);
+      }
     } else if (type === 'timer_triggered') {
       if (data) {
         this.showToast(`🔔 定時提醒到期：${data.message || ''}`);

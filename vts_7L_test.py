@@ -243,6 +243,7 @@ _AUDIENCE_DENIED_TOOLS = frozenset({
     "set_piano_volume", "set_piano_speed", "set_piano_instrument",
     "ask_desktop", "ask_gemini_desktop", "generate_ai_image", "draw_illustration",
     "music.transcribe_song", "music.stem_pack", "midi.edit", "midi.inspect", "execute_local_python_code",
+    "cancel_timer",   # 觀眾取消老爸設的提醒（2026-11-01 加取消計時器時一起擋）
 })
 # 這一輪是誰的：主腦只有一個，以前權限只看「最後一則輸入」——觀眾留言的紙條剛送進去、老爸剛好開口，
 # 這輪就被記成老爸的，觀眾借到老爸的權限；子智能體又是做的時候才看，中間換人講話也會借到（Fable 審查，老爸 2026-10-31 要修）。
@@ -674,6 +675,8 @@ async def execute_tool_dispatch(fn_name: str, fn_args: dict, caller_target: str 
             sec = 60
         msg = fn_args.get("message", "提醒時間到")
         spawn(set_timer(sec, msg, caller_user=caller_user))
+    elif fn_name == "cancel_timer":
+        extracted_text += " " + _cancel_timers_text(fn_args, caller_user=caller_user)
     elif fn_name == "control_microphone":
         is_en = fn_args.get("is_enabled", True)
         control_microphone(is_en)
@@ -2733,6 +2736,25 @@ async def check_screen_change_via_live_api(img_bytes: bytes, current_context: st
 # ────────────────────────────────────────────────────────
 #  9. 計時器、她話裡的動作標記
 # ────────────────────────────────────────────────────────
+def _cancel_timers_text(fn_args: dict, caller_user: str = "") -> str:
+    """取消計時器（cancel_timer 工具），回一句照實講的結果：取消了哪幾個、或根本沒有在跑的（她不能說取消了卻沒取消）。
+    caller_user：先取消他自己設的（老爸說「剛剛那個」不會取消到觀眾剛設的）。"""
+    args = fn_args if isinstance(fn_args, dict) else {}
+    everything = str(args.get("all") or "").strip().lower() in ("true", "1", "yes")   # NV 偶爾回字串 "false"
+    done = live_timer_hub.cancel(keyword=str(args.get("keyword") or ""), everything=everything, caller_user=caller_user)
+    try:
+        web_dash.broadcast_event("timer_cancelled", live_timer_hub.get_sensor_summary())
+    except Exception:
+        pass
+    if done:
+        return "已取消計時器：" + "、".join(f"「{t['message']}」" for t in done) + "。"
+    left = live_timer_hub.get_active_timers()
+    if left:
+        return ("沒有找到要取消的那個計時器，現在還在跑的是：" +
+                "、".join(f"「{t['message']}」（還剩 {t['remaining_human']}）" for t in left[:5]) + "。")
+    return "現在沒有在跑的計時器，不用取消。"
+
+
 async def set_timer(seconds: int, message: str, caller_user: str = ""):
     """設定定時感測提醒 (已全面升級至 API Live 定時感測中樞)"""
     # ⚠️ 定時人不一定是老爸：caller 原樣透傳，未知就空著，提醒文案走中性
@@ -3695,11 +3717,13 @@ _LAST_RESULT_BACK_TS = 0.0   # 最近一次有子智能體結果交回給她的�
 _CLAIMS_DONE = re.compile(
     r"(設定?|設置|弄|做|查|記|存|開|關|調|排|改|換|訂|準備|搞)(好|完|到|妥|上)(了|囉|啦|嘍|喔|嚕|$|[，。！!～~])|"
     r"(設定|設置)?完成|搞定(了|囉|啦|$|[，。！!～~])|記住了|記下來了|記起來了|"
-    r"(計時器|鬧鐘|提醒).{0,4}(啟動|開始跑|在跑|跑起來)|幫你(設|記|存)了|"
-    r"已經(幫你|替你|為你|幫老爸|幫妳)?(設|弄|做|查|記|存|開|關|調|排|改|換|訂|定)(?!.{0,2}開始)")
+    r"(計時器|鬧鐘|提醒).{0,4}(啟動|開始跑|在跑|跑起來)|幫你(設|記|存|取消)了|"
+    r"取消(掉|好)(了|囉|啦|嘍|嚕)|已取消|取消成功|"
+    # 「已經幫你取消囉」：取消的結果還沒回來就先說（2026-11-01 模擬版）。光是「取消囉」不算：「那我就把喝水提醒取消囉」是要去做
+    r"已經(幫你|替你|為你|幫老爸|幫妳)?(設|弄|做|查|記|存|開|關|調|排|改|換|訂|定|取消)(?!.{0,2}開始)")
 # 同一個小句裡有這些：是「之後會…」「…嗎？」，不是說已經辦好（「查到了再跟你說」「你準備好了嗎」）
 _CLAIMS_DONE_NOT = re.compile(r"再|會|就跟|就告訴|叫你|跟你說|告訴你|跟你講|嗎|？|\?|等我|如果|之後|以後|"
-                              r"我來|交給我|讓我|已經開始")
+                              r"我來|交給我|讓我|已經開始|不取消")
 
 
 def _claims_done(text: str) -> bool:
@@ -7001,6 +7025,12 @@ async def nv_interpret_task(task_ins: str, target: str = "dad", requester_name: 
                 except Exception as _se:
                     log_print(f"⚠️ [子智能體搜尋失敗]: {str(_se)[:80]}")
                     return "report", f"[系統底層：這次搜尋失敗了，請跟{requester_name or '剛才問的人'}說待會再查，不要自己編答案。]"
+            if fn_name == "cancel_timer":
+                if target == "audience":
+                    return "advice", "[系統底層：計時器只有老爸能取消，觀眾說的不算，系統沒有執行。請妳用一句話俏皮帶過。]"
+                # 取消有沒有成功要照實講：當場做、把結果交回給她（沒有在跑的就要說沒有）
+                _res = (await execute_tool_dispatch(fn_name, fn_args, caller_target=target, caller_user=requester_name)).strip()
+                return "report", f"[系統底層：{_res}請照這個結果跟{requester_name or '剛才問的人'}說，不要多講。]"
             if fn_name == "trigger_vts_expression":
                 # 本能主、NV 備用：先讓本能做，查臉確認，沒接住才自己上（防 toggle 關表情）
                 exp_name = (fn_args or {}).get("expression_name", "")

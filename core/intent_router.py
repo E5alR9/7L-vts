@@ -13,17 +13,18 @@
 import re
 from typing import Optional
 
-HINT = re.compile(r"查|搜|找一下|看一下|看看|上網|記住|記一下|記下|記得|記起來|提醒|叫我|叫一下我|分鐘|小時|鬧鐘|倒數|計時|"
+HINT = re.compile(r"取消|查|搜|找一下|看一下|看看|上網|記住|記一下|記下|記得|記起來|提醒|叫我|叫一下我|分鐘|小時|鬧鐘|倒數|計時|"
                   r"晚點|待會|等等|等一下")
 SYSTEM = ("判斷老爸對虛擬女兒 7L 說的這句話，是不是要她現在去做下面其中一件事：\n"
-          "timer＝設計時器或過一段時間提醒／叫他；remember＝把一件關於他的事記下來；search＝上網查資料或看即時資訊。\n"
-          "只是在講自己的事、講過去發生的、問她知不知道、閒聊，都是 none。只回一個字：timer、remember、search 或 none。")
-LABELS = {"timer": "設計時器或到時候提醒", "remember": "把一件事記進知識庫", "search": "上網查資料"}
+          "timer＝設計時器或過一段時間提醒／叫他；cancel＝取消已經設好的計時器或提醒；remember＝把一件關於他的事記下來；"
+          "search＝上網查資料或看即時資訊。\n"
+          "只是在講自己的事、講過去發生的、問她知不知道、閒聊，都是 none。只回一個字：timer、cancel、remember、search 或 none。")
+LABELS = {"timer": "設計時器或到時候提醒", "cancel": "取消已經設好的計時器", "remember": "把一件事記進知識庫", "search": "上網查資料"}
 TIMEOUT_SEC = 1.5   # 紙條要等這個判斷：最多等這麼久，Groq 慢就不加提示
 
 
 async def classify(text: str) -> Optional[str]:
-    """像要做事就回類別（timer／remember／search），不像或判斷不了回 None。"""
+    """像要做事就回類別（timer／cancel／remember／search），不像或判斷不了回 None。"""
     t = (text or "").strip()
     if len(t) < 3 or len(t) > 120 or not HINT.search(t):
         return None
@@ -33,7 +34,7 @@ async def classify(text: str) -> Optional[str]:
                             temperature=0.0, max_tokens=8, timeout=TIMEOUT_SEC, total_timeout=TIMEOUT_SEC)
     except Exception:
         return None
-    m = re.search(r"timer|remember|search", ((getattr(r, "text", "") or "") if r else "").lower())
+    m = re.search(r"cancel|timer|remember|search", ((getattr(r, "text", "") or "") if r else "").lower())
     return m.group(0) if m else None
 
 

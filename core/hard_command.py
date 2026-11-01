@@ -724,6 +724,7 @@ _TOOL_LABELS = {
     "search_google": "上網搜尋",
     "search_knowledge": "查知識庫",
     "set_timer": "設定計時提醒",
+    "cancel_timer": "取消計時提醒",
     "generate_ai_image": "畫圖",
     "move_spatial_position": "移動位置",
     "open_virtual_piano": "打開鋼琴",
