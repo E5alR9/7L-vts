@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """持續感知（2026-10-29 老爸：Live 退到幕後了，讓她持續感知世界、自己決定要不要講）。"""
 import ast
+import os
 import time
 
 from conftest import MAIN_SRC as MAIN, MAIN_TREE as TREE  # noqa: E402
@@ -97,11 +98,14 @@ def test_self_initiated_say_is_capped_but_replies_and_results_are_not():
 
 def test_slip_says_what_changed_and_how_to_behave():
     import types
-    ns = _load("_autonomy_slip", _owner_name=lambda: "老爸", get_current_time_string=lambda: "下午 3:00",
+    ns = _load("_audience_present", "_audience_line", "_autonomy_slip", _owner_name=lambda: "老爸",
+               get_current_time_string=lambda: "下午 3:00",
                _BRAIN_INPUT_ORIGIN={"ts": time.time() - 600, "who": "dad", "said": "我在寫程式，妳陪我就好"}, int=int,
                pe=types.SimpleNamespace(is_piano_performing=lambda: False, is_piano_active=False),
                _AUTONOMY={"last_self_say_ts": 0.0, "last_self_say": "", "recent_self_says": ["那個對話框卡很久了耶"]},
-               AUTONOMY_PRESENT_IDLE_SEC=300.0)
+               AUTONOMY_PRESENT_IDLE_SEC=300.0, time=time, STREAMER_MIND_BOARD=[],
+               AUDIENCE_CHAT_SOURCES=frozenset({"tiktok", "twitch", "youtube"}), AUDIENCE_RECENT_SEC=1200.0,
+               log_swallowed=lambda *a: None)
     s = ns["_autonomy_slip"](["電腦畫面變了：在看貓咪影片"], {"screen": "貓咪影片", "present": False, "idle": 400}, time.time())
     assert s.startswith("[系統提示：【感知】") and "不是誰在跟妳說話" in s and "貓咪影片" in s
     assert "離開電腦約 6 分鐘" in s and "最後跟妳講話是 10 分鐘前" in s and "預設安靜" in s and "say" in s
@@ -113,6 +117,15 @@ def test_slip_says_what_changed_and_how_to_behave():
     s = ns["_autonomy_slip"]([], {"screen": "VS Code", "present": True, "idle": 10}, time.time())
     assert "想自己彈琴唱歌可以" in s and "不要問問題" not in s                 # 老爸在也准她自己彈唱（老爸 10-29）
     assert "什麼都沒發生" in s and "不想就繼續安靜" in s                        # 沒事那輪＝很久沒事的「無聊了」
+    # 平時就只是女兒：沒有觀眾留言就說只有她跟老爸（老爸 2026-11-01：她開機就以為有觀眾在看直播）
+    assert "沒在直播，只有妳跟老爸" in s
+    now = time.time()
+    ns["STREAMER_MIND_BOARD"].append({"source": "web_console", "time": now})       # 老爸在後台打字不算觀眾
+    assert not ns["_audience_present"](now)
+    ns["STREAMER_MIND_BOARD"].append({"source": "youtube", "time": now - 2000})    # 半小時前的留言：早就沒人了
+    assert not ns["_audience_present"](now)
+    ns["STREAMER_MIND_BOARD"].append({"source": "twitch", "time": now - 60})
+    assert "有觀眾在留言" in ns["_autonomy_slip"]([], {"present": True, "idle": 10}, now)
 
 
 def test_wiring():
@@ -144,3 +157,12 @@ def test_perception_turn_does_not_look_things_up():
     sub = ast.get_source_segment(MAIN, _fn("_run_subagent_task"))
     # 舞台動作照准，沒填歌名也一樣（同日實機：她想自己彈琴、填了 play_piano 沒填歌，被當成查東西擋掉）
     assert 'if not _cmds and (_intent or {}).get("action") not in STAGE_ACTIONS and _autonomy_turn(time.time()):' in sub
+
+
+def test_persona_is_just_a_daughter_unless_streaming():
+    """人設平常就是女兒，不預設在直播（老爸 2026-11-01）；舊的閒聊紙條也不再一律「跟大家閒聊」。"""
+    from conftest import ROOT
+    persona = open(os.path.join(ROOT, "prompts", "7L_persona.md"), encoding="utf-8").read()
+    assert "平常就只是老爸的女兒" in persona and "同台直播" not in persona and "副播" not in persona
+    idle = ast.get_source_segment(MAIN, _fn("idle_chatter_worker"))
+    assert "跟大家閒聊" not in idle and "_audience_line(_now)" in idle

@@ -211,7 +211,7 @@ from core.llm_engine import (
     UNRESTRICTED_SAFETY_SETTINGS, thinking_config, held_live_connect, pick_live_key,
 )
 from core.input_sources import (parse_input_item, classify, sleep_wake_decision, live_speech_wakes, is_operator, has_wake_word,
-                                VIEWER_SOURCES, WAKE_WORDS)
+                                VIEWER_SOURCES, AUDIENCE_CHAT_SOURCES, WAKE_WORDS)
 from core.memory import (
     init_unified_memory, flush_unified_memory, fetch_from_long_term_memory,
     save_to_long_term_memory, append_to_unified_memory, clear_all_memories,
@@ -5851,6 +5851,28 @@ def _autonomy_blocked(now: float) -> str:
     return ""
 
 
+AUDIENCE_RECENT_SEC = 1200.0   # 這麼久內有直播觀眾留言，才算「現在有觀眾」
+
+
+def _audience_present(now: float = None) -> bool:
+    """最近有沒有直播觀眾留言（老爸 2026-11-01：她開機就以為有觀眾在看直播；平時就只是女兒）。"""
+    now = time.time() if now is None else now
+    try:
+        return any(m.get("source") in AUDIENCE_CHAT_SOURCES and now - (m.get("time") or 0) < AUDIENCE_RECENT_SEC
+                   for m in list(STREAMER_MIND_BOARD))
+    except Exception:
+        log_swallowed()
+        return False
+
+
+def _audience_line(now: float = None) -> str:
+    """紙條用：現在有誰在。"""
+    owner = _owner_name()
+    if _audience_present(now):
+        return f"直播間這陣子有觀眾在留言（在場的有{owner}和觀眾）"
+    return f"現在沒有觀眾留言、沒在直播，只有妳跟{owner}"
+
+
 def _autonomy_slip(changes: list, cur: dict, now: float) -> str:
     """感知紙條：自上次以來的變化＋幾句現況。"""
     owner = _owner_name()
@@ -5876,7 +5898,7 @@ def _autonomy_slip(changes: list, cur: dict, now: float) -> str:
     who_last = owner if o.get("who") == "dad" else (o.get("name") or "觀眾")
     # 第五版實測：6 分鐘前那句「陪我就好」照樣附上，她又回一次「好喔，安靜陪老爸」——太久以前的話不附
     last_words = f"，說「{(o.get('said') or '')[:40]}」" if o.get("said") and last_human < AUTONOMY_PRESENT_IDLE_SEC else ""
-    now_parts = [x for x in (presence, f"{who_last}最後跟妳講話是 {int(last_human // 60)} 分鐘前{last_words}",
+    now_parts = [x for x in (presence, _audience_line(now), f"{who_last}最後跟妳講話是 {int(last_human // 60)} 分鐘前{last_words}",
                              f"妳現在{doing}") if x]
     if not any("畫面" in c for c in changes) and cur.get("screen"):
         now_parts.append(f"畫面大概是：{cur['screen'][:80]}")
@@ -6010,12 +6032,15 @@ async def idle_chatter_worker(vts, input_queue):
             except Exception:
                 log_swallowed()
             _quiet_min = int((_now - (_last_speech or _now)) // 60)
+            # 沒有觀眾就是陪老爸（老爸 2026-11-01：平時狀態就是女兒而已，不要硬當在直播）
+            _who = "老爸或觀眾" if _audience_present(_now) else "老爸"
             _slip = (f"[系統提示：【自主閒聊】房間已經安靜約 {_quiet_min} 分鐘，沒有新留言。"
-                     f"請妳看看下面資訊，主動找個輕鬆話題跟大家閒聊 1~2 句（約 20~40 字，完整說完）：\n"
+                     f"請妳看看下面資訊，主動找個輕鬆話題跟{_who}閒聊 1~2 句（約 20~40 字，完整說完）：\n"
+                     f"- 在場：{_audience_line(_now)}\n"
                      f"- 畫面：{_screen or '（無新畫面）'}\n"
                      f"- 最近聊過：{_recent or '（無）'}\n"
                      f"- 現在時間：{get_current_time_string()}\n"
-                     f"規則：像跟老爸/觀眾搭話，不要自言自語，不要重複剛講過的話；"
+                     f"規則：像跟{_who}搭話，不要自言自語，不要重複剛講過的話；"
                      f"若在彈琴就邊彈邊隨性聊兩句。實在沒話題就輸出 [SILENCE] 保持安靜，不要硬擠。]")
             try:
                 send_brain_slip(_slip)
