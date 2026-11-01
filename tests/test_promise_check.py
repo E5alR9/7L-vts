@@ -11,7 +11,9 @@ from conftest import MAIN_SRC as MAIN, MAIN_TREE as TREE
 def test_cheap_hint_filter():
     for s in ("等時間到了我一定會盯著你喝水", "我再幫你設一次", "好，我等一下唱晴天給你聽", "到時候我叫你起床"):
         assert pc.worth_checking(s), s
-    for s in ("哈哈你好好笑", "老爸辛苦了", "[EXPRESSION: 我會] 晚安"):
+    assert pc.worth_checking("快去沙發躺平，我唱首好聽的歌幫你回血！")               # 答應要唱也算（2026-11-01 實機漏抓）
+    for s in ("哈哈你好好笑", "老爸辛苦了", "[EXPRESSION: 我會] 晚安",
+              "好呀，要幾分鐘後提醒你喝水呢？", "要我等一下唱晴天嗎"):              # 問細節的問句不算（實機誤判）
         assert not pc.worth_checking(s), s
 
 
