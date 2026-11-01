@@ -161,6 +161,14 @@ def search_google(query: str, depth: str = "basic") -> str:
         log_print(f"\n❌ [搜尋 Tool 異常]: {e}")
         return f"搜尋時發生錯誤: {e}"
 
+# 摘要提示詞：數字帶單位和方向、舊資料講日期、沒答案不猜（2026-11-01 模擬版：她把「1 台幣換 4.85 日圓」講成「日幣對台幣 4.8」）。
+# 12 題真的搜尋結果、各摘 3 次、Groq 當裁判對照原始資料：舊提示詞 temp 0.75 沒講錯 26/36 → 這版 temp 0.3 34/36
+#（只改提示詞不降溫 31/36；錯的多是換算方向反了、把別天的事講成這週、資料裡沒有的歸因）。
+_SUMMARY_SYSTEM = ("妳是虛擬主播 7L，負責把搜尋原始資料轉成自然口語。請將清單或網頁標題轉換為重點說明，並使用純文字對話。\n"
+                   "數字一定照資料講，帶單位和方向（匯率講成「1 台幣換 4.85 日圓」或「1 美元換 32.6 台幣」，不要只說「日幣對台幣 4.8」）；"
+                   "資料裡的日期跟問的不一樣（舊新聞、別天的預報）要講出是哪天的；資料裡沒有答案就老實說沒查到，不要猜。")
+
+
 async def summarize_search_to_speech(query: str, search_raw: str, user_role_name: str = "") -> str:
     """PROVIDER: GROQ（core.groq_router.groq_chat 純文字提煉；見 docs/AI_SOURCES.md）"""
     """將搜尋到的原始資料，以 7L 招牌自然口語（1~3 句，親切隨性）進行提煉整理。
@@ -181,10 +189,10 @@ async def summarize_search_to_speech(query: str, search_raw: str, user_role_name
         from core.groq_router import groq_chat
         g_resp = await groq_chat(
             [
-                {"role": "system", "content": "妳是虛擬主播 7L，負責把搜尋原始資料轉成自然口語。請將清單或網頁標題轉換為重點說明，並使用純文字對話。"},
+                {"role": "system", "content": _SUMMARY_SYSTEM},
                 {"role": "user", "content": f"查詢：{query}\n\n搜尋原始資料：\n{clean_search}\n\n請以親切隨性的口吻，用 1~3 句俐落短句（40~80 字以內）對{_prompt_who}提煉並說明重點。"},
             ],
-            temperature=0.75, max_tokens=500, timeout=4.5,
+            temperature=0.3, max_tokens=500, timeout=4.5,
         )
         if g_resp and g_resp.text:
             ans = re.sub(r'\[[A-Z_]+(?::\s*[^\]]+)?\]', '', g_resp.text).strip()
