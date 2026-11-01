@@ -70,9 +70,17 @@ def brain_system(owner: str, char_name: str, cloud_knowledge: dict, expression_m
       + ("\n" + SAY_GATE_NOTE.format(owner=owner) + "\n" if say_gate else "")
 
 
-def subagent_system() -> str:
-    """子智能體（解讀主腦交辦的任務、決定叫哪個工具）。"""
-    return load_prompt("7L_subagent.md")
+_WEEKDAYS = "一二三四五六日"
+
+
+def subagent_system(now=None) -> str:
+    """子智能體（解讀主腦交辦的任務、決定叫哪個工具）。尾巴帶今天日期：以前沒有，它查「最近上映的電影」
+    自己在搜尋字串加「2025」、查天氣加了編出來的日期（2026-11-01 實測）。now：datetime，測試固定用。"""
+    from datetime import datetime
+    now = now or datetime.now()
+    return (load_prompt("7L_subagent.md").rstrip() +
+            f"\n- 今天是 {now.year} 年 {now.month} 月 {now.day} 日（星期{_WEEKDAYS[now.weekday()]}），現在 {now:%H:%M}。"
+            "「今天、明天、最近」照這個日期算；搜尋字串不要自己加別的年份或日期。")
 
 
 # 看板哨兵：只決定她現在該不該開口（[SILENCE] 或 [SPEAK: …]）

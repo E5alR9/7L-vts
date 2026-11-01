@@ -5,6 +5,7 @@
 """
 import difflib
 import os
+from datetime import datetime
 
 import pytest
 
@@ -23,7 +24,7 @@ ROLES = {
     "screen_sentry": lambda: promptkit.SCREEN_SENTRY_SYSTEM + "\n---\n" + promptkit.screen_sentry_user("老爸在寫程式"),
     "director": lambda: promptkit.director_system(MENU_NAMES),
     "instinct": lambda: promptkit.instinct_system(vc.EXPRESSION_MENU_TEXT),
-    "subagent": lambda: promptkit.subagent_system(),
+    "subagent": lambda: promptkit.subagent_system(now=datetime(2026, 11, 1, 20, 30)),
     "advisor": lambda: promptkit.advisor_system("老爸"),
 }
 
