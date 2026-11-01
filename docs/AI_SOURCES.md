@@ -1,55 +1,93 @@
-# AI_SOURCES — 全棧 AI／轉錄來源對照表
+# AI_SOURCES — 7L 用到的 AI 與外部服務
 
-> 程式內凡調用 AI 皆有 `PROVIDER:` 標記指向本表。`grep -rn PROVIDER --include=*.py .` 即全覽。
-> 配額為 2026-09-29 用戶控制台值（28 天用量全 0；Timeout 屬網路非配額）。
+> 2026-11-01 照程式重新清點（之前那版停在 10-29）。程式內呼叫 AI 的地方多半有 `PROVIDER:` 標記，`grep -rn PROVIDER --include=*.py .` 可全覽。
+> 模型名稱唯一出處：`core/llm_engine.py` 開頭那段（Google 下架或改名只改那裡）。
+> 金鑰（2026-11-01）：Gemini 32 把、Groq 29 把、NVIDIA 3 把、Tavily 10 把，都放在家目錄的 `.env`／`6.env`。
 
-## 對話大腦
+## Gemini Live（主力；不吃 REST 每日額度，老爸說可一直用，只守每把 key 同時連線數）
 
-| 用途 | PROVIDER | 模型／後端 | key／env | 配額 | 備註 |
-|---|---|---|---|---|---|
-| 純文字快線（秒回／哨兵／審查／提煉／摘要） | GROQ | qwen3.8-27b → gpt-oss-120b → gpt-oss-20b（`core/groq_router.py` 梯隊；gpt-oss 帶 reasoning_effort=low，allam-2-7b 2026-10-27 拿掉） | `GROQ_API_KEYS`×30，`GROQ_REQUESTS_PER_MINUTE=20` | ITPM ~7000／org／model | 第一梯隊；`fetch_fast_text_reply` 主力 |
-| 背景純文字（定時提醒／搜尋提煉／鋼琴過場碎念） | GROQ | 同上梯隊（一律 `groq_chat`） | 同上 | 同上 | **2026-10-09 起全程零 Gemini**；失敗走本地離線摘要器／固定備援句／安靜不說話 |
-| 主腦深度推理 | GEMINI | REST 梯隊 3.5-flash-lite → 3.1-flash-lite → 3.6-flash → 3.8-flash；高 IQ 梯隊 3.8 → 3.6 → lite 系（`core/llm_engine.py`；3.5-flash／3.7-flash 已棄用、自動導向 3.6／3.8，不直接打；pro 系列、gemini-4-argon 額度 0；2.5 系列已下架，2026-10-27 實測） | `GEMINI_API_KEYS`×35，分池（觀眾／心流／視覺／主腦） | 旗艦 RPD 20／天／key；lite RPM 15／RPD 500 | 高頻一律 lite |
-| Live 全雙工（觀眾回覆／心流串流） | GEMINI-LIVE | **gemini-3.8-live**（舊 3.1-preview 已遷移，表上消失） | 同上（動態跨池備援） | RPM／RPD Unlimited，TPM 65K | 7x24 成立 |
-| Live 子智能體（工具判定＋深度思考） | GEMINI＋NVIDIA | 兩棒都 Gemini 先、NV 備援（`core/subagent_router.SUBAGENT_BRAIN`=auto 預設；可改 nv／gemini）；NV 模型 Nemotron-3-Ultra-550B（`_NV_SUBAGENT_MODEL`），回 404 停用 10 分鐘 | `NV_API_KEYS`×3／GEMINI keys | NV 推理模型深思要 60 秒，只當備援；舊的 Super-120B 已 404 | 2026-10-24 |
-| 說完又想到（深度思考副腦） | GEMINI-LIVE | **gemini-3.8-live-extended-thinking**，thinking_level=low，單次連線（`vts_7L_test._afterthought`） | GEMINI keys | Live 不吃 REST 額度 | 主腦回完人話（老爸或觀眾）後背後再想，有錯或有補充就遞紙條讓她補一句；high 實測 46 秒還空的 |
-| 視覺看圖（餘光／截圖／抽幀） | GEMINI-VISION | 3.1-flash-lite → 3.6-flash（`get_lightweight_gemini_vision`） | KEYS_VISION（keys 12:18） | lite RPD 500 | 黑屏檢測防幻覺 |
-| 生圖 | GEMINI-IMAGE | Nano Banana 系（2.5-image → 3.1-image → pro-image） | 同上 | ⚠️ 全系 0／0／0，現降級中 | 有配額前不可用 |
-| 本地第四條腿（規劃） | GEMMA | Ollama gemma3:4b（視覺＋128K）／3n E4B（影音圖文， transformers 路） | 無 key，本地 GPU | 無 | 伴侶隱私模式＋視覺初篩 |
-
-## 語音（STT／TTS）
-
-| 用途 | PROVIDER | 後端 | env | 配額 | 備註 |
-|---|---|---|---|---|---|
-| mic 快覽＋系統音轉錄（現行） | GOOGLE-WEB-SPEECH | `recognize_google(zh-TW)` 非官方免費端點（`listen_once_fast`／`transcribe_audio_bytes`） | 無 | 非官方，無配額概念（隨時可死） | 將遷 3.5-transcribe |
-| 官方 STT（規劃） | GEMINI-TRANSCRIBE | gemini-3.5-transcribe（說話人分離＋詞戳＋自訂詞表） | 同 Gemini keys | RPM 3／RPD 25 | 常駐轉錄仍走本地 faster-whisper（已在 requirements，未接線） |
-| TTS 主力 | LOCAL＋CLOUD | `TTS_ENGINE` 預設曉伊 GPT-SoVITS（xiaoyi），備援 `TTS_FALLBACK` 預設 edge（`services/tts_router.py` 引擎鏈） | `TTS_ENGINE`／`TTS_FALLBACK` | 無 | 120 秒自動升級回鏈首 |
-| TTS 備援 | CLOUD | edge-tts（微軟台灣腔女聲；套件要 7.3.1 以上，舊版會被微軟擋 403） | 無 | 無 | 曉伊掛了才用（老爸 2026-10-29：只留 edge 備用） |
-| mic 快覽 | GOOGLE-WEB-SPEECH | `recognize_google(zh-TW)`（`listen_once_fast`） | 無 | 非官方 | 深層理解走 Gemini Live audio_b64 |
-| 系統音／轉錄備援 | LOCAL-faster-whisper | `services/stt.py`（`_transcribe_faster`，small／CPU int8；只有看影片用） | 無 | 無 | — |
-| AI 作曲 | LOCAL-ACE-Step 1.5 | `services/acestep_music.py` → 官方 REST（`/release_task`→`/query_result`→`/v1/audio`），turbo 模型，`scripts/start_acestep.bat` 開在 7865 | 無 | 無 | 服務沒開安全跳過；第一次作曲下載約 6 GB 模型 |
-
-## 記憶／檢索／搜尋
-
-| 用途 | PROVIDER | 後端 | 備註 |
+| 用途 | 模型 | 頻率 | 程式 |
 |---|---|---|---|
-| RAG 向量庫 | LOCAL | chromadb（`data/rag/chroma`，collection 按模式切開：`knowledge_companion`／`knowledge_vtuber`，重建不相容舊） | `scripts/ingest_rag.py --reset` 重建 |
-| 文字嵌入 | LOCAL-fastembed／GEMINI-備援 | bge-small-zh-v1.5（130MB 離線）／`gemini-embedding-001`（`services/embedder.EMBED_BACKEND` 可切） | 圖影音幀走 `embedding-2-preview`（100 RPM／1K RPD） |
-| 上下文組裝（規劃） | LOCAL | 對標 groq-router：fold 摘要＋recent-2＋向量 top-k（0.15＋60％門檻、上限 4 段、時間序）＋ITPM 收斂器 | 解 Groq 7K ITPM |
-| 點播看全片 | LOCAL＋GEMINI-VISION＋GROQ | `services/video_watch.py`（captions→音軌轉錄→抽幀看圖→Groq 摘要→記憶＋看板，source=`video_watch`） | 單片上限 `VIDEO_WATCH_MAX_MIN`（模組常數，30 分） |
-| 聯網搜尋 | TAVILY／LOCAL-SCRAPE | `tavily`×10 key（⚠️ 額度已爆）／`search_google` 無 API 爬蟲 | Tavily 爆時自動退爬蟲 |
-| 每日日記濃縮 | GROQ | 只剩舊 `7L.py` 機器人有（主程式那份從沒被呼叫，2026-10-25 刪除） | 2026-10-25 |
-| 點歌意圖 JSON 解析 | GROQ-primary | `pe.resolve_piano_intent_by_ai` 走 `groq_chat`（temp 0.1）；Gemini 高 IQ 梯隊僅 Groq 全滅時兜底 | 2026-10-09 |
-| 本機有沒有這首（MIDI、翻唱快取） | GROQ | 歌名＋檔名清單丟給 AI 挑一個或回沒有：MIDI 走 `resolve_piano_intent_by_ai`（挑的在清單裡就信，不再過字串比對）；翻唱走 `ac.ai_match_cached_song`（temp 0，回清單外的字當沒有，AI 掛了照舊下載） | 2026-10-27 |
-| 雲同步（刪除候選） | FIRESTORE | `core/db.py`，全呼叫點 `if db is not None`＋本地 JSON 備援 | 拔掉只失多機同步；且 db.py 吃 google-auth |
+| 主腦：聽老爸講話（麥克風原生音訊）、聊天、決定開不開口（say 閘） | gemini-3.8-live → 3.1-flash-live-preview | 常駐 | `vts_7L_test.continuous_live_worker`（`LIVE_MAIN_MODELS`） |
+| 本能腦：邊聽邊做小表情、小動作 | 3.8-live | 常駐 | `instinct_live_worker` |
+| 神態導演：幫每句話排表情時間軸 | 3.8-live | 每句話（常駐連線） | `_director_ensure_session` |
+| 副意識群：查核、記憶、情緒、話題、分寸 | 查核／記憶用 3.8-live-extended-thinking（low），其他 3.8-live | 每輪對話 | `services/subminds.py`（`ResidentAdvisor`） |
+| 說完又想到：回完話背後再想，有錯或補充就遞紙條 | 3.8-live-extended-thinking（low） | 每輪對話 | `_afterthought` |
+| 視線副腦：看畫了 8x6 網格的截圖挑要看哪格／滑鼠／鏡頭 | 3.8-live（單次連線） | 約每 3 秒 | `workers/gaze_brain.py` → `live_one_shot` |
+| 畫面哨兵：餘光判斷畫面有沒有重大變化 | 3.8-live（單次連線） | 餘光視覺時 | `check_screen_change_via_live_api` → `live_one_shot` |
+| 看板哨兵：觀眾留言要不要回（Groq 備援） | 3.8-live（單次連線） | 有留言時 | `judge_should_speak` → `live_one_shot` |
+| YT 伴看：一直聽影片聲音，每 18 秒把 3 張畫面＋問題同一則訊息送、寫筆記 | 3.8-live | 開 YouTube 並同意陪看時 | `services/yt_companion_service.py` |
 
-## 直播輸入（零 AI，純通道）
+**看圖一律「圖跟問題同一則訊息＋`MEDIA_RESOLUTION_HIGH`」**（2026-11-01）：以前圖走即時影像串流（`send_realtime_input(video=…)`），紅點網格測試 6 次只答 2 次、差 4～6 格，串流加高解析度也 6 次答不出來；改後 8 次 7 次全對，每次慢 0.5～1 秒。`live_one_shot(image_as_stream=True)` 只留給對照測試。
 
-| 平台 | 後端 | key | 備註 |
-|---|---|---|---|
-| TikTok | EulerStream＋簽章 | `SIGN_API_KEY` | 禮物／點讚事件 |
-| Twitch | IRC 匿名 justinfan | 無 | `services/twitch_listener.py` |
-| YouTube | InnerTube 免 key 輪詢 | 無 | 頻道模式跟播＋去重退避 |
+**Live 不能／不用調的**：只回文字（`response_modalities=[TEXT]`）三個 Live 模型都回 1007 不支援，所以照舊生成語音、只取逐字稿（只浪費額度，不會播出來）；`gemini-3.8-live` 不支援 `thinking_level`（設了連不上）；講完判斷（`silence_duration_ms`）調短沒變快、調長擋不住停頓插話，維持預設。
+
+## Gemini REST（吃每日額度：旗艦 RPD 約 20／天／key，lite RPM 15／RPD 500）
+
+| 用途 | 模型 | 程式 |
+|---|---|---|
+| 餘光視覺（看螢幕寫描述，含歷史幀） | 3.5／3.1-flash-lite → 3.6 → 3.8（`GEMINI_MODELS`） | `peripheral_vision_worker`、`get_lightweight_gemini_vision` |
+| 看畫面、照鏡子（她自己叫的）、看片抽幀 | 同上 | `describe_images`（`live_vision_tool_task`、`live_mirror_tool_task`、`services/video_watch.py`） |
+| 系統聲音辨識（電腦在放什麼） | 3.1-flash-lite（`AUDIO_MODEL`） | `workers/system_audio.py` |
+| REST 大腦：Live 主腦斷線時接手回話（Groq 先試） | 3.6 → 3.8 → 3.5-flash-lite（`REST_BRAIN_MODELS`） | `core/rest_brain.py`、`_rest_answer_slip` |
+| 子智能體：工具判定（只用 Gemini）＋深度思考（跟 NVIDIA 一起想、誰先好用誰） | `GEMINI_MODELS` 系，3.6-flash 思考 minimal | `_gemini_tool_pass`、`_gemini_think_pass` |
+| 看板發話（回觀眾留言） | `STREAMER_MIND_MODELS` | `streamer_mind_loop_worker` |
+| 點歌判斷、AI 作曲（Groq 全滅才用） | `HIGH_IQ_GEMINI_MODELS`（3.8 → 3.6 → lite） | `services/piano_engine.py` |
+| 文字嵌入備援 | gemini-embedding-001 | `services/embedder.py`（平常用本機 bge） |
+| 生圖 | Nano Banana 系 | `generate_ai_image`（⚠️ 額度 0，用不了） |
+
+## Groq（純文字快線；`core/groq_router.py`）
+
+梯隊 qwen/qwen3.8-27b → openai/gpt-oss-120b → openai/gpt-oss-20b，一律串流（送出 3 秒沒回應、吐字後卡 2 秒就換下一把／下一個模型），每分鐘上限 `GROQ_REQUESTS_PER_MINUTE`。
+
+| 用途 | 程式 |
+|---|---|
+| 點歌／彈琴意圖判斷（Gemini 兜底）、彈琴過場碎念、AI 作曲先試 | `services/piano_engine.py` |
+| 翻唱快取比對（這首做過沒） | `auto_cover_pipeline.ai_match_cached_song` |
+| 唱／彈／停的指令判斷 | `_judge_stage_request` |
+| 看板哨兵備援 | `judge_should_speak` |
+| REST 大腦第一棒 | `core/rest_brain._groq_once` |
+| 搜尋結果整理成口語 | `services/web_search.summarize_search_to_speech` |
+| 記憶濃縮、看片摘要 | `services/rag_store.fold_summary`（`video_watch` 也用） |
+| 做夢日記（閒著時整理成當天日記） | `core/dream.merge_into_diary` |
+| 計時器到期提醒話 | `workers/timer_sensor.py` |
+| 快睡著的一句話 | `_doze_one_liner` |
+
+**參數**（2026-11-01 實測）：gpt-oss 帶 `reasoning_effort=low`；qwen 預設就不思考（設 `none` 差距在誤差內，沒設）；`include_reasoning=false` 不會變快；`service_tier`（auto／flex）這個帳號不能用（付費才有）；重複懲罰、logprobs 等 Groq 標示沒有模型支援。
+
+## NVIDIA（`integrate.api.nvidia.com`）
+
+| 用途 | 模型 | 備註 |
+|---|---|---|
+| 子智能體的深度思考：跟 Gemini 一起想、誰先想好用誰；**不做工具判定**（計時、搜尋、表情只給 Gemini）（老爸 2026-11-01：輝達不要用來計時，負責高智商任務；`core/subagent_router`） | nvidia/nemotron-3-ultra-550b-a55b（`_NV_SUBAGENT_MODEL`） | 深思限時 25 秒（`SUBAGENT_BRAIN=nv` 時才會用工具判定，限時 12 秒）；404 停用 10 分鐘，401/403 冷卻 1 小時，429 冷卻 1 分鐘 |
+
+額度：不用點數，只有速率限制，帳號頁（build.nvidia.com 右上角）寫「Up to 40 rpm」（2026-11-01 老爸截圖）；3 把 key 是 3 個不同帳號，合計每分鐘 120 次；沒有試用期限、不用等重置。回應標頭沒有額度資訊，也沒有查額度的 API。
+2026-11-01 實測：免費端點工具判定中位數 3～4 秒，最慢 37 秒、常回 500；單獨當子智能體 6 題 3 題卡 12 秒逾時（同題 Gemini 6/6）；單獨深思 6 題只成 2 題（其餘逾時或 503），所以只並排、不當主力；關思考（`chat_template_kwargs.enable_thinking=false`）看不出變快；`reasoning_budget` 每次都 500，不能用。
+
+## 其他外部服務
+
+| 服務 | 用途 | 程式 |
+|---|---|---|
+| Tavily → DuckDuckGo | 網路搜尋、找線上琴譜（Tavily 額度爆了自動改 DuckDuckGo） | `services/web_search.py`、`services/onlinesequencer_engine.py` |
+| edge-tts（微軟） | 說話備援聲音（曉伊掛了才用；套件要 7.3.1 以上） | `services/tts_router._synth_edge` |
+| Google 免費語音辨識 | **只在 Live 主腦斷線時**聽麥克風（非官方端點，隨時可能失效） | `listen_once_fast` |
+| Firestore | 記憶、觀眾檔、知識庫、事件紀錄的雲端備份（本機 JSON 是正本；`FIREBASE_ENABLED=0` 關掉） | `core/memory.py`、`core/db.py`、`core/eventlog.py` |
+| EulerStream | TikTok 直播簽章（`SIGN_API_KEY`） | `services/tiktok_listener.py` |
+| Twitch IRC、YouTube InnerTube | 讀直播留言（不用 key） | `services/twitch_listener.py`、`services/youtube_live_listener.py` |
+
+**不用的**：Gemini TTS、Groq Whisper（老爸不要；Groq Whisper 會幻聽）、Google TTS（`services/tts_router.ALLOWED_ENGINES` 只允許 xiaoyi＋edge）。
+
+## 本機（不用 API）
+
+| 用途 | 後端 |
+|---|---|
+| 說話聲音 | GPT-SoVITS 曉伊（`TTS_ENGINE` 預設 xiaoyi） |
+| 翻唱人聲分離 | Roformer → Demucs → ffmpeg 備援；可由筆電顯卡代跑（`REMOTE_GPU_URL`，`services/remote_gpu.py`、`services/gpu_split.py`） |
+| 翻唱變聲 | RVC（`services/rvc/`） |
+| 看片聽寫 | faster-whisper（`services/stt.py`） |
+| 記憶向量庫 | chromadb（`data/rag/chroma`），嵌入用 bge-small-zh-v1.5（fastembed） |
+| AI 作曲（音訊） | ACE-Step 1.5（`services/acestep_music.py`，服務開在 7865，沒開就跳過） |
+| 鋼琴、扒譜 | mido、librosa、basic-pitch（`services/midi_editor.py`、`services/audio_to_score.py`） |
 
 ## 已刪除（審計）
 
@@ -58,8 +96,10 @@
 | `get_embedding_vector`＋日記向量欄位 | 寫而不用（全倉零讀取） | 2026-09-29 |
 | `scratch/correct_chunk.py`（3144 行） | 舊碼墳場，零引用 | 2026-09-29 |
 | `gemini-3.1-pro-preview`（4 處梯隊） | 配額 0／0／0 | 2026-09-29 |
-| `gemini-3.1-flash-live-preview`（11 處） | Legacy，配額表消失 → `gemini-3.8-live` | 2026-09-29 |
-| 日記濃縮的 Gemini fallback | 背景記憶不佔 Gemini 額度 → Groq 專責，失敗跳過 | 2026-10-09 |
+| 日記濃縮的 Gemini fallback | 背景記憶不佔 Gemini 額度 → Groq 專責 | 2026-10-09 |
 | 搜尋提煉的 Gemini Flash Lite 層 | 純文字提煉 → Groq 梯隊 → 本機離線摘要器 | 2026-10-09 |
 | 定時提醒口語的 `fetch_ai_response` | 背景純文字 → `groq_chat`，失敗走固定備援句 | 2026-10-09 |
 | 鋼琴過場碎念的 Gemini 呼叫 | 背景純文字 → `groq_chat`，失敗就安靜 | 2026-10-09 |
+| allam-2-7b（Groq 梯隊） | 記憶濃縮整段重複、哨兵格式不對 | 2026-10-27 |
+| Google TTS、Gemini TTS 引擎 | 老爸只留 GPT-SoVITS＋edge | 2026-11-01 |
+| Live 看圖的即時影像串流（視線副腦、畫面哨兵、YT 伴看） | 低解析度串流 Live 幾乎看不清楚 → 圖跟問題同一則訊息＋高解析度 | 2026-11-01 |
