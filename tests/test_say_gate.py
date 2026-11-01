@@ -56,7 +56,7 @@ def _say_ns(singing=False, vision_busy=False):
                _BRAIN_INPUT_ORIGIN={"who": "dad"}, _live_reply_target=lambda who="": "dad", _turn_who=lambda: "dad",
                _RECENT_THOUGHTS=__import__("collections").deque(maxlen=20),
                log_print=logs.append, log_swallowed=lambda *a: None, spawn=lambda c: (after.append(c), c.close()),
-               _afterthought=lambda t: asyncio.sleep(0), _group_post=lambda *a: None, LAST_BRAIN_TURN_TS=0.0, LAST_BRAIN_REPLY_DONE_TS=0.0,
+               _afterthought=lambda t: asyncio.sleep(0), _check_promise=lambda *a: asyncio.sleep(0), _group_post=lambda *a: None, LAST_BRAIN_TURN_TS=0.0, LAST_BRAIN_REPLY_DONE_TS=0.0,
                eventlog=SimpleNamespace(get=lambda: SimpleNamespace(record=lambda *a, **k: logs.append(("ev", a)))))
     _const("_CLAIMS_DONE", ns)
     _const("_CLAIMS_DONE_NOT", ns)
@@ -69,7 +69,7 @@ def test_say_is_spoken_through_the_normal_path_and_answered_silently():
     assert spoken == [("[EXPRESSION: 開心] 老爸查到了！明天不會下雨", "dad", "dad", "live_api", True)]
     r = sess.sent[0]
     assert r.name == "say" and r.id == "c1" and r.scheduling == types.FunctionResponseScheduling.SILENT   # 不再開一輪
-    assert ns["LAST_BRAIN_TURN_TS"] > 0 and len(after) == 1        # 算她回話了；背後照樣再想一次
+    assert ns["LAST_BRAIN_TURN_TS"] > 0 and len(after) == 2        # 算她回話了；背後照樣再想一次＋檢查有沒有答應了沒做
 
 
 def test_say_cancelled_by_the_server_is_not_answered():

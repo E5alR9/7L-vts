@@ -184,6 +184,7 @@ from core.identity import is_owner_account, claims_owner_identity
 from core.paths import DATA_DIR   # 執行時資料夾 data/：記憶、聲紋、音訊快取都在這（唯一出處）
 import core.stage_state as stage
 from core import usage, promptkit, prosody   # prosody：說話的語速、音高、大小聲（2026-10-31）
+from core import promise_check   # 承諾追蹤：答應了沒做就提醒（2026-11-01）
 from core import volume as volume_ctl   # 後台的說話／唱歌音量滑桿（2026-11-01）
 from core import eventlog
 from core.speech_queue import SpeechQueue
@@ -485,6 +486,7 @@ async def execute_tool_dispatch(fn_name: str, fn_args: dict, caller_target: str 
     extracted_text = ""
     fn_name = (fn_name or "").strip().lower()
     fn_args = {k.lower(): v for k, v in fn_args.items()} if isinstance(fn_args, dict) else {}
+    _note_action()   # 承諾追蹤看這個：她說「我幫你設」前後有沒有真的做
     if fn_name == "trigger_vts_expression":
         exp_name = fn_args.get("expression_name", "")
         extracted_text += f" [EXPRESSION: {exp_name}]"
@@ -3760,8 +3762,38 @@ async def _handle_say(session, ws_send_lock, fn_call_id, text: str, vts=None) ->
                 _RECENT_SAYS.append((LAST_SAY_TS, spoken))
                 _group_post("主腦", f"說：{spoken}")
                 spawn(_afterthought(spoken))
+                spawn(_check_promise(spoken, LAST_SAY_TS))
         await _send_say_response(session, ws_send_lock, fn_call_id,
                                  "已說出口" if spoken else "沒有念（唱歌中或內容是空的）")
+
+
+_LAST_ACTION_TS = 0.0       # 最近一次真的做了動作（叫工具、交辦）的時間
+_PROMISE_NUDGE = {"ts": 0.0}
+PROMISE_NUDGE_GAP_SEC = 60.0   # 承諾提醒最多這麼久一次（她回提醒時又說「我來設」，不要一直追）
+
+
+def _note_action() -> None:
+    global _LAST_ACTION_TS
+    _LAST_ACTION_TS = time.time()
+
+
+async def _check_promise(said: str, ts: float) -> None:
+    """承諾追蹤（core/promise_check）：她說了「我幫你設」「時間到我會叫你」，前後卻沒叫工具也沒交辦 → 提醒一次。
+    2026-11-01 實測：「等時間到了我一定會盯著你喝水」「我再幫你設一次」，兩次都只是嘴上說。"""
+    if not promise_check.worth_checking(said):
+        return
+    await asyncio.sleep(promise_check.WAIT_SEC)
+    if _LAST_ACTION_TS >= ts - 10.0 or _AWAITING_RESULTS or _RUNNING_SUBAGENT_TASKS:
+        return   # 這句前後有做動作，或交辦還在辦：當作有做
+    if is_singing_active() or IS_SLEEPING or time.time() - _PROMISE_NUDGE["ts"] < PROMISE_NUDGE_GAP_SEC:
+        return
+    found = await promise_check.find_promise(said)
+    if not found or _LAST_ACTION_TS >= ts - 10.0:
+        return
+    _PROMISE_NUDGE["ts"] = time.time()
+    log_print(f"🤝 [承諾追蹤] 她說「{said[:40]}」答應了要{found['action']}，但沒看到她去做，提醒她"
+              + (f"（缺：{found['missing']}）" if found.get("missing") else ""))
+    send_brain_slip(promise_check.nudge_text(said, found, _owner_name()))
 
 
 _CANCELLED_CALL_IDS = collections.deque(maxlen=200)   # 伺服器取消掉的工具呼叫 id（tool_call_cancellation）
@@ -4436,6 +4468,8 @@ async def continuous_live_worker(vts):
                                         log_swallowed()
                                     global LAST_BRAIN_TOOL_TS
                                     LAST_BRAIN_TOOL_TS = time.time()
+                                    if fn_name != "say":
+                                        _note_action()
                                     _brain_output_seen()
                                             
                                     if fn_name == "say" and LIVE_SAY_GATE:
