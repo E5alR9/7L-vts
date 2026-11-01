@@ -126,6 +126,15 @@ def content_chars(text: str) -> set:
     return out
 
 
+def search_text(query: str) -> str:
+    """拿去向量庫比對的句子：先拿掉「還記得、上次、之前、老爸」這些詞（只留在講什麼事）；拿掉後沒剩東西就用原句。
+    2026-11-01 拿真的記憶庫（2197 筆）實測：老爸問「還記得上次…嗎」這種，對的那段記憶真的附上從 31/60 變 36/60；
+    不問記不記得、直接又提到同一件事的 12/60 → 11/60（差一句，算平手）；閒聊 20 句誤撈 6 → 5 筆。
+    同時試過向量＋關鍵字（BM25）混合：前 3 名沒變多，沒採用。"""
+    t = _STOP_RE.sub("", query or "").strip()
+    return t or query
+
+
 def _parse_ts(iso):
     try:
         return datetime.fromisoformat(str(iso)).timestamp()
@@ -243,12 +252,12 @@ async def related_memories_block(query: str, k: int = RELATED_MAX, timeout: floa
     async def _collect():
         got = []
         if query and len(content_chars(query)) >= MIN_CONTENT:
-            hits = await search_rag_memory(query, top_k=max(k * 3, 8))
+            hits = await search_rag_memory(search_text(query), top_k=max(k * 3, 8))
             got += pick_related(hits, query, k=k)
         for v in list(viewers or [])[:2]:
             mine = []
             if query and content_chars(query):
-                vh = await search_rag_memory(query, top_k=6, where=viewer_where(v))
+                vh = await search_rag_memory(search_text(query), top_k=6, where=viewer_where(v))
                 mine = pick_related(vh, query, k=VIEWER_LATEST, min_score=VIEWER_MIN_SCORE,
                                     min_query_content=1, need_overlap=False)
             if not mine:

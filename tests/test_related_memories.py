@@ -84,7 +84,13 @@ def test_related_memories_block_never_blocks_the_reply(monkeypatch):
     assert asyncio.run(rag.related_memories_block(q)) == ""
     monkeypatch.setattr(rag, "search_rag_memory", hits)
     assert "關於貓咪的小故事" in asyncio.run(rag.related_memories_block(q))
-    assert asyncio.run(rag.related_memories_block("7L 早安")) == "" and calls == [q]   # 沒內容的話連查都不查
+    assert asyncio.run(rag.related_memories_block("7L 早安")) == "" and calls == [rag.search_text(q)]   # 沒內容的話連查都不查
+
+
+def test_search_text_drops_remember_words():
+    assert rag.search_text("我之前講過的貓咪小故事妳還記得嗎") == "我講過的貓咪小故事妳還嗎"
+    assert rag.search_text("上次說要把我丟去核電站") == "說要把我丟去核電站"
+    assert rag.search_text("之前") == "之前"                                        # 拿光了就用原句
 
 
 MEM = "[相關的舊記憶（向量比對找的，可能不相關，自己判斷要不要提）：\n- 10/20 21:03 E5對7L說: 我家的貓叫咪咪]"
