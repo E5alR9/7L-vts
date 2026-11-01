@@ -6,8 +6,9 @@
 - 剛換前景視窗、或老爸在那個視窗裡做事：看那個視窗（在視窗裡跳幾個點，像在看內容）；
 - 畫面上剛有變化的地方（影片、跳出來的通知；餘光比對截圖時找出來的，已遮掉她自己的 VTS 視窗）：瞄一下；
 - 她在講話、或沒什麼好看的：看鏡頭（觀眾）。
-另外「她想看什麼」由視線副腦決定（workers/gaze_brain：Live 看截圖，從視窗、滑鼠、鏡頭、畫面變化裡挑；同日老爸要的），
-有挑就大多照它看，上面這些規則當反射和備援（副腦還沒回、斷線、餘光視覺關著時照規則）。這個模組本身不呼叫 AI。座標一律是「佔主螢幕的比例」（0～1），None 代表看鏡頭（正前方）。
+另外「她想看什麼」由視線副腦決定（workers/gaze_brain：Live 看畫了 8x6 網格的截圖，挑 1～3 格依序看、或滑鼠、或鏡頭）。
+副腦的挑選還新鮮時就照它看，看那幾格的中心、不隨機抖（老爸 2026-11-01：給她網格選格，不是函數亂晃）；
+上面這些規則只當反射（滑鼠突然動、畫面跳東西）和備援（副腦還沒回、斷線、餘光視覺關著時）。這個模組本身不呼叫 AI。座標一律是「佔主螢幕的比例」（0～1），None 代表看鏡頭（正前方）。
 """
 import random
 import time
@@ -16,9 +17,9 @@ from typing import Optional, Tuple
 Point = Optional[Tuple[float, float]]
 
 # 每種注視盯多久（秒）
-FIX_SEC = {"camera": (1.8, 4.0), "mouse": (0.8, 2.0), "window": (1.0, 2.5), "hotspot": (0.6, 1.4), "wander": (1.0, 2.5),
-           "intent": (1.5, 3.5)}   # 實機 20 秒跳 27 次太忙（2026-10-31），盯久一點
-INTENT_FRESH_SEC = 7.0      # 視線副腦（Live 看螢幕挑的）多久內算數
+FIX_SEC = {"camera": (1.8, 4.0), "mouse": (0.8, 2.0), "window": (1.0, 2.5), "hotspot": (0.6, 1.4),
+           "intent": (1.0, 1.8)}   # 副腦一次挑 1～3 格、約 3 秒回一次：每格看一下就換下一格
+INTENT_FRESH_SEC = 12.0     # 視線副腦（Live 看螢幕挑的）多久內算數：每次等 3 秒＋問 3～5 秒，7 秒會斷檔落回規則
 MOUSE_RECENT_SEC = 5.0      # 滑鼠這麼久內動過，才算「老爸在操作」
 MOUSE_ONSET_STILL_SEC = 1.0  # 滑鼠停了這麼久又開始動：算一次「滑鼠開始動」
 MOUSE_REFLEX_CHANCE = 0.3   # 滑鼠開始動時瞄過去的機會（副腦正挑著東西 0.15、講話時 0.1）
@@ -46,11 +47,13 @@ class GazeDirector:
         self.hotspot_ts = 0.0
         self._seen_hotspot_ts = 0.0
         self._seen_window_ts = 0.0
-        self.intent = None          # 視線副腦挑的：{"kind", "point", "rect", "ts"}
+        self.intent = None          # 視線副腦挑的：{"kind": grid／mouse／camera, "points": [格中心…], "ts"}
+        self._intent_idx = 0        # 依序看到第幾格
         self._seen_intent_ts = 0.0
         self._last_hotspot_reflex = -1e9
         self._last_mouse_reflex = -1e9
         self._pursuit_start = 0.0
+        self._talking = False
 
     # ── 外面餵進來的事 ──
     def note_mouse(self, pt: Point, now: float, moved_px: float = 0.0) -> None:
@@ -82,32 +85,38 @@ class GazeDirector:
             return
         self.hotspot, self.hotspot_ts = pt, now
 
-    def note_intent(self, kind: str, point: Point, rect, ts: float) -> None:
-        """視線副腦（workers/gaze_brain，Live 看螢幕）挑的「她想看的東西」。
-        跟上次挑的一樣就只更新時間、不重新跳過去（副腦每 3 秒回一次，以前每次都跳，實機 20 秒跳 22 次太忙）。"""
+    def note_intent(self, kind: str, points, ts: float, talking: bool = False) -> None:
+        """視線副腦（workers/gaze_brain，Live 看畫了網格的截圖）挑的：grid＝依序看這幾格的中心，mouse、camera。
+        跟上次挑的一樣就只更新時間、不重新從第一格看起（副腦每 3 秒回一次，以前每次都跳，實機 20 秒跳 22 次太忙）。
+        talking：挑的時候她是不是在講話。"""
+        pts = [tuple(p) for p in (points or []) if p is not None]
+        if kind == "grid" and not pts:
+            return
         it = self.intent
-        same = it is not None and it["kind"] == kind and it.get("rect") == rect and (
-            kind != "hotspot" or it.get("point") == point)
-        self.intent = {"kind": kind, "point": point if not same else it["point"], "rect": rect, "ts": ts}
+        same = it is not None and it["kind"] == kind and it["points"] == pts
+        self.intent = {"kind": kind, "points": pts, "ts": ts, "talking": bool(talking)}
         if same:
             self._seen_intent_ts = ts
+        else:
+            self._intent_idx = 0
 
     def _intent_point(self, now: float) -> Point:
-        """照副腦挑的看一眼：視窗就在挑的那一塊附近跳（像在看內容），滑鼠看現在的滑鼠，鏡頭回 None。"""
+        """照副腦挑的看：格子依序看過去、看完停在最後一格等下一次挑選；滑鼠看現在的滑鼠，鏡頭回 None。"""
         it = self.intent
         if it["kind"] == "camera":
             return None
         if it["kind"] == "mouse":
-            return self.mouse or it["point"]
-        if it["kind"] == "window" and it.get("rect") and it.get("point"):
-            l, t, r, b = it["rect"]
-            x, y = it["point"]
-            return (min(r, max(l, x + self.rng.uniform(-0.12, 0.12) * (r - l))),
-                    min(b, max(t, y + self.rng.uniform(-0.1, 0.1) * (b - t))))
-        return it["point"]
+            return self.mouse
+        pts = it["points"]
+        p = pts[min(self._intent_idx, len(pts) - 1)]
+        self._intent_idx += 1
+        return p
 
     def _intent_fresh(self, now: float) -> bool:
-        return self.intent is not None and now - self.intent["ts"] < INTENT_FRESH_SEC
+        """副腦的挑選還算數：12 秒內、而且不是「她沒在講話時挑的、現在卻開口了」（那時照講話的規則多看鏡頭；Fable）。"""
+        it = self.intent
+        return (it is not None and now - it["ts"] < INTENT_FRESH_SEC
+                and not (self._talking and not it.get("talking")))
 
     # ── 決定看哪裡 ──
     def _fix(self, kind: str, target: Point, now: float) -> Point:
@@ -119,14 +128,20 @@ class GazeDirector:
         self._pursuit_start = now
         return self._fix("mouse", self.mouse, now)
 
+    def _fix_intent(self, now: float) -> Point:
+        """照副腦挑的看：挑「滑鼠」就跟著滑鼠動（不是定在挑的那一刻的位置），其他看格子中心或鏡頭。"""
+        if self.intent["kind"] == "mouse" and self.mouse is not None:
+            return self._fix_mouse(now)
+        return self._fix("intent", self._intent_point(now), now)
+
     def _window_point(self) -> Point:
-        """視窗裡的一個點：偏上半部（標題、內容開頭），像在看內容。"""
+        """視窗裡固定看一個點：正中偏上（標題、內容開頭）。以前在上半部隨機挑，看起來像亂晃（2026-11-01）。"""
         l, t, r, b = self.window
-        return (self.rng.uniform(l + (r - l) * 0.15, r - (r - l) * 0.15),
-                self.rng.uniform(t + (b - t) * 0.1, t + (b - t) * 0.6))
+        return ((l + r) / 2, t + (b - t) * 0.35)
 
     def update(self, now: float = None, talking: bool = False) -> Point:
         now = time.time() if now is None else now
+        self._talking = talking
         mouse_active = self.mouse is not None and now - self.mouse_moved_ts < 0.6
         # 1. 突然的事：跳過去（跳視）。滑鼠開始動只是「有時候」瞄過去，不是一動就看（老爸 2026-10-31）
         if mouse_active and self._mouse_onset:
@@ -146,11 +161,12 @@ class GazeDirector:
         if self.window is not None and self.window_changed_ts > self._seen_window_ts \
                 and now - self.window_changed_ts < WINDOW_RECENT_SEC:
             self._seen_window_ts = self.window_changed_ts
-            return self._fix("window", self._window_point(), now)
+            if not self._intent_fresh(now):   # 副腦在挑的時候它自己看得到換了視窗，下一次就會挑那裡
+                return self._fix("window", self._window_point(), now)
         # 1b. 副腦剛挑了新的東西：看過去
         if self._intent_fresh(now) and self.intent["ts"] > self._seen_intent_ts:
             self._seen_intent_ts = self.intent["ts"]
-            return self._fix("intent", self._intent_point(now), now)
+            return self._fix_intent(now)
         # 2. 正在看滑鼠、滑鼠還在動：跟著看
         if self.kind == "mouse" and mouse_active and now - self._pursuit_start < MOUSE_PURSUIT_MAX_SEC:
             self.target = self.mouse
@@ -159,9 +175,10 @@ class GazeDirector:
         # 3. 這一眼還沒看完
         if now < self.until:
             return self.target
-        # 4. 挑下一個地方：副腦有挑就大多照它（講話時一半看鏡頭），其他照規則
-        if self._intent_fresh(now) and self.rng.random() < (0.5 if talking else 0.75):
-            return self._fix("intent", self._intent_point(now), now)
+        # 4. 挑下一個地方：副腦的挑選還新鮮就照它（下一格、或停在最後一格；講話時要不要看鏡頭也是它決定）。
+        #    以前 25% 機率不照它、改看規則挑的地方，看起來亂晃（2026-11-01）
+        if self._intent_fresh(now):
+            return self._fix_intent(now)
         choices = []
         mouse_recent = self.mouse is not None and now - self.mouse_moved_ts < MOUSE_RECENT_SEC
         if talking:
@@ -178,7 +195,6 @@ class GazeDirector:
             if self.hotspot is not None and now - self.hotspot_ts < 10.0:
                 choices.append(("hotspot", 0.1))
             choices.append(("camera", 0.15))
-            choices.append(("wander", 0.1))
         kinds, weights = zip(*choices)
         kind = self.rng.choices(kinds, weights)[0]
         if kind == "mouse":
@@ -187,10 +203,6 @@ class GazeDirector:
             return self._fix("window", self._window_point(), now)
         if kind == "hotspot":
             return self._fix("hotspot", self.hotspot, now)
-        if kind == "wander":   # 發呆：隨便看一個不遠的地方
-            base = self.target or (0.5, 0.5)
-            return self._fix("wander", (min(1.0, max(0.0, base[0] + self.rng.uniform(-0.15, 0.15))),
-                                        min(1.0, max(0.0, base[1] + self.rng.uniform(-0.1, 0.1)))), now)
         return self._fix("camera", None, now)
 
 

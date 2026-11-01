@@ -118,7 +118,7 @@ async def _ai_face_tracking_loop_impl(vts):
             gi = vc.gaze_intent   # 視線副腦（Live 看螢幕）挑的
             if gi and gi["ts"] > seen_intent_ts:
                 seen_intent_ts = gi["ts"]
-                gaze.note_intent(gi["kind"], gi["point"], gi["rect"], gi["ts"])
+                gaze.note_intent(gi["kind"], gi.get("points"), gi["ts"], gi.get("talking", False))
 
             state = stage.ai_state()
             gaze_mode = (not vc.is_tracking_mouse and not host.IS_SLEEPING and not pe.is_piano_active_and_alive()

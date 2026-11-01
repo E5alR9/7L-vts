@@ -25,6 +25,10 @@ class _Session:
     async def send_realtime_input(self, **kw):
         self.log.append(("send", sorted(kw)))
 
+    async def send_client_content(self, turns=None, turn_complete=False):
+        kinds = ["image" if p.inline_data else "text" for p in turns.parts]
+        self.log.append(("content", kinds, turn_complete))
+
     async def receive(self):
         if self.hang:
             await asyncio.sleep(10)
@@ -55,6 +59,7 @@ def fake_live(monkeypatch):
     def client(api_key):
         def connect(model, config):
             log.append(("connect", api_key, model))
+            log.append(("resolution", getattr(config, "media_resolution", None)))
             return _Connect(script[api_key], log)
         return SimpleNamespace(aio=SimpleNamespace(live=SimpleNamespace(connect=connect)))
     monkeypatch.setattr(le, "genai", SimpleNamespace(Client=client))
@@ -69,12 +74,21 @@ def _run(coro):
     return asyncio.run(coro)
 
 
-def test_returns_transcript_and_sends_image_first(fake_live):
+def test_returns_transcript_and_sends_image_with_the_question_in_high_resolution(fake_live):
+    """2026-11-01 紅圈測試：圖走即時影像串流、預設解析度時幾乎看不清楚（6 次只答 2 次、差 4～6 格）；
+    圖跟問題放同一則訊息＋高解析度才看得清楚網格。"""
+    from google.genai import types
     script, log = fake_live
     script["K1"] = ["[LOOK_", "SERIOUS]"]
     out = _run(le.live_one_shot("sys", "看畫面", ["K1"], image_jpeg=b"jpg"))
     assert out == "[LOOK_SERIOUS]"
-    assert [e for e in log if e[0] == "send"] == [("send", ["video"]), ("send", ["text"])]
+    assert [e for e in log if e[0] in ("send", "content")] == [("content", ["image", "text"], True)]
+    assert ("resolution", types.MediaResolution.MEDIA_RESOLUTION_HIGH) in log
+    log.clear()
+    script["K2"] = ["[NO_CHANGE]"]
+    _run(le.live_one_shot("sys", "沒圖的問題", ["K2"]))                 # 沒圖：照舊送文字、不改解析度
+    assert [e for e in log if e[0] in ("send", "content")] == [("send", ["text"])]
+    assert ("resolution", None) in log
 
 
 def test_rate_limited_key_is_cooled_and_next_key_answers(fake_live):

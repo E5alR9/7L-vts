@@ -269,10 +269,13 @@ DEEP_THINK_LIVE_MODEL = "gemini-3.8-live-extended-thinking"
 
 async def live_one_shot(system_text: str, prompt: str, pool: List[str], image_jpeg: bytes = b"",
                         timeout: float = 3.8, max_keys: int = 4, accept=None,
-                        model: str = LIVE_ONE_SHOT_MODEL, thinking_level: str = "") -> str:
+                        model: str = LIVE_ONE_SHOT_MODEL, thinking_level: str = "", image_as_stream: bool = False) -> str:
     """依序試 pool（不夠從全部 key 補，冷卻中的排後面）前 max_keys 把沒冷卻的 key，每把限時 timeout 秒。
-    有圖先送圖再送 prompt；回這一回合的轉寫文字。accept 不認的回覆（答非所問）換下一把再問；
-    限流的 key 記冷卻。全部失敗回 ""。"""
+    有圖：圖跟 prompt 放同一則訊息、高解析度送（回這一回合的轉寫文字）。accept 不認的回覆（答非所問）換下一把再問；
+    限流的 key 記冷卻。全部失敗回 ""。
+    以前圖走即時影像串流（send_realtime_input video）、預設解析度：2026-11-01 紅圈測試 6 次只答 2 次、差 4～6 格，
+    等於幾乎沒看清楚截圖；改成跟問題同一則訊息＋MEDIA_RESOLUTION_HIGH，8x6 網格 6 次全對。
+    image_as_stream=True 走舊的串流送法（只留給對照測試）。"""
     from core import usage
     for g_key in get_dynamic_live_key_candidates(pool)[:max_keys]:
         if key_cooling(g_key, model):
@@ -287,12 +290,19 @@ async def live_one_shot(system_text: str, prompt: str, pool: List[str], image_jp
             )
             if thinking_level:
                 cfg.thinking_config = types.ThinkingConfig(thinking_level=thinking_level)
+            if image_jpeg and not image_as_stream:
+                cfg.media_resolution = types.MediaResolution.MEDIA_RESOLUTION_HIGH
             text = ""
             async with asyncio.timeout(timeout):
                 async with held_live_connect(g_key, model, cfg) as session:
-                    if image_jpeg:
-                        await session.send_realtime_input(video={"data": image_jpeg, "mime_type": "image/jpeg"})
-                    await session.send_realtime_input(text=prompt)
+                    if image_jpeg and not image_as_stream:
+                        await session.send_client_content(turns=types.Content(role="user", parts=[
+                            types.Part.from_bytes(data=image_jpeg, mime_type="image/jpeg"), types.Part(text=prompt)]),
+                            turn_complete=True)
+                    else:
+                        if image_jpeg:
+                            await session.send_realtime_input(video={"data": image_jpeg, "mime_type": "image/jpeg"})
+                        await session.send_realtime_input(text=prompt)
                     async for resp in session.receive():
                         c = resp.server_content
                         if c:

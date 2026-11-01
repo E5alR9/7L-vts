@@ -2692,7 +2692,7 @@ async def check_screen_change_via_live_api(img_bytes: bytes, current_context: st
     decision = await live_one_shot(
         promptkit.SCREEN_SENTRY_SYSTEM,
         promptkit.screen_sentry_user(current_context) + gaze_cursor.capture_note(),
-        KEYS_VISION if KEYS_VISION else GEMINI_KEYS, image_jpeg=img_bytes, timeout=3.8,
+        KEYS_VISION if KEYS_VISION else GEMINI_KEYS, image_jpeg=img_bytes, timeout=6.0,   # 圖改高解析度送，實測 2.6～3.3 秒（2026-11-01）
         accept=lambda t: any(m in t.upper() for m in ("LOOK_SERIOUS", "NO_CHANGE", "[SILENCE]")))
     return "LOOK_SERIOUS" in decision.upper()
 

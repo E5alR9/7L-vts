@@ -22,7 +22,7 @@ current_look_y = 0.0
 screen_hotspot = None
 # 視線副腦（workers/gaze_brain，Live 看螢幕）挑的「她想看的東西」：{"kind", "point", "rect", "why", "ts"}
 gaze_intent = None
-gaze_kind = ""   # 她現在為什麼看那裡：camera／mouse／window／hotspot／intent／wander
+gaze_kind = ""   # 她現在為什麼看那裡：camera／mouse／window／hotspot／intent
 # 眼睛現在的角度（-1～1，臉部追蹤每一格寫）：視線游標拿來反推她看螢幕哪裡（workers/gaze_cursor.py）
 gaze_eye_x = 0.0
 gaze_eye_y = 0.0
