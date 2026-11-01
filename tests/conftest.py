@@ -32,6 +32,33 @@ _MEMORY_FILES = ("UNIFIED_MEMORY_FILE", "DIALOGUE_MEMORY_FILE", "THOUGHT_MEMORY_
                  "CLOUD_KNOWLEDGE_FILE", "USER_PROFILE_FILE", "MEMORY_CONFIG_FILE")
 
 
+class _FakeProcess:
+    pid = 0
+    returncode = 0
+
+    def poll(self):
+        return 0
+
+    def wait(self, *a, **k):
+        return 0
+
+    def terminate(self):
+        pass
+
+    kill = terminate
+
+
+class _SubprocessNoWindow:
+    """鋼琴引擎用的 subprocess：其他照舊，只有 Popen（開鋼琴視窗）換成假的。
+    2026-11-01：在沒有 midi_sheets/ 的程式副本裡跑測試，鋼琴點歌測試找不到本機譜就走到真的開視窗，一次開了 20 個鋼琴視窗。"""
+    def __getattr__(self, name):
+        import subprocess
+        return getattr(subprocess, name)
+
+    def Popen(self, *a, **k):
+        return _FakeProcess()
+
+
 @pytest.fixture(autouse=True, scope="session")
 def _memory_files_in_tmp(tmp_path_factory):
     """記憶檔在測試裡全指到暫存資料夾、不連雲端。
@@ -41,6 +68,7 @@ def _memory_files_in_tmp(tmp_path_factory):
     import core.memory as mem
     import services.rag_memory_service as rag_service
     import services.desktop_helper as desktop_helper
+    import services.piano_engine as piano_engine
 
     def _no_desktop(*a, **k):
         raise RuntimeError("找不到桌面版（測試一律不碰老爸的桌面版 Gemini）")
@@ -60,6 +88,7 @@ def _memory_files_in_tmp(tmp_path_factory):
         mp.setattr(rag_service.rag_store, "stats", lambda: {"count": 0})
         mp.setattr(desktop_helper, "get_answer", _no_desktop)   # 查資料備援、深度思考會叫它
         mp.setattr(desktop_helper, "prewarm", lambda: False)
+        mp.setattr(piano_engine, "subprocess", _SubprocessNoWindow())   # 測試絕不開真的鋼琴視窗
         yield tmp
 
 
